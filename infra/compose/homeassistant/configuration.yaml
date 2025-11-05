@@ -1,0 +1,18 @@
+default_config:
+
+mqtt:
+  broker: mosquitto
+  port: 1883
+  discovery: true
+  discovery_prefix: homeassistant
+  username: !env_var MQTT_USERNAME
+  password: !env_var MQTT_PASSWORD
+
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+
+automation: !include automations.yaml
+scene: !include scenes.yaml

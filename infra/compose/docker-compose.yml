@@ -1,0 +1,273 @@
+version: "3.9"
+
+x-service-env: &service-env
+  PYTHONPATH: /app
+  SETTINGS_MODULE: services.common.config
+  MQTT_HOST: mosquitto
+  MQTT_PORT: 1883
+  REDIS_URL: redis://redis:6379/0
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  PROMETHEUS_URL: http://prometheus:9090
+  MINIO_ENDPOINT: http://minio:9000
+  MINIO_BUCKET: jarvis-artifacts
+
+services:
+  brain:
+    build:
+      context: ../..
+      dockerfile: services/brain/Dockerfile
+    env_file:
+      - .env
+    environment:
+      <<: *service-env
+      SERVICE_NAME: brain
+    depends_on:
+      - mosquitto
+      - redis
+      - postgres
+    volumes:
+      - ../../services/common:/app/services/common:ro
+      - ../../services/brain:/app/services/brain:ro
+    ports:
+      - "8000:8000"
+    networks:
+      - jarvis
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: services/gateway/Dockerfile
+    env_file:
+      - .env
+    environment:
+      <<: *service-env
+      SERVICE_NAME: gateway
+      UPSTREAM_BRAIN_URL: http://brain:8000
+    depends_on:
+      - brain
+    volumes:
+      - ../../services/common:/app/services/common:ro
+      - ../../services/gateway:/app/services/gateway:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - jarvis
+
+  cad:
+    build:
+      context: ../..
+      dockerfile: services/cad/Dockerfile
+    env_file:
+      - .env
+    environment:
+      <<: *service-env
+      SERVICE_NAME: cad
+    depends_on:
+      - minio
+      - redis
+    volumes:
+      - ../../services/common:/app/services/common:ro
+      - ../../services/cad:/app/services/cad:ro
+    ports:
+      - "8200:8200"
+    networks:
+      - jarvis
+
+  fabrication:
+    build:
+      context: ../..
+      dockerfile: services/fabrication/Dockerfile
+    env_file:
+      - .env
+    environment:
+      <<: *service-env
+      SERVICE_NAME: fabrication
+    depends_on:
+      - mosquitto
+      - redis
+    volumes:
+      - ../../services/common:/app/services/common:ro
+      - ../../services/fabrication:/app/services/fabrication:ro
+    ports:
+      - "8300:8300"
+    networks:
+      - jarvis
+
+  safety:
+    build:
+      context: ../..
+      dockerfile: services/safety/Dockerfile
+    env_file:
+      - .env
+    environment:
+      <<: *service-env
+      SERVICE_NAME: safety
+    depends_on:
+      - postgres
+    volumes:
+      - ../../services/common:/app/services/common:ro
+      - ../../services/safety:/app/services/safety:ro
+    ports:
+      - "8400:8400"
+    networks:
+      - jarvis
+
+  ui:
+    build:
+      context: ../..
+      dockerfile: services/ui/Dockerfile
+    env_file:
+      - .env
+    environment:
+      API_BASE_URL: http://gateway:8080
+      MQTT_URL: ws://mosquitto:9001
+    depends_on:
+      - gateway
+    volumes:
+      - ../../services/ui:/app/services/ui:ro
+    ports:
+      - "4173:4173"
+    networks:
+      - jarvis
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - jarvis
+
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:2024.11.0
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+    volumes:
+      - homeassistant_config:/config
+      - ./homeassistant/configuration.yaml:/config/configuration.yaml:ro
+    networks:
+      - jarvis
+    depends_on:
+      - mosquitto
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --maxmemory 2gb --maxmemory-policy allkeys-lfu
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - jarvis
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.54.0
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    ports:
+      - "9121:9121"
+    depends_on:
+      - redis
+    networks:
+      - jarvis
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: jarvis
+      POSTGRES_USER: jarvis
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - jarvis
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-11-04T22-11-24Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - jarvis
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    restart: unless-stopped
+    command: --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.retention.time=15d
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - jarvis
+
+  grafana:
+    image: grafana/grafana:10.4.6
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - jarvis
+
+  loki:
+    image: grafana/loki:3.0.0
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - jarvis
+
+  tempo:
+    image: grafana/tempo:2.5.0
+    restart: unless-stopped
+    ports:
+      - "3200:3200"
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    networks:
+      - jarvis
+
+networks:
+  jarvis:
+    driver: bridge
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
+  homeassistant_config:
+  redis_data:
+  postgres_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+  tempo_data:
