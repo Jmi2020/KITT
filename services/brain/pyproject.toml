@@ -1,7 +1,7 @@
 [project]
-name = "jarvis-brain"
+name = "kitty-brain"
 version = "0.1.0"
-description = "Conversational orchestration service"
+description = "KITTY conversational orchestration service"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.111",
@@ -9,7 +9,8 @@ dependencies = [
   "httpx>=0.27",
   "anyio>=4.4",
   "websockets>=12.0",
-  "pydantic>=2.7"
+  "pydantic>=2.7",
+  "prometheus-client>=0.20"
 ]
 
 [build-system]

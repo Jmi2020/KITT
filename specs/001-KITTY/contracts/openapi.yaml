@@ -6,9 +6,9 @@ info:
     REST gateway for conversational orchestration, CAD generation, device control,
     and routing observability. All responses include trace identifiers for offline auditability.
 servers:
-  - url: https://jarvis.local
+  - url: https://kitty.local
     description: Local gateway (Tailscale/VLAN)
-  - url: https://jarvis.dev
+  - url: https://kitty.dev
     description: Remote access via Tailscale exit node
 tags:
   - name: Conversations

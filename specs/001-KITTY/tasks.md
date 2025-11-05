@@ -175,17 +175,16 @@
 
 ### Implementation for User Story 7
 
-- [ ] T069 [P] [US7] Initialize PWA project in `services/ui/package.json`
-- [ ] T070 [P] [US7] Implement MQTT context hook in `services/ui/src/hooks/useKittyContext.ts`
-- [ ] T071 [P] [US7] Implement Whisper/Piper-backed voice module in `services/ui/src/modules/voice.ts`
-- [ ] T072 [P] [US7] Implement dashboard page with device status panels in `services/ui/src/pages/Dashboard.tsx`
-- [ ] T073 [US7] Implement remote access guard using Tailscale API in `services/ui/src/utils/tailscaleMode.ts`
-- [ ] T074 [US7] Configure wall terminal layout for kiosk/screensaver mode in `services/ui/src/pages/WallTerminal.tsx`
-- [ ] T075 [US7] Coordinate UI with remote read-only policy toggle via MQTT in `services/ui/src/hooks/useRemoteMode.ts`
-- [ ] T075 [US7] Coordinate UI with remote read-only policy toggle via MQTT in `services/ui/src/hooks/useRemoteMode.ts`
+- [X] T069 [P] [US7] Initialize PWA project in `services/ui/package.json`
+- [X] T070 [P] [US7] Implement MQTT context hook in `services/ui/src/hooks/useKittyContext.ts`
+- [X] T071 [P] [US7] Implement Whisper/Piper-backed voice module in `services/ui/src/modules/voice.ts`
+- [X] T072 [P] [US7] Implement dashboard page with device status panels in `services/ui/src/pages/Dashboard.tsx`
+- [X] T073 [US7] Implement remote access guard using Tailscale API in `services/ui/src/utils/tailscaleMode.ts`
+- [X] T074 [US7] Configure wall terminal layout for kiosk/screensaver mode in `services/ui/src/pages/WallTerminal.tsx`
+- [X] T075 [US7] Coordinate UI with remote read-only policy toggle via MQTT in `services/ui/src/hooks/useRemoteMode.ts`
 - [X] T081 [US7] Expose conversation project summary API in `services/brain/src/brain/routes/projects.py`
 - [X] T082 [US7] Add project memory persistence (migrations + models) in `services/common/src/common/db/projects.py`
-- [ ] T083 [US7] Implement UI project memory panel with voice ↔ desktop hand-off in `services/ui/src/pages/Projects.tsx`
+- [X] T083 [US7] Implement UI project memory panel with voice ↔ desktop hand-off in `services/ui/src/pages/Projects.tsx`
 
 **Checkpoint**: Unified UX available across Mac, tablet, and wall terminals with synchronized context + voice.
 
