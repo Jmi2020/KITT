@@ -81,6 +81,9 @@ class Settings(BaseSettings):
     # Hazard signing
     hazard_signing_key: Optional[str] = None
 
+    # Voice
+    voice_system_prompt: Optional[str] = None
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

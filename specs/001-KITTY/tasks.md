@@ -185,6 +185,9 @@
 - [X] T081 [US7] Expose conversation project summary API in `services/brain/src/brain/routes/projects.py`
 - [X] T082 [US7] Add project memory persistence (migrations + models) in `services/common/src/common/db/projects.py`
 - [X] T083 [US7] Implement UI project memory panel with voice ↔ desktop hand-off in `services/ui/src/pages/Projects.tsx`
+- [X] T084 [US7] Implement voice service transcript endpoint and parser in `services/voice/src/voice`
+- [X] T085 [US7] Add remote status API for voice ↔ desktop handoff in `services/gateway/src/gateway/routes/remote.py`
+- [X] T086 [US7] Wire voice note commands to project memory in `services/voice/src/voice/router.py`
 
 **Checkpoint**: Unified UX available across Mac, tablet, and wall terminals with synchronized context + voice.
 
