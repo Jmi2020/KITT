@@ -32,7 +32,7 @@ class MQTTContextStore:
 
         self._contexts[context.conversation_id] = context
         self._ensure_connection()
-        topic = f"jarvis/ctx/{context.conversation_id}"
+        topic = f"kitty/ctx/{context.conversation_id}"
         payload = context.model_dump(mode="json")
         LOGGER.info("Publishing conversation context", topic=topic)
         self._client.publish(topic, payload, options=PublishOptions(qos=1, retain=True))

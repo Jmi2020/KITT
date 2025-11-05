@@ -4,12 +4,16 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Optional
 
 from pydantic import SecretStr
 
 from common.config import settings
 from common.credentials import HomeAssistantCredentials
 from common.messaging import MQTTClient
+
+from safety.unifi.client import UniFiAccessClient
+from safety.workflows.hazard import HazardWorkflow
 
 from .orchestrator import BrainOrchestrator
 from .routing.audit_store import RoutingAuditStore
@@ -43,13 +47,31 @@ def get_slo_calculator() -> SLOCalculator:
 
 
 @lru_cache(maxsize=1)
+def get_unifi_client() -> Optional[UniFiAccessClient]:
+    try:
+        return UniFiAccessClient()
+    except RuntimeError:
+        return None
+
+
+@lru_cache(maxsize=1)
+def get_hazard_workflow() -> HazardWorkflow:
+    return HazardWorkflow(unifi_client=get_unifi_client())
+
+
+@lru_cache(maxsize=1)
 def get_orchestrator() -> BrainOrchestrator:
     router = BrainRouter(
         audit_store=RoutingAuditStore(),
         cost_tracker=get_cost_tracker(),
         slo_calculator=get_slo_calculator(),
     )
-    return BrainOrchestrator(get_context_store(), get_home_assistant_credentials(), router)
+    return BrainOrchestrator(
+        get_context_store(),
+        get_home_assistant_credentials(),
+        router,
+        safety_workflow=get_hazard_workflow(),
+    )
 
 
 __all__ = ["get_orchestrator"]

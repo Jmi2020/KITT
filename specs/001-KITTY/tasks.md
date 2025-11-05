@@ -155,13 +155,13 @@
 
 ### Implementation for User Story 6
 
-- [ ] T062 [P] [US6] Create safety service manifest in `services/safety/pyproject.toml`
-- [ ] T063 [P] [US6] Implement policy definitions with zone hazard rules in `services/safety/src/safety/policies.py`
-- [ ] T064 [P] [US6] Implement signature verification utilities in `services/safety/src/safety/signing.py`
-- [ ] T065 [P] [US6] Implement UniFi Access client for identity/door endpoints in `services/safety/src/safety/unifi/client.py`
-- [ ] T066 [US6] Implement hazard workflow engine coordinating approvals in `services/safety/src/safety/workflows/hazard.py`
-- [ ] T067 [US6] Integrate safety checks into orchestrator decision flow in `services/brain/src/brain/orchestrator.py`
-- [ ] T068 [US6] Add safety audit logging with snapshot references in `services/safety/src/safety/audit.py`
+- [X] T062 [P] [US6] Create safety service manifest in `services/safety/pyproject.toml`
+- [X] T063 [P] [US6] Implement policy definitions with zone hazard rules in `services/safety/src/safety/policies.py`
+- [X] T064 [P] [US6] Implement signature verification utilities in `services/safety/src/safety/signing.py`
+- [X] T065 [P] [US6] Implement UniFi Access client for identity/door endpoints in `services/safety/src/safety/unifi/client.py`
+- [X] T066 [US6] Implement hazard workflow engine coordinating approvals in `services/safety/src/safety/workflows/hazard.py`
+- [X] T067 [US6] Integrate safety checks into orchestrator decision flow in `services/brain/src/brain/orchestrator.py`
+- [X] T068 [US6] Add safety audit logging with snapshot references in `services/safety/src/safety/audit.py`
 
 **Checkpoint**: Hazardous actions gated by policy with full identity verification and auditing.
 
@@ -182,8 +182,9 @@
 - [ ] T073 [US7] Implement remote access guard using Tailscale API in `services/ui/src/utils/tailscaleMode.ts`
 - [ ] T074 [US7] Configure wall terminal layout for kiosk/screensaver mode in `services/ui/src/pages/WallTerminal.tsx`
 - [ ] T075 [US7] Coordinate UI with remote read-only policy toggle via MQTT in `services/ui/src/hooks/useRemoteMode.ts`
-- [ ] T081 [US7] Expose conversation project summary API in `services/brain/src/brain/routes/projects.py`
-- [ ] T082 [US7] Add project memory persistence (migrations + models) in `services/common/src/common/db/projects.py`
+- [ ] T075 [US7] Coordinate UI with remote read-only policy toggle via MQTT in `services/ui/src/hooks/useRemoteMode.ts`
+- [X] T081 [US7] Expose conversation project summary API in `services/brain/src/brain/routes/projects.py`
+- [X] T082 [US7] Add project memory persistence (migrations + models) in `services/common/src/common/db/projects.py`
 - [ ] T083 [US7] Implement UI project memory panel with voice ↔ desktop hand-off in `services/ui/src/pages/Projects.tsx`
 
 **Checkpoint**: Unified UX available across Mac, tablet, and wall terminals with synchronized context + voice.

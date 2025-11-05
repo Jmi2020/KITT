@@ -8,12 +8,14 @@ from fastapi import FastAPI
 from common.logging import configure_logging
 
 from .metrics import router as metrics_router
+from .routes.projects import router as projects_router
 from .routes.query import router as query_router
 
 configure_logging()
 
 app = FastAPI(title="KITTY Brain API")
 app.include_router(query_router)
+app.include_router(projects_router)
 app.include_router(metrics_router)
 
 

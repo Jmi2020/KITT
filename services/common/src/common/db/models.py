@@ -313,6 +313,19 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class ConversationProject(Base):
+    __tablename__ = "conversation_projects"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversation_sessions.id"), nullable=False)
+    title: Mapped[Optional[str]] = mapped_column(String(200))
+    summary: Mapped[Optional[str]] = mapped_column(Text)
+    artifacts: Mapped[list] = mapped_column(JSONB, default=list)
+    metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 __all__ = [
     "Base",
     "User",
@@ -330,4 +343,5 @@ __all__ = [
     "SafetyEvent",
     "AccessPolicy",
     "Notification",
+    "ConversationProject",
 ]

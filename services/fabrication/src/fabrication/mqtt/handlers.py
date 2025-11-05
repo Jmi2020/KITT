@@ -19,7 +19,7 @@ class FabricationMQTTHandler:
 
     def start(self) -> None:
         self._mqtt.connect()
-        self._mqtt.subscribe("jarvis/devices/+/cmd", self._on_message)
+        self._mqtt.subscribe("kitty/devices/+/cmd", self._on_message)
 
     def _on_message(self, client, userdata, message):  # type: ignore[override]
         payload = json.loads(message.payload.decode("utf-8"))
@@ -38,7 +38,7 @@ class FabricationMQTTHandler:
         )
         await self._manager.start_job(job)
         self._mqtt.publish(
-            f"jarvis/devices/{payload['deviceId']}/state",
+            f"kitty/devices/{payload['deviceId']}/state",
             {"status": "printing", "jobId": job.job_id},
             options=PublishOptions(qos=1, retain=True),
         )

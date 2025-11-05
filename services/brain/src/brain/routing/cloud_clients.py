@@ -38,7 +38,7 @@ class FrontierClient:
                 "/v1/chat/completions",
                 json={
                     "model": self._model,
-                    "messages": [{"role": "system", "content": "JarvisV3 orchestration assistant."}, {"role": "user", "content": prompt}],
+                    "messages": [{"role": "system", "content": "KITTY orchestration assistant."}, {"role": "user", "content": prompt}],
                 },
             )
             response.raise_for_status()

@@ -68,6 +68,19 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-4o"
 
+    # CAD providers
+    zoo_api_base: str = "https://api.zoo.dev"
+    zoo_api_key: Optional[str] = None
+    tripo_api_base: str = "https://api.tripo.ai"
+    tripo_api_key: Optional[str] = None
+
+    # UniFi Access
+    unifi_access_base_url: Optional[str] = None
+    unifi_access_token: Optional[str] = None
+
+    # Hazard signing
+    hazard_signing_key: Optional[str] = None
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
