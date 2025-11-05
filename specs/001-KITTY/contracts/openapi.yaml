@@ -1,0 +1,358 @@
+openapi: 3.0.3
+info:
+  title: JarvisV3 Orchestrator API
+  version: 0.1.0
+  description: >
+    REST gateway for conversational orchestration, CAD generation, device control,
+    and routing observability. All responses include trace identifiers for offline auditability.
+servers:
+  - url: https://jarvis.local
+    description: Local gateway (Tailscale/VLAN)
+  - url: https://jarvis.dev
+    description: Remote access via Tailscale exit node
+tags:
+  - name: Conversations
+  - name: CAD
+  - name: Devices
+  - name: Observability
+paths:
+  /api/query:
+    post:
+      tags: [Conversations]
+      summary: Submit conversational request for orchestration
+      operationId: postQuery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+      responses:
+        '200':
+          description: Query processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+        '202':
+          description: Query accepted for asynchronous processing (used when hazard confirmation pending)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/cad/generate:
+    post:
+      tags: [CAD]
+      summary: Request CAD generation job with multi-provider cycling
+      operationId: postCadGenerate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CadGenerateRequest'
+      responses:
+        '202':
+          description: CAD job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CadGenerateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Offline policy requested but fallback unavailable
+  /api/device/{deviceId}/command:
+    post:
+      tags: [Devices]
+      summary: Issue command to a device via orchestrator
+      operationId: postDeviceCommand
+      parameters:
+        - in: path
+          name: deviceId
+          required: true
+          schema:
+            type: string
+          description: Internal device UUID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceCommandRequest'
+      responses:
+        '202':
+          description: Command forwarded to device topic
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceCommandResponse'
+        '403':
+          description: Command blocked by safety policy
+        '404':
+          description: Device not found or offline
+  /api/routing/logs:
+    get:
+      tags: [Observability]
+      summary: Retrieve routing decision history
+      operationId: getRoutingLogs
+      parameters:
+        - in: query
+          name: conversationId
+          schema:
+            type: string
+        - in: query
+          name: selectedTier
+          schema:
+            $ref: '#/components/schemas/RoutingTier'
+        - in: query
+          name: since
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        '200':
+          description: Routing history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RoutingDecision'
+                  nextCursor:
+                    type: string
+                    nullable: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+components:
+  responses:
+    BadRequest:
+      description: Invalid request payload
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid auth token
+  schemas:
+    QueryRequest:
+      type: object
+      required:
+        - conversationId
+        - userId
+        - input
+      properties:
+        conversationId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          enum: [mac, ipad, wall_terminal, remote]
+        input:
+          type: object
+          required:
+            - text
+          properties:
+            text:
+              type: string
+            attachments:
+              type: array
+              items:
+                $ref: '#/components/schemas/Attachment'
+        contextOverride:
+          type: object
+          additionalProperties: true
+        forceTier:
+          $ref: '#/components/schemas/RoutingTier'
+    QueryResponse:
+      type: object
+      required:
+        - conversationId
+        - replies
+        - routing
+      properties:
+        conversationId:
+          type: string
+          format: uuid
+        replies:
+          type: array
+          items:
+            type: object
+            properties:
+              role:
+                type: string
+                enum: [assistant, system]
+              text:
+                type: string
+        routing:
+          $ref: '#/components/schemas/RoutingDecision'
+        pendingHazard:
+          type: object
+          nullable: true
+          properties:
+            safetyEventId:
+              type: string
+              format: uuid
+            prompt:
+              type: string
+    CadGenerateRequest:
+      type: object
+      required:
+        - conversationId
+        - prompt
+      properties:
+        conversationId:
+          type: string
+          format: uuid
+        prompt:
+          type: string
+        policyMode:
+          type: string
+          enum: [online, offline, auto]
+          default: auto
+        references:
+          type: array
+          items:
+            type: string
+            description: Artifact IDs or attachment references
+    CadGenerateResponse:
+      type: object
+      required:
+        - cadJobId
+        - status
+      properties:
+        cadJobId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, running]
+        providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/CadProviderStatus'
+    DeviceCommandRequest:
+      type: object
+      required:
+        - intent
+      properties:
+        intent:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+        correlationId:
+          type: string
+          format: uuid
+        safetySignature:
+          type: string
+          description: Detached signature when intent marked hazardous
+    DeviceCommandResponse:
+      type: object
+      required:
+        - commandId
+        - status
+      properties:
+        commandId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, dispatched, awaiting_confirmation]
+        hazardEventId:
+          type: string
+          format: uuid
+          nullable: true
+    RoutingDecision:
+      type: object
+      required:
+        - requestId
+        - selectedTier
+        - confidence
+        - latencyMs
+        - costEstimate
+      properties:
+        decisionId:
+          type: string
+          format: uuid
+        requestId:
+          type: string
+          format: uuid
+        conversationId:
+          type: string
+          format: uuid
+        selectedTier:
+          $ref: '#/components/schemas/RoutingTier'
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        latencyMs:
+          type: integer
+        costEstimate:
+          type: number
+          format: float
+        escalationReason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    CadProviderStatus:
+      type: object
+      properties:
+        provider:
+          type: string
+          enum: [zoo, tripo, cadquery, freecad, triposr, instantmesh]
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        artifactId:
+          type: string
+          format: uuid
+          nullable: true
+        error:
+          type: string
+          nullable: true
+    Attachment:
+      type: object
+      required:
+        - id
+        - kind
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [image, cad_artifact, telemetry, document]
+        url:
+          type: string
+          format: uri
+          nullable: true
+    RoutingTier:
+      type: string
+      enum: [local, mcp, frontier]
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+        detail:
+          type: string
+          nullable: true
