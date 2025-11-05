@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: JarvisV3 Orchestrator API
+  title: KITTY Orchestrator API
   version: 0.1.0
   description: >
     REST gateway for conversational orchestration, CAD generation, device control,

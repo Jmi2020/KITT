@@ -8,9 +8,14 @@ dist/
 # Python
 __pycache__/
 *.pyc
+.venv/
+venv/
 
 # Editor
 .vscode/
 
 # Reference repos
 Reference/JarvisV3/
+
+# Alembic
+services/common/alembic/versions/

@@ -1,4 +1,4 @@
-# JarvisV3 Data Model
+# KITTY Data Model
 
 ## Overview
 

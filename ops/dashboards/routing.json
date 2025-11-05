@@ -1,0 +1,37 @@
+{
+  "title": "KITTY Routing Overview",
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Routing Requests by Tier",
+      "targets": [
+        {"expr": "increase(kitty_routing_requests_total{tier=\"local\"}[5m])", "legendFormat": "Local"},
+        {"expr": "increase(kitty_routing_requests_total{tier=\"mcp\"}[5m])", "legendFormat": "MCP"},
+        {"expr": "increase(kitty_routing_requests_total{tier=\"frontier\"}[5m])", "legendFormat": "Frontier"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Local Handling Ratio",
+      "targets": [
+        {"expr": "kitty_routing_local_ratio"}
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Routing Latency (ms)",
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(kitty_routing_latency_ms_bucket[5m])) by (le))", "legendFormat": "p95"}
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Accumulated Cost",
+      "targets": [
+        {"expr": "kitty_routing_cost_total{tier=\"local\"}", "legendFormat": "Local"},
+        {"expr": "kitty_routing_cost_total{tier=\"mcp\"}", "legendFormat": "MCP"},
+        {"expr": "kitty_routing_cost_total{tier=\"frontier\"}", "legendFormat": "Frontier"}
+      ]
+    }
+  ]
+}

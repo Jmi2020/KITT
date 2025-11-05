@@ -1,0 +1,57 @@
+[project]
+name = "kitty-common"
+version = "0.1.0"
+description = "Shared utilities for KITTY services"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "KITTY Team" }
+]
+dependencies = [
+  "pydantic>=2.7",
+  "pydantic-settings>=2.2",
+  "sqlalchemy>=2.0",
+  "alembic>=1.13",
+"redis>=5.0",
+"httpx>=0.27",
+"python-jose[cryptography]>=3.3",
+"passlib[bcrypt]>=1.7",
+"paho-mqtt>=1.6",
+"psycopg[binary]>=3.2",
+"structlog>=24.1",
+"anyio>=4.4",
+"typing-extensions>=4.9"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.1",
+  "ruff>=0.6",
+  "mypy>=1.11"
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I"]
+ignore = ["E203", "E266"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

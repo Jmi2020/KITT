@@ -1,30 +1,30 @@
-# JarvisV3: The Intelligent Warehouse Orchestration System
+# KITTY: The Intelligent Warehouse Orchestration System
 
-JarvisV3 is a conversational AI orchestration platform that transforms a Mac Studio M3 Ultra into the central brain of an intelligent warehouse, **intelligently routing between offline and online AI models based on confidence thresholds** while seamlessly controlling fabrication equipment, smart infrastructure, and CAD generation tools across every device in your facility. This system solves the fundamental problem of fragmented AI workflows by creating a unified, privacy-first interface that automatically chooses the right AI model for each task—from simple device control handled by local 7B models to complex multi-step CAD generation requiring GPT-5 or Claude Sonnet 4.5—all while remaining accessible whether you're at your Mac, grabbing an iPad on the warehouse floor, speaking to a wall terminal, or accessing remotely.
+KITTY is a conversational AI orchestration platform that transforms a Mac Studio M3 Ultra into the central brain of an intelligent warehouse, **intelligently routing between offline and online AI models based on confidence thresholds** while seamlessly controlling fabrication equipment, smart infrastructure, and CAD generation tools across every device in your facility. This system solves the fundamental problem of fragmented AI workflows by creating a unified, privacy-first interface that automatically chooses the right AI model for each task—from simple device control handled by local 7B models to complex multi-step CAD generation requiring GPT-5 or Claude Sonnet 4.5—all while remaining accessible whether you're at your Mac, grabbing an iPad on the warehouse floor, speaking to a wall terminal, or accessing remotely.
 
-## The problems JarvisV3 solves
+## The problems KITTY solves
 
-**Manual AI orchestration wastes time and money.** Today's AI landscape forces users to manually decide: Should I use ChatGPT for this query? Is my local model good enough? Should I check Perplexity for current information? This constant context-switching fragments workflows and leads to either overspending on cloud APIs for simple tasks or getting poor results from underpowered local models. JarvisV3 eliminates this friction by automatically routing queries based on confidence scores and task complexity—simple device commands ("turn on the lights") run on local 7B models in milliseconds, while complex reasoning ("design a bracket that can withstand 500N force while minimizing material") automatically escalates to Claude or routes through multiple CAD AI tools for alternative design perspectives. Research shows this intelligent routing achieves **70-80% local handling rates with 80% latency reduction** and **50%+ cost savings** while maintaining quality.
+**Manual AI orchestration wastes time and money.** Today's AI landscape forces users to manually decide: Should I use ChatGPT for this query? Is my local model good enough? Should I check Perplexity for current information? This constant context-switching fragments workflows and leads to either overspending on cloud APIs for simple tasks or getting poor results from underpowered local models. KITTY eliminates this friction by automatically routing queries based on confidence scores and task complexity—simple device commands ("turn on the lights") run on local 7B models in milliseconds, while complex reasoning ("design a bracket that can withstand 500N force while minimizing material") automatically escalates to Claude or routes through multiple CAD AI tools for alternative design perspectives. Research shows this intelligent routing achieves **70-80% local handling rates with 80% latency reduction** and **50%+ cost savings** while maintaining quality.
 
-**Fabrication workflows remain disconnected from AI capabilities.** Current warehouse operations involve separate interfaces for CAD software, 3D printer control, laser cutting parameters, lighting systems, power management, and security cameras. JarvisV3 creates a unified conversational interface that bridges these systems: "Start printing the motor mount on Printer 2, turn on the welding bay lights to full brightness, and show me the camera feed for quality control" becomes a single natural language command that orchestrates across MQTT-connected devices, OctoPrint APIs, Philips Hue controls, and UniFi cameras. The system maintains context across conversations, understanding that "check the print status" refers to the job you started earlier without requiring you to specify which printer or job ID.
+**Fabrication workflows remain disconnected from AI capabilities.** Current warehouse operations involve separate interfaces for CAD software, 3D printer control, laser cutting parameters, lighting systems, power management, and security cameras. KITTY creates a unified conversational interface that bridges these systems: "Start printing the motor mount on Printer 2, turn on the welding bay lights to full brightness, and show me the camera feed for quality control" becomes a single natural language command that orchestrates across MQTT-connected devices, OctoPrint APIs, Philips Hue controls, and UniFi cameras. The system maintains context across conversations, understanding that "check the print status" refers to the job you started earlier without requiring you to specify which printer or job ID.
 
-**CAD generation tools operate in isolation without iteration.** Existing CAD AI tools like Zoo, Adam, and Tripo each offer unique strengths but require manual switching and copy-pasting between platforms. JarvisV3's **multi-model CAD cycling** sends the same design prompt through different AI engines—parametric tools for mechanical precision and organic modeling tools for artistic variations—then presents alternatives for selection. Ask for "a decorative enclosure for this sensor module" and receive: (1) a parametric CAD design from Zoo optimized for CNC machining, (2) an organic artistic version from Tripo suitable for resin printing, (3) a weight-optimized topology from generative design, and (4) alternative interpretations by cycling through different prompt variations on the same tool. This multi-perspective approach wasn't possible before because each tool required separate accounts, authentication, and manual prompt refinement.
+**CAD generation tools operate in isolation without iteration.** Existing CAD AI tools like Zoo, Adam, and Tripo each offer unique strengths but require manual switching and copy-pasting between platforms. KITTY's **multi-model CAD cycling** sends the same design prompt through different AI engines—parametric tools for mechanical precision and organic modeling tools for artistic variations—then presents alternatives for selection. Ask for "a decorative enclosure for this sensor module" and receive: (1) a parametric CAD design from Zoo optimized for CNC machining, (2) an organic artistic version from Tripo suitable for resin printing, (3) a weight-optimized topology from generative design, and (4) alternative interpretations by cycling through different prompt variations on the same tool. This multi-perspective approach wasn't possible before because each tool required separate accounts, authentication, and manual prompt refinement.
 
 **Privacy and cost concerns limit AI adoption in production environments.** Sending proprietary designs, internal part dimensions, or strategic fabrication plans to cloud APIs creates IP exposure risks and unpredictable costs at scale. A local-first architecture with selective online augmentation means **sensitive operations never leave your network**—"design a mounting bracket using our standard 80/20 extrusion specs" processes entirely on the M3 Ultra using locally running Qwen 2.5 Coder 32B, while "research current market prices for titanium powder and suggest alternative materials" automatically routes to Perplexity MCP for real-time web data. The Mac Studio M3 Ultra with 256GB unified memory can run **70B parameter models at 15-25 tokens/second or multiple 32B models simultaneously**, providing GPT-3.5-level capabilities completely offline.
 
-**Multi-device accessibility remains fragmented across platforms.** Fabrication work requires mobility—you need AI assistance whether you're at your workstation designing in CAD, standing at a 3D printer troubleshooting layer adhesion, or welding across the warehouse floor. JarvisV3's **Node-RED + Home Assistant architecture** creates synchronized state across devices: start a conversation on your Mac asking about optimal print settings for PETG, continue it on your iPad while walking to the printer, then use voice commands at a wall terminal to adjust temperatures based on the AI's recommendation. MQTT pub/sub messaging ensures every device sees the same conversational context and system state in real-time. Tailscale VPN enables secure remote access without exposing services directly to the internet, letting you check camera feeds or start print jobs from anywhere while maintaining enterprise-grade security.
+**Multi-device accessibility remains fragmented across platforms.** Fabrication work requires mobility—you need AI assistance whether you're at your workstation designing in CAD, standing at a 3D printer troubleshooting layer adhesion, or welding across the warehouse floor. KITTY's **Node-RED + Home Assistant architecture** creates synchronized state across devices: start a conversation on your Mac asking about optimal print settings for PETG, continue it on your iPad while walking to the printer, then use voice commands at a wall terminal to adjust temperatures based on the AI's recommendation. MQTT pub/sub messaging ensures every device sees the same conversational context and system state in real-time. Tailscale VPN enables secure remote access without exposing services directly to the internet, letting you check camera feeds or start print jobs from anywhere while maintaining enterprise-grade security.
 
-## Core capabilities: What JarvisV3 actually does
+## Core capabilities: What KITTY actually does
 
 ### Conversational control of your entire warehouse ecosystem
 
-You interact with JarvisV3 through natural language across any device—typed commands, voice input via wake word detection, or programmatic API calls from other systems. **The system maintains persistent conversational context** across all interfaces: if you asked about 3D print settings on your Mac, then walk to the printer bay and speak "start that print," JarvisV3 understands the referent without requiring you to re-specify parameters. Behind the scenes, it orchestrates MQTT messages to OctoPrint APIs, confirms bed and nozzle temperatures are appropriate for the specified material, turns on task lighting in the relevant zone through Philips Hue controls, and sends you a notification when the first layer completes successfully. 
+You interact with KITTY through natural language across any device—typed commands, voice input via wake word detection, or programmatic API calls from other systems. **The system maintains persistent conversational context** across all interfaces: if you asked about 3D print settings on your Mac, then walk to the printer bay and speak "start that print," KITTY understands the referent without requiring you to re-specify parameters. Behind the scenes, it orchestrates MQTT messages to OctoPrint APIs, confirms bed and nozzle temperatures are appropriate for the specified material, turns on task lighting in the relevant zone through Philips Hue controls, and sends you a notification when the first layer completes successfully. 
 
 The conversation agent understands your warehouse's specific context—device names, locations, ongoing projects, standard operating procedures. It knows "the big printer" refers to your CR-10 Smart Pro, that "welding bay" means zone 3 lighting, and that print failures should trigger alerts through specific channels. Complex multi-step operations become single conversational commands: "prepare for aluminum welding" automatically routes power from EcoFlow batteries to the welding equipment, sets appropriate ventilation fan speeds, turns on high-CRI lighting, and ensures the area camera is recording for quality documentation.
 
 ### Intelligent model routing with confidence-based escalation
 
-JarvisV3 implements a **three-tier routing system** that automatically selects the optimal AI model for each query. Simple factual questions and device control commands ("what's the bed temperature on printer 2?") process through local 7B-32B models—Qwen 2.5 32B runs at 30-45 tokens/second on your M3 Ultra, providing instant responses with zero cost and complete privacy. These local models handle an estimated **70-80% of queries** through multi-layer caching (exact match + semantic similarity) and confidence-based validation.
+KITTY implements a **three-tier routing system** that automatically selects the optimal AI model for each query. Simple factual questions and device control commands ("what's the bed temperature on printer 2?") process through local 7B-32B models—Qwen 2.5 32B runs at 30-45 tokens/second on your M3 Ultra, providing instant responses with zero cost and complete privacy. These local models handle an estimated **70-80% of queries** through multi-layer caching (exact match + semantic similarity) and confidence-based validation.
 
 When a local model returns confidence scores below your defined threshold (typically 0.7-0.8), the system automatically escalates. A query requiring current web information ("what are the latest recommended print settings for eSun PETG+ according to recent community tests?") routes to **Perplexity MCP** for real-time research synthesis. Complex reasoning tasks ("analyze this failed print's layer lines and suggest root causes considering ambient temperature, material moisture, and recent mechanical adjustments") escalate to **Claude 3.5 Sonnet** for superior analytical capabilities. Cost-sensitive bulk operations default to local models with manual review triggers, while mission-critical design validation can be configured to always use top-tier models.
 
@@ -32,23 +32,23 @@ The orchestration framework tracks confidence scores, routing decisions, cache h
 
 ### Multi-model CAD AI integration with perspective cycling
 
-JarvisV3 serves as an orchestration layer above multiple CAD AI tools, each specialized for different design approaches. When you request a CAD design through conversation ("I need a mounting bracket for this proximity sensor that attaches to 80/20 extrusion"), the system can:
+KITTY serves as an orchestration layer above multiple CAD AI tools, each specialized for different design approaches. When you request a CAD design through conversation ("I need a mounting bracket for this proximity sensor that attaches to 80/20 extrusion"), the system can:
 
 **Route to a single optimal tool** based on requirements analysis—parametric mechanical designs go to **Zoo (zoo.dev)**, the leading text-to-parametric-CAD API with manufacturing-ready STEP outputs. Organic artistic models route to **Tripo** for rapid mesh generation or **Luma AI Genie** for game-ready assets. Architecture and enclosure designs might use **Maket.ai** or similar specialized tools.
 
 **Generate multiple perspectives by cycling through tools**—send the same prompt to Zoo for a parametric engineering approach, Tripo for an artistic interpretation, and emerging tools like **Adam** (the "Cursor for CAD" Y Combinator company) when its API becomes available. The system presents all variations side-by-side with metadata: file formats (STEP, STL, OBJ), estimated material costs, printability scores, and manufacturing method suitability. You select the preferred approach or request hybrid combinations.
 
-**Iterate interactively with prompt refinement**—if the initial designs don't meet requirements, continue the conversation: "make the mounting holes 5mm instead of 4mm and add a cable routing channel on the back." JarvisV3 tracks which tool generated each variation and routes iteration requests to the appropriate API, maintaining design lineage and version history. The system can also generate multiple variations from a single tool by adjusting prompt temperature, seed values, or model parameters—essentially A/B testing different phrasings to explore the design space.
+**Iterate interactively with prompt refinement**—if the initial designs don't meet requirements, continue the conversation: "make the mounting holes 5mm instead of 4mm and add a cable routing channel on the back." KITTY tracks which tool generated each variation and routes iteration requests to the appropriate API, maintaining design lineage and version history. The system can also generate multiple variations from a single tool by adjusting prompt temperature, seed values, or model parameters—essentially A/B testing different phrasings to explore the design space.
 
 **Integrate generative design workflows**—for performance-critical parts, route to topology optimization engines or generative design systems (like Fusion 360's generative design API when available), then cycle those optimized shapes through Tripo to create printable mesh versions or back through parametric tools for manufacturing drawings.
 
-The 2024-2025 CAD AI landscape shows clear bifurcation: **parametric/mechanical tools** (Zoo, Adam, Katalyst Labs, Leo AI) excel at engineering-precise designs with dimensions and constraints for CNC/manufacturing, while **organic/artistic tools** (Tripo, Luma Genie, NVIDIA Magic3D) generate flowing shapes ideal for 3D printing creative objects, game assets, or conceptual prototypes. JarvisV3 understands this distinction and routes appropriately—asking for "a gear assembly" goes parametric, while "a decorative vase inspired by coral reefs" goes organic.
+The 2024-2025 CAD AI landscape shows clear bifurcation: **parametric/mechanical tools** (Zoo, Adam, Katalyst Labs, Leo AI) excel at engineering-precise designs with dimensions and constraints for CNC/manufacturing, while **organic/artistic tools** (Tripo, Luma Genie, NVIDIA Magic3D) generate flowing shapes ideal for 3D printing creative objects, game assets, or conceptual prototypes. KITTY understands this distinction and routes appropriately—asking for "a gear assembly" goes parametric, while "a decorative vase inspired by coral reefs" goes organic.
 
 ### Seamless access across your device ecosystem
 
-Every interaction point in your warehouse becomes an AI-enabled interface through JarvisV3's architecture. Your **Mac Studio serves as the inference powerhouse**—running Ollama with Qwen 2.5 72B Q4 (~42GB), CodeLlama 34B Q4 (~20GB), and Gemma 27B Q5 (~18GB) simultaneously, totaling ~80GB for models plus ~30GB for context windows, leaving ample headroom in 256GB unified memory. MLX framework provides 20-30% faster inference than llama.cpp on Apple Silicon, with dynamic KV cache loading for memory efficiency.
+Every interaction point in your warehouse becomes an AI-enabled interface through KITTY's architecture. Your **Mac Studio serves as the inference powerhouse**—running Ollama with Qwen 2.5 72B Q4 (~42GB), CodeLlama 34B Q4 (~20GB), and Gemma 27B Q5 (~18GB) simultaneously, totaling ~80GB for models plus ~30GB for context windows, leaving ample headroom in 256GB unified memory. MLX framework provides 20-30% faster inference than llama.cpp on Apple Silicon, with dynamic KV cache loading for memory efficiency.
 
-**Home Assistant** manages device registry and state synchronization, exposing all warehouse equipment as controllable entities. Its Assist voice pipeline integrates local **Whisper STT** (base model for real-time CPU transcription) and **Piper TTS** (neural text-to-speech with natural voices) for hands-free operation. Wake word detection via **Porcupine or openWakeWord** enables true "Hey Jarvis" activation without constant cloud connectivity.
+**Home Assistant** manages device registry and state synchronization, exposing all warehouse equipment as controllable entities. Its Assist voice pipeline integrates local **Whisper STT** (base model for real-time CPU transcription) and **Piper TTS** (neural text-to-speech with natural voices) for hands-free operation. Wake word detection via **Porcupine or openWakeWord** enables true "Hey KITTY" activation without constant cloud connectivity.
 
 **Node-RED** serves as the orchestration middleware—visual flows connect MQTT messages from devices to LLM processing to API calls to response distribution. A typical flow: MQTT voice command → extract context → route to appropriate LLM (local/online decision) → parse intent and parameters → execute device commands via MQTT/HTTP → generate response → publish to TTS. JavaScript function nodes handle confidence calculation, caching logic, and multi-model voting when ensemble approaches are needed.
 
@@ -56,11 +56,11 @@ Every interaction point in your warehouse becomes an AI-enabled interface throug
 
 **iPad and mobile devices** access the same conversational interface through Home Assistant Companion app or responsive web interfaces served from Node-RED Dashboard. State synchronization via MQTT means your conversation context follows you—start debugging a print issue on your Mac's detailed view, continue adjusting parameters on iPad's camera feed overlay, finalize with voice commands while physically inspecting the printer.
 
-**UniFi door locks** integrate through Home Assistant's UniFi Protect integration, enabling AI-controlled access: "Jarvis, let Sarah into the welding bay" triggers facial recognition via cameras, unlocks the appropriate door, and logs access. Conversely, "who accessed the materials storage in the last 24 hours?" queries the system's access logs and camera footage metadata.
+**UniFi door locks** integrate through Home Assistant's UniFi Protect integration, enabling AI-controlled access: "KITTY, let Sarah into the welding bay" triggers facial recognition via cameras, unlocks the appropriate door, and logs access. Conversely, "who accessed the materials storage in the last 24 hours?" queries the system's access logs and camera footage metadata.
 
 ### Comprehensive API orchestration and automation
 
-The system maintains a **unified API layer** accessible via REST endpoints, MQTT topics, or Home Assistant service calls. External systems or custom scripts can trigger JarvisV3 capabilities programmatically:
+The system maintains a **unified API layer** accessible via REST endpoints, MQTT topics, or Home Assistant service calls. External systems or custom scripts can trigger KITTY capabilities programmatically:
 
 **3D Printer Control** via OctoPrint REST API—query job status, upload GCode, start/pause/cancel prints, adjust temperatures, send custom GCode commands, retrieve webcam snapshots, analyze print statistics. Multi-printer coordination: "start the same print on all available printers" identifies idle machines, uploads files in parallel, sequences start times to manage power draw.
 
@@ -82,7 +82,7 @@ When internet connectivity exists, the system opportunistically leverages cloud 
 
 - **Real-time information needs** → Perplexity MCP server for web search, current prices, recent community knowledge, latest documentation
 - **Complex reasoning requiring frontier capabilities** → Claude 3.5 Sonnet, GPT-5, Gemini Pro 2.5 for multi-step analysis, creative problem-solving, nuanced technical questions
-- **Cloud-only CAD APIs** → Zoo, Tripo, Luma Genie generate designs on their servers (no local inference option), but JarvisV3 queues requests and retries with exponential backoff if connectivity is intermittent
+- **Cloud-only CAD APIs** → Zoo, Tripo, Luma Genie generate designs on their servers (no local inference option), but KITTY queues requests and retries with exponential backoff if connectivity is intermittent
 
 **Semantic caching** dramatically reduces costs and latency—similar queries match against embedding database even with different phrasing. "What's the recommended bed temperature for PETG?" and "PETG bed temp?" both hit the same cached response. GPTCache or similar frameworks achieve 17-30% cache hit rate improvements over exact-match caching, with 80%+ latency reduction and 90% cost savings for cached queries via prompt caching on providers (OpenAI, Anthropic, Google all support KV cache reuse).
 
@@ -96,7 +96,7 @@ The parametric CAD AI space serves engineering and manufacturing use cases requi
 
 **Zoo (zoo.dev) emerges as the clear leader** for parametric mechanical design. Formerly KittyCAD, this platform offers text-to-CAD generation creating precise B-rep models, conversational prompt-to-edit workflows, and manufacturing-aware optimization (CNC milling, 3D printing). The company provides a **full REST API** with Python, TypeScript, Go, and Rust client libraries, plus open-source components including their modeling app and CLI tools. Pricing starts at 40 free minutes monthly ($10 value), then $0.50/minute for API access—reasonable for intermittent use but costs accumulate with heavy usage. Zoo outputs STEP (the industry standard for CAD interchange), STL, OBJ, GLTF, DXF, and native KCL (their open-source parametric language), integrating with SolidWorks, Fusion 360, FreeCAD, Onshape, and Blender. The platform is **production-ready now** with strong VC backing (Sequoia, GitHub founders) and enterprise offerings for custom fine-tuning on proprietary data.
 
-**Adam (Y Combinator W25) represents the next generation**—a browser-based parametric CAD tool described as "Cursor for CAD" that combines conversational AI with direct object manipulation. Just raising $4.1M in seed funding (October 2024), Adam went viral with 10M+ social media impressions demonstrating multi-modal interaction: text prompts + selecting objects + follow-up conversation creates intuitive design workflows. The platform is **extremely new** (Winter 2025 launch), with API access still in development and Onshape integration planned as first CAD platform connectivity. For JarvisV3, Adam is worth monitoring closely but not yet ready for production integration.
+**Adam (Y Combinator W25) represents the next generation**—a browser-based parametric CAD tool described as "Cursor for CAD" that combines conversational AI with direct object manipulation. Just raising $4.1M in seed funding (October 2024), Adam went viral with 10M+ social media impressions demonstrating multi-modal interaction: text prompts + selecting objects + follow-up conversation creates intuitive design workflows. The platform is **extremely new** (Winter 2025 launch), with API access still in development and Onshape integration planned as first CAD platform connectivity. For KITTY, Adam is worth monitoring closely but not yet ready for production integration.
 
 **Katalyst Labs offers an open-source alternative** with text-to-parametric CAD, photo/technical drawing-to-CAD conversion, and iterative design with version history. Currently **free during beta** with a community-driven approach, Katalyst generates parametric designs that auto-adjust when dimensions change and supports both single parts and assemblies. Integration capabilities are mentioned but specific API details aren't yet public, making this a "promising but immature" option.
 
@@ -114,16 +114,16 @@ The organic modeling space targets game development, animation, concept art, and
 
 **Autodesk Project Bernini and NVIDIA Magic3D** represent major players' research initiatives but remain experimental without public releases. These demonstrate that established CAD vendors and GPU leaders are investing heavily in AI-powered 3D generation, though timelines for commercial availability are unspecified.
 
-**The critical distinction**: Tripo and Luma excel at organic shapes for creative content but **cannot generate parametric CAD** for engineering/manufacturing. There's no precise dimension control, no editable feature trees, no manufacturing constraints. Conversely, Zoo and Adam focus on parametric precision but lack the artistic freedom of organic modeling. JarvisV3's value proposition includes **routing to the appropriate tool** based on request analysis—"design a gear" goes to Zoo, "design a decorative vase" goes to Tripo.
+**The critical distinction**: Tripo and Luma excel at organic shapes for creative content but **cannot generate parametric CAD** for engineering/manufacturing. There's no precise dimension control, no editable feature trees, no manufacturing constraints. Conversely, Zoo and Adam focus on parametric precision but lack the artistic freedom of organic modeling. KITTY's value proposition includes **routing to the appropriate tool** based on request analysis—"design a gear" goes to Zoo, "design a decorative vase" goes to Tripo.
 
-### Integration recommendations for JarvisV3
+### Integration recommendations for KITTY
 
 **Primary parametric tool: Zoo (zoo.dev)**
 - Most mature API, reasonable pricing, manufacturing-ready outputs
 - Free tier (40 minutes/month) suitable for experimentation
 - API at $0.50/minute requires cost monitoring for production use
 - Open-source components enable local customization
-- Integration: REST API → Node-RED → JarvisV3 orchestration layer
+- Integration: REST API → Node-RED → KITTY orchestration layer
 
 **Primary organic tool: Tripo (tripo3d.ai)**
 - Public API with clear pricing, self-hostable open-source option
@@ -134,7 +134,7 @@ The organic modeling space targets game development, animation, concept art, and
 
 **Emerging tool to monitor: Adam**
 - Wait for API availability (currently in development)
-- Browser-based may enable iframe embedding in JarvisV3 interface
+- Browser-based may enable iframe embedding in KITTY interface
 - Multi-modal interaction (text + object selection) suits conversational AI
 - YC backing and viral traction suggest rapid development
 
@@ -175,7 +175,7 @@ Beyond simple confidence thresholds, sophisticated orchestration employs multipl
 
 **Ensemble voting during inference** combines multiple models at different granularities: token-level integration (merge outputs at finest granularity), span-level (combine sequence fragments), or process-level (select optimal reasoning steps within chain-of-thought). LLM-Blender and Generation-as-Classification (GaC) frameworks implement these approaches, trading computational cost for quality improvements.
 
-**For JarvisV3**: Start with confidence-threshold cascade (simplest, effective, fast) using the RouteLLM framework for training routers. Add semantic routing for specialized domains (CAD generation, welding parameters, material selection) where historical data shows clear model preferences. Implement ensemble voting only for mission-critical decisions where quality justifies 2-3× computational cost.
+**For KITTY**: Start with confidence-threshold cascade (simplest, effective, fast) using the RouteLLM framework for training routers. Add semantic routing for specialized domains (CAD generation, welding parameters, material selection) where historical data shows clear model preferences. Implement ensemble voting only for mission-critical decisions where quality justifies 2-3× computational cost.
 
 ### Perplexity MCP integration for real-time information
 
@@ -183,7 +183,7 @@ The **Model Context Protocol (MCP)** created by Anthropic provides a standardize
 
 **Perplexity's MCP server** (`perplexityai/modelcontextprotocol` on GitHub) offers three key capabilities via their Sonar API: (1) **Search tool** for quick lookups, (2) **Reason tool** for complex multi-step analysis, and (3) **Deep Research tool** for comprehensive investigations with focus areas. The server automatically routes queries to appropriate Sonar models based on complexity detection.
 
-**Integration pattern for JarvisV3**:
+**Integration pattern for KITTY**:
 ```javascript
 // Node-RED flow configuration
 {
@@ -211,7 +211,7 @@ The **Model Context Protocol (MCP)** created by Anthropic provides a standardize
 
 **Layer 2: Semantic cache** converts queries to embeddings (sentence-transformers or similar), matches within similarity threshold (typically 0.85-0.95 cosine similarity), returns cached response for semantically equivalent queries even with different phrasing. Tools like GPTCache, Redis semantic cache, and Helicone implement this pattern, achieving 17-30% hit rate improvements.
 
-**Layer 3: Prompt caching (KV caching)** stores computed key-value pairs in transformer attention layers—OpenAI, Anthropic, and Google all support this, delivering 5×+ speedups for long sequences with 80% latency improvement and 90% cost reduction after just 1 cache reuse. Particularly effective for JarvisV3's system prompts and warehouse context that rarely change.
+**Layer 3: Prompt caching (KV caching)** stores computed key-value pairs in transformer attention layers—OpenAI, Anthropic, and Google all support this, delivering 5×+ speedups for long sequences with 80% latency improvement and 90% cost reduction after just 1 cache reuse. Particularly effective for KITTY's system prompts and warehouse context that rarely change.
 
 **Layer 4: Fresh LLM inference** when no cache hits—but immediately cache the response for future semantic matching.
 
@@ -231,7 +231,7 @@ The **256GB unified memory** provides exceptional local LLM capabilities, enabli
 
 **Quantization quality guidelines**: Q8/Q6 virtually indistinguishable from FP16, Q5 recommended minimum for 70B+ models, Q4_K_M is industry standard best balance, Q3 and below show noticeable quality loss except for massive models where size necessitates compression.
 
-**Practical recommendations for JarvisV3**:
+**Practical recommendations for KITTY**:
 - **Primary model**: Qwen 2.5 72B Q4 (~42GB) for excellent all-around performance
 - **Coding specialist**: Qwen 2.5 Coder 32B Q5 (~24GB) for CAD prompt generation, GCode debugging
 - **Fast responses**: Gemma 27B Q5 (~18GB) for simple queries, device control
@@ -407,17 +407,17 @@ Devices (Mac, iPad, wall terminals, mobile)
 
 **State synchronization via MQTT topics**:
 ```
-jarvis/conversation/context          # Current conversation state
-jarvis/conversation/history          # Message history
-jarvis/devices/printer1/status       # Device states
-jarvis/devices/lights/zone3/state    
-jarvis/ai/routing/decision           # Which model handled query
-jarvis/ai/confidence/score           # Confidence metrics
+kitty/conversation/context          # Current conversation state
+kitty/conversation/history          # Message history
+kitty/devices/printer1/status       # Device states
+kitty/devices/lights/zone3/state    
+kitty/ai/routing/decision           # Which model handled query
+kitty/ai/confidence/score           # Confidence metrics
 ```
 
 **Example Node-RED flow** for voice command processing:
 ```
-[MQTT In: jarvis/voice/command]
+[MQTT In: kitty/voice/command]
     ↓
 [Function: Extract user context]
     ↓
@@ -435,7 +435,7 @@ jarvis/ai/confidence/score           # Confidence metrics
     ↓
 [TTS Node: Generate speech]
     ↓
-[MQTT Out: jarvis/tts/response]
+[MQTT Out: kitty/tts/response]
 ```
 
 **Web interface** built with Node-RED Dashboard or custom React app provides rich visual interactions—CAD model viewers (Three.js), camera feeds (WebRTC), device status dashboards, conversation history. Responsive design adapts to screen sizes from iPhone to iPad to Mac displays.
@@ -455,7 +455,7 @@ jarvis/ai/confidence/score           # Confidence metrics
 
 ```javascript
 // HTTP In node receives requests
-app.post('/api/jarvis/query', async (req, res) => {
+app.post('/api/kitty/query', async (req, res) => {
     const { query, user_id, context } = req.body;
     
     // Route through confidence system
@@ -486,7 +486,7 @@ app.post('/api/devices/:device_id/command', async (req, res) => {
     
     // Publish via MQTT
     await mqttClient.publish(
-        `jarvis/devices/${device_id}/command`,
+        `kitty/devices/${device_id}/command`,
         JSON.stringify({ action, parameters })
     );
     
@@ -496,7 +496,7 @@ app.post('/api/devices/:device_id/command', async (req, res) => {
 
 **Security layers**: All endpoints require authentication via Home Assistant long-lived access tokens in Authorization headers. Rate limiting via `node-red-contrib-rate-limit`. Input validation prevents injection attacks. Audit logging tracks all access.
 
-**External integrations** can trigger JarvisV3 programmatically—GitHub webhooks for CI/CD pipeline integration ("Jarvis, start test print of latest STL from repository X"), calendar events ("turn on welding bay before scheduled fabrication session"), Slack commands ("/jarvis check printer status"), custom scripts for automation.
+**External integrations** can trigger KITTY programmatically—GitHub webhooks for CI/CD pipeline integration ("KITTY, start test print of latest STL from repository X"), calendar events ("turn on welding bay before scheduled fabrication session"), Slack commands ("/jarvis check printer status"), custom scripts for automation.
 
 ## Additional software and API integrations
 
@@ -614,7 +614,7 @@ app.post('/api/devices/:device_id/command', async (req, res) => {
 
 ## Conclusion: A unified vision for intelligent fabrication
 
-JarvisV3 transforms your Mac Studio M3 Ultra into an **intelligent orchestration brain** that unifies conversational AI, CAD generation, device control, and multi-device access into a seamless fabrication ecosystem. The system's core innovation—**confidence-based routing between offline and online AI models**—delivers privacy-preserving operation with 70-80% local handling while automatically escalating to frontier cloud models or real-time web research when needed, achieving 50%+ cost savings without sacrificing capability.
+KITTY transforms your Mac Studio M3 Ultra into an **intelligent orchestration brain** that unifies conversational AI, CAD generation, device control, and multi-device access into a seamless fabrication ecosystem. The system's core innovation—**confidence-based routing between offline and online AI models**—delivers privacy-preserving operation with 70-80% local handling while automatically escalating to frontier cloud models or real-time web research when needed, achieving 50%+ cost savings without sacrificing capability.
 
 **Multi-model CAD cycling** breaks down the walls between parametric engineering tools (Zoo, Adam) and organic creative tools (Tripo, Luma), enabling "design from multiple perspectives" workflows impossible with single-tool approaches. A single conversational prompt generates manufacturing-ready STEP files for CNC work alongside artistic STL variations for 3D printing, letting you choose the optimal approach or synthesize hybrid designs.
 
@@ -624,4 +624,4 @@ The **2024-2025 technology landscape** makes this vision achievable today: Zoo's
 
 **Implementation begins with foundation building**: Home Assistant + Node-RED + Ollama + Tailscale VPN establishes the core infrastructure in days, not months. Device integrations follow incrementally—start with easiest wins like Philips Hue and OctoPrint, gradually adding cameras, power systems, and specialized equipment. Voice control via Whisper and wake word detection adds hands-free operation. LLM confidence routing begins simply with threshold-based logic, maturing into sophisticated semantic routers as usage patterns emerge. CAD AI integration starts with one tool (Zoo for parametric, Tripo for organic) and expands as capabilities prove valuable.
 
-The result is a **warehouse that thinks**—where natural language commands orchestrate complex fabrication workflows, AI models automatically select themselves based on task requirements, designs generate from conversations and iterate through multiple perspectives, quality control happens via computer vision, and every device from 3D printers to door locks participates in a unified intelligent system. JarvisV3 doesn't just automate tasks; it fundamentally transforms how creative and technical work happens in physical spaces, bringing the power of large language models to the tangible world of making things.
+The result is a **warehouse that thinks**—where natural language commands orchestrate complex fabrication workflows, AI models automatically select themselves based on task requirements, designs generate from conversations and iterate through multiple perspectives, quality control happens via computer vision, and every device from 3D printers to door locks participates in a unified intelligent system. KITTY doesn't just automate tasks; it fundamentally transforms how creative and technical work happens in physical spaces, bringing the power of large language models to the tangible world of making things.

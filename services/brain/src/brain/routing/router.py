@@ -1,0 +1,175 @@
+# noqa: D401
+"""Confidence-based routing engine."""
+
+from __future__ import annotations
+
+import hashlib
+import time
+from dataclasses import dataclass
+from typing import Optional
+
+from pydantic import BaseModel
+
+from common.config import settings
+from common.db.models import RoutingTier
+from common.cache import CacheRecord, SemanticCache
+
+from ..metrics import record_decision
+from ..metrics.slo import SLOCalculator
+from .audit_store import RoutingAuditStore
+from .cloud_clients import FrontierClient, MCPClient
+from .config import RoutingConfig, get_routing_config
+from .cost_tracker import CostTracker
+from .local_client import OllamaClient
+from .ml_local_client import MLXLocalClient
+
+
+class RoutingRequest(BaseModel):
+    conversation_id: str
+    request_id: str
+    prompt: str
+    user_id: Optional[str] = None
+    force_tier: Optional[RoutingTier] = None
+    freshness_required: bool = False
+
+
+@dataclass
+class RoutingResult:
+    output: str
+    tier: RoutingTier
+    confidence: float
+    latency_ms: int
+    cached: bool = False
+
+
+def _hash_prompt(prompt: str) -> str:
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
+
+_COST_BY_TIER = {
+    RoutingTier.local: 0.0001,
+    RoutingTier.mcp: 0.002,
+    RoutingTier.frontier: 0.06,
+}
+
+
+class BrainRouter:
+    def __init__(
+        self,
+        config: Optional[RoutingConfig] = None,
+        ollama: Optional[OllamaClient] = None,
+        mlx: Optional[MLXLocalClient] = None,
+        audit_store: Optional[RoutingAuditStore] = None,
+        cache: Optional[SemanticCache] = None,
+        mcp_client: Optional[MCPClient] = None,
+        frontier_client: Optional[FrontierClient] = None,
+        cost_tracker: Optional[CostTracker] = None,
+        slo_calculator: Optional[SLOCalculator] = None,
+    ) -> None:
+        self._config = config or get_routing_config()
+        self._ollama = ollama or OllamaClient()
+        self._mlx = mlx or MLXLocalClient()
+        self._audit = audit_store or RoutingAuditStore()
+        self._cache = cache or (SemanticCache() if settings.semantic_cache_enabled else None)
+        self._mcp = mcp_client
+        if not self._mcp and settings.perplexity_api_key:
+            self._mcp = MCPClient(settings.perplexity_base_url, settings.perplexity_api_key)
+        self._frontier = frontier_client
+        if not self._frontier and settings.openai_api_key:
+            self._frontier = FrontierClient(settings.openai_base_url, settings.openai_api_key, settings.openai_model)
+        self._cost_tracker = cost_tracker or CostTracker()
+        self._slo_calculator = slo_calculator or SLOCalculator()
+
+    async def route(self, request: RoutingRequest) -> RoutingResult:
+        cache_key = _hash_prompt(request.prompt)
+        if self._cache and not request.freshness_required:
+            cached = self._cache.fetch(cache_key)
+            if cached:
+                result = RoutingResult(
+                    output=cached.response,
+                    tier=RoutingTier.local,
+                    confidence=cached.confidence,
+                    latency_ms=0,
+                    cached=True,
+                )
+                self._audit.record(
+                    conversation_id=request.conversation_id,
+                    request_id=request.request_id,
+                    tier=result.tier,
+                    confidence=result.confidence,
+                    latency_ms=result.latency_ms,
+                    user_id=request.user_id,
+                )
+                return result
+
+        result = await self._invoke_local(request)
+        if request.force_tier == RoutingTier.local:
+            self._record(request, result)
+            return result
+
+        if result.confidence < self._config.thresholds.local_confidence or request.force_tier == RoutingTier.mcp:
+            cloud_result = await self._invoke_mcp(request)
+            if cloud_result:
+                result = cloud_result
+            elif self._frontier:
+                result = await self._invoke_frontier(request) or result
+
+        self._record(request, result, cache_key=cache_key)
+        return result
+
+    async def _invoke_local(self, request: RoutingRequest) -> RoutingResult:
+        start = time.perf_counter()
+        response = await self._ollama.generate(request.prompt, self._config.local_models[0])
+        latency = int((time.perf_counter() - start) * 1000)
+        output = response.get("response") or response.get("output") or ""
+        confidence = 0.85 if output else 0.0
+        return RoutingResult(output=output, tier=RoutingTier.local, confidence=confidence, latency_ms=latency)
+
+    async def _invoke_mcp(self, request: RoutingRequest) -> Optional[RoutingResult]:
+        if not self._mcp:
+            return None
+        start = time.perf_counter()
+        response = await self._mcp.query({"query": request.prompt})
+        latency = int((time.perf_counter() - start) * 1000)
+        output = response.get("output") or response.get("text") or ""
+        if not output:
+            return None
+        return RoutingResult(output=output, tier=RoutingTier.mcp, confidence=0.6, latency_ms=latency)
+
+    async def _invoke_frontier(self, request: RoutingRequest) -> Optional[RoutingResult]:
+        if not self._frontier:
+            return None
+        start = time.perf_counter()
+        response = await self._frontier.generate(request.prompt)
+        latency = int((time.perf_counter() - start) * 1000)
+        choices = response.get("choices")
+        if not choices:
+            return None
+        output = choices[0]["message"]["content"]
+        return RoutingResult(output=output, tier=RoutingTier.frontier, confidence=0.9, latency_ms=latency)
+
+    def _record(self, request: RoutingRequest, result: RoutingResult, cache_key: Optional[str] = None) -> None:
+        if self._cache and cache_key and not result.cached:
+            self._cache.store(
+                CacheRecord(key=cache_key, prompt=request.prompt, response=result.output, confidence=result.confidence)
+            )
+        cost = _COST_BY_TIER.get(result.tier, 0.0)
+        self._cost_tracker.record(result.tier, cost)
+        local_ratio = self._slo_calculator.update(result.tier)
+        self._audit.record(
+            conversation_id=request.conversation_id,
+            request_id=request.request_id,
+            tier=result.tier,
+            confidence=result.confidence,
+            latency_ms=result.latency_ms,
+            user_id=request.user_id,
+        )
+        record_decision(
+            tier=result.tier.value,
+            latency_ms=result.latency_ms,
+            cost=cost,
+            local_ratio=local_ratio,
+        )
+
+
+__all__ = ["BrainRouter", "RoutingRequest", "RoutingResult"]

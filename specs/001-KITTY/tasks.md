@@ -1,4 +1,4 @@
-# Tasks: JarvisV3 Warehouse Orchestrator
+# Tasks: KITTY Warehouse Orchestrator
 
 **Input**: Design documents from `/specs/001-KITTY/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories)
@@ -7,12 +7,12 @@
 
 **Purpose**: Establish container orchestration, broker configuration, and developer tooling aligned with API integration requirements.
 
-- [ ] T001 Define container stack (FastAPI, Mosquitto, Home Assistant, Ollama, Redis, Postgres, Prometheus, Grafana, Loki, Tempo) in `infra/compose/docker-compose.yml`
-- [ ] T002 Create Mosquitto broker configuration with QoS/retained policies in `infra/compose/mosquitto.conf`
-- [ ] T003 Create Home Assistant MQTT bridge configuration in `infra/compose/homeassistant/configuration.yaml`
-- [ ] T004 Create environment template with integration secrets in `infra/compose/.env.example`
-- [ ] T005 [P] Configure CI workflow for services and UI in `.github/workflows/ci.yml`
-- [ ] T006 [P] Add repository-wide pre-commit hooks in `.pre-commit-config.yaml`
+- [X] T001 Define container stack (FastAPI, Mosquitto, Home Assistant, Ollama, Redis, Postgres, Prometheus, Grafana, Loki, Tempo) in `infra/compose/docker-compose.yml`
+- [X] T002 Create Mosquitto broker configuration with QoS/retained policies in `infra/compose/mosquitto.conf`
+- [X] T003 Create Home Assistant MQTT bridge configuration in `infra/compose/homeassistant/configuration.yaml`
+- [X] T004 Create environment template with integration secrets in `infra/compose/.env.example`
+- [X] T005 [P] Configure CI workflow for services and UI in `.github/workflows/ci.yml`
+- [X] T006 [P] Add repository-wide pre-commit hooks in `.pre-commit-config.yaml`
 
 ---
 
@@ -22,14 +22,17 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T007 Create Python project manifest for shared utilities in `services/common/pyproject.toml`
-- [ ] T008 [P] Implement settings loader supporting `.env` overrides in `services/common/src/common/config.py`
-- [ ] T009 [P] Implement MQTT helper with QoS/retain helpers in `services/common/src/common/messaging.py`
-- [ ] T010 [P] Set up structured logging helpers (JSON + trace IDs) in `services/common/src/common/logging.py`
-- [ ] T011 Establish shared Pydantic schemas for entities in `services/common/src/common/schemas.py`
-- [ ] T012 [P] Implement OAuth2/JWT security helpers per FastAPI guide in `services/common/src/common/security.py`
-- [ ] T013 [P] Implement REST client wrapper with bearer/API-key support in `services/common/src/common/http.py`
-- [ ] T014 [P] Define integration credential models in `services/common/src/common/credentials.py`
+- [X] T007 Create Python project manifest for shared utilities in `services/common/pyproject.toml`
+- [X] T008 [P] Implement settings loader supporting `.env` overrides in `services/common/src/common/config.py`
+- [X] T009 [P] Implement MQTT helper with QoS/retain helpers in `services/common/src/common/messaging.py`
+- [X] T010 [P] Set up structured logging helpers (JSON + trace IDs) in `services/common/src/common/logging.py`
+- [X] T011 Establish shared Pydantic schemas for entities in `services/common/src/common/schemas.py`
+- [X] T012 [P] Implement OAuth2/JWT security helpers per FastAPI guide in `services/common/src/common/security.py`
+- [X] T013 [P] Implement REST client wrapper with bearer/API-key support in `services/common/src/common/http.py`
+- [X] T014 [P] Define integration credential models in `services/common/src/common/credentials.py`
+- [X] T015 Implement database migrations scaffold (Alembic) in `services/common/alembic/`
+- [X] T016 [P] Define SQLAlchemy ORM models for core entities in `services/common/src/common/db/models.py`
+- [X] T017 [P] Implement Redis Streams semantic cache manager in `services/common/src/common/cache.py`
 
 **Checkpoint**: Shared configuration, security, and transport utilities ready for reuse.
 
@@ -39,19 +42,21 @@
 
 **Goal**: Deliver `/api/query` conversational control that authenticates via OAuth2, persists context, and issues Home Assistant service calls over MQTT.
 
-**Independent Test**: Acquire access token via `/token`, send device command through `/api/query`, verify context persistence on `jarvis/ctx/*`, and confirm corresponding Home Assistant REST call + MQTT command on `jarvis/devices/<dev>/cmd`.
+**Independent Test**: Acquire access token via `/token`, send device command through `/api/query`, verify context persistence on `kitty/ctx/*`, and confirm corresponding Home Assistant REST call + MQTT command on `kitty/devices/<dev>/cmd`.
 
 ### Implementation for User Story 1
 
-- [ ] T015 [P] [US1] Define conversation context models in `services/brain/src/brain/models/context.py`
-- [ ] T016 [P] [US1] Implement MQTT-backed context store in `services/brain/src/brain/state/mqtt_context_store.py`
-- [ ] T017 [P] [US1] Implement Home Assistant REST client using bearer tokens in `services/brain/src/brain/clients/home_assistant.py`
-- [ ] T018 [P] [US1] Implement Home Assistant WebSocket listener for state sync in `services/brain/src/brain/clients/home_assistant_ws.py`
-- [ ] T019 [P] [US1] Implement device intent catalog mapping to Home Assistant services in `services/brain/src/brain/skills/home_assistant.py`
-- [ ] T020 [US1] Build orchestration service translating intents to MQTT + REST calls in `services/brain/src/brain/orchestrator.py`
-- [ ] T021 [US1] Expose `/api/query` route with OAuth2 dependency in `services/brain/src/brain/routes/query.py`
-- [ ] T022 [US1] Wire FastAPI application startup + dependency graph in `services/brain/src/brain/app.py`
-- [ ] T023 [US1] Implement `/token` OAuth2 password flow in `services/gateway/src/gateway/routes/token.py`
+- [X] T018 [P] [US1] Define conversation context models in `services/brain/src/brain/models/context.py`
+- [X] T019 [P] [US1] Implement MQTT-backed context store in `services/brain/src/brain/state/mqtt_context_store.py`
+- [X] T020 [P] [US1] Implement Home Assistant REST client using bearer tokens in `services/brain/src/brain/clients/home_assistant.py`
+- [X] T021 [P] [US1] Implement Home Assistant WebSocket listener for state sync in `services/brain/src/brain/clients/home_assistant_ws.py`
+- [X] T022 [P] [US1] Implement device intent catalog mapping to Home Assistant services in `services/brain/src/brain/skills/home_assistant.py`
+- [X] T023 [US1] Build orchestration service translating intents to MQTT + REST calls in `services/brain/src/brain/orchestrator.py`
+- [X] T024 [US1] Expose `/api/query` route with OAuth2 dependency in `services/brain/src/brain/routes/query.py`
+- [X] T025 [US1] Wire FastAPI application startup + dependency graph in `services/brain/src/brain/app.py`
+- [X] T026 [US1] Implement `/token` OAuth2 password flow in `services/gateway/src/gateway/routes/token.py`
+- [X] T027 [US1] Implement remote-mode guard middleware for read-only enforcement in `services/gateway/src/gateway/middleware/remote_mode.py`
+- [X] T028 [US1] Add integration test for remote read-only policy in `tests/integration/test_remote_mode.py`
 
 **Checkpoint**: Conversational device control operational with authenticated access and synchronized context.
 
@@ -65,14 +70,15 @@
 
 ### Implementation for User Story 2
 
-- [ ] T024 [P] [US2] Define routing configuration models in `services/brain/src/brain/routing/config.py`
-- [ ] T025 [P] [US2] Implement Ollama client with keep-alive controls in `services/brain/src/brain/routing/ollama_client.py`
-- [ ] T026 [P] [US2] Implement MLX local model wrapper in `services/brain/src/brain/routing/ml_local_client.py`
-- [ ] T027 [P] [US2] Implement MCP/frontier adapter clients (Perplexity, GPT-5, Sonnet, Gemini) in `services/brain/src/brain/routing/cloud_clients.py`
-- [ ] T028 [P] [US2] Implement routing audit store persisting decision metadata in `services/brain/src/brain/routing/audit_store.py`
-- [ ] T029 [US2] Build confidence router core in `services/brain/src/brain/routing/router.py`
-- [ ] T030 [US2] Integrate router + decision logging into query flow in `services/brain/src/brain/orchestrator.py`
-- [ ] T031 [US2] Expose `/api/routing/logs` endpoint in `services/gateway/src/gateway/routes/routing.py`
+- [X] T029 [P] [US2] Define routing configuration models in `services/brain/src/brain/routing/config.py`
+- [X] T030 [P] [US2] Implement Ollama client with keep-alive controls in `services/brain/src/brain/routing/ollama_client.py`
+- [X] T031 [P] [US2] Implement MLX local model wrapper in `services/brain/src/brain/routing/ml_local_client.py`
+- [X] T032 [P] [US2] Implement MCP/frontier adapter clients (Perplexity, GPT-5, Sonnet, Gemini) in `services/brain/src/brain/routing/cloud_clients.py`
+- [X] T033 [P] [US2] Implement routing audit store persisting decision metadata in `services/brain/src/brain/routing/audit_store.py`
+- [X] T034 [US2] Build confidence router core in `services/brain/src/brain/routing/router.py`
+- [X] T035 [US2] Integrate router + decision logging into query flow in `services/brain/src/brain/orchestrator.py`
+- [X] T036 [US2] Expose `/api/routing/logs` endpoint in `services/gateway/src/gateway/routes/routing.py`
+- [X] T037 [US2] Integrate semantic cache into routing path with metrics in `services/brain/src/brain/routing/router.py`
 
 **Checkpoint**: Confidence router operational with audited local/cloud escalations.
 
@@ -86,15 +92,15 @@
 
 ### Implementation for User Story 3
 
-- [ ] T032 [P] [US3] Create fabrication service manifest in `services/fabrication/pyproject.toml`
-- [ ] T033 [P] [US3] Implement OctoPrint REST client covering file upload/job control in `services/fabrication/src/fabrication/octoprint/client.py`
-- [ ] T034 [P] [US3] Implement Moonraker JSON-RPC client for Klipper telemetry in `services/fabrication/src/fabrication/klipper/moonraker_client.py`
-- [ ] T035 [P] [US3] Implement UniFi Protect client for RTSP/snapshot access in `services/fabrication/src/fabrication/clients/unifi_protect.py`
-- [ ] T036 [P] [US3] Implement CV monitoring pipeline with spaghetti/adhesion detection in `services/fabrication/src/fabrication/cv/monitor.py`
-- [ ] T037 [US3] Implement print job manager coordinating heat/upload/start in `services/fabrication/src/fabrication/jobs/manager.py`
-- [ ] T038 [US3] Implement MQTT command handlers bridging `/api/device` to device topics in `services/fabrication/src/fabrication/mqtt/handlers.py`
-- [ ] T039 [US3] Implement lighting/power scene controller invoking Home Assistant services in `services/fabrication/src/fabrication/scenes/controller.py`
-- [ ] T040 [US3] Integrate fabrication workflow with `/api/device/:id/command` in `services/gateway/src/gateway/routes/devices.py`
+- [X] T038 [P] [US3] Create fabrication service manifest in `services/fabrication/pyproject.toml`
+- [X] T039 [P] [US3] Implement OctoPrint REST client covering file upload/job control in `services/fabrication/src/fabrication/octoprint/client.py`
+- [X] T040 [P] [US3] Implement Moonraker JSON-RPC client for Klipper telemetry in `services/fabrication/src/fabrication/klipper/moonraker_client.py`
+- [X] T041 [P] [US3] Implement UniFi Protect client for RTSP/snapshot access in `services/fabrication/src/fabrication/clients/unifi_protect.py`
+- [X] T042 [P] [US3] Implement CV monitoring pipeline with spaghetti/adhesion detection in `services/fabrication/src/fabrication/cv/monitor.py`
+- [X] T043 [US3] Implement print job manager coordinating heat/upload/start in `services/fabrication/src/fabrication/jobs/manager.py`
+- [X] T044 [US3] Implement MQTT command handlers bridging `/api/device` to device topics in `services/fabrication/src/fabrication/mqtt/handlers.py`
+- [X] T045 [US3] Implement lighting/power scene controller invoking Home Assistant services in `services/fabrication/src/fabrication/scenes/controller.py`
+- [X] T046 [US3] Integrate fabrication workflow with `/api/device/:id/command` in `services/gateway/src/gateway/routes/devices.py`
 
 **Checkpoint**: Fabrication workflows automated with CV-based safety pauses and facility scene orchestration.
 
@@ -108,14 +114,14 @@
 
 ### Implementation for User Story 4
 
-- [ ] T041 [P] [US4] Create CAD service manifest in `services/cad/pyproject.toml`
-- [ ] T042 [P] [US4] Implement Zoo API client with create/status polling in `services/cad/src/cad/providers/zoo_client.py`
-- [ ] T043 [P] [US4] Implement Tripo cloud client for IM2Tripo in `services/cad/src/cad/providers/tripo_client.py`
-- [ ] T044 [P] [US4] Implement TripoSR/InstantMesh local runner in `services/cad/src/cad/providers/tripo_local.py`
-- [ ] T045 [P] [US4] Implement artifact store + MinIO lineage tracker in `services/cad/src/cad/storage/artifact_store.py`
-- [ ] T046 [US4] Implement CAD cycling orchestrator sequencing providers in `services/cad/src/cad/cycler.py`
-- [ ] T047 [US4] Implement `/api/cad/generate` route in `services/cad/src/cad/routes/generate.py`
-- [ ] T048 [US4] Implement CadQuery/FreeCAD fallback pipeline in `services/cad/src/cad/fallback/freecad_runner.py`
+- [ ] T047 [P] [US4] Create CAD service manifest in `services/cad/pyproject.toml`
+- [ ] T048 [P] [US4] Implement Zoo API client with create/status polling in `services/cad/src/cad/providers/zoo_client.py`
+- [ ] T049 [P] [US4] Implement Tripo cloud client for IM2Tripo in `services/cad/src/cad/providers/tripo_client.py`
+- [ ] T050 [P] [US4] Implement TripoSR/InstantMesh local runner in `services/cad/src/cad/providers/tripo_local.py`
+- [ ] T051 [P] [US4] Implement artifact store + MinIO lineage tracker in `services/cad/src/cad/storage/artifact_store.py`
+- [ ] T052 [US4] Implement CAD cycling orchestrator sequencing providers in `services/cad/src/cad/cycler.py`
+- [ ] T053 [US4] Implement `/api/cad/generate` route in `services/cad/src/cad/routes/generate.py`
+- [ ] T054 [US4] Implement CadQuery/FreeCAD fallback pipeline in `services/cad/src/cad/fallback/freecad_runner.py`
 
 **Checkpoint**: CAD AI subsystem delivers multi-perspective outputs with resilient offline fallbacks.
 
@@ -129,11 +135,13 @@
 
 ### Implementation for User Story 5
 
-- [ ] T049 [P] [US5] Implement routing cost tracker aggregating API usage in `services/brain/src/brain/routing/cost_tracker.py`
-- [ ] T050 [P] [US5] Expose Prometheus metrics (latency/confidence/hit-rate) in `services/brain/src/brain/metrics.py`
-- [ ] T051 [P] [US5] Add Prometheus scrape configuration in `infra/compose/prometheus.yml`
-- [ ] T052 [P] [US5] Create Grafana routing dashboard JSON in `ops/dashboards/routing.json`
-- [ ] T053 [US5] Document observability operations/runbook in `ops/runbooks/routing-observability.md`
+- [X] T055 [P] [US5] Implement routing cost tracker aggregating API usage in `services/brain/src/brain/routing/cost_tracker.py`
+- [X] T056 [P] [US5] Expose Prometheus metrics (latency/confidence/hit-rate) in `services/brain/src/brain/metrics/__init__.py`
+- [X] T057 [P] [US5] Add Prometheus scrape configuration in `infra/compose/prometheus.yml`
+- [X] T058 [P] [US5] Create Grafana routing dashboard JSON in `ops/dashboards/routing.json`
+- [X] T059 [US5] Document observability operations/runbook in `ops/runbooks/routing-observability.md`
+- [X] T060 [US5] Implement SLO computation job for local-handling % and P95 latency in `services/brain/src/brain/metrics/slo.py`
+- [X] T061 [US5] Add Grafana panels for SLO metrics in `ops/dashboards/routing.json`
 
 **Checkpoint**: Routing observability live with actionable dashboards and cost controls.
 
@@ -147,13 +155,13 @@
 
 ### Implementation for User Story 6
 
-- [ ] T054 [P] [US6] Create safety service manifest in `services/safety/pyproject.toml`
-- [ ] T055 [P] [US6] Implement policy definitions with zone hazard rules in `services/safety/src/safety/policies.py`
-- [ ] T056 [P] [US6] Implement signature verification utilities in `services/safety/src/safety/signing.py`
-- [ ] T057 [P] [US6] Implement UniFi Access client for identity/door endpoints in `services/safety/src/safety/unifi/client.py`
-- [ ] T058 [US6] Implement hazard workflow engine coordinating approvals in `services/safety/src/safety/workflows/hazard.py`
-- [ ] T059 [US6] Integrate safety checks into orchestrator decision flow in `services/brain/src/brain/orchestrator.py`
-- [ ] T060 [US6] Add safety audit logging with snapshot references in `services/safety/src/safety/audit.py`
+- [ ] T062 [P] [US6] Create safety service manifest in `services/safety/pyproject.toml`
+- [ ] T063 [P] [US6] Implement policy definitions with zone hazard rules in `services/safety/src/safety/policies.py`
+- [ ] T064 [P] [US6] Implement signature verification utilities in `services/safety/src/safety/signing.py`
+- [ ] T065 [P] [US6] Implement UniFi Access client for identity/door endpoints in `services/safety/src/safety/unifi/client.py`
+- [ ] T066 [US6] Implement hazard workflow engine coordinating approvals in `services/safety/src/safety/workflows/hazard.py`
+- [ ] T067 [US6] Integrate safety checks into orchestrator decision flow in `services/brain/src/brain/orchestrator.py`
+- [ ] T068 [US6] Add safety audit logging with snapshot references in `services/safety/src/safety/audit.py`
 
 **Checkpoint**: Hazardous actions gated by policy with full identity verification and auditing.
 
@@ -167,12 +175,16 @@
 
 ### Implementation for User Story 7
 
-- [ ] T061 [P] [US7] Initialize PWA project in `services/ui/package.json`
-- [ ] T062 [P] [US7] Implement MQTT context hook in `services/ui/src/hooks/useJarvisContext.ts`
-- [ ] T063 [P] [US7] Implement Whisper/Piper-backed voice module in `services/ui/src/modules/voice.ts`
-- [ ] T064 [P] [US7] Implement dashboard page with device status panels in `services/ui/src/pages/Dashboard.tsx`
-- [ ] T065 [US7] Implement remote access guard using Tailscale API in `services/ui/src/utils/tailscaleMode.ts`
-- [ ] T066 [US7] Configure wall terminal layout for kiosk/screensaver mode in `services/ui/src/pages/WallTerminal.tsx`
+- [ ] T069 [P] [US7] Initialize PWA project in `services/ui/package.json`
+- [ ] T070 [P] [US7] Implement MQTT context hook in `services/ui/src/hooks/useKittyContext.ts`
+- [ ] T071 [P] [US7] Implement Whisper/Piper-backed voice module in `services/ui/src/modules/voice.ts`
+- [ ] T072 [P] [US7] Implement dashboard page with device status panels in `services/ui/src/pages/Dashboard.tsx`
+- [ ] T073 [US7] Implement remote access guard using Tailscale API in `services/ui/src/utils/tailscaleMode.ts`
+- [ ] T074 [US7] Configure wall terminal layout for kiosk/screensaver mode in `services/ui/src/pages/WallTerminal.tsx`
+- [ ] T075 [US7] Coordinate UI with remote read-only policy toggle via MQTT in `services/ui/src/hooks/useRemoteMode.ts`
+- [ ] T081 [US7] Expose conversation project summary API in `services/brain/src/brain/routes/projects.py`
+- [ ] T082 [US7] Add project memory persistence (migrations + models) in `services/common/src/common/db/projects.py`
+- [ ] T083 [US7] Implement UI project memory panel with voice ↔ desktop hand-off in `services/ui/src/pages/Projects.tsx`
 
 **Checkpoint**: Unified UX available across Mac, tablet, and wall terminals with synchronized context + voice.
 
@@ -182,11 +194,11 @@
 
 **Purpose**: Harden documentation, security posture, and performance based on API reference best practices.
 
-- [ ] T067 [P] Update architecture overview with integration diagrams in `docs/architecture.md`
-- [ ] T068 [P] Document security and key rotation procedures in `ops/runbooks/security-hardening.md`
-- [ ] T069 Consolidate deployment checklist covering Tailscale, API keys, and monitoring in `ops/runbooks/deployment-checklist.md`
-- [ ] T070 Tune router and model performance knobs in `services/brain/src/brain/config/performance.py`
-- [ ] T071 Validate quickstart scenarios end-to-end in `docs/quickstart.md`
+- [ ] T076 [P] Update architecture overview with integration diagrams in `docs/architecture.md`
+- [ ] T077 [P] Document security and key rotation procedures in `ops/runbooks/security-hardening.md`
+- [ ] T078 Consolidate deployment checklist covering Tailscale, API keys, and monitoring in `ops/runbooks/deployment-checklist.md`
+- [ ] T079 Tune router and model performance knobs in `services/brain/src/brain/config/performance.py`
+- [ ] T080 Validate quickstart scenarios end-to-end in `docs/quickstart.md`
 
 ---
 
@@ -202,11 +214,11 @@
 ## Parallel Execution Examples
 
 - **Setup**: T005 and T006 can run in parallel once compose/env files (T001–T004) exist.
-- **US1**: T017–T019 (Home Assistant clients/skills) can progress concurrently with T015–T016 (context state).
-- **US2**: T025–T027 implement separate adapters (Ollama, MLX, MCP) in parallel after config (T024).
-- **US3**: T033–T035 cover OctoPrint, Klipper, UniFi clients independently before orchestration tasks (T037–T040).
-- **US4**: T042–T044 implement provider pipelines parallel to artifact store (T045) before orchestrator (T046).
-- **US7**: T062–T064 build independent UI modules that converge for guard/layout tasks (T065–T066).
+- **US1**: T020–T022 (Home Assistant clients/skills) can progress concurrently with T018–T019 (context state).
+- **US2**: T030–T032 implement separate adapters (Ollama, MLX, MCP) in parallel after config (T029).
+- **US3**: T039–T041 cover OctoPrint, Klipper, UniFi clients independently before orchestration tasks (T043–T046).
+- **US4**: T048–T050 implement provider pipelines parallel to artifact store (T051) before orchestrator (T052).
+- **US7**: T070–T072 build independent UI modules that converge for guard/layout tasks (T073–T075).
 
 ---
 

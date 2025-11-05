@@ -1,4 +1,4 @@
-# JarvisV3 Quickstart Scenarios
+# KITTY Quickstart Scenarios
 
 ## Prerequisites
 
@@ -22,7 +22,7 @@
    ```bash
    curl http://localhost:8000/healthz
    curl http://localhost:8080/api/ha/status
-   mosquitto_sub -h localhost -t 'jarvis/ctx/#' -C 1
+   mosquitto_sub -h localhost -t 'kitty/ctx/#' -C 1
    ```
 
 ## Scenario 1 — Conversational Device Command (US1)
@@ -37,7 +37,7 @@
    ```
 2. Confirm MQTT emission:
    ```bash
-   mosquitto_sub -t 'jarvis/devices/welding-lights/cmd' -C 1
+   mosquitto_sub -t 'kitty/devices/welding-lights/cmd' -C 1
    ```
 3. Check Home Assistant log for executed `light.scene`.
 
@@ -54,13 +54,13 @@
 
 1. Upload CAD artifact to MinIO and register new fabrication job.
 2. POST `/api/device/{printerId}/command` with intent `start_print`.
-3. Watch `jarvis/devices/<printer>/cmd` for heat/upload/start sequence.
+3. Watch `kitty/devices/<printer>/cmd` for heat/upload/start sequence.
 4. Simulate failure by injecting `spaghetti_detected` frame; ensure job pauses and notification emitted via MQTT/Slack.
 
 ## Scenario 4 — CAD AI Cycling (US4)
 
 1. POST `/api/cad/generate` with `policyMode=auto`.
-2. Monitor `jarvis/cad/jobs/<id>` topic for provider updates.
+2. Monitor `kitty/cad/jobs/<id>` topic for provider updates.
 3. Force offline mode (`policyMode=offline`) with network disconnected; confirm CadQuery + TripoSR outputs appear with STEP + STL artifacts.
 
 ## Scenario 5 — Routing Observability (US5)

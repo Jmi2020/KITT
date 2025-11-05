@@ -1,7 +1,7 @@
-# JarvisV3: Conversational Warehouse Orchestrator — Product Spec
+# KITTY: Conversational Warehouse Orchestrator — Product Spec
 
 ## Overview
-JarvisV3 transforms a Mac Studio M3 Ultra into an offline-first conversational control plane for fabrication labs and smart warehouses. The system routes between local and cloud AI models based on confidence, orchestrates CAD generation and fabrication equipment, and exposes multimodal experiences across Mac, iPad, wall terminals, and remote clients while enforcing safety and access policies.
+KITTY transforms a Mac Studio M3 Ultra into an offline-first conversational control plane for fabrication labs and smart warehouses. The system routes between local and cloud AI models based on confidence, orchestrates CAD generation and fabrication equipment, and exposes multimodal experiences across Mac, iPad, wall terminals, and remote clients while enforcing safety and access policies.
 
 ## Personas
 - **Fabrication Operator**: Runs additive/subtractive jobs, monitors prints, needs hands-free control and quick insights.
@@ -15,20 +15,21 @@ JarvisV3 transforms a Mac Studio M3 Ultra into an offline-first conversational c
 As a fabrication operator, I want to control printers, lighting, power, doors, and cameras via conversational commands with context persistence so I can manage the shop floor hands-free across devices.
 - **Acceptance Criteria**
   - `/api/query` routes device intents to MQTT/Home Assistant skills.
-  - Context (device selections, job references) persists across sessions and clients via `jarvis/ctx/*`.
+  - Context (device selections, job references) persists across sessions and clients via `kitty/ctx/*`.
   - Voice endpoints (Mac/iPad/wall terminal) share synchronized state through MQTT.
+  - Operator can hand off a voice session to the desktop UI, preserving memory and history to continue the conversation.
 
 ### US2 (P1) — Confidence-Based Model Routing
-As an AI systems architect, I want JarvisV3 to try local models first and escalate to online tools only when confidence is low or fresh data is required, logging each decision, so we minimize cost and preserve privacy.
+As an AI systems architect, I want KITTY to try local models first and escalate to online tools only when confidence is low or fresh data is required, logging each decision, so we minimize cost and preserve privacy.
 - **Acceptance Criteria**
   - Router thresholds configurable; local LLMs (7B–72B) invoked by default.
   - Escalations trigger Perplexity MCP or registered frontier adapters with retry queueing.
   - Routing decisions recorded in audit DB and exposed via `/api/routing/logs`.
 
 ### US3 (P1) — Fabrication Control & CV Monitoring
-As a fabrication operator, I want JarvisV3 to integrate OctoPrint/Klipper printers and monitor prints with UniFi cameras so the system can pause and alert on failures while orchestrating lighting and power scenes.
+As a fabrication operator, I want KITTY to integrate OctoPrint/Klipper printers and monitor prints with UniFi cameras so the system can pause and alert on failures while orchestrating lighting and power scenes.
 - **Acceptance Criteria**
-  - `jarvis/devices/<printer>/cmd` drives heat/upload/start/abort sequences.
+  - `kitty/devices/<printer>/cmd` drives heat/upload/start/abort sequences.
   - CV pipelines detect first-layer failures/spaghetti and pause jobs, sending snapshots.
   - Scene control (lights, power relays) triggered per job profile.
 
@@ -59,6 +60,7 @@ As a fabrication operator, I want consistent interfaces on Mac, iPad, wall termi
   - PWAs for tablet/wall terminals with live status dashboards and voice input.
   - Remote access via Tailscale with degraded (read-only) mode when local connectivity limited.
   - Shared state via MQTT ensures conversation continuity and device states across endpoints.
+  - UI supports project memory view showing stored conversation summaries and associated CAD/print assets.
 
 ## Non-Goals
 - Fully autonomous operation of hazardous equipment without human confirmation.
@@ -73,4 +75,3 @@ As a fabrication operator, I want consistent interfaces on Mac, iPad, wall termi
 - **Hazardous actuation** → Two-factor approvals, PPE/camera checks, physical lockouts.
 - **API/provider drift** → Abstraction layers, contract tests, feature flags.
 - **Mesh manufacturability** → Route critical jobs to Zoo parametric pipeline, provide detection heuristics.
-

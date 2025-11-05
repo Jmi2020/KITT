@@ -1,4 +1,4 @@
-# JarvisV3 Research Notes
+# KITTY Research Notes
 
 ## Confidence-Based Routing
 
@@ -20,7 +20,7 @@
 
 ## MQTT & State Synchronization
 
-- **Decision**: Mosquitto broker with topic hierarchy `jarvis/ctx/*`, `jarvis/devices/<dev>/state|cmd`, `jarvis/ai/routing/*`, QoS 1 for critical commands, retained messages for device state only.  
+- **Decision**: Mosquitto broker with topic hierarchy `kitty/ctx/*`, `kitty/devices/<dev>/state|cmd`, `kitty/ai/routing/*`, QoS 1 for critical commands, retained messages for device state only.  
 - **Rationale**: Aligns with Home Assistant conventions, ensures idempotent command delivery while avoiding stale actions; MQTT suits low-latency, multi-device sync.  
 - **Alternatives**: NATS JetStream (rejected: additional ops overhead, unnecessary feature set); WebSockets-only (rejected: poor device compatibility).
 
@@ -59,3 +59,18 @@
 - **Decision**: pytest + pytest-asyncio for service unit/integration tests, pytest-mqtt harness for pub/sub validation, Playwright for PWA acceptance, synthetic job scenarios scripted in Quickstart.  
 - **Rationale**: Python-first tooling aligns with FastAPI services; Playwright handles multi-device UI; MQTT-specific fixtures ensure offline reliability.  
 - **Alternatives**: Nose/unittest (obsolete); Cypress (browser-only, lacks MQTT simulation coverage).
+
+## Voice-to-Print Pipeline
+
+- **Decision**: Implement a `voice` service that captures audio via Whisper.cpp or Vosk, applies GPT-based command parsing with the structured JSON schema from the VoiceToPrint guide, and publishes intents onto existing `/api/device/:id/command` → MQTT flows.  
+- **Rationale**: Reuses offline-capable STT and our fabrication control path, enabling hands-free command/print initiation without duplicating safety policies.  
+- **Alternatives**: Train custom intent classifier (rejected: high effort/low accuracy per TenTech data); direct serial streaming (rejected: bypasses OctoPrint safeguards).  
+- **Extended Flow**: For full object generation, reuse OpenSCAD/CadQuery prompt templates → render STL (OpenSCAD/CadQuery CLI) → slice (PrusaSlicer/Bambu CLI) → upload via OctoPrint or Moonraker API with preview & human confirmation before print.  
+- **Safety**: Buffer G-code, validate dimensions, require explicit confirmation before executing auto-generated prints, provide Piper TTS feedback to keep operator in the loop.
+
+## Conversation Memory & Project Spaces
+
+- **Decision**: Persist conversation history, prompts, CAD artifacts, and print outcomes as “projects” in Postgres, keyed by conversation IDs, and expose summaries to both voice agents and desktop UI for seamless hand-offs.  
+- **Rationale**: Supports the new requirement to switch between voice and desktop workflows without losing context, enables replays/reuse of generated assets, and improves auditability.  
+- **Implementation Notes**: Leverage existing `conversation_sessions` and `cad_artifacts` tables; add a `projects` table binding conversations, generated files, and metadata. Provide APIs in the brain/gateway services for session continuation and in the UI to display project memory.  
+- **Alternatives**: Ephemeral in-memory context only (rejected: context lost when switching devices) or storing in separate NoSQL store (rejected: Postgres already available and ensures relational integrity).
