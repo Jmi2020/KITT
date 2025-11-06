@@ -12,6 +12,7 @@ CTX_SIZE="${LLAMACPP_CTX:-8192}"
 N_GPU_LAYERS="${LLAMACPP_N_GPU_LAYERS:-1}"
 THREADS="${LLAMACPP_THREADS:-$(sysctl -n hw.logicalcpu)}"
 FLASH_ATTN="${LLAMACPP_FLASH_ATTN:-1}"
+TOOL_CALLING="${LLAMACPP_TOOL_CALLING:-1}"
 EXTRA_ARGS="${LLAMACPP_EXTRA_ARGS:-}"
 
 if ! command -v "$LLAMACPP_BIN" >/dev/null 2>&1; then
@@ -51,6 +52,11 @@ fi
 
 if [[ "$FLASH_ATTN" == "1" || "$FLASH_ATTN" == "true" ]]; then
   cmd+=(--flash-attn)
+fi
+
+if [[ "$TOOL_CALLING" == "1" || "$TOOL_CALLING" == "true" ]]; then
+  cmd+=(--jinja -fa)
+  echo "Tool calling enabled: --jinja -fa"
 fi
 
 if [[ -n "$EXTRA_ARGS" ]]; then
