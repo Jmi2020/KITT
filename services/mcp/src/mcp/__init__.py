@@ -8,6 +8,8 @@ from .server import (
     ToolResult,
 )
 from .servers.cad_server import CADMCPServer
+from .servers.homeassistant_server import HomeAssistantMCPServer
+from .servers.memory_server import MemoryMCPServer
 
 __all__ = [
     "MCPServer",
@@ -16,4 +18,6 @@ __all__ = [
     "PromptDefinition",
     "ToolResult",
     "CADMCPServer",
+    "HomeAssistantMCPServer",
+    "MemoryMCPServer",
 ]
