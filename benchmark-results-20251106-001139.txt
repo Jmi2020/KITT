@@ -1,0 +1,51 @@
+===========================================
+llama.cpp GPU Benchmark
+===========================================
+Host: http://localhost:8082
+Model: kitty-coder
+Date: Thu Nov  6 00:11:39 PST 2025
+
+Server is responding. Starting benchmark tests...
+
+Test: short-prompt
+Prompt length: 30 chars
+Generating 64 tokens...
+Tokens generated: 8
+Time elapsed: .724045000s
+Throughput: 11.04 tokens/sec
+
+Test: medium-prompt
+Prompt length: 175 chars
+Generating 128 tokens...
+Tokens generated: 128
+Time elapsed: 5.627111000s
+Throughput: 22.74 tokens/sec
+
+Test: long-prompt
+Prompt length: 2771 chars
+Generating 128 tokens...
+Tokens generated: 69
+Time elapsed: 5.072075000s
+Throughput: 13.60 tokens/sec
+
+Test: generation-test
+Prompt length: 67 chars
+Generating 256 tokens...
+Tokens generated: 256
+Time elapsed: 11.083431000s
+Throughput: 23.09 tokens/sec
+
+===========================================
+Benchmark Complete
+Results saved to: benchmark-results-20251106-001139.txt
+===========================================
+
+GPU Metrics Summary:
+  generation-test:
+    No GPU metrics captured
+  long-prompt:
+    No GPU metrics captured
+  medium-prompt:
+    No GPU metrics captured
+  short-prompt:
+    No GPU metrics captured

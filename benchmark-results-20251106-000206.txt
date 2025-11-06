@@ -1,0 +1,47 @@
+===========================================
+llama.cpp GPU Benchmark
+===========================================
+Host: http://localhost:8080
+Model: kitty-coder
+Date: Thu Nov  6 00:02:06 PST 2025
+
+Server is responding. Starting benchmark tests...
+
+Test: short-prompt
+Prompt length: 30 chars
+Generating 64 tokens...
+ERROR: Failed to generate tokens
+Response: {"detail":"Not Found"}
+
+Test: medium-prompt
+Prompt length: 175 chars
+Generating 128 tokens...
+ERROR: Failed to generate tokens
+Response: {"detail":"Not Found"}
+
+Test: long-prompt
+Prompt length: 2771 chars
+Generating 128 tokens...
+ERROR: Failed to generate tokens
+Response: {"detail":"Not Found"}
+
+Test: generation-test
+Prompt length: 67 chars
+Generating 256 tokens...
+ERROR: Failed to generate tokens
+Response: {"detail":"Not Found"}
+
+===========================================
+Benchmark Complete
+Results saved to: benchmark-results-20251106-000206.txt
+===========================================
+
+GPU Metrics Summary:
+  generation-test:
+    No GPU metrics captured
+  long-prompt:
+    No GPU metrics captured
+  medium-prompt:
+    No GPU metrics captured
+  short-prompt:
+    No GPU metrics captured
