@@ -22,6 +22,8 @@ from .config import RoutingConfig, get_routing_config
 from .cost_tracker import CostTracker
 from .llama_cpp_client import LlamaCppClient
 from .ml_local_client import MLXLocalClient
+from .permission import PermissionManager
+from .pricing import estimate_cost
 
 
 class RoutingRequest(BaseModel):
@@ -67,6 +69,7 @@ class BrainRouter:
         frontier_client: Optional[FrontierClient] = None,
         cost_tracker: Optional[CostTracker] = None,
         slo_calculator: Optional[SLOCalculator] = None,
+        permission_manager: Optional[PermissionManager] = None,
     ) -> None:
         self._config = config or get_routing_config()
         self._llama = llama_client or LlamaCppClient(self._config.llamacpp)
@@ -83,6 +86,7 @@ class BrainRouter:
             )
         self._cost_tracker = cost_tracker or CostTracker()
         self._slo_calculator = slo_calculator or SLOCalculator()
+        self._permission = permission_manager or PermissionManager()
 
     async def route(self, request: RoutingRequest) -> RoutingResult:
         cache_key = _hash_prompt(request.prompt)
@@ -111,15 +115,57 @@ class BrainRouter:
             self._record(request, result)
             return result
 
-        if (
+        # Check if escalation is needed
+        needs_escalation = (
             result.confidence < self._config.thresholds.local_confidence
             or request.force_tier == RoutingTier.mcp
-        ):
-            cloud_result = await self._invoke_mcp(request)
-            if cloud_result:
-                result = cloud_result
-            elif self._frontier:
-                result = await self._invoke_frontier(request) or result
+            or request.freshness_required
+        )
+
+        if needs_escalation:
+            # Try MCP first (cheaper)
+            if self._mcp:
+                cost_est = estimate_cost(request.prompt, "perplexity")
+                reason = (
+                    "low confidence"
+                    if result.confidence < self._config.thresholds.local_confidence
+                    else "fresh data required"
+                )  # noqa: E501
+
+                # Request permission
+                approved = await self._permission.request_permission(
+                    tier=RoutingTier.mcp,
+                    provider="perplexity",
+                    estimated_cost=cost_est,
+                    reason=reason,
+                    conversation_id=request.conversation_id,
+                )
+
+                if approved:
+                    cloud_result = await self._invoke_mcp(request)
+                    if cloud_result:
+                        result = cloud_result
+                        # TODO: Extract actual token count from response and update cost
+                        # self._permission.record_actual_cost(actual_cost)
+
+            # Fallback to Frontier if MCP didn't work
+            if result.tier == RoutingTier.local and self._frontier:
+                cost_est = estimate_cost(request.prompt, "openai")
+                reason = "MCP unavailable or low quality"
+
+                approved = await self._permission.request_permission(
+                    tier=RoutingTier.frontier,
+                    provider="openai",
+                    estimated_cost=cost_est,
+                    reason=reason,
+                    conversation_id=request.conversation_id,
+                )
+
+                if approved:
+                    frontier_result = await self._invoke_frontier(request)
+                    if frontier_result:
+                        result = frontier_result
+                        # TODO: Extract actual token count from response and update cost
 
         self._record(request, result, cache_key=cache_key)
         return result
