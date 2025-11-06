@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Dict, List
+
 
 def get_expert_system_prompt(
     user_query: str,
@@ -131,4 +133,99 @@ Answer:"""
     return prompt
 
 
-__all__ = ["get_expert_system_prompt", "get_chain_of_thought_prompt"]
+# ReAct (Reasoning + Acting) instructions for tool-aware prompts
+REACT_INSTRUCTIONS = """
+## TOOL USAGE (ReAct Pattern)
+
+You have access to tools that can help you answer questions and perform tasks.
+
+When responding, use this ReAct (Reasoning + Acting) pattern:
+
+1. **Thought**: Reason about what you need to do next
+2. **Action**: If you need information or to perform an action, call a tool using:
+   <tool_call>{"name": "tool_name", "arguments": {...}}</tool_call>
+3. **Observation**: After calling a tool, you'll receive results
+4. **Repeat**: Continue thinking and acting until you have enough information
+5. **Answer**: When ready, provide your final answer without any tool calls
+
+### Available Tool Categories:
+- **CAD Generation**: generate_cad_model - Create 3D CAD models from text descriptions
+- **Home Assistant**: control_device, get_entity_state, list_entities - Control smart home devices
+- **Memory**: store_memory, recall_memory - Store and retrieve semantic memories
+
+### Example Flow:
+Thought: I need to generate a CAD model for the mounting bracket.
+Action: <tool_call>{"name": "generate_cad_model", "arguments": {"prompt": "L-shaped mounting bracket with 4 holes", "provider": "zoo"}}</tool_call>
+
+[After receiving observation with CAD model ID]
+
+Thought: I now have the CAD model generated. Let me provide the final answer.
+Final Answer: I've generated an L-shaped mounting bracket CAD model using Zoo. The model ID is [id] and you can find it in your recent models.
+
+### Important Notes:
+- Only use tools when you actually need them
+- Think before each action - don't call tools unnecessarily
+- For simple questions that don't require external actions, just answer directly
+- When controlling devices, always confirm the action was successful
+"""
+
+
+def get_react_agent_prompt(
+    user_query: str,
+    tools: List[Dict[str, Any]],
+    context: str | None = None,
+) -> str:
+    """Generate a ReAct-enabled prompt with tool awareness.
+
+    This prompt enables the agent to reason iteratively and use tools to accomplish tasks.
+
+    Args:
+        user_query: The user's question or request
+        tools: List of available tool definitions (JSON Schema format)
+        context: Optional relevant context or memories
+
+    Returns:
+        Formatted ReAct prompt for the agent
+    """
+    # Format available tools
+    tools_list = []
+    for tool in tools:
+        func = tool.get("function", {})
+        name = func.get("name", "unknown")
+        desc = func.get("description", "")
+        tools_list.append(f"- **{name}**: {desc}")
+
+    tools_text = "\n".join(tools_list) if tools_list else "No tools currently available"
+
+    context_section = ""
+    if context:
+        context_section = f"""
+<relevant_context>
+{context}
+</relevant_context>
+"""
+
+    prompt = f"""You are KITTY, a warehouse-grade creative and operational AI assistant with expertise across CAD modeling, fabrication, and maker technologies.
+{context_section}
+
+{REACT_INSTRUCTIONS}
+
+### Tools Available to You:
+{tools_text}
+
+USER QUERY:
+{user_query}
+
+Think step-by-step and use tools as needed to answer the user's query. Start by reasoning about what you need to do.
+
+Thought:"""
+
+    return prompt
+
+
+__all__ = [
+    "get_expert_system_prompt",
+    "get_chain_of_thought_prompt",
+    "get_react_agent_prompt",
+    "REACT_INSTRUCTIONS",
+]
