@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     llamacpp_host: str = "http://localhost:8080"
     mlx_endpoint: str = "http://localhost:8091"
     semantic_cache_enabled: bool = True
+    agentic_mode_enabled: bool = False
 
     # External providers
     perplexity_base_url: str = "https://api.perplexity.ai"

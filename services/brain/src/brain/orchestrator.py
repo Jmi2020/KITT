@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 from common.credentials import HomeAssistantCredentials
 from common.db.models import RoutingTier
+from common.config import settings
 
 from .memory import MemoryClient
 from .models.context import ConversationContext, DeviceSelection
@@ -101,6 +102,8 @@ class BrainOrchestrator:
             # If memory service is unavailable, continue without memories
             pass
 
+        agentic_mode = use_agent or settings.agentic_mode_enabled
+
         routing_request = RoutingRequest(
             conversation_id=conversation_id,
             request_id=request_id,
@@ -109,7 +112,7 @@ class BrainOrchestrator:
             force_tier=force_tier,
             freshness_required=freshness_required,
             model_hint=model_hint,
-            use_agent=use_agent,
+            use_agent=agentic_mode,
         )
         result = await self._router.route(routing_request)
 

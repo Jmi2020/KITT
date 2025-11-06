@@ -8,6 +8,7 @@ import logging
 from typing import Any, Dict, List
 
 from ..clients.home_assistant import HomeAssistantClient
+from common.credentials import HomeAssistantCredentials
 
 # Import MCP server classes
 import sys
@@ -72,7 +73,8 @@ class MCPClient:
                 ha_url = ha_service_url or os.getenv("HOME_ASSISTANT_URL")
                 ha_token = os.getenv("HOME_ASSISTANT_TOKEN")
                 if ha_url and ha_token:
-                    ha_client = HomeAssistantClient(base_url=ha_url, token=ha_token)
+                    creds = HomeAssistantCredentials(base_url=ha_url, token=ha_token)
+                    ha_client = HomeAssistantClient(credentials=creds)
                     self._servers["homeassistant"] = HomeAssistantMCPServer(ha_client=ha_client)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Disabling MCP tools: %s", exc)
