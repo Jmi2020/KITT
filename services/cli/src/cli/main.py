@@ -6,7 +6,8 @@ import os
 import sys
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlparse
 
 import httpx
 import typer
@@ -18,23 +19,78 @@ load_dotenv()
 
 console = Console()
 app = typer.Typer(help="Command-line assistant for KITTY.")
+RUNNING_IN_CONTAINER = os.path.exists("/.dockerenv")
 
 
 def _env(name: str, default: str) -> str:
     return os.getenv(name, default)
 
 
-API_BASE = _env("KITTY_API_BASE", _env("GATEWAY_API", "http://localhost:8080"))
+def _env_any(names: Iterable[str], default: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return default
+
+
+def _first_valid_url(candidates: Iterable[str], default: str) -> str:
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            parsed = urlparse(candidate)
+        except ValueError:
+            continue
+        host = parsed.hostname
+        if not host:
+            continue
+        if host in {"localhost", "127.0.0.1", "0.0.0.0"} or "." in host:
+            return candidate
+        if RUNNING_IN_CONTAINER:
+            return candidate
+    return default
+
+
+API_BASE = _first_valid_url(
+    (
+        os.getenv("KITTY_API_BASE"),
+        os.getenv("KITTY_CLI_API_BASE"),
+        os.getenv("GATEWAY_API"),
+        os.getenv("GATEWAY_PUBLIC_URL"),
+        os.getenv("BRAIN_API_BASE"),
+        os.getenv("BRAIN_API"),
+    ),
+    "http://localhost:8000",
+)
 CAD_BASE = _env("KITTY_CAD_API", "http://localhost:8200")
 USER_NAME = _env("USER_NAME", "ssh-operator")
-DEFAULT_MODEL = _env("LOCAL_MODEL_PRIMARY", "kitty-primary")
+USER_UUID = _env(
+    "KITTY_USER_ID",
+    str(uuid.uuid5(uuid.NAMESPACE_DNS, USER_NAME)),
+)
+DEFAULT_MODEL = _env_any(
+    (
+        "KITTY_DEFAULT_MODEL",
+        "LOCAL_MODEL_PRIMARY_ALIAS",
+        "LLAMACPP_PRIMARY_ALIAS",
+        "LOCAL_MODEL_PRIMARY",
+    ),
+    "kitty-primary",
+)
 DEFAULT_VERBOSITY = int(_env("VERBOSITY", "3"))
+CHAIN_OF_THOUGHT_ENABLED = _env("KITTY_CHAIN_OF_THOUGHT", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 
 @dataclass
 class SessionState:
-    conversation_id: str = field(default_factory=lambda: f"ssh-{uuid.uuid4().hex}")
-    user_id: str = USER_NAME or "ssh-operator"
+    conversation_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str = USER_UUID
+    user_name: str = USER_NAME or "ssh-operator"
     model_alias: Optional[str] = DEFAULT_MODEL
     verbosity: int = DEFAULT_VERBOSITY
     last_artifacts: List[Dict[str, Any]] = field(default_factory=list)
@@ -71,6 +127,28 @@ def _print_artifacts(artifacts: List[Dict[str, Any]]) -> None:
             f"type={artifact.get('artifactType')} "
             f"url={artifact.get('location')}"
         )
+
+
+def _format_prompt(user_prompt: str) -> str:
+    if not CHAIN_OF_THOUGHT_ENABLED:
+        return user_prompt
+    return f"""You are KITTY, a warehouse-grade creative and operational AI assistant.
+
+USER QUERY:
+{user_prompt}
+
+Please think through this step-by-step before answering:
+
+<thinking>
+1. Rephrase the problem in your own words.
+2. List any domain expertise or tooling that might be relevant.
+3. Identify technical constraints, trade-offs, and potential risks.
+4. Recommend a path forward and justify why it is the best option.
+</thinking>
+
+Now provide your answer based on the reasoning above. Be concise but complete, and explain your recommendations clearly.
+
+Answer:"""
 
 
 @app.command()
@@ -116,16 +194,21 @@ def say(
     """Send a one-off conversational message."""
 
     text = " ".join(message)
+    formatted_prompt = _format_prompt(text)
     payload: Dict[str, Any] = {
         "conversationId": state.conversation_id,
         "userId": state.user_id,
         "intent": "chat.prompt",
-        "prompt": text,
+        "prompt": formatted_prompt,
     }
-    if model or state.model_alias:
-        payload["modelAlias"] = model or state.model_alias
-    if verbosity or state.verbosity:
-        payload["verbosity"] = verbosity or state.verbosity
+    chosen_model = model or state.model_alias or DEFAULT_MODEL
+    if chosen_model:
+        state.model_alias = chosen_model
+        payload["modelAlias"] = chosen_model
+    chosen_verbosity = verbosity or state.verbosity or DEFAULT_VERBOSITY
+    if chosen_verbosity:
+        state.verbosity = chosen_verbosity
+        payload["verbosity"] = chosen_verbosity
 
     try:
         data = _post_json(f"{API_BASE}/api/query", payload)
@@ -205,7 +288,14 @@ def shell(
     """Interactive shell interaction."""
 
     if conversation:
-        state.conversation_id = conversation
+        try:
+            uuid.UUID(conversation)
+            state.conversation_id = conversation
+        except ValueError:
+            console.print(
+                "[yellow]Conversation IDs must be UUIDs. Generating a new session ID."
+            )
+            state.conversation_id = str(uuid.uuid4())
     if model:
         state.model_alias = model
     if verbosity:
@@ -215,6 +305,13 @@ def shell(
     console.print(
         "Commands: /model <alias>, /verbosity <1-5>, /cad <prompt>, /list, /queue <idx> <printer>, /exit"
     )
+    console.print(
+        f"[dim]Default model: {state.model_alias}  |  Verbosity: {state.verbosity}"
+    )
+    if CHAIN_OF_THOUGHT_ENABLED:
+        console.print(
+            "[dim]Chain-of-thought mode enabled – prompts will be expanded automatically."
+        )
 
     while True:
         try:

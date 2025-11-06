@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from common.db.models import RoutingTier
 from common.verbosity import VerbosityLevel, clamp_level, describe_level, get_verbosity_level
@@ -19,6 +19,8 @@ router = APIRouter(prefix="/api", tags=["query"])
 
 
 class QueryInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     conversation_id: str = Field(..., alias="conversationId")
     user_id: str = Field(..., alias="userId")
     intent: str
@@ -32,6 +34,8 @@ class QueryInput(BaseModel):
 
 
 class QueryResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     conversation_id: str = Field(..., alias="conversationId")
     intent: str
     result: Dict[str, Any]

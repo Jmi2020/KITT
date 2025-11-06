@@ -8,6 +8,8 @@ import time
 from dataclasses import dataclass
 from typing import Dict, Optional
 
+import logging
+
 from pydantic import BaseModel
 
 from common.config import settings
@@ -28,6 +30,8 @@ from .pricing import estimate_cost
 # Import ReAct agent and tool MCP client
 from ..agents import ReActAgent
 from ..tools.mcp_client import MCPClient as ToolMCPClient
+
+logger = logging.getLogger(__name__)
 
 
 class RoutingRequest(BaseModel):
@@ -306,14 +310,17 @@ class BrainRouter:
         cost = _COST_BY_TIER.get(result.tier, 0.0)
         self._cost_tracker.record(result.tier, cost)
         local_ratio = self._slo_calculator.update(result.tier)
-        self._audit.record(
-            conversation_id=request.conversation_id,
-            request_id=request.request_id,
-            tier=result.tier,
-            confidence=result.confidence,
-            latency_ms=result.latency_ms,
-            user_id=request.user_id,
-        )
+        try:
+            self._audit.record(
+                conversation_id=request.conversation_id,
+                request_id=request.request_id,
+                tier=result.tier,
+                confidence=result.confidence,
+                latency_ms=result.latency_ms,
+                user_id=request.user_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to record routing decision: %s", exc)
         record_decision(
             tier=result.tier.value,
             latency_ms=result.latency_ms,

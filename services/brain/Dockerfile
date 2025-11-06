@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy service sources (shared + service-specific) for dependency resolution.
 COPY services/common ./services/common
 COPY services/brain ./services/brain
+COPY services/mcp ./services/mcp
 
 # Install dependencies when lock/requirements files exist (guards keep the scaffold buildable pre-dependency).
 RUN pip install --upgrade pip && \
