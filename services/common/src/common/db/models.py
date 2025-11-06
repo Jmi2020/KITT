@@ -111,7 +111,9 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     routing_decisions: Mapped[List["RoutingDecision"]] = relationship(back_populates="user")
-    safety_events: Mapped[List["SafetyEvent"]] = relationship(back_populates="initiated_by_user")
+    safety_events: Mapped[List["SafetyEvent"]] = relationship(
+        foreign_keys="SafetyEvent.initiated_by", back_populates="initiated_by_user"
+    )
 
 
 class Zone(Base):
@@ -239,7 +241,7 @@ class CADArtifact(Base):
     provider: Mapped[CADProvider] = mapped_column(Enum(CADProvider), nullable=False)
     artifact_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     artifact_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+    artifact_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
     quality_score: Mapped[Optional[float]] = mapped_column(Numeric(3, 2))
 
     cad_job: Mapped[CADJob] = relationship(back_populates="artifacts")
@@ -338,7 +340,7 @@ class ConversationProject(Base):
     title: Mapped[Optional[str]] = mapped_column(String(200))
     summary: Mapped[Optional[str]] = mapped_column(Text)
     artifacts: Mapped[list] = mapped_column(JSONB, default=list)
-    metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+    project_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

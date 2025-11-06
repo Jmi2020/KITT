@@ -22,13 +22,11 @@ RUN pip install --upgrade pip && \
     if [ -f services/common/requirements.txt ]; then pip install -r services/common/requirements.txt; fi && \
     if [ -f services/fabrication/requirements.txt ]; then pip install -r services/fabrication/requirements.txt; fi && \
     if [ -f services/common/pyproject.toml ]; then \
-        pip install poetry && \
-        cd services/common && poetry build -f wheel && pip install dist/*.whl && cd /app; \
+        cd services/common && pip install -e . && cd /app; \
     fi && \
     if [ -f services/fabrication/pyproject.toml ]; then \
-        pip install poetry && \
-        cd services/fabrication && poetry build -f wheel && pip install dist/*.whl && cd /app; \
+        cd services/fabrication && pip install -e . && cd /app; \
     fi
 
 EXPOSE 8300
-CMD ["uvicorn", "services.fabrication.app:app", "--host", "0.0.0.0", "--port", "8300"]
+CMD ["python", "-m", "uvicorn", "fabrication.app:app", "--host", "0.0.0.0", "--port", "8300"]

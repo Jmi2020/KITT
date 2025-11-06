@@ -18,7 +18,7 @@ def _build_headers(bearer_token: Optional[str], api_key: Optional[str]) -> Dict[
 
 
 @asynccontextmanager
-def http_client(  # type: ignore[return-type]
+async def http_client(  # type: ignore[return-type]
     base_url: Optional[str] = None,
     bearer_token: Optional[str] = None,
     api_key: Optional[str] = None,

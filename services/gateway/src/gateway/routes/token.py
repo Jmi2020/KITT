@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 
 from common.security import check_secret, create_access_token, get_admin_credentials
@@ -11,7 +11,7 @@ router = APIRouter(tags=["auth"])
 
 
 @router.post("/token")
-async def issue_token(form_data: OAuth2PasswordRequestForm = None):  # type: ignore[assignment]
+async def issue_token(form_data: OAuth2PasswordRequestForm = Depends()):
     if not form_data:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid form data"

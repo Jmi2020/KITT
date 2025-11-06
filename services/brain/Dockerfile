@@ -27,13 +27,11 @@ RUN pip install --upgrade pip && \
     if [ -f services/common/requirements.txt ]; then pip install -r services/common/requirements.txt; fi && \
     if [ -f services/brain/requirements.txt ]; then pip install -r services/brain/requirements.txt; fi && \
     if [ -f services/common/pyproject.toml ]; then \
-        pip install poetry && \
-        cd services/common && poetry build -f wheel && pip install dist/*.whl && cd /app; \
+        cd services/common && pip install -e . && cd /app; \
     fi && \
     if [ -f services/brain/pyproject.toml ]; then \
-        pip install poetry && \
-        cd services/brain && poetry build -f wheel && pip install dist/*.whl && cd /app; \
+        cd services/brain && pip install -e . && cd /app; \
     fi
 
 EXPOSE 8000
-CMD ["uvicorn", "services.brain.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["python", "-m", "uvicorn", "brain.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

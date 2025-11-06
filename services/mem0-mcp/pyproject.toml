@@ -3,9 +3,9 @@ build-backend = "setuptools.build_meta"
 requires = [ "setuptools>=68", "wheel" ]
 
 [project]
-name = "kitty-safety"
+name = "kitty-mem0-mcp"
 version = "0.1.0"
-description = "Safety and access workflows for KITTY"
+description = "MCP-based memory service for KITTY using Qdrant"
 requires-python = ">=3.11"
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
@@ -17,13 +17,10 @@ classifiers = [
 dependencies = [
   "fastapi>=0.111",
   "httpx>=0.27",
+  "numpy>=1.24",
   "pydantic>=2.7",
-  "python-jose[cryptography]>=3.3",
+  "qdrant-client>=1.11",
+  "sentence-transformers>=3",
+  "torch>=2",
   "uvicorn[standard]>=0.30",
 ]
-
-[tool.setuptools.package-dir]
-"" = "src"
-
-[tool.setuptools.packages.find]
-where = [ "src" ]

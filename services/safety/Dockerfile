@@ -18,13 +18,11 @@ RUN pip install --upgrade pip && \
     if [ -f services/common/requirements.txt ]; then pip install -r services/common/requirements.txt; fi && \
     if [ -f services/safety/requirements.txt ]; then pip install -r services/safety/requirements.txt; fi && \
     if [ -f services/common/pyproject.toml ]; then \
-        pip install poetry && \
-        cd services/common && poetry build -f wheel && pip install dist/*.whl && cd /app; \
+        cd services/common && pip install -e . && cd /app; \
     fi && \
     if [ -f services/safety/pyproject.toml ]; then \
-        pip install poetry && \
-        cd services/safety && poetry build -f wheel && pip install dist/*.whl && cd /app; \
+        cd services/safety && pip install -e . && cd /app; \
     fi
 
 EXPOSE 8400
-CMD ["uvicorn", "services.safety.app:app", "--host", "0.0.0.0", "--port", "8400"]
+CMD ["python", "-m", "uvicorn", "safety.app:app", "--host", "0.0.0.0", "--port", "8400"]

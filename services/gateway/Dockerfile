@@ -19,13 +19,11 @@ RUN pip install --upgrade pip && \
     if [ -f services/common/requirements.txt ]; then pip install -r services/common/requirements.txt; fi && \
     if [ -f services/gateway/requirements.txt ]; then pip install -r services/gateway/requirements.txt; fi && \
     if [ -f services/common/pyproject.toml ]; then \
-        pip install poetry && \
-        cd services/common && poetry build -f wheel && pip install dist/*.whl && cd /app; \
+        cd services/common && pip install -e . && cd /app; \
     fi && \
     if [ -f services/gateway/pyproject.toml ]; then \
-        pip install poetry && \
-        cd services/gateway && poetry build -f wheel && pip install dist/*.whl && cd /app; \
+        cd services/gateway && pip install -e . && cd /app; \
     fi
 
 EXPOSE 8080
-CMD ["uvicorn", "services.gateway.app:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]
+CMD ["python", "-m", "uvicorn", "gateway.app:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]

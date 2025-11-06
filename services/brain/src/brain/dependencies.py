@@ -12,9 +12,6 @@ from common.config import settings
 from common.credentials import HomeAssistantCredentials
 from common.messaging import MQTTClient
 
-from safety.unifi.client import UniFiAccessClient
-from safety.workflows.hazard import HazardWorkflow
-
 from .orchestrator import BrainOrchestrator
 from .routing.audit_store import RoutingAuditStore
 from .routing.cost_tracker import CostTracker
@@ -49,16 +46,25 @@ def get_slo_calculator() -> SLOCalculator:
 
 
 @lru_cache(maxsize=1)
-def get_unifi_client() -> Optional[UniFiAccessClient]:
+def get_unifi_client() -> Optional[object]:
+    """Get UniFi client if safety service is available."""
     try:
+        from safety.unifi.client import UniFiAccessClient
+
         return UniFiAccessClient()
-    except RuntimeError:
+    except (ImportError, RuntimeError):
         return None
 
 
 @lru_cache(maxsize=1)
-def get_hazard_workflow() -> HazardWorkflow:
-    return HazardWorkflow(unifi_client=get_unifi_client())
+def get_hazard_workflow() -> Optional[object]:
+    """Get hazard workflow if safety service is available."""
+    try:
+        from safety.workflows.hazard import HazardWorkflow
+
+        return HazardWorkflow(unifi_client=get_unifi_client())
+    except ImportError:
+        return None
 
 
 @lru_cache(maxsize=1)
