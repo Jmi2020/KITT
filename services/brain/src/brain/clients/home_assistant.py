@@ -15,12 +15,15 @@ class HomeAssistantClient:
     def __init__(self, credentials: HomeAssistantCredentials) -> None:
         self._credentials = credentials
 
-    async def call_service(self, domain: str, service: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def call_service(
+        self, domain: str, service: str, data: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """Call a Home Assistant domain service."""
 
         endpoint = f"/api/services/{domain}/{service}"
         async with http_client(
-            base_url=self._credentials.base_url, bearer_token=self._credentials.token.get_secret_value()
+            base_url=self._credentials.base_url,
+            bearer_token=self._credentials.token.get_secret_value(),
         ) as client:
             response = await client.post(endpoint, json=data or {})
             response.raise_for_status()
@@ -30,7 +33,8 @@ class HomeAssistantClient:
         """Return entity states."""
 
         async with http_client(
-            base_url=self._credentials.base_url, bearer_token=self._credentials.token.get_secret_value()
+            base_url=self._credentials.base_url,
+            bearer_token=self._credentials.token.get_secret_value(),
         ) as client:
             response = await client.get("/api/states")
             response.raise_for_status()

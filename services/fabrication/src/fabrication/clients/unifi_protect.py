@@ -8,7 +8,9 @@ import httpx
 
 
 class UniFiProtectClient:
-    def __init__(self, base_url: str, username: str, password: str, verify_ssl: bool = False) -> None:
+    def __init__(
+        self, base_url: str, username: str, password: str, verify_ssl: bool = False
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._username = username
         self._password = password
@@ -29,7 +31,11 @@ class UniFiProtectClient:
     async def get_snapshot(self, camera_id: str) -> bytes:
         await self._ensure_login()
         assert self._cookies is not None
-        async with httpx.AsyncClient(verify=self._verify_ssl, cookies=self._cookies) as client:
-            response = await client.get(f"{self._base_url}/api/cameras/{camera_id}/snapshot")
+        async with httpx.AsyncClient(
+            verify=self._verify_ssl, cookies=self._cookies
+        ) as client:
+            response = await client.get(
+                f"{self._base_url}/api/cameras/{camera_id}/snapshot"
+            )
             response.raise_for_status()
             return response.content

@@ -879,13 +879,13 @@ def call_with_fallback(prompt, preferred="claude"):
         "openai": call_openai,
         "gemini": call_gemini
     }
-    
+
     for provider_name in [preferred] + [p for p in providers if p != preferred]:
         try:
             return providers[provider_name](prompt)
         except RateLimitError:
             continue
-    
+
     raise Exception("All providers rate limited")
 
 # Exponential backoff
@@ -1286,7 +1286,7 @@ services:
     volumes:
       - ./init.sql:/docker-entrypoint-initdb.d/
       - db_data:/var/lib/postgresql/data
-    
+
   pgbouncer:
     image: pgbouncer:1.18
     environment:
@@ -1403,14 +1403,14 @@ curl -X POST -H "Content-Type: application/json" \
 ```yaml
 limits_config:
   retention_period: 30d
-  
+
   streams:
     - selector: '{job="ai_inference"}'
       retention: 60d
-    
+
     - selector: '{level="error"}'
       retention: 90d
-    
+
     - selector: '{level="debug"}'
       retention: 3d
 ```
@@ -1461,7 +1461,7 @@ storage:
 ```yaml
 retention:
   period: 30d
-  
+
   streams:
     - selector: '{service="ai_inference"}'
       retention: 60d

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field, ConfigDict
 
 from common.db.projects import list_projects, upsert_project
@@ -44,7 +44,9 @@ class ProjectResponse(BaseModel):
 
 
 @router.get("/", response_model=List[ProjectResponse])
-async def get_projects(conversation_id: Optional[str] = Query(default=None, alias="conversationId")) -> List[ProjectResponse]:
+async def get_projects(
+    conversation_id: Optional[str] = Query(default=None, alias="conversationId"),
+) -> List[ProjectResponse]:
     projects = list_projects(conversation_id)
     return [
         ProjectResponse(

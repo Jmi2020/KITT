@@ -28,7 +28,9 @@ def get_home_assistant_credentials() -> HomeAssistantCredentials:
     token = settings.home_assistant_token
     if not token:
         raise RuntimeError("HOME_ASSISTANT_TOKEN not configured")
-    return HomeAssistantCredentials(token=SecretStr(token), base_url=settings.home_assistant_base_url)
+    return HomeAssistantCredentials(
+        token=SecretStr(token), base_url=settings.home_assistant_base_url
+    )
 
 
 @lru_cache(maxsize=1)

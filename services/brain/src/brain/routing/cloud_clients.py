@@ -17,7 +17,9 @@ class MCPClient:
 
     async def query(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
-        async with httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=60) as client:
+        async with httpx.AsyncClient(
+            base_url=self._base_url, headers=headers, timeout=60
+        ) as client:
             response = await client.post("/query", json=payload)
             response.raise_for_status()
             return response.json()
@@ -33,12 +35,17 @@ class FrontierClient:
 
     async def generate(self, prompt: str) -> Dict[str, Any]:
         headers = {"Authorization": f"Bearer {self._api_key}"}
-        async with httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=60) as client:
+        async with httpx.AsyncClient(
+            base_url=self._base_url, headers=headers, timeout=60
+        ) as client:
             response = await client.post(
                 "/v1/chat/completions",
                 json={
                     "model": self._model,
-                    "messages": [{"role": "system", "content": "KITTY orchestration assistant."}, {"role": "user", "content": prompt}],
+                    "messages": [
+                        {"role": "system", "content": "KITTY orchestration assistant."},
+                        {"role": "user", "content": prompt},
+                    ],
                 },
             )
             response.raise_for_status()

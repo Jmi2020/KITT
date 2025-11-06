@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 import asyncio
 import sys
 from pathlib import Path
@@ -56,7 +57,9 @@ class StubAudit:
 async def test_router_returns_local_result(monkeypatch):
     cache = FakeCache()
     audit = StubAudit()
-    router = BrainRouter(ollama=StubLocal("local"), audit_store=audit, cache=cache)
+    router = BrainRouter(
+        llama_client=StubLocal("local"), audit_store=audit, cache=cache
+    )
 
     request = RoutingRequest(conversation_id="c1", request_id="r1", prompt="hello")
     result = await router.route(request)
@@ -65,6 +68,7 @@ async def test_router_returns_local_result(monkeypatch):
     assert result.tier == RoutingTier.local
     assert "local" in result.output
     assert audit.records
+
 
 @pytest.mark.asyncio
 async def test_router_uses_cache(monkeypatch):
@@ -78,7 +82,9 @@ async def test_router_uses_cache(monkeypatch):
             confidence=0.9,
         )
     )
-    router = BrainRouter(ollama=StubLocal("local"), audit_store=audit, cache=cache)
+    router = BrainRouter(
+        llama_client=StubLocal("local"), audit_store=audit, cache=cache
+    )
 
     request = RoutingRequest(conversation_id="c2", request_id="r2", prompt="hello")
     result = await router.route(request)

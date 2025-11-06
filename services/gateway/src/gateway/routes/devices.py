@@ -21,7 +21,9 @@ class CommandRequest(BaseModel):
 
 
 @router.post("/{device_id}/command")
-async def command_device(device_id: str = Path(...), body: CommandRequest | None = None) -> Dict[str, str]:
+async def command_device(
+    device_id: str = Path(...), body: CommandRequest | None = None
+) -> Dict[str, str]:
     if not body:
         raise HTTPException(status_code=400, detail="Missing body")
     topic = f"kitty/devices/{device_id}/cmd"

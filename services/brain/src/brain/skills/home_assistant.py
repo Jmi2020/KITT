@@ -26,7 +26,9 @@ class HomeAssistantSkill:
     def __init__(self, credentials: HomeAssistantCredentials) -> None:
         self._client = HomeAssistantClient(credentials)
 
-    async def execute(self, context: ConversationContext, intent: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(
+        self, context: ConversationContext, intent: str, payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
         if intent not in INTENT_MAP:
             raise ValueError(f"Unsupported Home Assistant intent: {intent}")
 

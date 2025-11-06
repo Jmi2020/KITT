@@ -6,7 +6,7 @@ from __future__ import annotations
 import hashlib
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, Optional
 
 from pydantic import BaseModel
 
@@ -20,7 +20,7 @@ from .audit_store import RoutingAuditStore
 from .cloud_clients import FrontierClient, MCPClient
 from .config import RoutingConfig, get_routing_config
 from .cost_tracker import CostTracker
-from .local_client import OllamaClient
+from .llama_cpp_client import LlamaCppClient
 from .ml_local_client import MLXLocalClient
 
 
@@ -31,6 +31,7 @@ class RoutingRequest(BaseModel):
     user_id: Optional[str] = None
     force_tier: Optional[RoutingTier] = None
     freshness_required: bool = False
+    model_hint: Optional[str] = None
 
 
 @dataclass
@@ -40,6 +41,7 @@ class RoutingResult:
     confidence: float
     latency_ms: int
     cached: bool = False
+    metadata: Optional[Dict[str, str]] = None
 
 
 def _hash_prompt(prompt: str) -> str:
@@ -57,7 +59,7 @@ class BrainRouter:
     def __init__(
         self,
         config: Optional[RoutingConfig] = None,
-        ollama: Optional[OllamaClient] = None,
+        llama_client: Optional[LlamaCppClient] = None,
         mlx: Optional[MLXLocalClient] = None,
         audit_store: Optional[RoutingAuditStore] = None,
         cache: Optional[SemanticCache] = None,
@@ -67,7 +69,7 @@ class BrainRouter:
         slo_calculator: Optional[SLOCalculator] = None,
     ) -> None:
         self._config = config or get_routing_config()
-        self._ollama = ollama or OllamaClient()
+        self._llama = llama_client or LlamaCppClient(self._config.llamacpp)
         self._mlx = mlx or MLXLocalClient()
         self._audit = audit_store or RoutingAuditStore()
         self._cache = cache or (SemanticCache() if settings.semantic_cache_enabled else None)
@@ -76,7 +78,9 @@ class BrainRouter:
             self._mcp = MCPClient(settings.perplexity_base_url, settings.perplexity_api_key)
         self._frontier = frontier_client
         if not self._frontier and settings.openai_api_key:
-            self._frontier = FrontierClient(settings.openai_base_url, settings.openai_api_key, settings.openai_model)
+            self._frontier = FrontierClient(
+                settings.openai_base_url, settings.openai_api_key, settings.openai_model
+            )
         self._cost_tracker = cost_tracker or CostTracker()
         self._slo_calculator = slo_calculator or SLOCalculator()
 
@@ -107,7 +111,10 @@ class BrainRouter:
             self._record(request, result)
             return result
 
-        if result.confidence < self._config.thresholds.local_confidence or request.force_tier == RoutingTier.mcp:
+        if (
+            result.confidence < self._config.thresholds.local_confidence
+            or request.force_tier == RoutingTier.mcp
+        ):
             cloud_result = await self._invoke_mcp(request)
             if cloud_result:
                 result = cloud_result
@@ -119,11 +126,29 @@ class BrainRouter:
 
     async def _invoke_local(self, request: RoutingRequest) -> RoutingResult:
         start = time.perf_counter()
-        response = await self._ollama.generate(request.prompt, self._config.local_models[0])
+        model_alias = request.model_hint or (
+            self._config.local_models[0] if self._config.local_models else None
+        )
+        response = await self._llama.generate(request.prompt, model_alias)
         latency = int((time.perf_counter() - start) * 1000)
-        output = response.get("response") or response.get("output") or ""
+        output = (
+            response.get("response") or response.get("output") or response.get("completion") or ""
+        )
         confidence = 0.85 if output else 0.0
-        return RoutingResult(output=output, tier=RoutingTier.local, confidence=confidence, latency_ms=latency)
+        metadata = {
+            "provider": "llamacpp",
+            "model": model_alias
+            or self._config.llamacpp.model_alias
+            or self._config.local_models[0],
+            "host": self._config.llamacpp.host,
+        }
+        return RoutingResult(
+            output=output,
+            tier=RoutingTier.local,
+            confidence=confidence,
+            latency_ms=latency,
+            metadata=metadata,
+        )
 
     async def _invoke_mcp(self, request: RoutingRequest) -> Optional[RoutingResult]:
         if not self._mcp:
@@ -134,7 +159,14 @@ class BrainRouter:
         output = response.get("output") or response.get("text") or ""
         if not output:
             return None
-        return RoutingResult(output=output, tier=RoutingTier.mcp, confidence=0.6, latency_ms=latency)
+        metadata = {"provider": "perplexity_mcp"}
+        return RoutingResult(
+            output=output,
+            tier=RoutingTier.mcp,
+            confidence=0.6,
+            latency_ms=latency,
+            metadata=metadata,
+        )
 
     async def _invoke_frontier(self, request: RoutingRequest) -> Optional[RoutingResult]:
         if not self._frontier:
@@ -146,12 +178,26 @@ class BrainRouter:
         if not choices:
             return None
         output = choices[0]["message"]["content"]
-        return RoutingResult(output=output, tier=RoutingTier.frontier, confidence=0.9, latency_ms=latency)
+        metadata = {"provider": "frontier_llm", "model": settings.openai_model}
+        return RoutingResult(
+            output=output,
+            tier=RoutingTier.frontier,
+            confidence=0.9,
+            latency_ms=latency,
+            metadata=metadata,
+        )
 
-    def _record(self, request: RoutingRequest, result: RoutingResult, cache_key: Optional[str] = None) -> None:
+    def _record(
+        self, request: RoutingRequest, result: RoutingResult, cache_key: Optional[str] = None
+    ) -> None:
         if self._cache and cache_key and not result.cached:
             self._cache.store(
-                CacheRecord(key=cache_key, prompt=request.prompt, response=result.output, confidence=result.confidence)
+                CacheRecord(
+                    key=cache_key,
+                    prompt=request.prompt,
+                    response=result.output,
+                    confidence=result.confidence,
+                )
             )
         cost = _COST_BY_TIER.get(result.tier, 0.0)
         self._cost_tracker.record(result.tier, cost)

@@ -11,6 +11,8 @@ __pycache__/
 .venv/
 venv/
 *.env
+.logs/
+docs/admin/
 
 # Editor
 .vscode/
@@ -20,3 +22,13 @@ Reference/JarvisV3/
 
 # Alembic
 services/common/alembic/versions/
+
+# Build artifacts
+*.egg-info/
+**/*.egg-info/
+/build/
+/dist/
+__pycache__/
+*.log
+.docs/
+.scratch/

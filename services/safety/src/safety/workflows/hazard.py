@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from common.db.models import RoutingTier, SafetyEventStatus, SafetyEventType
+from common.db.models import SafetyEventStatus, SafetyEventType
 from common.logging import get_logger
 
 from .. import audit
-from ..policies import HazardPolicy, get_policy
+from ..policies import get_policy
 from ..signing import verify_signature
 from ..unifi.client import UniFiAccessClient
 
@@ -55,10 +55,14 @@ class HazardWorkflow:
             LOGGER.info("Hazard action pending secondary approval", event=event.id)
             return False, {"status": "pending_approval", "eventId": event.id}
 
-        audit.update_event(event.id, approved_by=user_id, status=SafetyEventStatus.approved)
+        audit.update_event(
+            event.id, approved_by=user_id, status=SafetyEventStatus.approved
+        )
         LOGGER.info("Hazard action auto-approved", event=event.id)
         return True, {"status": "approved", "eventId": event.id}
 
     async def approve_event(self, event_id: str, approver_id: str) -> dict:
-        audit.update_event(event_id, approved_by=approver_id, status=SafetyEventStatus.approved)
+        audit.update_event(
+            event_id, approved_by=approver_id, status=SafetyEventStatus.approved
+        )
         return {"status": "approved", "eventId": event_id}

@@ -39,7 +39,9 @@ def create_event(
         session.close()
 
 
-def update_event(event_id: str, *, approved_by: str | None, status: SafetyEventStatus) -> None:
+def update_event(
+    event_id: str, *, approved_by: str | None, status: SafetyEventStatus
+) -> None:
     session: Session = SessionLocal()
     try:
         event = session.get(SafetyEvent, event_id)

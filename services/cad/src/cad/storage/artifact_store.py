@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Optional
 from uuid import uuid4
@@ -22,7 +21,9 @@ class ArtifactStore:
         self._minio: Optional[Minio] = None
         self._local_root: Optional[Path] = None
         if settings.minio_access_key and settings.minio_secret_key:
-            endpoint = settings.minio_endpoint.replace("http://", "").replace("https://", "")
+            endpoint = settings.minio_endpoint.replace("http://", "").replace(
+                "https://", ""
+            )
             secure = settings.minio_endpoint.startswith("https")
             self._minio = Minio(
                 endpoint,
@@ -49,7 +50,9 @@ class ArtifactStore:
                 length=len(content),
                 content_type="application/octet-stream",
             )
-            LOGGER.info("Stored artifact in MinIO", bucket=self._bucket, object_name=object_name)
+            LOGGER.info(
+                "Stored artifact in MinIO", bucket=self._bucket, object_name=object_name
+            )
             return f"minio://{self._bucket}/{object_name}"
         assert self._local_root is not None
         path = self._local_root / object_name

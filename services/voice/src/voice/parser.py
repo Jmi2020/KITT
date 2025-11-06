@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Dict
 
-from common.config import settings
 
 SYSTEM_PROMPT = """You are KITTY, a fabrication orchestrator. Convert user speech into structured commands.
 Output JSON objects. Supported command types:
@@ -44,7 +43,9 @@ class VoiceParser:
                 "type": "device",
                 "intent": "light.turn_on",
                 "payload": {
-                    "deviceId": "welding-lights" if "welding" in lower else "shop-lights",
+                    "deviceId": "welding-lights"
+                    if "welding" in lower
+                    else "shop-lights",
                 },
             }
 
@@ -53,7 +54,9 @@ class VoiceParser:
                 "type": "device",
                 "intent": "light.turn_off",
                 "payload": {
-                    "deviceId": "welding-lights" if "welding" in lower else "shop-lights",
+                    "deviceId": "welding-lights"
+                    if "welding" in lower
+                    else "shop-lights",
                 },
             }
 

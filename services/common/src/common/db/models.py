@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import enum
 from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-
-import enum
 
 
 class Base(DeclarativeBase):
@@ -176,7 +175,9 @@ class DeviceCommand(Base):
     intent: Mapped[str] = mapped_column(String(120), nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
     requested_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
-    status: Mapped[CommandStatus] = mapped_column(Enum(CommandStatus), default=CommandStatus.pending)
+    status: Mapped[CommandStatus] = mapped_column(
+        Enum(CommandStatus), default=CommandStatus.pending
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     ack_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     safety_event_id: Mapped[Optional[str]] = mapped_column(ForeignKey("safety_events.id"))
@@ -199,7 +200,9 @@ class RoutingDecision(Base):
     __tablename__ = "routing_decisions"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
-    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversation_sessions.id"), nullable=False)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversation_sessions.id"), nullable=False
+    )
     request_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     selected_tier: Mapped[RoutingTier] = mapped_column(Enum(RoutingTier), nullable=False)
     confidence: Mapped[float] = mapped_column(Numeric(3, 2), nullable=False)
@@ -216,7 +219,9 @@ class CADJob(Base):
     __tablename__ = "cad_jobs"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
-    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversation_sessions.id"), nullable=False)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversation_sessions.id"), nullable=False
+    )
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     policy_mode: Mapped[CADPolicy] = mapped_column(Enum(CADPolicy), default=CADPolicy.auto)
     status: Mapped[CADStatus] = mapped_column(Enum(CADStatus), default=CADStatus.queued)
@@ -247,19 +252,25 @@ class FabricationJob(Base):
     device_id: Mapped[str] = mapped_column(ForeignKey("devices.id"), nullable=False)
     cad_artifact_id: Mapped[Optional[str]] = mapped_column(ForeignKey("cad_artifacts.id"))
     gcode_path: Mapped[str] = mapped_column(String(255), nullable=False)
-    status: Mapped[FabricationStatus] = mapped_column(Enum(FabricationStatus), default=FabricationStatus.preparing)
+    status: Mapped[FabricationStatus] = mapped_column(
+        Enum(FabricationStatus), default=FabricationStatus.preparing
+    )
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     requested_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
 
-    monitor_events: Mapped[List["PrintMonitorEvent"]] = relationship(back_populates="fabrication_job")
+    monitor_events: Mapped[List["PrintMonitorEvent"]] = relationship(
+        back_populates="fabrication_job"
+    )
 
 
 class PrintMonitorEvent(Base):
     __tablename__ = "print_monitor_events"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
-    fabrication_job_id: Mapped[str] = mapped_column(ForeignKey("fabrication_jobs.id"), nullable=False)
+    fabrication_job_id: Mapped[str] = mapped_column(
+        ForeignKey("fabrication_jobs.id"), nullable=False
+    )
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     confidence: Mapped[float] = mapped_column(Numeric(3, 2), nullable=False)
     snapshot_key: Mapped[Optional[str]] = mapped_column(String(255))
@@ -278,12 +289,16 @@ class SafetyEvent(Base):
     initiated_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     approved_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     signature: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[SafetyEventStatus] = mapped_column(Enum(SafetyEventStatus), default=SafetyEventStatus.pending)
+    status: Mapped[SafetyEventStatus] = mapped_column(
+        Enum(SafetyEventStatus), default=SafetyEventStatus.pending
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     evidence_key: Mapped[Optional[str]] = mapped_column(String(255))
 
-    initiated_by_user: Mapped[User] = relationship(foreign_keys=[initiated_by], back_populates="safety_events")
+    initiated_by_user: Mapped[User] = relationship(
+        foreign_keys=[initiated_by], back_populates="safety_events"
+    )
     device_command: Mapped[Optional[DeviceCommand]] = relationship(back_populates="safety_event")
 
 
@@ -317,7 +332,9 @@ class ConversationProject(Base):
     __tablename__ = "conversation_projects"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
-    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversation_sessions.id"), nullable=False)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversation_sessions.id"), nullable=False
+    )
     title: Mapped[Optional[str]] = mapped_column(String(200))
     summary: Mapped[Optional[str]] = mapped_column(Text)
     artifacts: Mapped[list] = mapped_column(JSONB, default=list)

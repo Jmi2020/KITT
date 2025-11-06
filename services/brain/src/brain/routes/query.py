@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from common.db.models import RoutingTier
+from common.verbosity import VerbosityLevel, clamp_level, describe_level, get_verbosity_level
 from ..dependencies import get_orchestrator
 from ..models.context import DeviceSelection
 from ..orchestrator import BrainOrchestrator
@@ -26,6 +27,8 @@ class QueryInput(BaseModel):
     prompt: Optional[str] = None
     force_tier: Optional[RoutingTier] = Field(default=None, alias="forceTier")
     freshness_required: bool = Field(False, alias="freshnessRequired")
+    verbosity: Optional[int] = None
+    model_alias: Optional[str] = Field(default=None, alias="modelAlias")
 
 
 class QueryResponse(BaseModel):
@@ -36,7 +39,9 @@ class QueryResponse(BaseModel):
 
 
 @router.post("/query", response_model=QueryResponse)
-async def post_query(body: QueryInput, orchestrator: BrainOrchestrator = Depends(get_orchestrator)) -> QueryResponse:
+async def post_query(
+    body: QueryInput, orchestrator: BrainOrchestrator = Depends(get_orchestrator)
+) -> QueryResponse:
     device_intent = body.intent in {
         "light.turn_on",
         "light.turn_off",
@@ -52,11 +57,15 @@ async def post_query(body: QueryInput, orchestrator: BrainOrchestrator = Depends
             payload=body.payload,
             device=body.device.model_dump() if body.device else None,
         )
-        return QueryResponse(conversation_id=body.conversation_id, intent=body.intent, result=result)
+        return QueryResponse(
+            conversation_id=body.conversation_id, intent=body.intent, result=result
+        )
 
     prompt = body.prompt or body.payload.get("prompt")
     if not prompt:
         raise ValueError("prompt is required for non-device intents")
+
+    verbosity_level = clamp_level(body.verbosity) if body.verbosity else get_verbosity_level()
 
     routing_result = await orchestrator.generate_response(
         conversation_id=body.conversation_id,
@@ -65,16 +74,29 @@ async def post_query(body: QueryInput, orchestrator: BrainOrchestrator = Depends
         user_id=body.user_id,
         force_tier=body.force_tier,
         freshness_required=body.freshness_required,
+        model_hint=body.model_alias,
     )
-    routing_details = {
-        "tier": routing_result.tier.value,
-        "confidence": routing_result.confidence,
-        "latencyMs": routing_result.latency_ms,
-        "cached": routing_result.cached,
-    }
+    routing_details = None
+    if verbosity_level >= VerbosityLevel.CONCISE:
+        routing_details = {"tier": routing_result.tier.value}
+        if verbosity_level >= VerbosityLevel.DETAILED:
+            routing_details["confidence"] = routing_result.confidence
+            routing_details["latencyMs"] = routing_result.latency_ms
+        if verbosity_level >= VerbosityLevel.COMPREHENSIVE:
+            routing_details["cached"] = routing_result.cached
+            if routing_result.metadata:
+                routing_details["metadata"] = routing_result.metadata
+        if verbosity_level >= VerbosityLevel.EXHAUSTIVE:
+            routing_details["verbosityLevel"] = int(verbosity_level)
+            routing_details["verbosityDescription"] = describe_level(verbosity_level)
+
+    result_payload: Dict[str, Any] = {"output": routing_result.output}
+    if verbosity_level >= VerbosityLevel.COMPREHENSIVE:
+        result_payload["verbosityLevel"] = int(verbosity_level)
+
     return QueryResponse(
         conversation_id=body.conversation_id,
         intent=body.intent,
-        result={"output": routing_result.output},
+        result=result_payload,
         routing=routing_details,
     )

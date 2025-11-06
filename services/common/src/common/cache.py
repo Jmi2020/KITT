@@ -22,7 +22,7 @@ class CacheRecord:
 class SemanticCache:
     """Persist prompts/responses in Redis Streams for reuse and observability."""
 
-    STREAM_KEY = "jarvis:semantic-cache"
+    STREAM_KEY = "kitty:semantic-cache"
 
     def __init__(self, redis_url: Optional[str] = None) -> None:
         self._client = redis.from_url(redis_url or settings.redis_url, decode_responses=True)
@@ -40,7 +40,12 @@ class SemanticCache:
         for _, fields in entries:
             if key in fields:
                 data = json.loads(fields[key])
-                return CacheRecord(key=key, prompt=data["prompt"], response=data["response"], confidence=data["confidence"])
+                return CacheRecord(
+                    key=key,
+                    prompt=data["prompt"],
+                    response=data["response"],
+                    confidence=data["confidence"],
+                )
         return None
 
     def hit_ratio(self) -> float:

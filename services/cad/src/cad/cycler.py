@@ -41,13 +41,17 @@ class CADCycler:
         self._local_runner = local_runner
         self._freecad = freecad_runner
 
-    async def run(self, prompt: str, references: Optional[Dict[str, str]] = None) -> List[CADArtifact]:
+    async def run(
+        self, prompt: str, references: Optional[Dict[str, str]] = None
+    ) -> List[CADArtifact]:
         artifacts: List[CADArtifact] = []
         references = references or {}
 
         # Zoo parametric generation
         try:
-            zoo_job = await self._zoo.create_model(name="jarvis-job", prompt=prompt, parameters=references)
+            zoo_job = await self._zoo.create_model(
+                name="kitty-job", prompt=prompt, parameters=references
+            )
             status_url = zoo_job.get("polling_url") or zoo_job.get("status_url")
             if status_url:
                 status = await self._zoo.poll_status(status_url)
@@ -59,7 +63,9 @@ class CADCycler:
                             provider="zoo",
                             artifact_type=geometry.get("format", "gltf"),
                             location=stored,
-                            metadata={"credits_used": str(status.get("credits_used", 0))},
+                            metadata={
+                                "credits_used": str(status.get("credits_used", 0))
+                            },
                         )
                     )
         except Exception as exc:  # noqa: BLE001
@@ -94,7 +100,12 @@ class CADCycler:
             if success:
                 location = self._store.save_file(tmp_output, ".glb")
                 artifacts.append(
-                    CADArtifact(provider="tripo_local", artifact_type="glb", location=location, metadata={})
+                    CADArtifact(
+                        provider="tripo_local",
+                        artifact_type="glb",
+                        location=location,
+                        metadata={},
+                    )
                 )
                 tmp_output.unlink(missing_ok=True)
 
@@ -105,7 +116,12 @@ class CADCycler:
             if success:
                 location = self._store.save_file(tmp_output, ".step")
                 artifacts.append(
-                    CADArtifact(provider="freecad", artifact_type="step", location=location, metadata={})
+                    CADArtifact(
+                        provider="freecad",
+                        artifact_type="step",
+                        location=location,
+                        metadata={},
+                    )
                 )
                 tmp_output.unlink(missing_ok=True)
 

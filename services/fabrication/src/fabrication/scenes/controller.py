@@ -12,7 +12,9 @@ class SceneController:
     def __init__(self, credentials: HomeAssistantCredentials) -> None:
         self._credentials = credentials
 
-    async def activate_scene(self, scene_entity: str, extra: Dict[str, Any] | None = None) -> None:
+    async def activate_scene(
+        self, scene_entity: str, extra: Dict[str, Any] | None = None
+    ) -> None:
         payload = {"entity_id": scene_entity}
         if extra:
             payload.update(extra)

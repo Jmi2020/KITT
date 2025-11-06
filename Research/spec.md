@@ -18,7 +18,7 @@ KITTY is a conversational AI orchestration platform that transforms a Mac Studio
 
 ### Conversational control of your entire warehouse ecosystem
 
-You interact with KITTY through natural language across any device—typed commands, voice input via wake word detection, or programmatic API calls from other systems. **The system maintains persistent conversational context** across all interfaces: if you asked about 3D print settings on your Mac, then walk to the printer bay and speak "start that print," KITTY understands the referent without requiring you to re-specify parameters. Behind the scenes, it orchestrates MQTT messages to OctoPrint APIs, confirms bed and nozzle temperatures are appropriate for the specified material, turns on task lighting in the relevant zone through Philips Hue controls, and sends you a notification when the first layer completes successfully. 
+You interact with KITTY through natural language across any device—typed commands, voice input via wake word detection, or programmatic API calls from other systems. **The system maintains persistent conversational context** across all interfaces: if you asked about 3D print settings on your Mac, then walk to the printer bay and speak "start that print," KITTY understands the referent without requiring you to re-specify parameters. Behind the scenes, it orchestrates MQTT messages to OctoPrint APIs, confirms bed and nozzle temperatures are appropriate for the specified material, turns on task lighting in the relevant zone through Philips Hue controls, and sends you a notification when the first layer completes successfully.
 
 The conversation agent understands your warehouse's specific context—device names, locations, ongoing projects, standard operating procedures. It knows "the big printer" refers to your CR-10 Smart Pro, that "welding bay" means zone 3 lighting, and that print failures should trigger alerts through specific channels. Complex multi-step operations become single conversational commands: "prepare for aluminum welding" automatically routes power from EcoFlow batteries to the welding equipment, sets appropriate ventilation fan speeds, turns on high-CRI lighting, and ensures the area camera is recording for quality documentation.
 
@@ -251,21 +251,21 @@ class ConfidenceRouter:
         self.local_llm = Ollama(model=local_model)
         self.threshold = threshold
         self.semantic_cache = SemanticCache(similarity_threshold=0.88)
-        
+
     async def route_query(self, query, context):
         # Layer 1: Check semantic cache
         cached = await self.semantic_cache.lookup(query)
         if cached:
             return cached, "cache"
-        
+
         # Layer 2: Try local model
         local_response = await self.local_llm.agenerate(query)
         confidence = self.extract_confidence(local_response)
-        
+
         if confidence >= self.threshold:
             await self.semantic_cache.store(query, local_response)
             return local_response, "local"
-        
+
         # Layer 3: Classify for appropriate online service
         if self.needs_realtime_info(query):
             return await self.query_perplexity(query), "perplexity"
@@ -273,14 +273,14 @@ class ConfidenceRouter:
             return await self.query_claude(query), "claude"
         else:
             return await self.query_gpt4(query), "gpt4"
-    
+
     def extract_confidence(self, response):
         # Method 1: Use log probabilities if available
         # Method 2: Self-reflection prompt
         confidence_prompt = f"Rate your confidence (0.0-1.0): {response}"
         score = self.local_llm(confidence_prompt)
         return float(score.strip())
-    
+
     def needs_realtime_info(self, query):
         keywords = ["current", "latest", "recent", "price", "news"]
         return any(kw in query.lower() for kw in keywords)
@@ -300,10 +300,10 @@ class CADRouter:
         self.zoo_client = ZooAPI(api_key=os.getenv("ZOO_API_KEY"))
         self.tripo_client = TripoAPI(api_key=os.getenv("TRIPO_API_KEY"))
         self.luma_client = LumaAPI()  # When API available
-        
+
     async def route_cad_request(self, prompt, requirements):
         classification = self.classify_design_type(prompt, requirements)
-        
+
         if classification == "parametric_mechanical":
             # Engineering design with dimensions
             return await self.zoo_client.generate(
@@ -311,7 +311,7 @@ class CADRouter:
                 format="step",  # Manufacturing-ready
                 constraints=requirements.get("constraints", {})
             )
-        
+
         elif classification == "organic_artistic":
             # Creative/aesthetic design
             return await self.tripo_client.text_to_model(
@@ -319,23 +319,23 @@ class CADRouter:
                 style=requirements.get("style", "realistic"),
                 format="glb"
             )
-        
+
         elif classification == "architectural":
             # Building/enclosure design
             return await self.maket_client.generate(prompt)
-    
+
     def classify_design_type(self, prompt, requirements):
         # Use fast local model to classify
         classification_prompt = f"""
         Classify this CAD request:
         Prompt: {prompt}
         Requirements: {requirements}
-        
+
         Categories:
         - parametric_mechanical: Engineering parts, assemblies, brackets, gears
         - organic_artistic: Decorative items, character models, sculptures
         - architectural: Buildings, enclosures, floor plans
-        
+
         Answer with single category name:
         """
         return self.local_llm(classification_prompt).strip()
@@ -347,7 +347,7 @@ class CADRouter:
 async def cycle_cad_models(self, prompt, num_variations=3):
     """Generate multiple perspectives on same design."""
     results = []
-    
+
     # Parametric variation from Zoo
     zoo_result = await self.zoo_client.generate(
         prompt=prompt,
@@ -360,7 +360,7 @@ async def cycle_cad_models(self, prompt, num_variations=3):
         "format": "step",
         "strengths": "Manufacturing-ready, precise dimensions"
     })
-    
+
     # Organic interpretation from Tripo
     tripo_result = await self.tripo_client.text_to_model(
         prompt=prompt,
@@ -373,7 +373,7 @@ async def cycle_cad_models(self, prompt, num_variations=3):
         "format": "glb",
         "strengths": "Artistic freedom, rapid iteration"
     })
-    
+
     # Prompt variations on same tool
     for i in range(num_variations):
         varied_prompt = self.vary_prompt(prompt, seed=i)
@@ -387,7 +387,7 @@ async def cycle_cad_models(self, prompt, num_variations=3):
             "file": variation.file_url,
             "prompt": varied_prompt
         })
-    
+
     return results
 ```
 
@@ -398,7 +398,7 @@ async def cycle_cad_models(self, prompt, num_variations=3):
 **Node-RED as orchestration hub** provides visual flow-based programming connecting all systems:
 
 ```
-Home Assistant (device state) 
+Home Assistant (device state)
     ↓ MQTT
 Node-RED (orchestration logic)
     ↓ WebSocket/MQTT
@@ -410,7 +410,7 @@ Devices (Mac, iPad, wall terminals, mobile)
 kitty/conversation/context          # Current conversation state
 kitty/conversation/history          # Message history
 kitty/devices/printer1/status       # Device states
-kitty/devices/lights/zone3/state    
+kitty/devices/lights/zone3/state
 kitty/ai/routing/decision           # Which model handled query
 kitty/ai/confidence/score           # Confidence metrics
 ```
@@ -457,10 +457,10 @@ kitty/ai/confidence/score           # Confidence metrics
 // HTTP In node receives requests
 app.post('/api/kitty/query', async (req, res) => {
     const { query, user_id, context } = req.body;
-    
+
     // Route through confidence system
     const result = await confidenceRouter.route_query(query, context);
-    
+
     // Log for analytics
     await db.insert('query_log', {
         user_id,
@@ -471,7 +471,7 @@ app.post('/api/kitty/query', async (req, res) => {
         cost: result.cost,
         timestamp: Date.now()
     });
-    
+
     res.json({
         response: result.text,
         source: result.source,
@@ -483,13 +483,13 @@ app.post('/api/kitty/query', async (req, res) => {
 app.post('/api/devices/:device_id/command', async (req, res) => {
     const { device_id } = req.params;
     const { action, parameters } = req.body;
-    
+
     // Publish via MQTT
     await mqttClient.publish(
         `kitty/devices/${device_id}/command`,
         JSON.stringify({ action, parameters })
     );
-    
+
     res.json({ status: 'command_sent' });
 });
 ```

@@ -17,7 +17,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", extra="allow")
 
     environment: str = "development"
-    service_name: str = "jarvis-service"
+    service_name: str = "kitty-service"
+    user_name: str = "operator"
+    primary_locale: str = "en-US"
+    verbosity: int = 3
 
     # Messaging / MQTT
     mqtt_host: str = "localhost"
@@ -31,19 +34,21 @@ class Settings(BaseSettings):
     # Database
     postgres_host: str = "localhost"
     postgres_port: int = 5432
-    postgres_db: str = "jarvis"
-    postgres_user: str = "jarvis"
+    postgres_db: str = "kitty"
+    postgres_user: str = "kitty"
     postgres_password: str = "changeme"
 
     # MinIO / artifact store
     minio_endpoint: str = "http://localhost:9000"
-    minio_bucket: str = "jarvis-artifacts"
+    minio_bucket: str = "kitty-artifacts"
     minio_access_key: Optional[str] = None
     minio_secret_key: Optional[str] = None
 
     # Home Assistant
     home_assistant_base_url: str = "http://homeassistant:8123"
     home_assistant_token: Optional[str] = None
+    home_assistant_auto_discover: bool = False
+    home_assistant_discovery_timeout: float = 5.0
 
     # Security / OAuth
     secret_key: str = "super-secret"
@@ -51,13 +56,13 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
 
     # Model routing
-    local_models: List[str] = ["qwen2.5-coder-32b", "mistral-7b"]
+    local_models: List[str] = ["kitty-primary", "kitty-coder"]
 
     # Observability
     prometheus_url: str = "http://localhost:9090"
 
     # Model endpoints
-    ollama_host: str = "http://ollama:11434"
+    llamacpp_host: str = "http://localhost:8080"
     mlx_endpoint: str = "http://localhost:8091"
     semantic_cache_enabled: bool = True
 

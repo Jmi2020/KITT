@@ -32,7 +32,9 @@ class GenerateResponse(BaseModel):
 
 
 @router.post("/generate", response_model=GenerateResponse)
-async def generate_cad(body: GenerateRequest, cycler=Depends(get_cad_cycler)) -> GenerateResponse:
+async def generate_cad(
+    body: GenerateRequest, cycler=Depends(get_cad_cycler)
+) -> GenerateResponse:
     artifacts: List[CADArtifact] = await cycler.run(body.prompt, body.references)
     return GenerateResponse(
         conversation_id=body.conversation_id,

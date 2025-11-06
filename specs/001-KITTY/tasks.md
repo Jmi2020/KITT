@@ -7,7 +7,7 @@
 
 **Purpose**: Establish container orchestration, broker configuration, and developer tooling aligned with API integration requirements.
 
-- [X] T001 Define container stack (FastAPI, Mosquitto, Home Assistant, Ollama, Redis, Postgres, Prometheus, Grafana, Loki, Tempo) in `infra/compose/docker-compose.yml`
+- [X] T001 Define container stack (FastAPI, Mosquitto, Home Assistant, Redis, Postgres, Prometheus, Grafana, Loki, Tempo) in `infra/compose/docker-compose.yml`
 - [X] T002 Create Mosquitto broker configuration with QoS/retained policies in `infra/compose/mosquitto.conf`
 - [X] T003 Create Home Assistant MQTT bridge configuration in `infra/compose/homeassistant/configuration.yaml`
 - [X] T004 Create environment template with integration secrets in `infra/compose/.env.example`
@@ -64,14 +64,14 @@
 
 ## Phase 4: User Story 2 - Confidence-Based Model Routing (Priority: P1)
 
-**Goal**: Implement routing that prefers local Ollama/MLX models, escalates to MCP/frontier adapters when confidence or freshness requires, and logs every decision.
+**Goal**: Implement routing that prefers local llama.cpp/MLX models, escalates to MCP/frontier adapters when confidence or freshness requires, and logs every decision.
 
 **Independent Test**: Trigger queries for local success, forced MCP escalation, and frontier escalation; confirm routing decisions persisted with confidence, latency, and cost metrics, and retrievable via `/api/routing/logs`.
 
 ### Implementation for User Story 2
 
 - [X] T029 [P] [US2] Define routing configuration models in `services/brain/src/brain/routing/config.py`
-- [X] T030 [P] [US2] Implement Ollama client with keep-alive controls in `services/brain/src/brain/routing/ollama_client.py`
+- [X] T030 [P] [US2] Implement llama.cpp client with keep-alive controls in `services/brain/src/brain/routing/llama_cpp_client.py`
 - [X] T031 [P] [US2] Implement MLX local model wrapper in `services/brain/src/brain/routing/ml_local_client.py`
 - [X] T032 [P] [US2] Implement MCP/frontier adapter clients (Perplexity, GPT-5, Sonnet, Gemini) in `services/brain/src/brain/routing/cloud_clients.py`
 - [X] T033 [P] [US2] Implement routing audit store persisting decision metadata in `services/brain/src/brain/routing/audit_store.py`
@@ -197,11 +197,11 @@
 
 **Purpose**: Harden documentation, security posture, and performance based on API reference best practices.
 
-- [ ] T076 [P] Update architecture overview with integration diagrams in `docs/architecture.md`
-- [ ] T077 [P] Document security and key rotation procedures in `ops/runbooks/security-hardening.md`
-- [ ] T078 Consolidate deployment checklist covering Tailscale, API keys, and monitoring in `ops/runbooks/deployment-checklist.md`
-- [ ] T079 Tune router and model performance knobs in `services/brain/src/brain/config/performance.py`
-- [ ] T080 Validate quickstart scenarios end-to-end in `docs/quickstart.md`
+- [X] T076 [P] Update architecture overview with integration diagrams in `docs/architecture.md`
+- [X] T077 [P] Document security and key rotation procedures in `ops/runbooks/security-hardening.md`
+- [X] T078 Consolidate deployment checklist covering Tailscale, API keys, and monitoring in `ops/runbooks/deployment-checklist.md`
+- [X] T079 Tune router and model performance knobs in `services/brain/src/brain/config/performance.py`
+- [X] T080 Validate quickstart scenarios end-to-end in `docs/quickstart.md`
 
 ---
 
@@ -218,7 +218,7 @@
 
 - **Setup**: T005 and T006 can run in parallel once compose/env files (T001–T004) exist.
 - **US1**: T020–T022 (Home Assistant clients/skills) can progress concurrently with T018–T019 (context state).
-- **US2**: T030–T032 implement separate adapters (Ollama, MLX, MCP) in parallel after config (T029).
+- **US2**: T030–T032 implement separate adapters (llama.cpp, MLX, MCP) in parallel after config (T029).
 - **US3**: T039–T041 cover OctoPrint, Klipper, UniFi clients independently before orchestration tasks (T043–T046).
 - **US4**: T048–T050 implement provider pipelines parallel to artifact store (T051) before orchestrator (T052).
 - **US7**: T070–T072 build independent UI modules that converge for guard/layout tasks (T073–T075).

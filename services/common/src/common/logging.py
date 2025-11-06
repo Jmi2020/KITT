@@ -20,7 +20,9 @@ def _configure_structlog() -> None:
             structlog.processors.format_exc_info,
             structlog.processors.JSONRenderer(),
         ],
-        wrapper_class=structlog.make_filtering_bound_logger(logging.getLevelName(DEFAULT_LOG_LEVEL)),
+        wrapper_class=structlog.make_filtering_bound_logger(
+            logging.getLevelName(DEFAULT_LOG_LEVEL)
+        ),
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )

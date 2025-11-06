@@ -37,7 +37,9 @@ LOCAL_HANDLED_RATIO = Gauge(
 )
 
 
-def record_decision(*, tier: str, latency_ms: int, cost: float, local_ratio: Optional[float] = None) -> None:
+def record_decision(
+    *, tier: str, latency_ms: int, cost: float, local_ratio: Optional[float] = None
+) -> None:
     ROUTING_REQUESTS.labels(tier=tier).inc()
     ROUTING_LATENCY.observe(latency_ms)
     ROUTING_COST.labels(tier=tier).inc(cost)

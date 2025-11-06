@@ -27,7 +27,9 @@ class VoiceRouter:
         self._cache = cache
         self._mqtt.connect()
 
-    async def handle_transcript(self, conversation_id: str, user_id: str, transcript: str) -> Dict:
+    async def handle_transcript(
+        self, conversation_id: str, user_id: str, transcript: str
+    ) -> Dict:
         command = self._parser.parse(transcript)
         if command["type"] == "device":
             payload = command.get("payload", {})
@@ -45,7 +47,11 @@ class VoiceRouter:
                 prompt=command["prompt"],
                 user_id=user_id,
             )
-            return {"status": "routed", "tier": result.tier.value, "output": result.output}
+            return {
+                "status": "routed",
+                "tier": result.tier.value,
+                "output": result.output,
+            }
 
         if command["type"] == "note":
             upsert_project(

@@ -16,7 +16,9 @@ class TripoClient:
         self._base_url = (base_url or settings.tripo_api_base).rstrip("/")
 
     async def image_to_mesh(self, image_url: str) -> Dict[str, str]:
-        async with http_client(base_url=self._base_url, api_key=self._api_key) as client:
+        async with http_client(
+            base_url=self._base_url, api_key=self._api_key
+        ) as client:
             response = await client.post(
                 "/v2/openapi/im2tripo",
                 data={"model": "default", "quality": "draft", "image_url": image_url},

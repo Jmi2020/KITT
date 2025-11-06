@@ -24,7 +24,9 @@ def upsert_project(
     session: Session = SessionLocal()
     try:
         project = session.execute(
-            select(ConversationProject).where(ConversationProject.conversation_id == conversation_id)
+            select(ConversationProject).where(
+                ConversationProject.conversation_id == conversation_id
+            )
         ).scalar_one_or_none()
         if not project:
             project = ConversationProject(

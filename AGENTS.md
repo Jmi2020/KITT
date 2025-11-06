@@ -4,7 +4,7 @@ Auto-generated from all feature plans. Last updated: 2025-11-04
 
 ## Active Technologies
 
-- Python 3.11 (services), TypeScript 5.x (PWA), Bash (ops), YAML (compose) + FastAPI, Pydantic, paho-mqtt, SQLAlchemy, Home Assistant API, OctoPrint REST, Perplexity MCP SDK, Zoo CAD SDK, Tripo API, CadQuery/FreeCAD, Ollama/MLX runtimes, Whisper.cpp, Piper (001-KITTY)
+- Python 3.11 (services), TypeScript 5.x (PWA), Bash (ops), YAML (compose) + FastAPI, Pydantic, paho-mqtt, SQLAlchemy, Home Assistant API, OctoPrint REST, Perplexity MCP SDK, Zoo CAD SDK, Tripo API, CadQuery/FreeCAD, llama.cpp/MLX runtimes, Whisper.cpp, Piper (001-KITTY)
 
 ## Project Structure
 
@@ -23,7 +23,7 @@ Python 3.11 (services), TypeScript 5.x (PWA), Bash (ops), YAML (compose): Follow
 
 ## Recent Changes
 
-- 001-KITTY: Added Python 3.11 (services), TypeScript 5.x (PWA), Bash (ops), YAML (compose) + FastAPI, Pydantic, paho-mqtt, SQLAlchemy, Home Assistant API, OctoPrint REST, Perplexity MCP SDK, Zoo CAD SDK, Tripo API, CadQuery/FreeCAD, Ollama/MLX runtimes, Whisper.cpp, Piper
+- 001-KITTY: Added Python 3.11 (services), TypeScript 5.x (PWA), Bash (ops), YAML (compose) + FastAPI, Pydantic, paho-mqtt, SQLAlchemy, Home Assistant API, OctoPrint REST, Perplexity MCP SDK, Zoo CAD SDK, Tripo API, CadQuery/FreeCAD, llama.cpp/MLX runtimes, Whisper.cpp, Piper
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->

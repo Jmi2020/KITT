@@ -10,7 +10,7 @@ x-service-env: &service-env
   POSTGRES_PORT: 5432
   PROMETHEUS_URL: http://prometheus:9090
   MINIO_ENDPOINT: http://minio:9000
-  MINIO_BUCKET: jarvis-artifacts
+  MINIO_BUCKET: kitty-artifacts
 
 services:
   brain:
@@ -32,7 +32,7 @@ services:
     ports:
       - "8000:8000"
     networks:
-      - jarvis
+      - kitty
 
   gateway:
     build:
@@ -52,27 +52,27 @@ services:
     ports:
       - "8080:8080"
     networks:
-      - jarvis
+      - kitty
 
-  cad:
-    build:
-      context: ../..
-      dockerfile: services/cad/Dockerfile
-    env_file:
-      - .env
-    environment:
-      <<: *service-env
-      SERVICE_NAME: cad
-    depends_on:
-      - minio
-      - redis
-    volumes:
-      - ../../services/common:/app/services/common:ro
-      - ../../services/cad:/app/services/cad:ro
-    ports:
-      - "8200:8200"
-    networks:
-      - jarvis
+  # cad:
+  #   build:
+  #     context: ../..
+  #     dockerfile: services/cad/Dockerfile
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     <<: *service-env
+  #     SERVICE_NAME: cad
+  #   depends_on:
+  #     - minio
+  #     - redis
+  #   volumes:
+  #     - ../../services/common:/app/services/common:ro
+  #     - ../../services/cad:/app/services/cad:ro
+  #   ports:
+  #     - "8200:8200"
+  #   networks:
+  #     - kitty
 
   fabrication:
     build:
@@ -92,7 +92,7 @@ services:
     ports:
       - "8300:8300"
     networks:
-      - jarvis
+      - kitty
 
   safety:
     build:
@@ -111,7 +111,7 @@ services:
     ports:
       - "8400:8400"
     networks:
-      - jarvis
+      - kitty
 
   ui:
     build:
@@ -129,7 +129,7 @@ services:
     ports:
       - "4173:4173"
     networks:
-      - jarvis
+      - kitty
 
   mosquitto:
     image: eclipse-mosquitto:2.0
@@ -142,7 +142,7 @@ services:
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
     networks:
-      - jarvis
+      - kitty
 
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:2024.11.0
@@ -153,7 +153,7 @@ services:
       - homeassistant_config:/config
       - ./homeassistant/configuration.yaml:/config/configuration.yaml:ro
     networks:
-      - jarvis
+      - kitty
     depends_on:
       - mosquitto
 
@@ -166,7 +166,7 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - jarvis
+      - kitty
 
   redis-exporter:
     image: oliver006/redis_exporter:v1.54.0
@@ -178,24 +178,24 @@ services:
     depends_on:
       - redis
     networks:
-      - jarvis
+      - kitty
 
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: jarvis
-      POSTGRES_USER: jarvis
+      POSTGRES_DB: kitty
+      POSTGRES_USER: kitty
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - jarvis
+      - kitty
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2024-11-04T22-11-24Z
+    image: quay.io/minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
@@ -206,7 +206,7 @@ services:
     volumes:
       - minio_data:/data
     networks:
-      - jarvis
+      - kitty
 
   prometheus:
     image: prom/prometheus:v2.53.0
@@ -218,7 +218,7 @@ services:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     networks:
-      - jarvis
+      - kitty
 
   grafana:
     image: grafana/grafana:10.4.6
@@ -234,7 +234,7 @@ services:
       - prometheus
       - loki
     networks:
-      - jarvis
+      - kitty
 
   loki:
     image: grafana/loki:3.0.0
@@ -243,7 +243,7 @@ services:
       - "3100:3100"
     command: -config.file=/etc/loki/local-config.yaml
     networks:
-      - jarvis
+      - kitty
 
   tempo:
     image: grafana/tempo:2.5.0
@@ -255,10 +255,10 @@ services:
       - ./tempo.yaml:/etc/tempo.yaml:ro
       - tempo_data:/var/tempo
     networks:
-      - jarvis
+      - kitty
 
 networks:
-  jarvis:
+  kitty:
     driver: bridge
 
 volumes:

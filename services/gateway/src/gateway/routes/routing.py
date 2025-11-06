@@ -23,7 +23,11 @@ def get_routing_logs(
 ) -> List[dict]:
     session: Session = SessionLocal()
     try:
-        stmt = select(RoutingDecision).order_by(RoutingDecision.created_at.desc()).limit(limit)
+        stmt = (
+            select(RoutingDecision)
+            .order_by(RoutingDecision.created_at.desc())
+            .limit(limit)
+        )
         if conversation_id:
             stmt = stmt.where(RoutingDecision.conversation_id == conversation_id)
         if selected_tier:

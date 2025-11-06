@@ -31,7 +31,10 @@ class MQTTClient:
             self._client.username_pw_set(settings.mqtt_username, settings.mqtt_password)
 
     def connect(self) -> None:
-        LOGGER.info("Connecting to MQTT broker", extra={"host": settings.mqtt_host, "port": settings.mqtt_port})
+        LOGGER.info(
+            "Connecting to MQTT broker",
+            extra={"host": settings.mqtt_host, "port": settings.mqtt_port},
+        )
         self._client.connect(settings.mqtt_host, settings.mqtt_port, keepalive=60)
         self._client.loop_start()
 
@@ -40,12 +43,22 @@ class MQTTClient:
         self._client.loop_stop()
         self._client.disconnect()
 
-    def subscribe(self, topic: str, callback: Callable[[mqtt.Client, Any, mqtt.MQTTMessage], None], qos: int = 1) -> None:
+    def subscribe(
+        self,
+        topic: str,
+        callback: Callable[[mqtt.Client, Any, mqtt.MQTTMessage], None],
+        qos: int = 1,
+    ) -> None:
         LOGGER.debug("Subscribing to topic", extra={"topic": topic, "qos": qos})
         self._client.subscribe(topic, qos=qos)
         self._client.message_callback_add(topic, callback)
 
-    def publish(self, topic: str, payload: Dict[str, Any] | str | bytes, options: Optional[PublishOptions] = None) -> None:
+    def publish(
+        self,
+        topic: str,
+        payload: Dict[str, Any] | str | bytes,
+        options: Optional[PublishOptions] = None,
+    ) -> None:
         opts = options or PublishOptions()
         data: bytes
         if isinstance(payload, bytes):
@@ -57,7 +70,12 @@ class MQTTClient:
 
         LOGGER.debug(
             "Publishing MQTT message",
-            extra={"topic": topic, "qos": opts.qos, "retain": opts.retain, "payload_len": len(data)},
+            extra={
+                "topic": topic,
+                "qos": opts.qos,
+                "retain": opts.retain,
+                "payload_len": len(data),
+            },
         )
         self._client.publish(topic, data, qos=opts.qos, retain=opts.retain)
 

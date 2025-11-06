@@ -19,8 +19,8 @@ Based on analysis of Ritual Industries (Brian Harms) demonstrations and related 
 
 ### Architecture
 ```
-Microphone â†’ Speech Recognition (Whisper/Vosk) â†’ 
-NLP Processing (ChatGPT API) â†’ Command Parser â†’ 
+Microphone â†’ Speech Recognition (Whisper/Vosk) â†’
+NLP Processing (ChatGPT API) â†’ Command Parser â†’
 G-code Generator â†’ Serial Connection â†’ 3D Printer
 ```
 
@@ -95,10 +95,10 @@ while True:
 def levenshtein_distance(s1, s2):
     if len(s1) < len(s2):
         return levenshtein_distance(s2, s1)
-    
+
     if len(s2) == 0:
         return len(s1)
-    
+
     previous_row = range(len(s2) + 1)
     for i, c1 in enumerate(s1):
         current_row = [i + 1]
@@ -108,20 +108,20 @@ def levenshtein_distance(s1, s2):
             substitutions = previous_row[j] + (c1 != c2)
             current_row.append(min(insertions, deletions, substitutions))
         previous_row = current_row
-    
+
     return previous_row[-1]
 
 def match_keyword(detected_word, keyword_list, threshold=2):
     """Match detected word to closest keyword if within threshold"""
     best_match = detected_word
     min_distance = float('inf')
-    
+
     for keyword in keyword_list:
         dist = levenshtein_distance(detected_word.lower(), keyword.lower())
         if dist < min_distance:
             min_distance = dist
             best_match = keyword
-    
+
     return best_match if min_distance <= threshold else detected_word
 
 # Usage
@@ -168,7 +168,7 @@ def parse_voice_command(text):
         temperature=0.1,
         max_tokens=150
     )
-    
+
     try:
         command = json.loads(response.choices[0].message.content)
         return command
@@ -190,12 +190,12 @@ class GCodeGenerator:
         self.current_y = 0
         self.current_z = 0
         self.feedrate = 1500  # mm/min
-    
+
     def move(self, axis, distance, units="mm"):
         """Generate G-code for movement"""
         if units == "cm":
             distance *= 10
-        
+
         if axis == "X":
             self.current_x += distance
             return f"G0 X{self.current_x} F{self.feedrate}"
@@ -205,15 +205,15 @@ class GCodeGenerator:
         elif axis == "Z":
             self.current_z += distance
             return f"G0 Z{self.current_z} F{self.feedrate}"
-    
+
     def print_line(self, axis, distance, units="mm"):
         """Generate G-code for printing a line"""
         if units == "cm":
             distance *= 10
-        
+
         gcode = []
         gcode.append("G1 F1200")  # Print speed
-        
+
         if axis == "X":
             self.current_x += distance
             extrusion = abs(distance) * 0.02  # ~0.02mm extrusion per mm
@@ -222,35 +222,35 @@ class GCodeGenerator:
             self.current_y += distance
             extrusion = abs(distance) * 0.02
             gcode.append(f"G1 Y{self.current_y} E{extrusion}")
-        
+
         return "\n".join(gcode)
-    
+
     def print_circle(self, radius, units="mm"):
         """Generate G-code for circular arc"""
         if units == "cm":
             radius *= 10
-        
+
         # Use G2/G3 for arc interpolation
         gcode = []
         gcode.append(f"G1 F1200")
         gcode.append(f"G2 X{self.current_x} Y{self.current_y} I{radius} J0")
         return "\n".join(gcode)
-    
+
     def home(self, axes="all"):
         """Home specified axes"""
         if axes == "all":
             return "G28"
         else:
             return f"G28 {' '.join(axes)}"
-    
+
     def level(self):
         """Auto bed leveling"""
         return "G29"
-    
+
     def heat_nozzle(self, temp):
         """Heat nozzle to temperature"""
         return f"M104 S{temp}"
-    
+
     def heat_bed(self, temp):
         """Heat bed to temperature"""
         return f"M140 S{temp}"
@@ -273,11 +273,11 @@ class PrinterConnection:
         self.serial = serial.Serial(port, baudrate, timeout=1)
         time.sleep(2)  # Wait for connection
         print(f"Connected to printer on {port}")
-    
+
     def send_gcode(self, gcode):
         """Send G-code command and wait for 'ok'"""
         self.serial.write(f"{gcode}\n".encode())
-        
+
         # Wait for acknowledgment
         while True:
             response = self.serial.readline().decode().strip()
@@ -285,7 +285,7 @@ class PrinterConnection:
                 print(f"Printer: {response}")
             if "ok" in response.lower():
                 break
-    
+
     def close(self):
         self.serial.close()
 
@@ -302,17 +302,17 @@ printer.close()
 ```python
 def process_command(voice_text):
     """Main processing pipeline"""
-    
+
     # Step 1: Parse with GPT-4
     command = parse_voice_command(voice_text)
-    
+
     if "error" in command:
         print(f"Error: {command['error']}")
         return
-    
+
     # Step 2: Generate G-code
     gen = GCodeGenerator()
-    
+
     if command["command"] == "MOVE":
         gcode = gen.move(command["axis"], command["distance"])
     elif command["command"] == "PRINT" and command["type"] == "line":
@@ -331,7 +331,7 @@ def process_command(voice_text):
     else:
         print("Unknown command")
         return
-    
+
     # Step 3: Send to printer
     print(f"G-code: {gcode}")
     printer.send_gcode(gcode)
@@ -355,9 +355,9 @@ while True:
 
 ### Architecture
 ```
-Voice Input â†’ GPT-4o Audio API â†’ 
-Python Script (OpenSCAD/CadQuery) â†’ 
-STL File â†’ Slicer (Cura/Bambu Studio) â†’ 
+Voice Input â†’ GPT-4o Audio API â†’
+Python Script (OpenSCAD/CadQuery) â†’
+STL File â†’ Slicer (Cura/Bambu Studio) â†’
 G-code â†’ Printer
 ```
 
@@ -405,14 +405,14 @@ def voice_to_openscad(description):
         temperature=0.3,
         max_tokens=500
     )
-    
+
     code = response.choices[0].message.content
     # Extract code block if wrapped in ```
     if "```" in code:
         code = code.split("```")[1]
         if code.startswith("openscad"):
             code = code[8:]
-    
+
     return code.strip()
 
 # Usage
@@ -458,11 +458,11 @@ def voice_to_cadquery(description):
         ],
         temperature=0.3
     )
-    
+
     code = response.choices[0].message.content
     if "```python" in code:
         code = code.split("```python")[1].split("```")[0]
-    
+
     return code.strip()
 
 # Execute and export STL
@@ -492,9 +492,9 @@ def openscad_to_stl(scad_file, stl_file):
         "-o", stl_file,
         scad_file
     ]
-    
+
     result = subprocess.run(cmd, capture_output=True, text=True)
-    
+
     if result.returncode == 0:
         print(f"STL generated: {stl_file}")
         return True
@@ -519,9 +519,9 @@ def slice_stl_to_gcode(stl_file, gcode_file, printer_profile="prusa_mk4"):
         "--output", gcode_file,
         stl_file
     ]
-    
+
     result = subprocess.run(cmd, capture_output=True, text=True)
-    
+
     if result.returncode == 0:
         print(f"G-code generated: {gcode_file}")
         return True
@@ -541,15 +541,15 @@ import requests
 
 def send_to_bambu_printer(gcode_file, printer_ip, access_code):
     """Send G-code to Bambu Lab printer via LAN API"""
-    
+
     url = f"http://{printer_ip}/api/upload"
-    
+
     with open(gcode_file, "rb") as f:
         files = {"file": f}
         data = {"access_code": access_code}
-        
+
         response = requests.post(url, files=files, data=data)
-    
+
     if response.status_code == 200:
         print("File uploaded successfully")
         # Start print
@@ -573,30 +573,30 @@ def voice_to_print_pipeline(voice_description):
     Complete pipeline:
     Voice â†’ CAD Script â†’ STL â†’ G-code â†’ Print
     """
-    
+
     print(f"Voice input: {voice_description}")
-    
+
     # Step 1: Generate OpenSCAD code
     print("Generating CAD code...")
     openscad_code = voice_to_openscad(voice_description)
-    
+
     with open("temp_model.scad", "w") as f:
         f.write(openscad_code)
-    
+
     # Step 2: Render STL
     print("Rendering STL...")
     if not openscad_to_stl("temp_model.scad", "temp_model.stl"):
         return False
-    
+
     # Step 3: Slice to G-code
     print("Slicing...")
     if not slice_stl_to_gcode("temp_model.stl", "temp_model.gcode"):
         return False
-    
+
     # Step 4: Send to printer
     print("Sending to printer...")
     send_to_bambu_printer("temp_model.gcode", "192.168.1.100", "12345678")
-    
+
     print("Print started!")
     return True
 
@@ -606,7 +606,7 @@ while True:
     if recognizer.AcceptWaveform(data):
         result = json.loads(recognizer.Result())
         text = result.get("text", "")
-        
+
         if text and "create" in text.lower():
             voice_to_print_pipeline(text)
 ```
@@ -626,22 +626,22 @@ class OctoPrintAPI:
         self.host = host
         self.api_key = api_key
         self.headers = {"X-Api-Key": api_key}
-    
+
     def upload_and_print(self, gcode_file):
         """Upload G-code and start print"""
         url = f"{self.host}/api/files/local"
-        
+
         with open(gcode_file, "rb") as f:
             files = {"file": f}
             data = {"print": "true"}  # Auto-start
-            
+
             response = requests.post(
                 url,
                 headers=self.headers,
                 files=files,
                 data=data
             )
-        
+
         return response.status_code == 201
 
 # Usage for multiple printers
@@ -666,17 +666,17 @@ import requests
 class MoonrakerAPI:
     def __init__(self, host):
         self.host = host
-    
+
     def upload_gcode(self, gcode_file):
         """Upload G-code via Moonraker API"""
         url = f"{self.host}/server/files/upload"
-        
+
         with open(gcode_file, "rb") as f:
             files = {"file": f}
             response = requests.post(url, files=files)
-        
+
         return response.json()
-    
+
     def start_print(self, filename):
         """Start print job"""
         url = f"{self.host}/printer/print/start"

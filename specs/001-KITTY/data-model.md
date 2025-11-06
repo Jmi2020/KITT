@@ -83,20 +83,20 @@ Entities supporting conversational orchestration, fabrication control, CAD AI ge
 
 ## Derived Relationships
 
-- Starting a print creates `FabricationJob` linked to originating `DeviceCommand` and any `CADArtifact` used.  
-- Hazardous commands spawn `SafetyEvent` prior to command execution; command status remains `pending` until approval recorded.  
-- Routing escalations attach to the same `ConversationSession` to maintain audit trail for cost reporting.  
+- Starting a print creates `FabricationJob` linked to originating `DeviceCommand` and any `CADArtifact` used.
+- Hazardous commands spawn `SafetyEvent` prior to command execution; command status remains `pending` until approval recorded.
+- Routing escalations attach to the same `ConversationSession` to maintain audit trail for cost reporting.
 - CAD jobs in offline mode log fallback provider usage for observability dashboards.
 
 ## State Transitions
 
-- **FabricationJob**: `preparing → printing → (paused ↔ printing) → completed|failed|aborted`  
-- **CADJob**: `queued → running → completed|failed`  
-- **SafetyEvent**: `pending → approved|denied` (approved may trigger `resolved_at` upon execution)  
+- **FabricationJob**: `preparing → printing → (paused ↔ printing) → completed|failed|aborted`
+- **CADJob**: `queued → running → completed|failed`
+- **SafetyEvent**: `pending → approved|denied` (approved may trigger `resolved_at` upon execution)
 - **DeviceCommand**: `pending → sent → acked|failed`
 
 ## Validation Rules Summary
 
-- Hazard-level zones automatically enforce dual confirmation and presence checks.  
-- Offline CAD fallback must succeed before returning response when policy=offline; failure escalates to operator alert.  
+- Hazard-level zones automatically enforce dual confirmation and presence checks.
+- Offline CAD fallback must succeed before returning response when policy=offline; failure escalates to operator alert.
 - Routing decisions require latency & confidence metrics even for cached responses to satisfy observability SLOs.

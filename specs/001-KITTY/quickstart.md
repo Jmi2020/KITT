@@ -3,27 +3,34 @@
 ## Prerequisites
 
 - Mac Studio M3 Ultra with macOS 14+, Docker Desktop, Python 3.11, Node 20.
-- Tailscale authenticated and machine tagged for `jarvis-core`.
-- Local `.env` copied from `infra/compose/.env.example` with secrets set.
-- Ollama installed with required models (`qwen2.5-coder-32b`, `mistral-7b`, `llava`), MLX runtimes configured.
+- Tailscale authenticated and machine tagged for `kitty-core`.
+- Local `.env` copied from `.env.example` with secrets set.
+- Populate `ADMIN_USERS` with `user:hash` entries (hash via `kitty-cli hash-password`).
+- llama.cpp built from source with GGUF models stored under `/Users/Shared/Coding/models` (provide host aliases `kitty-primary`, `kitty-coder`).
+- Adjust `VERBOSITY` in `.env` as needed (1=extremely terse … 5=exhaustive) to control API response detail.
 
 ## Bootstrapping the Stack
 
-1. **Start host services**
+1. **Launch stack + TailScale**
    ```bash
-   make ollama-up        # loads configured local models
-   make tailscale-up     # ensures tunnel active
+   ./ops/scripts/start-kitty.sh
+   make tailscale-up     # ensures tunnel active (optional)
    ```
-2. **Launch containers**
-   ```bash
-   docker compose -f infra/compose/docker-compose.yml up -d
-   ```
-3. **Verify health**
+2. **Verify health**
    ```bash
    curl http://localhost:8000/healthz
    curl http://localhost:8080/api/ha/status
    mosquitto_sub -h localhost -t 'kitty/ctx/#' -C 1
    ```
+
+## Command-line client (SSH)
+
+```
+pip install -e services/cli
+kitty-cli shell
+```
+
+Commands mirror the voice features: switch models, tune verbosity, generate CAD (/cad), and queue prints (/queue).
 
 ## Scenario 1 — Conversational Device Command (US1)
 
@@ -65,7 +72,7 @@
 
 ## Scenario 5 — Routing Observability (US5)
 
-- Access Grafana dashboard (`http://localhost:3000/d/jarvis-routing`) to ensure local vs cloud hit-rate panels populate.
+- Access Grafana dashboard (`http://localhost:3000/d/kitty-routing`) to ensure local vs cloud hit-rate panels populate.
 
 ## Scenario 6 — Safety Workflow (US6)
 
@@ -80,6 +87,6 @@
 ## Cleanup
 
 ```bash
-docker compose -f infra/compose/docker-compose.yml down
-make ollama-stop
+./ops/scripts/stop-kitty.sh
+make tailscale-stop
 ```
