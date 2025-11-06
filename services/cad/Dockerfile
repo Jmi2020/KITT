@@ -29,4 +29,4 @@ RUN pip install --upgrade pip && \
     fi
 
 EXPOSE 8200
-CMD ["uvicorn", "services.cad.app:app", "--host", "0.0.0.0", "--port", "8200"]
+CMD ["uvicorn", "cad.app:app", "--host", "0.0.0.0", "--port", "8200"]
