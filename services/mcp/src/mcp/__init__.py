@@ -1,3 +1,19 @@
 """Model Context Protocol (MCP) server framework for KITTY."""
 
-__all__ = []
+from .server import (
+    MCPServer,
+    PromptDefinition,
+    ResourceDefinition,
+    ToolDefinition,
+    ToolResult,
+)
+from .servers.cad_server import CADMCPServer
+
+__all__ = [
+    "MCPServer",
+    "ToolDefinition",
+    "ResourceDefinition",
+    "PromptDefinition",
+    "ToolResult",
+    "CADMCPServer",
+]
