@@ -1,182 +1,810 @@
-# KITTY Warehouse Orchestrator
+# 🐱 KITTY: Your AI-Powered Fabrication Lab Assistant
 
-> Offline-first control plane for fabrication labs: voice, CLI, CAD generation, printer workflows, and safety automation running on a Mac Studio M3 Ultra.
+> **K**nowledgeable **I**ntelligent **T**ool-using **T**abletop **Y**ielder
+>
+> An offline-first, voice-enabled warehouse orchestrator running on Mac Studio M3 Ultra. Think "JARVIS for your workshop" - but it actually works, runs locally, and won't spy on you.
 
-This repository hosts the implementation plan, infrastructure, and services that transform a Mac Studio into a warehouse-grade conversational assistant. KITTY runs local language models through llama.cpp, escalates to cloud providers when needed, orchestrates CAD jobs, and drives printers, cameras, lighting, and access control.
-
----
-
-## Table of contents
-
-1. [Feature overview](#feature-overview)
-2. [System requirements](#system-requirements)
-3. [First-time setup](#first-time-setup)
-4. [Launching the stack](#launching-the-stack)
-5. [Operating KITTY](#operating-kitty)
-6. [Observability & budgeting](#observability--budgeting)
-7. [Directory map](#directory-map)
-8. [Troubleshooting](#troubleshooting)
-9. [Continuous integration](#continuous-integration)
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+"/>
+  <img src="https://img.shields.io/badge/typescript-5.x-blue.svg" alt="TypeScript 5.x"/>
+  <img src="https://img.shields.io/badge/platform-macOS_14+-lightgrey.svg" alt="macOS 14+"/>
+  <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"/>
+</p>
 
 ---
 
-## Feature overview
+## 🎯 What is KITTY?
 
-- **Local-first inference** – llama.cpp backed by Metal acceleration serves primary and coder models; router promotes to Perplexity/GPT/Claude only when confidence or freshness demands.
-- **Voice & text control** – Whisper/voice service for hands-free commands and a SSH-friendly CLI (`kitty-cli`) for remote sessions.
-- **CAD AI cycling** – Zoo (parametric) + Tripo (organic) pipelines, offline CadQuery/FreeCAD fallback, automated artifact storage.
-- **Fabrication workflows** – OctoPrint/Klipper integration, printer state via MQTT, one-click queue from UI or CLI.
-- **Safety engine** – UniFi Access integration, confirmation phrases, audit logging, and hazard workflows.
-- **Observability** – Prometheus/Grafana dashboards, routing audit logs, semantic cache statistics, configurable verbosity.
+KITTY transforms your Mac Studio into a conversational command center for your entire fabrication lab. It's like having a knowledgeable assistant who:
 
----
+- **Talks to you** via voice (Whisper) or CLI/web interface
+- **Thinks locally first** using llama.cpp with Metal GPU acceleration (70%+ queries handled offline)
+- **Knows your tools** - integrates with 3D printers (OctoPrint/Klipper), smart home (Home Assistant), cameras (UniFi), and more
+- **Generates CAD models** on demand using AI (Zoo API, Tripo, or local CadQuery/FreeCAD)
+- **Manages fabrication workflows** from voice command through slicing, printing, and quality monitoring
+- **Stays safe** with built-in hazard workflows, confirmation phrases, and audit logging
+- **Keeps learning** with semantic memory storage and citation-tracked research capabilities
 
-## System requirements
+### Why "Offline-First"?
 
-| Component | Notes |
-|-----------|-------|
-| Hardware | Mac Studio M3 Ultra (256 GB unified memory recommended). |
-| OS | macOS 14 or newer with Rosetta + Xcode command line tools. |
-| Dependencies | Docker Desktop, Python 3.11, Node 20, Homebrew (for git-lfs, huggingface-cli, etc.). |
-| Local models | GGUF shards stored under `/Users/Shared/Coding/models` (aliases `kitty-primary`, `kitty-coder`). |
-| Network | Optional Tailscale for remote mode; no inbound ports required. |
+Because the internet goes down, APIs get expensive, and your workshop shouldn't stop working when AWS has a bad day. KITTY runs powerful local models (Qwen2.5, Llama, Gemma) on your Mac's Metal GPU and only escalates to cloud providers (OpenAI, Anthropic, Perplexity) when truly necessary.
 
 ---
 
-## First-time setup
+## ✨ Key Features
+
+### 🗣️ **Conversational Control**
 
 ```bash
-git clone https://github.com/.../KITT.git
+You: "Turn on the bench lights and preheat the Prusa to 210°C"
+KITTY: *executes via Home Assistant and OctoPrint*
+      "Bench lights are on. Prusa preheating to 210°C for PLA."
+
+You: "Generate a parametric hex storage box, 50mm wide"
+KITTY: *calls Zoo CAD API*
+      "Generated! Preview ready. Want me to queue it for printing?"
+```
+
+### 🧠 **Intelligent Routing**
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Your Query                                         │
+└──────────────────┬──────────────────────────────────┘
+                   │
+         ┌─────────▼──────────┐
+         │  Brain Router      │
+         │  (Confidence-Based)│
+         └─────────┬──────────┘
+                   │
+        ┌──────────┴───────────┐
+        │                      │
+┌───────▼────────┐   ┌─────────▼─────────┐
+│ Local Model    │   │  Cloud APIs       │
+│ (Qwen2.5/Llama)│   │  (GPT/Claude/     │
+│ 70%+ of queries│   │   Perplexity)     │
+│ FREE           │   │  30%- queries     │
+└────────────────┘   │  BUDGET GATED     │
+                     └───────────────────┘
+```
+
+**Smart routing features:**
+- Confidence-based escalation (local model runs first)
+- Semantic caching (Redis) to avoid redundant LLM calls
+- Budget tracking with "omega" password gate for expensive APIs
+- Cost estimation before every cloud call
+- Prometheus metrics for hit rate, latency, and costs
+
+### 🛠️ **ReAct Agent with Tool Use**
+
+KITTY uses a **ReAct (Reasoning + Acting) agent** that can:
+
+- **Reason** about complex multi-step tasks
+- **Use tools** via Model Context Protocol (MCP) servers:
+  - 🏠 **Home Assistant**: Control lights, locks, sensors, climate
+  - 🖨️ **CAD Generation**: Create 3D models with Zoo/Tripo/local tools
+  - 🧠 **Memory**: Store and recall semantic memories (Qdrant vector DB)
+  - 🔧 **Command Broker**: Execute system commands (with allow-list safety)
+  - 🔍 **Web Research**: Search DuckDuckGo, fetch pages, track citations
+- **Observe** results and adapt its strategy
+- **Iterate** until task completion (max 10 reasoning steps)
+
+**Example agent workflow:**
+```
+Query: "Research best PLA filament brands and create a comparison table"
+
+Step 1: [Thought] Need to search for PLA filament reviews
+        [Action] web_search("best PLA filament brands 2024")
+        [Observation] Found 8 results from 3DPrintingToday, All3DP, etc.
+
+Step 2: [Thought] Need detailed info on top brands
+        [Action] fetch_webpage("https://all3dp.com/best-pla-filament")
+        [Observation] Content retrieved, citation added
+
+Step 3: [Thought] Need more sources for comparison
+        [Action] fetch_webpage("https://3dprintingtoday.com/pla-guide")
+        [Observation] Content retrieved, citation added
+
+Step 4: [Thought] Have enough data, create comparison
+        [Action] None
+        [Answer] "Here's a comparison of top PLA brands..."
+        [Citations] Markdown-formatted sources with access dates
+```
+
+### 🔐 **Safety-First Design**
+
+- **Hazard workflows**: Two-step confirmation for dangerous operations (e.g., unlocking doors)
+- **Command allow-lists**: Only pre-approved system commands can execute
+- **Audit logging**: Every tool use logged to PostgreSQL with timestamps
+- **Budget gates**: Cloud API calls require password confirmation
+- **Zone presence**: UniFi Access integration for physical safety zones
+
+### 📦 **CAD AI Cycling**
+
+Generate 3D models from natural language using multiple AI providers:
+
+```bash
+kitty-cli cad "Create a phone stand with 45° angle and cable management"
+```
+
+**Providers** (automatic fallback chain):
+1. **Zoo API** (parametric, produces STEP files)
+2. **Tripo** (mesh generation, produces STL/OBJ)
+3. **Local CadQuery** (Python-based parametric, offline fallback)
+4. **Local FreeCAD** (offline fallback with scripting)
+
+**Features:**
+- Artifact storage in MinIO (S3-compatible)
+- Metadata tracking (prompts, parameters, lineage)
+- Visual previews in web UI
+- One-click queue to OctoPrint/Klipper
+
+### 🎤 **Voice-to-Print Pipeline**
+
+End-to-end fabrication from voice command:
+
+```
+ [1]          [2]         [3]         [4]         [5]
+Voice    →  Whisper  →  GPT-4   →   CAD AI  →  Slicer  →  OctoPrint
+Command     (STT)     (Intent)   (Generate)   (Auto)     (Queue)
+             ↓
+          "Create     Parse to    Zoo/Tripo   PrusaSlicer  Print
+           a desk     structured  generates   with preset   starts!
+           organizer" CAD params  STEP file   profile
+```
+
+**Safety gates:**
+- Confirmation prompts via Piper TTS
+- Preview generation before printing
+- Material/printer compatibility checks
+
+### 📊 **Observability & Metrics**
+
+**Prometheus + Grafana dashboards:**
+- Routing tier distribution (local vs cloud)
+- Response latency (P50, P95, P99)
+- Cost tracking per provider
+- Semantic cache hit rate
+- Tool execution statistics
+- Print job monitoring
+
+**Logs:**
+- Structured JSON via Python logging
+- llama.cpp logs in `.logs/llamacpp.log`
+- Routing decisions with confidence scores
+- Tool use audit trail in PostgreSQL
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- **Hardware**: Mac Studio M3 Ultra recommended (64GB+ RAM for large models)
+- **OS**: macOS 14+ with Xcode command line tools
+- **Software**: Docker Desktop, Python 3.11, Node 20, Homebrew
+
+### Installation (5 minutes)
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/KITT.git
 cd KITT
 
-# Install developer tooling
+# Install developer tools
 pip install --upgrade pip pre-commit
 pre-commit install
 
 # Create environment file
 cp .env.example .env
 
-# Configure admin credentials (bcrypt hash)
-python -c "from services.common.src.common.security import hash_password; print(hash_password('changeme'))"
-# Set ADMIN_USERS=admin:<hash> in .env
+# Edit .env with your settings:
+# - Model paths (LLAMACPP_PRIMARY_MODEL, LLAMACPP_CODER_MODEL)
+# - API keys (optional: OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
+# - Home Assistant URL and token
+# - Safety phrases and user name
 
-# Edit .env to match your model paths, API keys, and safety phrases
+# Generate admin password hash
+python -c "from services.common.src.common.security import hash_password; print(hash_password('your-password-here'))"
+# Add to .env: ADMIN_USERS=admin:<hash>
 ```
 
-### Download models
+### Download Models
 
-1. Clone GGUF repositories into `/Users/Shared/Coding/models` (examples):
-   ```bash
-   huggingface-cli download Mungert/gemma-3-27b-it-GGUF --local-dir /Users/Shared/Coding/models/gemma-3-27b-it-GGUF --include "*.gguf"
-   huggingface-cli download Qwen/Qwen2.5-72B-Instruct-GGUF ...
-   ````
-2. Update `LLAMACPP_PRIMARY_MODEL` and `LLAMACPP_CODER_MODEL` in `.env` to point at the quantisations you want to serve (for example `q4_k_m`).
-3. Ensure `USER_NAME`, `HAZARD_CONFIRMATION_PHRASE`, and other placeholders reflect your environment.
-
----
-
-## Launching the stack
-
-Everything runs through the launcher scripts under `ops/scripts/`.
+KITTY works best with local GGUF models. Recommended setup:
 
 ```bash
-# Start llama.cpp + Docker compose
+# Create models directory
+mkdir -p /Users/Shared/Coding/models
+
+# Download Qwen2.5-72B-Instruct (recommended for primary)
+huggingface-cli download Qwen/Qwen2.5-72B-Instruct-GGUF \
+  --local-dir /Users/Shared/Coding/models/Qwen2.5-72B-Instruct-GGUF \
+  --include "*q4_k_m.gguf"
+
+# Download Qwen2.5-Coder-32B (recommended for code tasks)
+huggingface-cli download Qwen/Qwen2.5-Coder-32B-Instruct-GGUF \
+  --local-dir /Users/Shared/Coding/models/Qwen2.5-Coder-32B-Instruct-GGUF \
+  --include "*q4_k_m.gguf"
+
+# Update .env with your chosen models:
+# LLAMACPP_PRIMARY_MODEL=Qwen2.5-72B-Instruct-GGUF/qwen2.5-72b-instruct-q4_k_m.gguf
+# LLAMACPP_CODER_MODEL=Qwen2.5-Coder-32B-Instruct-GGUF/qwen2.5-coder-32b-instruct-q4_k_m.gguf
+```
+
+**Alternative models:**
+- Llama 3.3 70B (great general purpose)
+- Gemma 2 27B (fast, efficient)
+- Mistral 7B (lightweight for testing)
+
+### Launch KITTY
+
+```bash
+# Start llama.cpp + Docker services
 ./ops/scripts/start-kitty.sh
 
-# (first run) apply database migrations for shared models
+# (First run only) Apply database migrations
 alembic -c services/common/alembic.ini upgrade head
 ```
 
-`start-kitty.sh` will:
-
-1. Source `.env` and render the system prompt with your USER_NAME.
-2. Start `llama-server` using the configured models (logs in `.logs/llamacpp.log`).
-3. Launch Docker Compose with the same env file so all services share configuration.
-
-The script keeps running; press `Ctrl+C` or use `./ops/scripts/stop-kitty.sh` to stop compose and the llama.cpp process.
+That's it! KITTY is now running. Press `Ctrl+C` to stop, or run `./ops/scripts/stop-kitty.sh`.
 
 ---
 
-## Operating KITTY
+## 🎮 Using KITTY
 
-### Web console
+### Web Interface
 
-- UI: `http://localhost:4173`
-- Brain API docs: `http://localhost:8080/docs`
-- Use the **Fabrication Console** tab to:
-  - Change verbosity and model alias for ad-hoc queries.
-  - Generate CAD previews (`/api/cad/generate`).
-  - Inspect artifact metadata and queue a print to OctoPrint.
+Open your browser to:
 
-### CLI (SSH-friendly)
+- **UI**: http://localhost:4173
+- **API Docs**: http://localhost:8080/docs (Swagger/OpenAPI)
+- **Grafana**: http://localhost:3000 (metrics and dashboards)
+
+**Features:**
+- Chat interface with model selection
+- CAD generation with visual preview
+- Fabrication console (printer status, queue management)
+- Verbosity control (1-5 levels)
+- Real-time streaming responses
+
+### CLI (SSH-Friendly)
 
 ```bash
-pip install -e services/cli      # one-time install
-kitty-cli shell                  # interactive session
+# Install CLI tool (one-time)
+pip install -e services/cli
+
+# Interactive shell
+kitty-cli shell
+
+# Inside the shell:
+> /model kitty-coder           # Switch to coder model
+> /verbosity 3                  # Set response detail level
+> What printers are available?
+> /cad Create a 50mm hex box
+> /queue 0 prusa-mk4            # Queue artifact #0 to printer
+> /exit
+
+# Quick one-off queries
+kitty-cli say "Turn on bench lights"
+kitty-cli say "What's the print queue status?"
 ```
 
-Inside the shell:
-- `/model <alias>` – change the local model for routing.
-- `/verbosity <1-5>` – override response detail level.
-- `/cad <prompt>` – run the CAD cycler and cache artifacts.
-- `/queue <idx> <printer>` – queue the cached artifact on a printer.
-- `/exit` – end session.
+### Voice Control
 
-For quick one-offs: `kitty-cli say "Summarize today’s print queue"`.
+```bash
+# Voice service runs automatically with Docker Compose
+# Transcripts sent to /api/voice/transcript endpoint
 
-### Voice service
+# Example voice commands:
+"KITTY, turn on the bench lights"
+"Generate a phone stand with cable routing"
+"What's the status of the Prusa printer?"
+"Preheat the hotend to 210 degrees"
+```
 
-- The voice FastAPI service consumes audio transcripts (`/api/voice/transcript`).
-- `VOICE_SYSTEM_PROMPT` in `.env` now injects `USER_NAME`, locale, and model hints automatically.
-- Start/stop the voice module with the main compose stack; remote mode can disable voice capture.
+### REST API
 
-### REST shortcuts
+```bash
+# Chat query
+curl -X POST http://localhost:8080/api/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What printers are online?", "verbosity": 3}'
 
-- Conversation: `POST /api/query`
-- CAD: `POST /api/cad/generate`
-- Printer command: `POST /api/device/<printerId>/command`
-- Routing logs: `GET /api/routing/logs`
-- Local models: `GET /api/routing/models`
+# Generate CAD
+curl -X POST http://localhost:8080/api/cad/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "hex storage box 50mm", "provider": "zoo"}'
 
-All endpoints honour the verbosity and model alias parameters used by the UI/CLI.
+# Control device (via Home Assistant)
+curl -X POST http://localhost:8080/api/device/light.bench/command \
+  -H "Content-Type: application/json" \
+  -d '{"command": "turn_on"}'
 
----
-
-## Observability & budgeting
-
-- **Prometheus/Grafana** (`http://localhost:3000`): routing hit/miss, latency, semantic cache metrics, cost tracker totals.
-- **Logs**: structured JSON via Loki; llama.cpp logs in `.logs/llamacpp.log`.
-- **Budget**: `BUDGET_PER_TASK_USD` is available through `PerformanceSettings` and surfaced in the system prompt. Real-time enforcement requires extending the routing clients to record provider token costs.
-- **Safety**: audit trails stored in PostgreSQL (`hazard_audit` table) with camera bookmark references.
-
----
-
-## Directory map
-
-| Path | Purpose |
-|------|---------|
-| `infra/compose/` | Docker Compose definitions, Prometheus config, Home Assistant bridge |
-| `services/` | Service code (brain, cad, fabrication, safety, voice, ui, cli) |
-| `services/common/` | Shared config, logging, ORM models, Alembic migrations |
-| `services/cli/` | SSH/terminal client (`kitty-cli`) |
-| `specs/001-KITTY/` | Plan, spec, data model, API contracts, tasks checklist |
-| `ops/runbooks/` | Deployment, observability, and security procedures |
-| `docs/` | Architecture overview, quickstart, research notes |
+# Get routing logs
+curl http://localhost:8080/api/routing/logs
+```
 
 ---
 
-## Troubleshooting
+## 🏗️ Architecture
 
-| Issue | Resolution |
-|-------|------------|
-| `start-kitty.sh` cannot find `.env` | Ensure you created `.env` at the repo root (`cp .env.example .env`). |
-| llama.cpp refuses to start | Verify `LLAMACPP_*` paths exist and the `llama-server` binary is installed/built with Metal support. |
-| UI shows “Voice Disabled (Remote Mode)” | Remote mode is active; update the MQTT topic or toggle the remote mode flag in `.env` and restart gateway. |
-| CLI returns HTTP errors | Confirm services are running (`docker compose ps`) and endpoints are reachable (`curl http://localhost:8080/healthz`). |
-| Disk usage huge in `/models` | Each repo clones multiple quantisations. Remove unused shards or prune git-lfs objects. |
+### System Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Mac Studio Host                         │
+│  ┌──────────────┐         ┌─────────────────────────────┐  │
+│  │ llama.cpp    │◄────────┤  Docker Compose Services    │  │
+│  │ (Metal GPU)  │         │                             │  │
+│  │              │         │  ┌──────────┐ ┌──────────┐  │  │
+│  │ • Qwen2.5    │         │  │ Gateway  │ │  Brain   │  │  │
+│  │ • Llama 3    │         │  │  (REST)  │ │ (Router) │  │  │
+│  │ • Gemma      │         │  └────┬─────┘ └────┬─────┘  │  │
+│  └──────────────┘         │       │            │        │  │
+│                           │       │       ┌────▼─────┐  │  │
+│  ┌──────────────┐         │       │       │ ReAct    │  │  │
+│  │ Whisper.cpp  │         │       │       │ Agent    │  │  │
+│  │ (Voice STT)  │         │       │       └────┬─────┘  │  │
+│  └──────────────┘         │       │            │        │  │
+│                           │       │       ┌────▼─────┐  │  │
+│                           │       │       │   MCP    │  │  │
+│                           │       │       │ Servers  │  │  │
+│                           │       │       └────┬─────┘  │  │
+│                           │       │            │        │  │
+│                           │  ┌────▼────────────▼─────┐  │  │
+│                           │  │  CAD │ Fab │ Safety  │  │  │
+│                           │  │ Voice│ UI  │ Memory  │  │  │
+│                           │  └──────────────────────┘  │  │
+│                           └─────────────────────────────┘  │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐  │
+│  │              Storage Layer                          │  │
+│  │  • PostgreSQL (audit logs, state)                   │  │
+│  │  • Redis (semantic cache, routing state)            │  │
+│  │  • Qdrant (vector embeddings for memory)            │  │
+│  │  • MinIO (CAD artifacts, S3-compatible)             │  │
+│  └─────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+              │                           │
+              │                           │
+         ┌────▼────┐              ┌───────▼────────┐
+         │  Home   │              │   OctoPrint    │
+         │Assistant│              │   Printers     │
+         │ (MQTT)  │              │  (REST/MQTT)   │
+         └─────────┘              └────────────────┘
+```
+
+### Service Breakdown
+
+| Service | Purpose | Tech Stack |
+|---------|---------|------------|
+| **Gateway** | REST ingress, auth, request aggregation | FastAPI, JWT auth |
+| **Brain** | Orchestrator, routing logic, ReAct agent | FastAPI, llama.cpp client |
+| **CAD** | Model generation, artifact storage | FastAPI, Zoo SDK, Tripo API |
+| **Fabrication** | Printer integration, CV monitoring | FastAPI, OctoPrint API |
+| **Safety** | Hazard workflows, policy engine | FastAPI, PostgreSQL |
+| **Voice** | Speech capture, NLP parsing | FastAPI, Whisper |
+| **UI** | Web console (PWA) | React, TypeScript, Vite |
+| **CLI** | Terminal interface | Python Click |
+| **MCP Servers** | Tool protocol for agent | Custom MCP implementation |
+| **Research** | Web search, citation tracking | DuckDuckGo, BeautifulSoup |
+| **Memory** | Semantic storage & recall | Qdrant, sentence-transformers |
+
+### MCP (Model Context Protocol) Servers
+
+KITTY implements custom MCP servers to expose tools to the ReAct agent:
+
+1. **CAD MCP Server**: `generate_cad_model` tool
+2. **Home Assistant MCP Server**: `control_device`, `get_entity_state`, `list_entities`
+3. **Memory MCP Server**: `store_memory`, `recall_memory`
+4. **Broker MCP Server**: `execute_command`, `list_commands`
+5. **Research MCP Server**: `web_search`, `fetch_webpage`, `get_citations`
+
+Each server follows a consistent pattern:
+- JSON Schema tool definitions
+- Async tool execution
+- Structured result objects
+- Safety classification (free/cloud/hazardous)
 
 ---
 
-## Continuous integration
+## 📚 Documentation
 
-GitHub Actions lint shared Python utilities, run import checks, and validate the compose definition. Pre-commit hooks mirror the formatting/typing checks locally.
+### Essential Reading
+
+- **[Quick Start Guide](specs/001-KITTY/quickstart.md)**: Get KITTY running in 10 minutes
+- **[Implementation Plan](specs/001-KITTY/plan.md)**: Full technical specification
+- **[Data Model](specs/001-KITTY/data-model.md)**: Database schemas and relationships
+- **[API Contracts](specs/001-KITTY/contracts/)**: REST endpoint specifications
+
+### Operational Guides
+
+- **[Deployment Checklist](ops/runbooks/deployment-checklist.md)**: Production readiness steps
+- **[Security Hardening](ops/runbooks/security-hardening.md)**: Safety configurations
+- **[Troubleshooting](docs/troubleshooting.md)**: Common issues and solutions
+
+### Developer Resources
+
+- **[Architecture Overview](docs/architecture.md)**: System design deep dive
+- **[Contributing Guide](CONTRIBUTING.md)**: How to contribute code
+- **[Testing Strategy](tests/README.md)**: Unit, integration, and E2E tests
+
+---
+
+## 🔧 Configuration
+
+KITTY is configured via the `.env` file. Key settings:
+
+### Core Settings
+
+```bash
+# User & Safety
+USER_NAME=YourName
+HAZARD_CONFIRMATION_PHRASE=alpha-omega-protocol
+ADMIN_USERS=admin:$2b$12$...bcrypt.hash...
+
+# Local Models
+LLAMACPP_MODELS_DIR=/Users/Shared/Coding/models
+LLAMACPP_PRIMARY_MODEL=Qwen2.5-72B-Instruct-GGUF/qwen2.5-72b-instruct-q4_k_m.gguf
+LLAMACPP_PRIMARY_ALIAS=kitty-primary
+LLAMACPP_CODER_MODEL=Qwen2.5-Coder-32B-Instruct-GGUF/qwen2.5-coder-32b-instruct-q4_k_m.gguf
+LLAMACPP_CODER_ALIAS=kitty-coder
+
+# GPU Optimization (M3 Ultra)
+LLAMACPP_N_GPU_LAYERS=999        # Offload all layers to Metal GPU
+LLAMACPP_THREADS=20              # P-cores only
+LLAMACPP_BATCH_SIZE=4096         # Prefill batch
+LLAMACPP_UBATCH_SIZE=1024        # Kernel tiling
+LLAMACPP_PARALLEL=6              # Concurrent sequences
+LLAMACPP_FLASH_ATTN=1            # Metal-optimized attention
+
+# Cloud APIs (optional)
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+PERPLEXITY_API_KEY=pplx-...
+API_OVERRIDE_PASSWORD=omega      # Required to use cloud APIs
+
+# Budget Control
+BUDGET_PER_TASK_USD=0.50         # Max spend per conversation
+CONFIDENCE_THRESHOLD=0.85        # When to escalate to cloud
+```
+
+### Integration Settings
+
+```bash
+# Home Assistant
+HOME_ASSISTANT_URL=http://homeassistant.local:8123
+HOME_ASSISTANT_TOKEN=your-long-lived-token
+
+# OctoPrint
+OCTOPRINT_URL=http://octopi.local
+OCTOPRINT_API_KEY=your-api-key
+
+# CAD Providers
+ZOO_API_KEY=your-zoo-key          # Optional
+TRIPO_API_KEY=your-tripo-key      # Optional
+
+# UniFi (for cameras/access)
+UNIFI_URL=https://unifi.local
+UNIFI_USERNAME=admin
+UNIFI_PASSWORD=...
+```
+
+### Performance Tuning
+
+```bash
+# Routing
+SEMANTIC_CACHE_TTL=3600          # Cache duration (seconds)
+MAX_TOKENS_LOCAL=4096            # Token limit for local models
+MAX_TOKENS_CLOUD=8192            # Token limit for cloud models
+
+# Observability
+VERBOSITY_DEFAULT=3              # 1-5 response detail level
+LOG_LEVEL=INFO                   # DEBUG, INFO, WARNING, ERROR
+PROMETHEUS_ENABLED=true
+```
+
+---
+
+## 🧪 Testing
+
+### Run Test Suite
+
+```bash
+# Unit tests
+pytest tests/unit -v
+
+# Integration tests (requires running services)
+pytest tests/integration -v
+
+# End-to-end tests
+pytest tests/e2e -v
+
+# Specific test module
+pytest tests/unit/test_router.py -v
+```
+
+### Test Coverage
+
+```bash
+pytest tests/ --cov=services --cov-report=html
+open htmlcov/index.html
+```
+
+### Manual Testing
+
+```bash
+# Test CAD generation
+./tests/test_kitty_cad.sh
+
+# Benchmark llama.cpp performance
+./ops/scripts/benchmark-llamacpp.sh
+
+# Test Home Assistant integration
+curl http://localhost:8080/api/device/light.bench/state
+```
+
+---
+
+## 🎨 Customization
+
+### Adding New MCP Tools
+
+Create a new MCP server in `services/mcp/src/mcp/servers/`:
+
+```python
+from ..server import MCPServer, ToolDefinition, ToolResult
+
+class CustomMCPServer(MCPServer):
+    def __init__(self):
+        super().__init__(name="custom", description="My custom tools")
+        self._register_tools()
+
+    def _register_tools(self):
+        self.register_tool(
+            ToolDefinition(
+                name="my_tool",
+                description="What my tool does",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "param1": {"type": "string", "description": "..."}
+                    },
+                    "required": ["param1"]
+                }
+            )
+        )
+
+    async def execute_tool(self, tool_name: str, arguments: dict) -> ToolResult:
+        if tool_name == "my_tool":
+            # Your tool logic here
+            return ToolResult(success=True, data={"result": "..."})
+```
+
+Register it in `services/brain/src/brain/tools/mcp_client.py`:
+
+```python
+from mcp import CustomMCPServer
+
+self._servers["custom"] = CustomMCPServer()
+```
+
+### Adding New Voice Commands
+
+Extend the voice parser in `services/voice/src/voice/parser.py`:
+
+```python
+def parse_voice_command(transcript: str) -> dict:
+    if "new command pattern" in transcript.lower():
+        return {
+            "intent": "new_intent",
+            "params": {...}
+        }
+```
+
+### Customizing System Prompts
+
+Edit `services/brain/src/brain/config/prompts.py`:
+
+```python
+KITTY_SYSTEM_PROMPT = """
+You are KITTY, a helpful AI assistant for {user_name}'s fabrication lab.
+[Your custom personality and instructions here]
+"""
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+**Issue**: `llama.cpp` won't start
+
+```bash
+# Check if models exist
+ls -lh /Users/Shared/Coding/models/
+
+# Verify llama-server binary
+which llama-server
+
+# Check logs
+tail -f .logs/llamacpp.log
+```
+
+**Issue**: Docker services won't start
+
+```bash
+# Check Docker Desktop is running
+docker ps
+
+# View service logs
+docker compose -f infra/compose/docker-compose.yml logs brain
+
+# Rebuild specific service
+docker compose -f infra/compose/docker-compose.yml build --no-cache brain
+```
+
+**Issue**: "Permission denied" for cloud APIs
+
+```bash
+# Cloud APIs require the omega password (configured in .env)
+# When prompted, enter the API_OVERRIDE_PASSWORD value
+```
+
+**Issue**: CLI returns HTTP errors
+
+```bash
+# Ensure services are running
+docker compose -f infra/compose/docker-compose.yml ps
+
+# Test endpoints
+curl http://localhost:8080/healthz
+
+# Check if gateway is accessible
+curl http://localhost:4000/health
+```
+
+**Issue**: Voice transcription not working
+
+```bash
+# Check voice service logs
+docker compose logs voice
+
+# Verify Whisper model downloaded
+ls ~/.cache/whisper/
+
+# Test transcript endpoint
+curl -X POST http://localhost:8080/api/voice/transcript \
+  -H "Content-Type: application/json" \
+  -d '{"text": "test command"}'
+```
+
+### Getting Help
+
+- **Documentation**: Check `docs/` and `specs/001-KITTY/`
+- **Issues**: https://github.com/yourusername/KITT/issues
+- **Discussions**: https://github.com/yourusername/KITT/discussions
+
+---
+
+## 🗺️ Roadmap
+
+### Phase 1: Core Foundation ✅ COMPLETE
+- [x] Docker Compose orchestration
+- [x] llama.cpp integration with Metal GPU
+- [x] FastAPI services (gateway, brain, CAD)
+- [x] Home Assistant integration
+- [x] Confidence-based routing
+
+### Phase 2: Tool-Aware Agent ✅ COMPLETE
+- [x] ReAct agent implementation
+- [x] MCP server protocol
+- [x] Safe tool executor with hazard workflows
+- [x] CAD generation (Zoo/Tripo/local)
+- [x] Command broker with allow-lists
+- [x] Web research with citation tracking
+
+### Phase 3: Voice & Fabrication 🚧 IN PROGRESS
+- [ ] Voice-to-print pipeline
+- [ ] OctoPrint/Klipper integration
+- [ ] UniFi camera CV monitoring
+- [ ] Print queue management
+- [ ] Slicer automation
+
+### Phase 4: Safety & Access 📋 PLANNED
+- [ ] UniFi Access integration
+- [ ] Zone presence detection
+- [ ] Enhanced hazard workflows
+- [ ] Multi-factor confirmation
+- [ ] Audit dashboard
+
+### Phase 5: Advanced Features 📋 PLANNED
+- [ ] Multi-user support
+- [ ] Role-based access control
+- [ ] Advanced observability (Loki, Tempo)
+- [ ] Mobile app (iOS/Android)
+- [ ] Offline CAD model training
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! Here's how to get started:
+
+1. **Fork the repository**
+2. **Create a feature branch**: `git checkout -b feature/amazing-feature`
+3. **Make your changes** (following the existing code style)
+4. **Run tests**: `pytest tests/ -v`
+5. **Run linters**: `pre-commit run --all-files`
+6. **Commit**: `git commit -m "feat: add amazing feature"`
+7. **Push**: `git push origin feature/amazing-feature`
+8. **Open a Pull Request**
+
+### Development Setup
+
+```bash
+# Install development dependencies
+pip install -e ".[dev]"
+
+# Install pre-commit hooks
+pre-commit install
+
+# Run formatter
+black services/
+ruff check services/ --fix
+
+# Run type checker
+mypy services/
+```
+
+### Code Style
+
+- **Python**: Follow PEP 8, use Black formatter, type hints required
+- **TypeScript**: Use Prettier, ESLint rules enforced
+- **Commits**: Use [Conventional Commits](https://www.conventionalcommits.org/)
+- **Documentation**: Update relevant docs with code changes
+
+---
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+## 🙏 Acknowledgments
+
+KITTY stands on the shoulders of giants:
+
+- **[llama.cpp](https://github.com/ggerganov/llama.cpp)**: Incredible local LLM inference
+- **[Qwen Team](https://github.com/QwenLM)**: Outstanding open-weight models
+- **[FastAPI](https://fastapi.tiangolo.com/)**: Modern Python web framework
+- **[Home Assistant](https://www.home-assistant.io/)**: Smart home integration
+- **[OctoPrint](https://octoprint.org/)**: 3D printer management
+- **[Zoo](https://zoo.dev/)**: Parametric CAD API
+- **[Qdrant](https://qdrant.tech/)**: Vector database for semantic memory
+
+---
+
+## 💬 Philosophy
+
+KITTY is built on these principles:
+
+1. **Offline-First**: Your workshop shouldn't depend on the cloud
+2. **Safety-First**: Dangerous operations require explicit confirmation
+3. **Privacy-First**: Your conversations stay on your hardware
+4. **Cost-Conscious**: Cloud APIs are expensive; use them sparingly
+5. **Tool-Neutral**: Multiple providers for every capability
+6. **Open**: Fully inspectable, modifiable, and extensible
+
+---
+
+<p align="center">
+  <i>Built with ❤️ for makers, by makers</i>
+</p>
+
+<p align="center">
+  <sub>KITTY: Because your workshop deserves an AI assistant that actually understands "turn that thing on over there"</sub>
+</p>
