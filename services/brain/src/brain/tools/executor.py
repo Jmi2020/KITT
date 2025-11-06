@@ -67,6 +67,10 @@ class SafeToolExecutor:
             "store_memory",
             "list_commands",
             "get_command_schema",
+            "web_search",
+            "fetch_webpage",
+            "get_citations",
+            "reset_research_session",
         }  # Always allowed
 
     async def execute(

@@ -26,10 +26,11 @@ try:  # noqa: WPS229
         CADMCPServer,
         HomeAssistantMCPServer,
         MemoryMCPServer,
+        ResearchMCPServer,
         ToolDefinition,
     )
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
-    BrokerMCPServer = CADMCPServer = HomeAssistantMCPServer = MemoryMCPServer = None  # type: ignore[assignment]
+    BrokerMCPServer = CADMCPServer = HomeAssistantMCPServer = MemoryMCPServer = ResearchMCPServer = None  # type: ignore[assignment]
     ToolDefinition = Dict[str, Any]  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,10 @@ class MCPClient:
                     creds = HomeAssistantCredentials(base_url=ha_url, token=ha_token)
                     ha_client = HomeAssistantClient(credentials=creds)
                     self._servers["homeassistant"] = HomeAssistantMCPServer(ha_client=ha_client)
+
+            # Research server
+            if callable(ResearchMCPServer):
+                self._servers["research"] = ResearchMCPServer()
         except Exception as exc:  # noqa: BLE001
             logger.warning("Disabling MCP tools: %s", exc)
             self._servers.clear()
