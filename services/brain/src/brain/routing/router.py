@@ -25,6 +25,10 @@ from .ml_local_client import MLXLocalClient
 from .permission import PermissionManager
 from .pricing import estimate_cost
 
+# Import ReAct agent and tool MCP client
+from ..agents import ReActAgent
+from ..tools.mcp_client import MCPClient as ToolMCPClient
+
 
 class RoutingRequest(BaseModel):
     conversation_id: str
@@ -34,6 +38,7 @@ class RoutingRequest(BaseModel):
     force_tier: Optional[RoutingTier] = None
     freshness_required: bool = False
     model_hint: Optional[str] = None
+    use_agent: bool = False  # Enable agentic routing with tool use
 
 
 @dataclass
@@ -70,6 +75,7 @@ class BrainRouter:
         cost_tracker: Optional[CostTracker] = None,
         slo_calculator: Optional[SLOCalculator] = None,
         permission_manager: Optional[PermissionManager] = None,
+        tool_mcp_client: Optional[ToolMCPClient] = None,
     ) -> None:
         self._config = config or get_routing_config()
         self._llama = llama_client or LlamaCppClient(self._config.llamacpp)
@@ -87,6 +93,14 @@ class BrainRouter:
         self._cost_tracker = cost_tracker or CostTracker()
         self._slo_calculator = slo_calculator or SLOCalculator()
         self._permission = permission_manager or PermissionManager()
+
+        # Initialize tool MCP client and ReAct agent
+        self._tool_mcp = tool_mcp_client or ToolMCPClient()
+        self._agent = ReActAgent(
+            llm_client=self._llama,
+            mcp_client=self._tool_mcp,
+            max_iterations=10,
+        )
 
     async def route(self, request: RoutingRequest) -> RoutingResult:
         cache_key = _hash_prompt(request.prompt)
@@ -109,6 +123,12 @@ class BrainRouter:
                     user_id=request.user_id,
                 )
                 return result
+
+        # Check for agentic routing
+        if request.use_agent:
+            result = await self._invoke_agent(request)
+            self._record(request, result, cache_key=cache_key)
+            return result
 
         result = await self._invoke_local(request)
         if request.force_tier == RoutingTier.local:
@@ -229,6 +249,44 @@ class BrainRouter:
             output=output,
             tier=RoutingTier.frontier,
             confidence=0.9,
+            latency_ms=latency,
+            metadata=metadata,
+        )
+
+    async def _invoke_agent(self, request: RoutingRequest) -> RoutingResult:
+        """Run ReAct agent with tool use for complex queries.
+
+        Args:
+            request: Routing request
+
+        Returns:
+            RoutingResult with agent response
+        """
+        start = time.perf_counter()
+
+        # Run ReAct agent
+        agent_result = await self._agent.run(request.prompt)
+
+        latency = int((time.perf_counter() - start) * 1000)
+
+        # Format agent result as RoutingResult
+        metadata = {
+            "provider": "react_agent",
+            "iterations": str(agent_result.iterations),
+            "tools_used": str(len([s for s in agent_result.steps if s.action])),
+            "success": str(agent_result.success),
+        }
+
+        if agent_result.error:
+            metadata["error"] = agent_result.error
+
+        # High confidence if agent succeeded
+        confidence = 0.9 if agent_result.success else 0.5
+
+        return RoutingResult(
+            output=agent_result.answer,
+            tier=RoutingTier.local,  # Agent uses local LLM + tools
+            confidence=confidence,
             latency_ms=latency,
             metadata=metadata,
         )
