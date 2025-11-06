@@ -40,9 +40,9 @@ cmd=(
   --n_gpu_layers "$N_GPU_LAYERS"
   --ctx-size "$CTX_SIZE"
   --threads "$THREADS"
-  --batch "$BATCH_SIZE"
-  --ubatch "$UBATCH_SIZE"
-  --parallel "$PARALLEL"
+  --batch-size "$BATCH_SIZE"
+  --ubatch-size "$UBATCH_SIZE"
+  -np "$PARALLEL"
   --model "$primary_path"
   --alias "$PRIMARY_ALIAS"
 )
