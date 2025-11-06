@@ -22,13 +22,14 @@ if mcp_path.exists() and str(mcp_path) not in sys.path:
 
 try:  # noqa: WPS229
     from mcp import (  # noqa: E402
+        BrokerMCPServer,
         CADMCPServer,
         HomeAssistantMCPServer,
         MemoryMCPServer,
         ToolDefinition,
     )
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
-    CADMCPServer = HomeAssistantMCPServer = MemoryMCPServer = None  # type: ignore[assignment]
+    BrokerMCPServer = CADMCPServer = HomeAssistantMCPServer = MemoryMCPServer = None  # type: ignore[assignment]
     ToolDefinition = Dict[str, Any]  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ class MCPClient:
         cad_service_url: str | None = None,
         memory_service_url: str | None = None,
         ha_service_url: str | None = None,
+        broker_url: str | None = None,
     ) -> None:
         """Initialize MCP client with server connections.
 
@@ -49,11 +51,18 @@ class MCPClient:
             cad_service_url: Optional CAD service URL
             memory_service_url: Optional memory service URL
             ha_service_url: Optional Home Assistant service URL
+            broker_url: Optional Command Broker service URL
         """
         # Initialize MCP servers
         self._servers: Dict[str, Any] = {}
 
         try:
+            # Broker server
+            if callable(BrokerMCPServer):
+                self._servers["broker"] = BrokerMCPServer(
+                    broker_url=broker_url or os.getenv("BROKER_URL", "http://broker:8777")
+                )
+
             # CAD server
             if callable(CADMCPServer):
                 self._servers["cad"] = CADMCPServer(

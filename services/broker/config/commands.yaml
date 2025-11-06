@@ -1,0 +1,199 @@
+# Command allow-list for KITTY Command Broker
+# Deny-by-default: only commands listed here can be executed
+#
+# Each command must define:
+# - name: Unique command identifier
+# - executable: Absolute path to executable
+# - args_schema: JSON Schema for argument validation
+# - launch_type: "daemon" (headless) or "agent" (GUI)
+# - timeout: Maximum execution time in seconds
+# - description: Human-readable description
+
+commands:
+  # System Information Commands
+  - name: get_system_info
+    executable: /usr/bin/uname
+    description: Get basic system information
+    launch_type: daemon
+    timeout: 5
+    args_schema:
+      type: object
+      properties:
+        all:
+          type: boolean
+          description: Print all information
+      additionalProperties: false
+
+  - name: get_disk_usage
+    executable: /usr/bin/df
+    description: Report filesystem disk space usage
+    launch_type: daemon
+    timeout: 10
+    args_schema:
+      type: object
+      properties:
+        human-readable:
+          type: boolean
+          description: Print sizes in human readable format
+      additionalProperties: false
+
+  # File Operations
+  - name: list_directory
+    executable: /bin/ls
+    description: List directory contents
+    launch_type: daemon
+    timeout: 10
+    args_schema:
+      type: object
+      properties:
+        path:
+          type: string
+          description: Directory path to list
+        long:
+          type: boolean
+          description: Use long listing format
+        all:
+          type: boolean
+          description: Show hidden files
+      required: [path]
+      additionalProperties: false
+
+  - name: read_file
+    executable: /bin/cat
+    description: Read file contents
+    launch_type: daemon
+    timeout: 15
+    args_schema:
+      type: object
+      properties:
+        path:
+          type: string
+          description: File path to read
+      required: [path]
+      additionalProperties: false
+
+  # Image Processing (Example GUI command)
+  - name: open_image
+    executable: /usr/bin/open
+    description: Open image file in default viewer
+    launch_type: agent
+    timeout: 5
+    args_schema:
+      type: object
+      properties:
+        path:
+          type: string
+          description: Image file path
+      required: [path]
+      additionalProperties: false
+
+  # CAD/Maker Operations
+  - name: slice_gcode
+    executable: /usr/local/bin/prusa-slicer
+    description: Slice 3D model to G-code
+    launch_type: daemon
+    timeout: 120
+    args_schema:
+      type: object
+      properties:
+        input:
+          type: string
+          description: Input STL/OBJ file path
+        output:
+          type: string
+          description: Output G-code file path
+        config:
+          type: string
+          description: Slicer configuration file
+      required: [input, output]
+      additionalProperties: false
+
+  # Git Operations
+  - name: git_status
+    executable: /usr/bin/git
+    description: Show git repository status
+    launch_type: daemon
+    timeout: 10
+    args_schema:
+      type: object
+      properties:
+        repository:
+          type: string
+          description: Repository path
+      required: [repository]
+      additionalProperties: false
+
+  - name: git_pull
+    executable: /usr/bin/git
+    description: Pull latest changes from remote
+    launch_type: daemon
+    timeout: 60
+    args_schema:
+      type: object
+      properties:
+        repository:
+          type: string
+          description: Repository path
+      required: [repository]
+      additionalProperties: false
+
+  # Python Script Execution
+  - name: run_python_script
+    executable: /usr/local/bin/python3
+    description: Execute a Python script
+    launch_type: daemon
+    timeout: 300
+    args_schema:
+      type: object
+      properties:
+        script:
+          type: string
+          description: Path to Python script
+        args:
+          type: array
+          items:
+            type: string
+          description: Script arguments
+      required: [script]
+      additionalProperties: false
+
+  # Network Operations
+  - name: ping_host
+    executable: /sbin/ping
+    description: Send ICMP ECHO_REQUEST to network host
+    launch_type: daemon
+    timeout: 10
+    args_schema:
+      type: object
+      properties:
+        count:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: Number of packets to send
+        host:
+          type: string
+          description: Target hostname or IP
+      required: [host, count]
+      additionalProperties: false
+
+  # Archive Operations
+  - name: extract_archive
+    executable: /usr/bin/tar
+    description: Extract tar archive
+    launch_type: daemon
+    timeout: 120
+    args_schema:
+      type: object
+      properties:
+        file:
+          type: string
+          description: Archive file path
+        directory:
+          type: string
+          description: Destination directory
+        verbose:
+          type: boolean
+          description: Verbose output
+      required: [file, directory]
+      additionalProperties: false

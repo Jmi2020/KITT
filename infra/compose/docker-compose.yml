@@ -25,6 +25,7 @@ services:
       QDRANT_URL: http://qdrant:6333
       MEM0_MCP_URL: http://mem0-mcp:8765
       CAD_SERVICE_URL: http://cad:8200
+      BROKER_URL: http://broker:8777
       HOME_ASSISTANT_URL: ${HOME_ASSISTANT_URL:-http://homeassistant:8123}
       HOME_ASSISTANT_TOKEN: ${HOME_ASSISTANT_TOKEN}
     depends_on:
@@ -34,6 +35,7 @@ services:
       - qdrant
       - mem0-mcp
       - cad
+      - broker
       - homeassistant
     volumes:
       - ../../services/common:/app/services/common:ro
@@ -121,6 +123,27 @@ services:
       - ../../services/safety:/app/services/safety:ro
     ports:
       - "8400:8400"
+    networks:
+      - kitty
+
+  broker:
+    build:
+      context: ../..
+      dockerfile: services/broker/Dockerfile
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: broker
+      BROKER_HOST: 0.0.0.0
+      BROKER_PORT: 8777
+      BROKER_ALLOW_LIST: /etc/kitty/commands.yaml
+      BROKER_AUDIT_LOG: /var/log/kitty/broker-audit.jsonl
+      BROKER_ENABLE_PRIVILEGE_DROP: "false"
+    volumes:
+      - ../../services/broker:/app/services/broker:ro
+      - broker-logs:/var/log/kitty
+    ports:
+      - "8777:8777"
     networks:
       - kitty
 

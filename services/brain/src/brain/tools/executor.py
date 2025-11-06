@@ -55,13 +55,18 @@ class SafeToolExecutor:
         self._hazard = hazard_workflow
 
         # Classify tools by safety level
-        self._hazardous_tools: Set[str] = {"control_device"}  # Tools that may be dangerous
+        self._hazardous_tools: Set[str] = {
+            "control_device",
+            "execute_command",
+        }  # Tools that may be dangerous
         self._cloud_tools: Set[str] = {"generate_cad_model"}  # Tools that may cost money
         self._free_tools: Set[str] = {
             "get_entity_state",
             "list_entities",
             "recall_memory",
             "store_memory",
+            "list_commands",
+            "get_command_schema",
         }  # Always allowed
 
     async def execute(
@@ -154,6 +159,22 @@ class SafeToolExecutor:
                 )
                 return allowed
 
+        # Handle execute_command tool with command-specific checks
+        if tool_name == "execute_command":
+            command = arguments.get("command", "")
+
+            # Certain commands may be hazardous based on their nature
+            potentially_hazardous_commands = {
+                "run_python_script",  # Arbitrary code execution
+                "git_pull",  # File system modifications
+                "extract_archive",  # File system modifications
+            }
+
+            if command in potentially_hazardous_commands:
+                # For now, allow but this could be enhanced with hazard workflow
+                # In the future, we could require confirmation for these operations
+                return True
+
         # Other hazardous tools - allow by default unless specific rules added
         return True
 
@@ -198,6 +219,9 @@ class SafeToolExecutor:
             "list_entities": 0.0,
             "store_memory": 0.001,  # Minimal embedding cost
             "recall_memory": 0.001,
+            "execute_command": 0.0,  # Free (local execution)
+            "list_commands": 0.0,
+            "get_command_schema": 0.0,
         }
         return cost_map.get(tool_name, 0.01)  # Default to 1 cent
 
@@ -217,6 +241,9 @@ class SafeToolExecutor:
             "list_entities": "homeassistant",
             "store_memory": "qdrant",
             "recall_memory": "qdrant",
+            "execute_command": "broker",
+            "list_commands": "broker",
+            "get_command_schema": "broker",
         }
         return provider_map.get(tool_name, "unknown")
 
