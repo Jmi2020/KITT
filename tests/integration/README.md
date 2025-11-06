@@ -37,6 +37,29 @@ API contract tests ensuring consistent request/response schemas across services.
 pytest tests/integration/test_service_contracts.py -v
 ```
 
+### test_e2e_cad_workflow.py
+End-to-end CAD workflow tests validating complete request flow through service chain.
+
+**Coverage:**
+- Gateway → Brain → CAD service integration
+- Authentication flow (JWT tokens)
+- Service routing and orchestration
+- Response propagation through layers
+- Error handling cascade
+- Timeout handling
+- Conversation ID continuity
+- Metadata enrichment at each layer
+- Health check cascade
+- Rate limiting
+- CORS configuration
+- Distributed tracing
+- Service discovery
+
+**Run:**
+```bash
+pytest tests/integration/test_e2e_cad_workflow.py -v
+```
+
 ## Running Tests
 
 **All integration tests:**
