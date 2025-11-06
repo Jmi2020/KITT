@@ -79,11 +79,6 @@ DEFAULT_MODEL = _env_any(
     "kitty-primary",
 )
 DEFAULT_VERBOSITY = int(_env("VERBOSITY", "3"))
-CHAIN_OF_THOUGHT_ENABLED = _env("KITTY_CHAIN_OF_THOUGHT", "true").lower() in {
-    "1",
-    "true",
-    "yes",
-}
 
 
 @dataclass
@@ -130,25 +125,8 @@ def _print_artifacts(artifacts: List[Dict[str, Any]]) -> None:
 
 
 def _format_prompt(user_prompt: str) -> str:
-    if not CHAIN_OF_THOUGHT_ENABLED:
-        return user_prompt
-    return f"""You are KITTY, a warehouse-grade creative and operational AI assistant.
-
-USER QUERY:
-{user_prompt}
-
-Please think through this step-by-step before answering:
-
-<thinking>
-1. Rephrase the problem in your own words.
-2. List any domain expertise or tooling that might be relevant.
-3. Identify technical constraints, trade-offs, and potential risks.
-4. Recommend a path forward and justify why it is the best option.
-</thinking>
-
-Now provide your answer based on the reasoning above. Be concise but complete, and explain your recommendations clearly.
-
-Answer:"""
+    # No longer needed - ReAct agent handles reasoning internally
+    return user_prompt
 
 
 @app.command()
@@ -190,8 +168,11 @@ def say(
         None, "--model", "-m", help="Override local model alias"
     ),
     verbosity: Optional[int] = typer.Option(None, "--verbosity", "-v", min=1, max=5),
+    no_agent: bool = typer.Option(
+        False, "--no-agent", help="Disable agentic mode (direct LLM response)"
+    ),
 ) -> None:
-    """Send a one-off conversational message."""
+    """Send a one-off conversational message with intelligent agent reasoning."""
 
     text = " ".join(message)
     formatted_prompt = _format_prompt(text)
@@ -200,6 +181,7 @@ def say(
         "userId": state.user_id,
         "intent": "chat.prompt",
         "prompt": formatted_prompt,
+        "useAgent": not no_agent,  # Enable agentic mode by default
     }
     chosen_model = model or state.model_alias or DEFAULT_MODEL
     if chosen_model:
@@ -308,10 +290,9 @@ def shell(
     console.print(
         f"[dim]Default model: {state.model_alias}  |  Verbosity: {state.verbosity}"
     )
-    if CHAIN_OF_THOUGHT_ENABLED:
-        console.print(
-            "[dim]Chain-of-thought mode enabled – prompts will be expanded automatically."
-        )
+    console.print(
+        "[dim]Agentic mode enabled – KITTY will reason about your requests and use tools as needed."
+    )
 
     while True:
         try:

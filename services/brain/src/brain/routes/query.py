@@ -31,6 +31,7 @@ class QueryInput(BaseModel):
     freshness_required: bool = Field(False, alias="freshnessRequired")
     verbosity: Optional[int] = None
     model_alias: Optional[str] = Field(default=None, alias="modelAlias")
+    use_agent: bool = Field(default=True, alias="useAgent")
 
 
 class QueryResponse(BaseModel):
@@ -79,6 +80,7 @@ async def post_query(
         force_tier=body.force_tier,
         freshness_required=body.freshness_required,
         model_hint=body.model_alias,
+        use_agent=body.use_agent,
     )
     routing_details = None
     if verbosity_level >= VerbosityLevel.CONCISE:
