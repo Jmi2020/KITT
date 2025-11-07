@@ -89,7 +89,9 @@ class BrainRouter:
         self._cache = cache or (SemanticCache() if settings.semantic_cache_enabled else None)
         self._mcp = mcp_client
         if not self._mcp and settings.perplexity_api_key:
-            self._mcp = MCPClient(settings.perplexity_base_url, settings.perplexity_api_key)
+            # Use perplexity_model_search if available, otherwise default to "sonar"
+            model = getattr(settings, "perplexity_model_search", "sonar")
+            self._mcp = MCPClient(settings.perplexity_base_url, settings.perplexity_api_key, model=model)
         self._frontier = frontier_client
         if not self._frontier and settings.openai_api_key:
             self._frontier = FrontierClient(

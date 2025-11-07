@@ -66,12 +66,22 @@ class LlamaCppClient:
             payload["tools"] = tools
             logger.info(f"Passing {len(tools)} tools to llama.cpp: {[t['function']['name'] for t in tools]}")
 
+        # Log payload for debugging (truncate prompt if too long)
+        log_payload = payload.copy()
+        if "prompt" in log_payload and len(log_payload["prompt"]) > 200:
+            log_payload["prompt"] = log_payload["prompt"][:200] + f"... ({len(payload['prompt'])} chars total)"
+        logger.debug(f"llama.cpp request payload: {log_payload}")
+
         async with httpx.AsyncClient(
             base_url=self._base_url, timeout=self._config.timeout_seconds
         ) as client:
-            response = await client.post(self._config.api_path, json=payload)
-            response.raise_for_status()
-            data: Dict[str, Any] = response.json()
+            try:
+                response = await client.post(self._config.api_path, json=payload)
+                response.raise_for_status()
+                data: Dict[str, Any] = response.json()
+            except httpx.HTTPStatusError as e:
+                logger.error(f"llama.cpp returned {e.response.status_code}: {e.response.text[:500]}")
+                raise
 
         completion = data.get("response") or data.get("content") or data.get("completion")
         if completion is None and "choices" in data:

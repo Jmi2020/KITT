@@ -25,6 +25,7 @@ dependencies = [
   "rich>=13.7",
   "uvicorn[standard]>=0.30",
   "websockets>=12",
+  "python-frontmatter>=1.0",
   # Research tools dependencies
   "beautifulsoup4>=4.12",
   "lxml>=5.0",

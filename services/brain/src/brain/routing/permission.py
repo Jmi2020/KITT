@@ -52,11 +52,12 @@ class PermissionManager:
         Args:
             override_password: Override password (default from env: API_OVERRIDE_PASSWORD)
             permission_callback: Async callback to request user permission
-            auto_approve: If True, auto-approve all requests (for testing)
+            auto_approve: If True, auto-approve all requests (for testing/autonomous workflows)
         """
         self._override_password = override_password or os.getenv("API_OVERRIDE_PASSWORD", "omega")
         self._callback = permission_callback
-        self._auto_approve = auto_approve
+        # Auto-approve can be set via env var for autonomous workflows
+        self._auto_approve = auto_approve or os.getenv("API_AUTO_APPROVE", "").lower() in ("true", "1", "yes")
         self._budget_used = 0.0
         self._budget_limit = float(os.getenv("BUDGET_PER_TASK_USD", "0.50"))
 
