@@ -295,6 +295,32 @@ class BrokerMCPServer(MCPServer):
                 error=f"Failed to get command schema: {e}",
             )
 
+    async def fetch_resource(self, uri: str) -> Dict[str, Any]:
+        """Fetch a broker resource by URI.
+
+        Args:
+            uri: Resource URI (e.g., "broker://commands")
+
+        Returns:
+            Resource data as dict
+
+        Raises:
+            ValueError: If URI is invalid
+        """
+        if uri == "broker://commands":
+            # Return list of available commands
+            result = await self._list_commands()
+            if result.success:
+                return {
+                    "uri": uri,
+                    "content": result.output,
+                    "metadata": result.metadata,
+                }
+            else:
+                raise ValueError(f"Failed to fetch commands: {result.error}")
+        else:
+            raise ValueError(f"Unknown resource URI: {uri}")
+
     async def read_resource(self, uri: str) -> str:
         """Read broker resource.
 

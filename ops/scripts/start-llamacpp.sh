@@ -75,8 +75,8 @@ if [[ -n "$flash_value" ]]; then
 fi
 
 if [[ "$TOOL_CALLING" == "1" || "$TOOL_CALLING" == "true" ]]; then
-  cmd+=(--jinja -fa)
-  echo "Tool calling enabled: --jinja -fa"
+  cmd+=(--jinja)
+  echo "Tool calling enabled: --jinja"
 fi
 
 if [[ -n "$EXTRA_ARGS" ]]; then
