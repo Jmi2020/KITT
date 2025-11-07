@@ -41,7 +41,7 @@ services:
       - ../../services/common:/app/services/common:ro
       - ../../services/brain:/app/services/brain:ro
       - ../../services/mcp:/app/services/mcp:ro
-      - ../../services/mcp:/app/services/mcp:ro
+      - ../../services/research:/app/services/research:ro
     ports:
       - "8000:8000"
     networks:
