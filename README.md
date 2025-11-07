@@ -15,10 +15,53 @@
 
 ## 🚀 Quick Command Reference
 
+### 🎬 First Time Setup
+
+**Option 1: TUI-First Workflow (Recommended)**
+
+The easiest way to get started is using the Model Manager TUI to interactively select and start models:
+
+```bash
+# 1. Install Model Manager
+pip install -e services/model-manager/
+
+# 2. Launch TUI and select a model
+kitty-model-manager tui
+# Use arrow keys to browse models
+# Press Enter to expand families and select models
+# Press 's' to start the selected model
+
+# 3. Start KITTY services (in a new terminal)
+./ops/scripts/start-kitty-validated.sh
+```
+
+**Option 2: Auto-Bootstrap Workflow**
+
+For automation or CI environments, configure models in `.env` for automatic startup:
+
+```bash
+# 1. Copy example configuration
+cp .env.example .env
+
+# 2. Edit .env to set model paths:
+#    LLAMACPP_MODELS_DIR=/Users/Shared/Coding/models
+#    LLAMACPP_PRIMARY_MODEL=family/model.gguf
+
+# 3. Start everything (auto-loads configured model)
+./ops/scripts/start-kitty-validated.sh
+```
+
+> **Note**: If no model is configured and no server is running, the startup script will show helpful instructions.
+
+---
+
 ### Start/Stop KITTY
 
 ```bash
-# Start llama.cpp + all Docker services
+# Start llama.cpp + all Docker services (validated startup)
+./ops/scripts/start-kitty-validated.sh
+
+# Quick start (legacy script, less validation)
 ./ops/scripts/start-kitty.sh
 
 # Stop everything
@@ -48,6 +91,25 @@ kitty-cli shell
 # Quick one-off queries
 kitty-cli say "What printers are online?"
 kitty-cli say "Turn on bench lights"
+```
+
+### Unified Launcher TUI (NEW!)
+
+```bash
+# Install Unified Launcher (one-time)
+pip install -e services/launcher/
+
+# Launch unified launcher - single command for everything
+kitty
+
+# TUI Commands:
+# s - Show startup instructions
+# m - Launch Model Manager TUI
+# c - Launch CLI in new terminal
+# q - Quit
+
+# Note: This is MVP v0.1 - more features coming soon!
+# Full Docker management, embedded CLI, voice, logs in future releases
 ```
 
 ### Model Manager TUI

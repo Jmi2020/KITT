@@ -162,7 +162,21 @@ if curl -sf "http://localhost:$LLAMACPP_PORT/health" > /dev/null 2>&1; then
     print_status "Current model: $MODEL_NAME"
     print_status "Using existing server on port $LLAMACPP_PORT"
 else
-    # No server running - start one
+    # No server running - check if model is configured
+    if [ -z "$LLAMACPP_PRIMARY_MODEL" ] || [ -z "$LLAMACPP_MODELS_DIR" ]; then
+        print_error "No llama.cpp server running and no model configured"
+        echo ""
+        print_warning "Start a model first using Model Manager TUI:"
+        echo "  ${GREEN}kitty-model-manager tui${NC}"
+        echo ""
+        print_warning "Or configure a model in .env for automatic bootstrap:"
+        echo "  LLAMACPP_MODELS_DIR=/Users/Shared/Coding/models"
+        echo "  LLAMACPP_PRIMARY_MODEL=family/model.gguf"
+        echo ""
+        exit 1
+    fi
+
+    # Model is configured - start server
     print_status "Starting llama.cpp server..."
 
     LLAMACPP_HOST="${LLAMACPP_HOST:-0.0.0.0}"
@@ -178,7 +192,8 @@ else
     MODEL_PATH="${LLAMACPP_MODELS_DIR}/${LLAMACPP_PRIMARY_MODEL}"
     if [ ! -f "$MODEL_PATH" ]; then
         print_error "Model not found: $MODEL_PATH"
-        print_warning "Use Model Manager TUI to start a server: kitty-model-manager tui"
+        print_warning "Check your .env configuration or use Model Manager TUI:"
+        echo "  ${GREEN}kitty-model-manager tui${NC}"
         exit 1
     fi
 
