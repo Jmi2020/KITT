@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -23,8 +24,9 @@ class LlamaCppClient:
         self._config = cfg
         self._base_url = cfg.host.rstrip("/")
 
-        # Detect model format for tool calling (use model_alias or primary_model)
-        model_identifier = cfg.model_alias or cfg.primary_model or "qwen2.5"
+        # Detect model format for tool calling (use alias or inferred local default)
+        primary_fallback = getattr(cfg, "primary_model", None)
+        model_identifier = cfg.model_alias or primary_fallback or os.getenv("LOCAL_MODEL_PRIMARY") or "qwen2.5"
         self._model_format = detect_model_format(model_identifier)
         logger.info(f"LlamaCppClient initialized with format: {self._model_format.value} (model: {model_identifier})")
 

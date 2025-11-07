@@ -8,17 +8,17 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install dependencies
-COPY requirements.txt .
+COPY services/broker/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY src/ ./src/
+COPY services/broker/src/ ./src/
 
 # Create directories for config and logs
 RUN mkdir -p /etc/kitty /var/log/kitty
 
 # Copy default allow-list
-COPY config/commands.yaml /etc/kitty/commands.yaml
+COPY services/broker/config/commands.yaml /etc/kitty/commands.yaml
 
 # Set environment variables
 ENV PYTHONPATH=/app/src

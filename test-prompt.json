@@ -1,0 +1,8 @@
+{
+  "messages": [
+    {"role": "system", "content": "You are KITTY, a friendly warehouse fabrication assistant."},
+    {"role": "user", "content": "Hello KITTY! How are you? Can you tell me briefly what you help with?"}
+  ],
+  "max_tokens": 100,
+  "temperature": 0.7
+}

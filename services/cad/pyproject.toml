@@ -16,11 +16,16 @@ classifiers = [
 ]
 dependencies = [
   "anyio>=4.4",
-  "cadquery>=2.5",  # optional fallback pipeline
   "fastapi>=0.111",
   "httpx>=0.27",
   "minio>=7.2",
   "pydantic>=2.7",
+  "uvicorn[standard]>=0.30",
+]
+
+[project.optional-dependencies]
+local = [
+  "cadquery>=2.5",  # ARM64 wheels not available - use Zoo/Tripo APIs instead
 ]
 
 [tool.setuptools.package-dir]

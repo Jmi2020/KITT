@@ -1,47 +1,40 @@
-# CADQuery / OCP on Apple Silicon
+# CAD Fallback on Apple Silicon
 
-This note captures supported setups for KITTY's local CAD fallback on a Mac Studio (Apple Silicon). The goal is to keep Zoo (online) as the default parametric path while retaining CadQuery as an offline fallback.
+## Overview
+- Zoo stays primary; CadQuery/OCP is the offline fallback on Mac Studio.
+- Prefer prebuilt binaries (conda/pip) to avoid flaky source builds.
 
 ## Problem Summary
-
-- `cadquery-ocp` often ships x86-only binaries; installing it on macOS arm64 fails with missing wheels.
-- Building OpenCascade (OCP) locally is slow and brittle.
-- We need a reproducible path that aligns with the "offline fallback" policy, without disrupting the Zoo → MinIO workflow.
+- `cadquery-ocp` lacks universal wheels; fails on osx-arm64.
+- Compiling OpenCascade locally is slow and brittle.
+- Need reproducible install paths that don’t break Zoo → MinIO workflows.
 
 ## Recommended Approaches
 
-### Option A: MicroMamba / Conda-Forge (Most Reliable)
-
+### Option A – MicroMamba / Conda-Forge (Most reliable)
 ```bash
 /bin/bash -c "$(curl -L micro.mamba.pm/install.sh)"
 micromamba create -n cq -c conda-forge python=3.11 cadquery ocp -y
 micromamba activate cq
 python - <<'PY'
 import cadquery as cq
-r = cq.Workplane('XY').box(40, 40, 10)
-print('cadquery OK:', r.val().Volume() > 0)
+result = cq.Workplane('XY').box(40, 40, 10)
+print('cadquery OK:', result.val().Volume() > 0)
 PY
 ```
+Conda-Forge publishes osx-arm64 wheels for both CadQuery and OCP.
 
-Why it works: Conda-Forge provides prebuilt osx-arm64 wheels for CadQuery + OCP, so we avoid manual compilation.
-
-### Option B: Pure pip (force binary wheels only)
-
+### Option B – pip (binary wheels only)
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install --upgrade pip wheel setuptools
-pip uninstall -y cadquery-ocp ocp OCP cadquery
+pip uninstall -y cadquery-ocp ocp OCP cadquery || true
 pip install --only-binary=:all: "ocp>=7.7,<7.8" "cadquery>=2.4,<2.5"
 python -c "import cadquery as cq; print('cadquery OK:', cq.Workplane('XY').box(1,1,1))"
 ```
+If pip tries to build from source, tighten version pins or revert to Option A.
 
-If pip attempts to build from source, tighten versions or switch back to Option A.
-
-### Option C: Containerised CadQuery Service
-
-Run CadQuery inside a dedicated container (optional if you prefer to keep the host clean).
-
+### Option C – Containerized CadQuery service
 ```yaml
 services:
   cad-cq:
@@ -60,46 +53,67 @@ services:
     ports:
       - "8000:8000"
 ```
-
-Minimal `app.py` for the service:
-
+Minimal API:
 ```python
 from fastapi import FastAPI
 import cadquery as cq
-
 app = FastAPI()
-
 @app.get('/healthz')
 def healthz():
     return {'ok': True}
-
 @app.post('/cube/{size_mm}')
 def cube(size_mm: float):
     model = cq.Workplane('XY').box(size_mm, size_mm, size_mm)
-    output = f"/data/cube_{size_mm}.step"
-    model.val().exportStep(output)
-    return {'step': output}
+    out = f"/data/cube_{size_mm}.step"
+    model.val().exportStep(out)
+    return {'step': out}
 ```
 
-## KITTY Integration Notes
-
-1. Zoo remains the default for parametric CAD. Use CadQuery only when offline or for post-processing.
-2. Remove `cadquery-ocp` from the dependency graph; depend on `cadquery` + `ocp` directly (via Conda-Forge or pip).
-3. Example version pins:
+## Integration Notes
+1. Keep Zoo default; use CadQuery only when offline or for post-processing.
+2. Remove `cadquery-ocp`; depend on `cadquery` + `ocp` (conda or pip).
+3. Pin versions:
    - `cadquery==2.4.*`
    - `ocp==7.7.*`
    - `python==3.11`
-4. Add health checks for the fallback (`/healthz`, simple STEP generation smoke test).
+4. Add `/healthz` and STEP smoke tests for the fallback service.
 
 ## Temporary Fallback
-
-- Set `CAD_LOCAL_ENABLED=false` (or equivalent) and route all jobs to Zoo if local CadQuery is not ready.
-- Re-enable once one of the solutions above is stable.
+- Set `CAD_LOCAL_ENABLED=false` to route all workflows to Zoo while local stack stabilizes.
 
 ## Future Enhancements
+- Cost accounting for cloud CAD.
+- Complete UniFi Access integration (pending creds).
+- CLI polishing (log streaming, status dashboards).
+- Voice capture upgrades (MediaRecorder support).
+- IaC automation for remote deployments.
 
-- Real-time cost accounting for cloud routes.
-- Completing UniFi Access integration when credentials are available.
-- CLI improvements (log streaming, status dashboard).
-- Browser MediaRecorder support for voice capture.
-- Infrastructure-as-code automation (Terraform/Ansible) for remote deployments.
+## Offline CAD with Native ARM64 Support
+| Software   | License     | ARM64 Support | Notes                                   |
+|------------|-------------|---------------|-----------------------------------------|
+| FreeCAD    | Open Source | ✅ Native     | Parametric, STEP/IGES support           |
+| OpenSCAD   | Open Source | ✅ Universal  | Scripted CAD, CGAL kernel               |
+| Blender    | Open Source | ✅ Native     | CAD-adjacent mesh workflows             |
+| Fusion 360 | Commercial  | ✅ Native     | Cloud/tethered, hobbyist tier           |
+| Shapr3D    | Commercial  | ✅ Native     | Touch-first workflow, STEP/IGES         |
+| SolveSpace | Open Source | ⚠️ Nightly    | Universal nightly builds (test first)   |
+| Build123d  | Open Source | ⚠️ Workaround | Requires conda/Nix on ARM64             |
+| BRL-CAD    | Open Source | ⚠️ Source     | Manual build on ARM64                   |
+
+## References
+1. https://github.com/FreeCAD/FreeCAD-Bundle/releases/tag/weekly-builds
+2. https://wiki.freecad.org/Download#macOS
+3. https://openscad.org/downloads.html
+4. https://openscad.org/news/2023/02/19/legacy-releases.html#
+5. https://www.blender.org/download/releases/2-93/
+6. https://www.blender.org/download/releases/4-0/
+7. https://www.autodesk.com/products/fusion-360/blog/apple-silicon/
+8. https://forums.autodesk.com/t5/fusion-support-forum/apple-silicon-m3/td/p/12353926
+9. https://forums.autodesk.com/t5/fusion-support-forum/is-autodesk-ever-going-to-fix-fusion-360-for-apple/td/p/12513643
+10. https://support.shapr3d.com/hc/en-us/articles/4405755373842-Install-Shapr3D-on-macOS
+11. https://solvespace.com/download.pl
+12. https://solvespace.com/forum.pl?action=viewthread&parent=5892&tt=1731684130
+13. https://discourse.nixos.org/t/hoping-to-make-a-aarch64-darwin-flake-for-cadquery-ocp-libclang-dylib-woes/28261
+14. https://cadquery.discourse.group/t/build123d-on-apple-silicon/1571/7
+15. https://github.com/BRL-CAD/brlcad/issues/743
+16. https://forums.autodesk.com/t5/fusion-support-forum/about-offline-mode/td/p/11327824

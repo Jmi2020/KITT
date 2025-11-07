@@ -335,3 +335,4 @@ volumes:
   grafana_data:
   tempo_data:
   qdrant_data:
+  broker-logs:

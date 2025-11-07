@@ -3,6 +3,7 @@
 Enhanced with real-time system health monitoring and Docker service management.
 """
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -185,7 +186,7 @@ class KittyLauncherApp(App):
         self.notify("✓ Launching CLI in this terminal...")
 
         # Wait briefly for user to see status
-        await self.app.sleep(0.8)
+        await asyncio.sleep(0.8)
 
         # Exit the Textual app cleanly
         self.exit()

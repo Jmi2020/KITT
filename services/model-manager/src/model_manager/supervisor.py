@@ -84,12 +84,14 @@ class ServerSupervisor:
         self,
         config: Optional[ServerConfig] = None,
         wait_for_ready: bool = True,
+        on_progress: Optional[Callable[[HealthCheckResult, int, int], None]] = None,
     ) -> SupervisorState:
         """Start server with supervision.
 
         Args:
             config: Server configuration (loads from .env if not provided)
             wait_for_ready: If True, wait for server to be ready before returning
+            on_progress: Optional progress callback (result, attempt, max_attempts)
 
         Returns:
             SupervisorState after startup
@@ -119,7 +121,9 @@ class ServerSupervisor:
         if wait_for_ready:
             logger.info("Waiting for server to be ready...")
             try:
-                result = sync_wait_for_ready(config.endpoint, max_retries=120)
+                result = sync_wait_for_ready(
+                    config.endpoint, max_retries=120, on_progress=on_progress
+                )
                 state = self._get_state()
                 state.last_health_check = result
                 state.status = ServerStatus.READY
@@ -159,6 +163,7 @@ class ServerSupervisor:
         config: Optional[ServerConfig] = None,
         force: bool = False,
         wait_for_ready: bool = True,
+        on_progress: Optional[Callable[[HealthCheckResult, int, int], None]] = None,
     ) -> SupervisorState:
         """Restart server with optional new configuration.
 
@@ -166,6 +171,7 @@ class ServerSupervisor:
             config: New configuration (uses current if not provided)
             force: If True, force kill existing process
             wait_for_ready: If True, wait for ready after restart
+            on_progress: Optional progress callback (result, attempt, max_attempts)
 
         Returns:
             SupervisorState after restart
@@ -181,7 +187,7 @@ class ServerSupervisor:
             self.stop(force=force)
 
         # Start with new config
-        return self.start(config=config, wait_for_ready=wait_for_ready)
+        return self.start(config=config, wait_for_ready=wait_for_ready, on_progress=on_progress)
 
     def auto_restart(
         self,
@@ -241,6 +247,7 @@ class ServerSupervisor:
         model_path: str,
         alias: Optional[str] = None,
         wait_for_ready: bool = True,
+        on_progress: Optional[Callable[[HealthCheckResult, int, int], None]] = None,
     ) -> SupervisorState:
         """Switch to a different model (hot-swap).
 
@@ -248,6 +255,7 @@ class ServerSupervisor:
             model_path: Relative path to model from models_dir
             alias: Optional model alias
             wait_for_ready: If True, wait for ready after switch
+            on_progress: Optional progress callback (result, attempt, max_attempts)
 
         Returns:
             SupervisorState after switch
@@ -259,7 +267,7 @@ class ServerSupervisor:
         config = self.config_manager.load()
 
         # Restart with new config
-        return self.restart(config=config, wait_for_ready=wait_for_ready)
+        return self.restart(config=config, wait_for_ready=wait_for_ready, on_progress=on_progress)
 
     def get_state(self) -> SupervisorState:
         """Get current supervisor state.

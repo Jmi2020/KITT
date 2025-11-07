@@ -414,11 +414,46 @@ class ModelManagerApp(App):
 
     async def action_start_server(self) -> None:
         """Start llama.cpp server."""
+        import time
+
         if self.log_panel:
             self.log_panel.add_log("Starting server...", "info")
 
+        start_time = time.time()
+
+        # Progress callback for model loading
+        def on_progress(result, attempt, max_attempts):
+            """Handle progress updates from health checker."""
+            try:
+                elapsed = int(time.time() - start_time)
+                status_msg = result.status.value if result.status else "unknown"
+
+                # Create progress message based on status
+                if status_msg == "READY":
+                    msg = f"Model loaded ({attempt} checks, {elapsed}s elapsed)"
+                    log_type = "success"
+                elif status_msg == "LOADING":
+                    msg = f"Loading model... ({attempt}/{max_attempts}, {elapsed}s elapsed)"
+                    log_type = "info"
+                elif status_msg == "STARTING":
+                    msg = f"Server starting... ({attempt}/{max_attempts}, {elapsed}s elapsed)"
+                    log_type = "info"
+                else:
+                    msg = f"Status: {status_msg} ({attempt}/{max_attempts}, {elapsed}s elapsed)"
+                    log_type = "warning"
+
+                # Thread-safe UI update - post to event loop
+                if self.log_panel:
+                    self.call_from_thread(self.log_panel.add_log, msg, log_type)
+            except Exception as e:
+                # Log errors in progress callback without failing
+                import logging
+                logging.error(f"Progress callback error: {e}")
+
         try:
-            state = await asyncio.to_thread(self.supervisor.start, wait_for_ready=True)
+            state = await asyncio.to_thread(
+                self.supervisor.start, wait_for_ready=True, on_progress=on_progress
+            )
             if self.log_panel:
                 self.log_panel.add_log(
                     f"Server started (PID: {state.pid})", "success"
@@ -442,12 +477,45 @@ class ModelManagerApp(App):
 
     async def action_restart_server(self) -> None:
         """Restart llama.cpp server."""
+        import time
+
         if self.log_panel:
             self.log_panel.add_log("Restarting server...", "info")
 
+        start_time = time.time()
+
+        # Progress callback for model loading
+        def on_progress(result, attempt, max_attempts):
+            """Handle progress updates from health checker."""
+            try:
+                elapsed = int(time.time() - start_time)
+                status_msg = result.status.value if result.status else "unknown"
+
+                # Create progress message based on status
+                if status_msg == "READY":
+                    msg = f"Model loaded ({attempt} checks, {elapsed}s elapsed)"
+                    log_type = "success"
+                elif status_msg == "LOADING":
+                    msg = f"Loading model... ({attempt}/{max_attempts}, {elapsed}s elapsed)"
+                    log_type = "info"
+                elif status_msg == "STARTING":
+                    msg = f"Server starting... ({attempt}/{max_attempts}, {elapsed}s elapsed)"
+                    log_type = "info"
+                else:
+                    msg = f"Status: {status_msg} ({attempt}/{max_attempts}, {elapsed}s elapsed)"
+                    log_type = "warning"
+
+                # Thread-safe UI update - post to event loop
+                if self.log_panel:
+                    self.call_from_thread(self.log_panel.add_log, msg, log_type)
+            except Exception as e:
+                # Log errors in progress callback without failing
+                import logging
+                logging.error(f"Progress callback error: {e}")
+
         try:
             state = await asyncio.to_thread(
-                self.supervisor.restart, wait_for_ready=True
+                self.supervisor.restart, wait_for_ready=True, on_progress=on_progress
             )
             if self.log_panel:
                 self.log_panel.add_log(

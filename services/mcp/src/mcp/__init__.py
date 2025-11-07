@@ -7,9 +7,13 @@ from .server import (
     ToolDefinition,
     ToolResult,
 )
-from .servers.cad_server import CADMCPServer
-from .servers.homeassistant_server import HomeAssistantMCPServer
-from .servers.memory_server import MemoryMCPServer
+from .servers import (
+    BrokerMCPServer,
+    CADMCPServer,
+    HomeAssistantMCPServer,
+    MemoryMCPServer,
+    ResearchMCPServer,
+)
 
 __all__ = [
     "MCPServer",
@@ -17,7 +21,9 @@ __all__ = [
     "ResourceDefinition",
     "PromptDefinition",
     "ToolResult",
+    "BrokerMCPServer",
     "CADMCPServer",
     "HomeAssistantMCPServer",
     "MemoryMCPServer",
+    "ResearchMCPServer",
 ]

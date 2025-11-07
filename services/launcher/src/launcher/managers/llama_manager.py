@@ -1,8 +1,10 @@
 """llama.cpp server management and monitoring."""
 
 import os
+import re
 from dataclasses import dataclass
-from typing import Optional
+from pathlib import Path
+from typing import Iterable, Optional, Sequence
 
 import httpx
 
@@ -19,8 +21,13 @@ class LlamaServerStatus:
     error: Optional[str] = None
 
 
+DEFAULT_PORT = 8080
+LEGACY_PORTS = (8082, 8081)
+PID_FILE = Path(".logs/llamacpp.pid")
+
+
 class LlamaManager:
-    """Manage llama.cpp server monitoring."""
+    """Manage llama.cpp server monitoring with automatic port discovery."""
 
     def __init__(
         self,
@@ -36,9 +43,15 @@ class LlamaManager:
             timeout: HTTP request timeout in seconds
         """
         self.host = host
-        self.port = port or int(os.getenv("LLAMACPP_PORT", "8082"))
         self.timeout = timeout
-        self.base_url = f"http://{self.host}:{self.port}"
+        self._configured_port = port or self._read_configured_port()
+        self._discovered_port: Optional[int] = None
+
+    def _read_configured_port(self) -> int:
+        env_port = os.getenv("LLAMACPP_PORT")
+        if env_port and env_port.isdigit():
+            return int(env_port)
+        return DEFAULT_PORT
 
     async def get_status(self) -> LlamaServerStatus:
         """Get llama.cpp server status.
@@ -46,44 +59,53 @@ class LlamaManager:
         Returns:
             LlamaServerStatus with health and model info
         """
-        url = f"{self.base_url}/health"
+        for port in self._candidate_ports():
+            status = await self._probe_port(port)
+            if status.running:
+                self._discovered_port = port
+                return status
 
+        # Use last status if any probes were attempted; otherwise, return generic failure.
+        return status if "status" in locals() else LlamaServerStatus(
+            running=False,
+            url=f"http://{self.host}:{self._configured_port}",
+            error="Unable to connect to llama.cpp on any known port",
+        )
+
+    async def _probe_port(self, port: int) -> LlamaServerStatus:
+        base_url = f"http://{self.host}:{port}"
+        url = f"{base_url}/health"
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(url)
-
                 if response.status_code == 200:
-                    # Server is healthy - try to get model info
-                    model_info = await self._get_model_info(client)
-
+                    model_info = await self._get_model_info(client, base_url)
                     return LlamaServerStatus(
                         running=True,
-                        url=self.base_url,
+                        url=base_url,
                         model=model_info.get("model"),
                         n_ctx=model_info.get("n_ctx"),
                         n_gpu_layers=model_info.get("n_gpu_layers"),
                     )
-                else:
-                    return LlamaServerStatus(
-                        running=False,
-                        url=self.base_url,
-                        error=f"Server returned {response.status_code}",
-                    )
-
+                return LlamaServerStatus(
+                    running=False,
+                    url=base_url,
+                    error=f"Server returned {response.status_code}",
+                )
         except (httpx.ConnectError, httpx.TimeoutException) as e:
             return LlamaServerStatus(
                 running=False,
-                url=self.base_url,
+                url=base_url,
                 error=f"Connection failed: {type(e).__name__}",
             )
         except Exception as e:
             return LlamaServerStatus(
                 running=False,
-                url=self.base_url,
+                url=base_url,
                 error=f"Error: {e}",
             )
 
-    async def _get_model_info(self, client: httpx.AsyncClient) -> dict:
+    async def _get_model_info(self, client: httpx.AsyncClient, base_url: str) -> dict:
         """Get model information from server.
 
         Args:
@@ -94,7 +116,7 @@ class LlamaManager:
         """
         try:
             # Try to get model info from /props endpoint
-            response = await client.get(f"{self.base_url}/props")
+            response = await client.get(f"{base_url}/props")
             if response.status_code == 200:
                 data = response.json()
                 return {
@@ -110,6 +132,46 @@ class LlamaManager:
             pass
 
         return {}
+
+    def _candidate_ports(self) -> Iterable[int]:
+        """Generate ports to probe: configured, discovered, pid hint, legacy."""
+        seen = set()
+
+        def add(port: Optional[int]):
+            if port and port not in seen:
+                seen.add(port)
+                yield port
+
+        yield from add(self._configured_port)
+        yield from add(self._discovered_port)
+        yield from add(self._port_from_pid())
+        for legacy in LEGACY_PORTS:
+            yield from add(legacy)
+
+    def _port_from_pid(self) -> Optional[int]:
+        """Try to read the running port from the llama.cpp process."""
+        pid = None
+        try:
+            if PID_FILE.exists():
+                pid = int(PID_FILE.read_text().strip())
+        except Exception:
+            pid = None
+
+        if not pid:
+            return None
+
+        try:
+            import psutil
+
+            proc = psutil.Process(pid)
+            cmdline = " ".join(proc.cmdline())
+            match = re.search(r"--port\s+(\d+)", cmdline)
+            if match:
+                return int(match.group(1))
+        except Exception:
+            return None
+
+        return None
 
     def get_process_status(self) -> bool:
         """Check if llama.cpp process is running via process list.

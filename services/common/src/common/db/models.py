@@ -100,6 +100,43 @@ class SafetyEventStatus(enum.Enum):
     denied = "denied"
 
 
+class GoalType(enum.Enum):
+    research = "research"
+    fabrication = "fabrication"
+    improvement = "improvement"
+    optimization = "optimization"
+
+
+class GoalStatus(enum.Enum):
+    identified = "identified"
+    approved = "approved"
+    rejected = "rejected"
+    completed = "completed"
+
+
+class ProjectStatus(enum.Enum):
+    proposed = "proposed"
+    approved = "approved"
+    in_progress = "in_progress"
+    completed = "completed"
+    cancelled = "cancelled"
+
+
+class TaskStatus(enum.Enum):
+    pending = "pending"
+    in_progress = "in_progress"
+    completed = "completed"
+    failed = "failed"
+    blocked = "blocked"
+
+
+class TaskPriority(enum.Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+    critical = "critical"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -345,8 +382,99 @@ class ConversationProject(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class Goal(Base):
+    """High-level objectives identified by KITTY for autonomous work."""
+
+    __tablename__ = "goals"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    goal_type: Mapped[GoalType] = mapped_column(Enum(GoalType), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    estimated_budget: Mapped[float] = mapped_column(Numeric(12, 6), nullable=False)
+    estimated_duration_hours: Mapped[Optional[int]] = mapped_column(Integer)
+    status: Mapped[GoalStatus] = mapped_column(Enum(GoalStatus), default=GoalStatus.identified)
+    identified_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    approved_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    goal_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+    projects: Mapped[List["Project"]] = relationship(back_populates="goal")
+    approver: Mapped[Optional[User]] = relationship()
+
+
+class Project(Base):
+    """Autonomous projects KITTY undertakes to achieve goals."""
+
+    __tablename__ = "projects"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    goal_id: Mapped[Optional[str]] = mapped_column(ForeignKey("goals.id"))
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[ProjectStatus] = mapped_column(
+        Enum(ProjectStatus), default=ProjectStatus.proposed
+    )
+    budget_allocated: Mapped[float] = mapped_column(Numeric(12, 6), default=0.0)
+    budget_spent: Mapped[float] = mapped_column(Numeric(12, 6), default=0.0)
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    project_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+    goal: Mapped[Optional[Goal]] = relationship(back_populates="projects")
+    tasks: Mapped[List["Task"]] = relationship(back_populates="project")
+    creator: Mapped[Optional[User]] = relationship()
+
+
+class Task(Base):
+    """Actionable steps within projects, supporting dependencies and scheduling."""
+
+    __tablename__ = "tasks"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[TaskStatus] = mapped_column(Enum(TaskStatus), default=TaskStatus.pending)
+    priority: Mapped[TaskPriority] = mapped_column(
+        Enum(TaskPriority), default=TaskPriority.medium
+    )
+    depends_on: Mapped[Optional[str]] = mapped_column(ForeignKey("tasks.id"))
+    assigned_to: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    scheduled_for: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    result: Mapped[dict] = mapped_column(JSONB, default=dict)
+    task_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+    project: Mapped[Project] = relationship(back_populates="tasks")
+    dependency: Mapped[Optional["Task"]] = relationship(remote_side="Task.id")
+    assignee: Mapped[Optional[User]] = relationship()
+
+
 __all__ = [
     "Base",
+    # Enums
+    "RoleEnum",
+    "HazardLevel",
+    "DeviceKind",
+    "CommandStatus",
+    "TelemetryStatus",
+    "RoutingTier",
+    "CADProvider",
+    "CADPolicy",
+    "CADStatus",
+    "FabricationStatus",
+    "SafetyEventType",
+    "SafetyEventStatus",
+    "GoalType",
+    "GoalStatus",
+    "ProjectStatus",
+    "TaskStatus",
+    "TaskPriority",
+    # Models
     "User",
     "Zone",
     "ZonePresence",
@@ -363,4 +491,7 @@ __all__ = [
     "AccessPolicy",
     "Notification",
     "ConversationProject",
+    "Goal",
+    "Project",
+    "Task",
 ]
