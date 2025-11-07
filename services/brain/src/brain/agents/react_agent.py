@@ -91,11 +91,22 @@ class ReActAgent:
 Available Tools:
 {tools_text}
 
-Use this format:
-Thought: Think about what you need to do
-Action: tool_name
-Action Input: {{"param": "value"}}
-Observation: [tool result will be inserted here]
+IMPORTANT: When you need to use a tool, output EXACTLY this XML format:
+<tool_call>{{"name": "tool_name", "arguments": {{"param": "value"}}}}</tool_call>
+
+Example - Generate a CAD model:
+Thought: The user wants a 3D model of a sphere. I should use the generate_cad_model tool.
+<tool_call>{{"name": "generate_cad_model", "arguments": {{"prompt": "sphere 2 inches diameter"}}}}</tool_call>
+
+Example - Control a device:
+Thought: The user wants to turn on the living room lights. I'll use the control_device tool.
+<tool_call>{{"name": "control_device", "arguments": {{"domain": "light", "service": "turn_on", "entity_id": "light.living_room"}}}}</tool_call>
+
+Example - Search the web:
+Thought: I need to find information about GPU optimization. I'll search the web.
+<tool_call>{{"name": "web_search", "arguments": {{"query": "llama.cpp Metal GPU optimization", "max_results": 5}}}}</tool_call>
+
+DO NOT make up URLs or fake results. ALWAYS use tools when the user requests an action that requires them.
 
 When you have enough information to answer:
 Thought: I now know the final answer

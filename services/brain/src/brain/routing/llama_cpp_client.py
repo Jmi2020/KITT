@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
 import httpx
 
 from ..tools.parser import ToolCall, parse_tool_calls
 from .config import LlamaCppConfig, get_routing_config
+
+logger = logging.getLogger(__name__)
 
 
 class LlamaCppClient:
@@ -53,6 +56,7 @@ class LlamaCppClient:
         # Include tools if provided (requires llama-server with --jinja -fa flags)
         if tools:
             payload["tools"] = tools
+            logger.info(f"Passing {len(tools)} tools to llama.cpp: {[t['function']['name'] for t in tools]}")
 
         async with httpx.AsyncClient(
             base_url=self._base_url, timeout=self._config.timeout_seconds
@@ -76,6 +80,10 @@ class LlamaCppClient:
         cleaned_text = completion or ""
         if tools and completion:
             tool_calls, cleaned_text = parse_tool_calls(completion)
+            if tool_calls:
+                logger.info(f"Parsed {len(tool_calls)} tool calls from response: {[tc.name for tc in tool_calls]}")
+            else:
+                logger.warning("No tool calls found in model response despite tools being provided")
 
         return {
             "response": cleaned_text,
