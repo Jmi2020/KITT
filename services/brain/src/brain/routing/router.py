@@ -18,6 +18,7 @@ from common.cache import CacheRecord, SemanticCache
 
 from ..metrics import record_decision
 from ..metrics.slo import SLOCalculator
+from ..logging_config import log_routing_decision, log_confidence_analysis
 from .audit_store import RoutingAuditStore
 from .cloud_clients import FrontierClient, MCPClient
 from .config import RoutingConfig, get_routing_config
@@ -31,7 +32,7 @@ from .pricing import estimate_cost
 from ..agents import ReActAgent
 from ..tools.mcp_client import MCPClient as ToolMCPClient
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("brain.routing")
 
 
 class RoutingRequest(BaseModel):
@@ -146,6 +147,24 @@ class BrainRouter:
             or request.freshness_required
         )
 
+        # Log confidence analysis
+        reason = []
+        if result.confidence < self._config.thresholds.local_confidence:
+            reason.append(f"low confidence ({result.confidence:.2f} < {self._config.thresholds.local_confidence})")
+        if request.force_tier == RoutingTier.mcp:
+            reason.append("forced MCP tier")
+        if request.freshness_required:
+            reason.append("freshness required")
+
+        log_confidence_analysis(
+            logger=logger,
+            prompt=request.prompt,
+            local_confidence=result.confidence,
+            needs_escalation=needs_escalation,
+            reason=" + ".join(reason) if reason else "local sufficient",
+            model=result.metadata.get("model", "unknown") if result.metadata else "unknown",
+        )
+
         if needs_escalation:
             # Try MCP first (cheaper)
             if self._mcp:
@@ -212,6 +231,19 @@ class BrainRouter:
             or self._config.local_models[0],
             "host": self._config.llamacpp.host,
         }
+
+        # Log routing decision
+        log_routing_decision(
+            logger=logger,
+            tier="local",
+            model=metadata["model"],
+            confidence=confidence,
+            cost=_COST_BY_TIER[RoutingTier.local],
+            prompt=request.prompt,
+            response=output,
+            metadata=metadata,
+        )
+
         return RoutingResult(
             output=output,
             tier=RoutingTier.local,
@@ -230,6 +262,19 @@ class BrainRouter:
         if not output:
             return None
         metadata = {"provider": "perplexity_mcp"}
+
+        # Log routing decision
+        log_routing_decision(
+            logger=logger,
+            tier="mcp",
+            model="perplexity",
+            confidence=0.6,
+            cost=_COST_BY_TIER[RoutingTier.mcp],
+            prompt=request.prompt,
+            response=output,
+            metadata=metadata,
+        )
+
         return RoutingResult(
             output=output,
             tier=RoutingTier.mcp,
@@ -249,6 +294,19 @@ class BrainRouter:
             return None
         output = choices[0]["message"]["content"]
         metadata = {"provider": "frontier_llm", "model": settings.openai_model}
+
+        # Log routing decision
+        log_routing_decision(
+            logger=logger,
+            tier="frontier",
+            model=settings.openai_model,
+            confidence=0.9,
+            cost=_COST_BY_TIER[RoutingTier.frontier],
+            prompt=request.prompt,
+            response=output,
+            metadata=metadata,
+        )
+
         return RoutingResult(
             output=output,
             tier=RoutingTier.frontier,

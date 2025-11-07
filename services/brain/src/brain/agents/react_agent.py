@@ -10,10 +10,11 @@ from typing import Any, Dict, List, Optional
 from brain.routing.llama_cpp_client import LlamaCppClient
 from brain.tools.mcp_client import MCPClient
 from brain.tools.model_config import detect_model_format
+from brain.logging_config import log_agent_step
 
 from .prompt_templates import get_tool_call_examples
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("brain.agent")
 
 
 @dataclass
@@ -193,6 +194,16 @@ User Question: {query}
                     logger.error(f"Tool execution failed: {e}")
                     observation = f"Tool execution failed: {str(e)}"
 
+                # Log agent step with action
+                log_agent_step(
+                    logger=logger,
+                    iteration=iteration + 1,
+                    thought=thought,
+                    action=f"{action}({action_input})",
+                    observation=observation,
+                    model=self._model_format.value,
+                )
+
                 # Record step
                 history.append(
                     AgentStep(
@@ -205,6 +216,16 @@ User Question: {query}
 
             else:
                 # No tool call and no final answer - just reasoning
+                # Log agent step without action
+                log_agent_step(
+                    logger=logger,
+                    iteration=iteration + 1,
+                    thought=thought,
+                    action=None,
+                    observation=None,
+                    model=self._model_format.value,
+                )
+
                 history.append(
                     AgentStep(
                         thought=thought,

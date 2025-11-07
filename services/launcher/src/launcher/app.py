@@ -3,7 +3,9 @@
 Enhanced with real-time system health monitoring and Docker service management.
 """
 
+import os
 import subprocess
+import sys
 
 import typer
 from textual.app import App, ComposeResult
@@ -12,6 +14,7 @@ from textual.containers import Container, Vertical
 from textual.widgets import Footer, Header, Static
 
 from launcher.panels.system_status import DetailedStatusPanel, SystemStatusPanel
+from launcher.viewers import ReasoningLogViewer
 
 
 class WelcomePanel(Static):
@@ -34,13 +37,13 @@ class WelcomePanel(Static):
                     "  [bold]h[/bold] - Toggle system health status\n"
                     "  [bold]d[/bold] - Toggle detailed service list\n"
                     "  [bold]s[/bold] - Show startup instructions\n"
-                    "  [bold]m[/bold] - Launch Model Manager TUI\n"
-                    "  [bold]c[/bold] - Launch CLI (external terminal)\n"
+                    "  [bold]r[/bold] - Toggle reasoning log viewer\n"
+                    "  [bold]m[/bold] - Launch Model Manager (replaces launcher in this window)\n"
+                    "  [bold]c[/bold] - Launch CLI (validates health, replaces launcher)\n"
                     "  [bold]q[/bold] - Quit\n\n"
                     "[dim]Full features coming:[/dim]\n"
                     "  • Embedded CLI interface\n"
                     "  • Voice capture and transcripts\n"
-                    "  • Aggregated log viewing\n"
                     "  • Web UI shortcuts")
 
 
@@ -87,6 +90,7 @@ class KittyLauncherApp(App):
         Binding("h", "toggle_health", "Health Status"),
         Binding("d", "toggle_details", "Service Details"),
         Binding("s", "toggle_startup", "Startup Info"),
+        Binding("r", "toggle_reasoning", "Reasoning Logs"),
         Binding("m", "launch_model_manager", "Model Manager"),
         Binding("c", "launch_cli", "CLI"),
     ]
@@ -96,6 +100,7 @@ class KittyLauncherApp(App):
         self.show_startup = False
         self.show_health = False
         self.show_details = False
+        self.show_reasoning = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -107,6 +112,8 @@ class KittyLauncherApp(App):
                 yield DetailedStatusPanel()
             if self.show_startup:
                 yield StartupPanel()
+            if self.show_reasoning:
+                yield ReasoningLogViewer()
         yield Footer()
 
     def action_toggle_health(self) -> None:
@@ -128,30 +135,63 @@ class KittyLauncherApp(App):
         self.show_startup = not self.show_startup
         self.refresh(recompose=True)
 
-    def action_launch_model_manager(self) -> None:
-        """Launch Model Manager TUI in external terminal."""
-        self.notify("Launching Model Manager TUI...")
-        try:
-            # Try to launch in new terminal window
-            subprocess.Popen([
-                "osascript", "-e",
-                'tell application "Terminal" to do script "kitty-model-manager tui"'
-            ])
-            self.notify("Model Manager TUI launched in new terminal")
-        except Exception as e:
-            self.notify(f"Error launching Model Manager: {e}", severity="error")
+    def action_toggle_reasoning(self) -> None:
+        """Toggle reasoning log viewer panel."""
+        self.show_reasoning = not self.show_reasoning
+        self.refresh(recompose=True)
+        status = "shown" if self.show_reasoning else "hidden"
+        self.notify(f"Reasoning logs {status}")
 
-    def action_launch_cli(self) -> None:
-        """Launch CLI in external terminal."""
-        self.notify("Launching KITTY CLI...")
-        try:
-            subprocess.Popen([
-                "osascript", "-e",
-                'tell application "Terminal" to do script "kitty-cli shell"'
-            ])
-            self.notify("KITTY CLI launched in new terminal")
-        except Exception as e:
-            self.notify(f"Error launching CLI: {e}", severity="error")
+    def action_launch_model_manager(self) -> None:
+        """Launch Model Manager TUI in same terminal, replacing launcher."""
+        # Exit the Textual app cleanly
+        self.exit()
+
+        # Replace current process with model manager (takes over same terminal)
+        os.execvp("kitty-model-manager", ["kitty-model-manager", "tui"])
+
+    async def action_launch_cli(self) -> None:
+        """Launch CLI in same terminal after health checks, replacing launcher."""
+        from launcher.managers.docker_manager import DockerManager
+        from launcher.managers.llama_manager import LlamaManager
+
+        self.notify("Checking system health before launching CLI...")
+
+        # Initialize managers
+        llama_manager = LlamaManager()
+        docker_manager = DockerManager()
+
+        # Check llama.cpp health
+        llama_status = await llama_manager.get_status()
+        if not llama_status.running:
+            self.notify("❌ llama.cpp is not running. Start model first (press 'm')", severity="error")
+            return
+
+        # Check Docker health
+        if not docker_manager.is_docker_running():
+            self.notify("❌ Docker is not running. Start Docker first", severity="error")
+            return
+
+        # Check Docker services
+        services = docker_manager.list_services()
+        running_count = sum(1 for s in services if s.state == "running")
+        if running_count == 0:
+            self.notify("❌ No Docker services running. Run start-kitty.sh first", severity="error")
+            return
+
+        # All checks passed - show status and exit
+        self.notify(f"✓ llama.cpp: {llama_status.model or 'running'}")
+        self.notify(f"✓ Docker services: {running_count}/{len(services)} running")
+        self.notify("✓ Launching CLI in this terminal...")
+
+        # Wait briefly for user to see status
+        await self.app.sleep(0.8)
+
+        # Exit the Textual app cleanly
+        self.exit()
+
+        # Replace current process with CLI (takes over same terminal)
+        os.execvp("kitty-cli", ["kitty-cli", "shell"])
 
 
 cli_app = typer.Typer(help="KITTY Unified Launcher TUI")

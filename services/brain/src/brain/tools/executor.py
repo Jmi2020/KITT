@@ -3,12 +3,16 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Optional, Set
 
 from common.db.models import RoutingTier
 
 from ..routing.permission import PermissionManager
+from ..logging_config import log_tool_execution
 from .mcp_client import MCPClient
+
+logger = logging.getLogger("brain.tools")
 
 # Import safety workflow (optional dependency)
 try:
@@ -115,7 +119,20 @@ class SafeToolExecutor:
                 }
 
         # Execute tool via MCP client
-        return await self._mcp.execute_tool(tool_name, arguments)
+        result = await self._mcp.execute_tool(tool_name, arguments)
+
+        # Log tool execution
+        cost = self._estimate_tool_cost(tool_name) if tool_name in self._cloud_tools else 0.0
+        log_tool_execution(
+            logger=logger,
+            tool_name=tool_name,
+            args=arguments,
+            result=result,
+            cost=cost,
+            model=self._get_tool_provider(tool_name),
+        )
+
+        return result
 
     async def _check_hazard_safety(
         self,

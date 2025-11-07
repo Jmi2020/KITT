@@ -67,6 +67,9 @@ cp .env.example .env
 # Stop everything
 ./ops/scripts/stop-kitty.sh
 
+# Only stop llama.cpp (leave Docker stack alone)
+./ops/scripts/stop-llamacpp.sh
+
 # Check service status
 docker compose -f infra/compose/docker-compose.yml ps
 ```
@@ -93,7 +96,9 @@ kitty-cli say "What printers are online?"
 kitty-cli say "Turn on bench lights"
 ```
 
-### Unified Launcher TUI (NEW!)
+### Unified Launcher TUI (Recommended!)
+
+**The easiest way to manage KITTY** - single command interface with live system monitoring:
 
 ```bash
 # Install Unified Launcher (one-time)
@@ -102,15 +107,29 @@ pip install -e services/launcher/
 # Launch unified launcher - single command for everything
 kitty
 
-# TUI Commands:
+# TUI Features:
+# h - Toggle system health status (Docker services, llama.cpp)
+# d - Toggle detailed service list (all containers with ports)
+# r - Toggle reasoning log viewer (watch AI thinking in real-time!)
 # s - Show startup instructions
-# m - Launch Model Manager TUI
-# c - Launch CLI in new terminal
+# m - Launch Model Manager (replaces launcher in same terminal)
+# c - Launch CLI (validates health, replaces launcher in same terminal)
 # q - Quit
 
-# Note: This is MVP v0.1 - more features coming soon!
-# Full Docker management, embedded CLI, voice, logs in future releases
+# What you get:
+# ✓ Real-time Docker service health monitoring
+# ✓ llama.cpp server status with model info
+# ✓ Live reasoning logs with tier distribution, confidence, costs
+# ✓ Quick access to Model Manager and CLI
+# ✓ Beautiful terminal UI with color coding
 ```
+
+**Reasoning Log Viewer** (`r` key in launcher):
+- Shows last 50 log entries with color coding by type
+- Statistics: tier distribution, model usage, confidence scores
+- Cost tracking across all routing decisions
+- Auto-refreshes every 2 seconds
+- Perfect for understanding how KITTY thinks and routes queries
 
 ### Model Manager TUI
 
@@ -175,6 +194,8 @@ alembic -c services/common/alembic.ini current         # Show current version
 docker compose -f infra/compose/docker-compose.yml logs brain      # Brain service logs
 docker compose -f infra/compose/docker-compose.yml logs -f gateway # Follow gateway logs
 tail -f .logs/llamacpp.log                                         # llama.cpp logs
+# Stop llama.cpp if you launched it manually
+./ops/scripts/stop-llamacpp.sh
 
 # Rebuild specific service
 docker compose -f infra/compose/docker-compose.yml build --no-cache brain
