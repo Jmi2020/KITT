@@ -101,8 +101,8 @@ class BrainRouter:
         self._slo_calculator = slo_calculator or SLOCalculator()
         self._permission = permission_manager or PermissionManager()
 
-        # Initialize tool MCP client and ReAct agent
-        self._tool_mcp = tool_mcp_client or ToolMCPClient()
+        # Initialize tool MCP client with Perplexity integration and ReAct agent
+        self._tool_mcp = tool_mcp_client or ToolMCPClient(perplexity_client=self._mcp)
         self._agent = ReActAgent(
             llm_client=self._llama,
             mcp_client=self._tool_mcp,

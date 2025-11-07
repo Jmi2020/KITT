@@ -45,6 +45,7 @@ class MCPClient:
         memory_service_url: str | None = None,
         ha_service_url: str | None = None,
         broker_url: str | None = None,
+        perplexity_client: Any = None,
     ) -> None:
         """Initialize MCP client with server connections.
 
@@ -53,6 +54,7 @@ class MCPClient:
             memory_service_url: Optional memory service URL
             ha_service_url: Optional Home Assistant service URL
             broker_url: Optional Command Broker service URL
+            perplexity_client: Optional Perplexity MCP client for premium web search
         """
         # Initialize MCP servers
         self._servers: Dict[str, Any] = {}
@@ -87,9 +89,9 @@ class MCPClient:
                     ha_client = HomeAssistantClient(credentials=creds)
                     self._servers["homeassistant"] = HomeAssistantMCPServer(ha_client=ha_client)
 
-            # Research server
+            # Research server with optional Perplexity integration
             if callable(ResearchMCPServer):
-                self._servers["research"] = ResearchMCPServer()
+                self._servers["research"] = ResearchMCPServer(perplexity_client=perplexity_client)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Disabling MCP tools: %s", exc)
             self._servers.clear()

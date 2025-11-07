@@ -37,8 +37,13 @@ class ResearchMCPServer(MCPServer):
     proper source tracking and deduplication.
     """
 
-    def __init__(self) -> None:
-        """Initialize Research MCP server."""
+    def __init__(self, perplexity_client: Any = None) -> None:
+        """Initialize Research MCP server.
+
+        Args:
+            perplexity_client: Optional Perplexity MCP client for premium web search.
+                              If provided, web_search will try Perplexity first, then fallback to DuckDuckGo.
+        """
         super().__init__(
             name="research",
             description="Web research and content analysis tools with citation tracking",
@@ -50,6 +55,9 @@ class ResearchMCPServer(MCPServer):
         self._deduplicator = SimHashDeduplicator() if SimHashDeduplicator else None
         self._citations = CitationTracker() if CitationTracker else None
 
+        # Optional Perplexity client for premium search
+        self._perplexity_client = perplexity_client
+
         # Register tools if available
         if self._search_tool and self._web_tool:
             self._register_tools()
@@ -57,13 +65,13 @@ class ResearchMCPServer(MCPServer):
 
     def _register_tools(self) -> None:
         """Register research tools."""
-        # web_search tool
+        # web_search tool (DuckDuckGo - free, fast)
         self.register_tool(
             ToolDefinition(
                 name="web_search",
                 description=(
-                    "Search the web using DuckDuckGo. Returns list of search results with titles, URLs, and descriptions. "
-                    "Use this to find relevant web pages for answering questions or gathering information. "
+                    "Search the web using DuckDuckGo (free). Returns list of search results with titles, URLs, and descriptions. "
+                    "Use this for quick, general web searches. For deeper research requiring RAG-augmented analysis, use research_deep instead. "
                     "Automatically deduplicates similar results using SimHash."
                 ),
                 parameters={
@@ -85,6 +93,31 @@ class ResearchMCPServer(MCPServer):
                 },
             )
         )
+
+        # research_deep tool (Perplexity - paid, deep research)
+        if self._perplexity_client:
+            self.register_tool(
+                ToolDefinition(
+                    name="research_deep",
+                    description=(
+                        "Perform deep research using Perplexity AI (paid API, uses credits). "
+                        "Provides RAG-augmented, synthesized answers with web sources. "
+                        "Use this when web_search results are insufficient or when you need comprehensive, "
+                        "authoritative information with citation-backed analysis. "
+                        "Cost: ~$0.001-0.005 per query."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Research query requiring deep analysis (e.g., 'comprehensive comparison of Metal vs CUDA GPU acceleration for LLM inference')",
+                            },
+                        },
+                        "required": ["query"],
+                    },
+                )
+            )
 
         # fetch_webpage tool
         self.register_tool(
@@ -184,6 +217,8 @@ class ResearchMCPServer(MCPServer):
         try:
             if tool_name == "web_search":
                 return await self._web_search(arguments)
+            elif tool_name == "research_deep":
+                return await self._research_deep(arguments)
             elif tool_name == "fetch_webpage":
                 return await self._fetch_webpage(arguments)
             elif tool_name == "get_citations":
@@ -206,7 +241,7 @@ class ResearchMCPServer(MCPServer):
             )
 
     async def _web_search(self, arguments: Dict[str, Any]) -> ToolResult:
-        """Execute web search.
+        """Execute web search using DuckDuckGo.
 
         Args:
             arguments: Tool arguments with 'query' and optional 'max_results'
@@ -217,7 +252,7 @@ class ResearchMCPServer(MCPServer):
         query = arguments["query"]
         max_results = arguments.get("max_results", 10)
 
-        # Execute search
+        logger.info("DuckDuckGo search for: %s", query)
         search_result = await self._search_tool.search(query, max_results=max_results)
 
         if not search_result["success"]:
@@ -258,6 +293,60 @@ class ResearchMCPServer(MCPServer):
                 "after_dedup": len(filtered_results),
             },
         )
+
+    async def _research_deep(self, arguments: Dict[str, Any]) -> ToolResult:
+        """Execute deep research using Perplexity AI.
+
+        Args:
+            arguments: Tool arguments with 'query'
+
+        Returns:
+            ToolResult with research findings
+        """
+        query = arguments["query"]
+
+        if not self._perplexity_client:
+            return ToolResult(
+                success=False,
+                error="Perplexity API not configured (requires PERPLEXITY_API_KEY)",
+                metadata={"query": query},
+            )
+
+        try:
+            logger.info("Perplexity deep research for: %s", query)
+            perplexity_result = await self._perplexity_client.query({"query": query})
+
+            if not perplexity_result or not perplexity_result.get("output"):
+                return ToolResult(
+                    success=False,
+                    error="Perplexity returned empty response",
+                    metadata={"query": query},
+                )
+
+            output = perplexity_result["output"]
+            logger.info("Perplexity research completed (%d chars)", len(output))
+
+            return ToolResult(
+                success=True,
+                data={
+                    "query": query,
+                    "research": output,
+                    "source": "perplexity",
+                },
+                metadata={
+                    "tool": "research_deep",
+                    "query": query,
+                    "content_length": len(output),
+                },
+            )
+
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Perplexity research failed: %s", exc)
+            return ToolResult(
+                success=False,
+                error=f"Perplexity API error: {str(exc)}",
+                metadata={"query": query, "exception": str(exc)},
+            )
 
     async def _fetch_webpage(self, arguments: Dict[str, Any]) -> ToolResult:
         """Fetch and parse web page.
