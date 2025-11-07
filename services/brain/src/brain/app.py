@@ -3,12 +3,16 @@
 
 from __future__ import annotations
 
+import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from common.config import settings
 from common.logging import configure_logging
 
+from .autonomous.scheduler import get_scheduler
 from .logging_config import setup_reasoning_logging
 from .metrics import router as metrics_router
 from .routes.projects import router as projects_router
@@ -28,7 +32,57 @@ setup_reasoning_logging(
     jsonl_file=reasoning_jsonl_file,
 )
 
-app = FastAPI(title="KITTY Brain API")
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for brain service startup/shutdown.
+
+    Handles:
+    - Starting/stopping autonomous scheduler
+    - Registering scheduled jobs
+    """
+    # Startup
+    logger.info("Brain service starting up")
+
+    # Start autonomous scheduler if enabled
+    autonomous_enabled = getattr(settings, "autonomous_enabled", False)
+    if autonomous_enabled:
+        logger.info("Autonomous mode enabled, starting scheduler")
+        scheduler = get_scheduler()
+        scheduler.start()
+
+        # Register test job (will be replaced with actual autonomous workflows later)
+        def monday_test_job():
+            logger.info("🤖 Weekly autonomous cycle starting (test job)")
+
+        scheduler.add_cron_job(
+            func=monday_test_job,
+            day_of_week="mon",
+            hour=9,
+            minute=0,
+            job_id="weekly_autonomous_cycle_test",
+        )
+
+        logger.info("Autonomous scheduler started and jobs registered")
+    else:
+        logger.info("Autonomous mode disabled (AUTONOMOUS_ENABLED=false)")
+
+    yield
+
+    # Shutdown
+    logger.info("Brain service shutting down")
+
+    if autonomous_enabled:
+        logger.info("Stopping autonomous scheduler")
+        scheduler = get_scheduler()
+        scheduler.stop(wait=True)
+        logger.info("Autonomous scheduler stopped")
+
+
+app = FastAPI(title="KITTY Brain API", lifespan=lifespan)
 app.include_router(query_router)
 app.include_router(projects_router)
 app.include_router(models_router)
@@ -36,6 +90,7 @@ app.include_router(metrics_router)
 
 
 @app.get("/healthz")
+@app.get("/health")
 async def health_check() -> dict[str, str]:
     return {"status": "ok"}
 

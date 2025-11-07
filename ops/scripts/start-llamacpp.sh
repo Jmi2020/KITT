@@ -56,8 +56,22 @@ if [[ -n "$CODER_MODEL" ]]; then
   cmd+=(--model "$coder_path" --alias "$CODER_ALIAS")
 fi
 
-if [[ "$FLASH_ATTN" == "1" || "$FLASH_ATTN" == "true" ]]; then
-  cmd+=(--flash-attn)
+normalize_flash() {
+  local input="${1:-}"
+  local val
+  val="$(printf '%s' "$input" | tr '[:upper:]' '[:lower:]')"
+  case "$val" in
+    1|true|on|yes) echo "on" ;;
+    0|false|off|no) echo "off" ;;
+    auto) echo "auto" ;;
+    "" ) echo "" ;;
+    *) echo "$1" ;; # pass through custom values
+  esac
+}
+
+flash_value=$(normalize_flash "$FLASH_ATTN")
+if [[ -n "$flash_value" ]]; then
+  cmd+=(--flash-attn "$flash_value")
 fi
 
 if [[ "$TOOL_CALLING" == "1" || "$TOOL_CALLING" == "true" ]]; then

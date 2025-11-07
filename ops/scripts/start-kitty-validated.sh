@@ -201,6 +201,25 @@ else
     print_status "Port: $LLAMACPP_PORT"
     print_status "GPU Layers: $LLAMACPP_N_GPU_LAYERS"
 
+    normalize_flash_attn() {
+        local input="${1:-}"
+        local val
+        val="$(printf '%s' "$input" | tr '[:upper:]' '[:lower:]')"
+        case "$val" in
+            1|true|on|yes) echo "on" ;;
+            0|false|off|no) echo "off" ;;
+            auto) echo "auto" ;;
+            "" ) echo "" ;;
+            *) echo "$1" ;;
+        esac
+    }
+
+    FLASH_ATTN_VALUE=$(normalize_flash_attn "${LLAMACPP_FLASH_ATTN:-auto}")
+    FLASH_ARGS=()
+    if [ -n "$FLASH_ATTN_VALUE" ]; then
+        FLASH_ARGS=(--flash-attn "$FLASH_ATTN_VALUE")
+    fi
+
     # Start llama.cpp server
     llama-server \
         --model "$MODEL_PATH" \
@@ -211,8 +230,8 @@ else
         --threads "$LLAMACPP_THREADS" \
         --batch-size "$LLAMACPP_BATCH_SIZE" \
         --ubatch-size "$LLAMACPP_UBATCH_SIZE" \
-        --parallel "$LLAMACPP_PARALLEL" \
-        --flash-attn \
+        -np "$LLAMACPP_PARALLEL" \
+        "${FLASH_ARGS[@]}" \
         --log-disable \
         > .logs/llamacpp.log 2>&1 &
 
