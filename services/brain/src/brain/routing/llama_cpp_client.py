@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from ..tools.model_config import detect_model_format
 from ..tools.parser import ToolCall, parse_tool_calls
 from .config import LlamaCppConfig, get_routing_config
 
@@ -21,6 +22,11 @@ class LlamaCppClient:
         cfg = config or get_routing_config().llamacpp
         self._config = cfg
         self._base_url = cfg.host.rstrip("/")
+
+        # Detect model format for tool calling (use model_alias or primary_model)
+        model_identifier = cfg.model_alias or cfg.primary_model or "qwen2.5"
+        self._model_format = detect_model_format(model_identifier)
+        logger.info(f"LlamaCppClient initialized with format: {self._model_format.value} (model: {model_identifier})")
 
     async def generate(
         self, prompt: str, model: Optional[str] = None, tools: Optional[List[Dict[str, Any]]] = None
@@ -75,11 +81,11 @@ class LlamaCppClient:
             # fall back to joining chunks if present
             completion = data.get("generated_text") or ""
 
-        # Parse tool calls from response (Qwen2.5 uses XML format)
+        # Parse tool calls from response using detected model format
         tool_calls: List[ToolCall] = []
         cleaned_text = completion or ""
         if tools and completion:
-            tool_calls, cleaned_text = parse_tool_calls(completion)
+            tool_calls, cleaned_text = parse_tool_calls(completion, format_type=self._model_format)
             if tool_calls:
                 logger.info(f"Parsed {len(tool_calls)} tool calls from response: {[tc.name for tc in tool_calls]}")
             else:

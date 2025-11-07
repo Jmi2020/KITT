@@ -9,6 +9,9 @@ from typing import Any, Dict, List, Optional
 
 from brain.routing.llama_cpp_client import LlamaCppClient
 from brain.tools.mcp_client import MCPClient
+from brain.tools.model_config import detect_model_format
+
+from .prompt_templates import get_tool_call_examples
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,7 @@ class ReActAgent:
         llm_client: LlamaCppClient,
         mcp_client: MCPClient,
         max_iterations: int = 10,
+        model_alias: Optional[str] = None,
     ) -> None:
         """Initialize ReAct agent.
 
@@ -50,10 +54,15 @@ class ReActAgent:
             llm_client: LLM client for reasoning
             mcp_client: MCP client for tool execution
             max_iterations: Maximum reasoning iterations
+            model_alias: Optional model identifier for format detection (e.g., "kitty-coder")
         """
         self._llm = llm_client
         self._mcp = mcp_client
         self._max_iterations = max_iterations
+
+        # Detect model format for tool calling (default to Qwen if not specified)
+        self._model_format = detect_model_format(model_alias or "qwen2.5")
+        logger.info(f"ReAct agent initialized with format: {self._model_format.value}")
 
     def _build_react_prompt(
         self, query: str, tools: List[Dict[str, Any]], history: List[AgentStep]
@@ -86,27 +95,15 @@ class ReActAgent:
                 history_text += f"Action Input: {step.action_input}\n"
                 history_text += f"Observation: {step.observation}\n"
 
+        # Get model-specific tool call examples
+        tool_examples = get_tool_call_examples(self._model_format)
+
         prompt = f"""You are an AI assistant with access to tools. Answer the user's question by reasoning step-by-step and using tools when needed.
 
 Available Tools:
 {tools_text}
 
-IMPORTANT: When you need to use a tool, output EXACTLY this XML format:
-<tool_call>{{"name": "tool_name", "arguments": {{"param": "value"}}}}</tool_call>
-
-Example - Generate a CAD model:
-Thought: The user wants a 3D model of a sphere. I should use the generate_cad_model tool.
-<tool_call>{{"name": "generate_cad_model", "arguments": {{"prompt": "sphere 2 inches diameter"}}}}</tool_call>
-
-Example - Control a device:
-Thought: The user wants to turn on the living room lights. I'll use the control_device tool.
-<tool_call>{{"name": "control_device", "arguments": {{"domain": "light", "service": "turn_on", "entity_id": "light.living_room"}}}}</tool_call>
-
-Example - Search the web:
-Thought: I need to find information about GPU optimization. I'll search the web.
-<tool_call>{{"name": "web_search", "arguments": {{"query": "llama.cpp Metal GPU optimization", "max_results": 5}}}}</tool_call>
-
-DO NOT make up URLs or fake results. ALWAYS use tools when the user requests an action that requires them.
+{tool_examples}
 
 When you have enough information to answer:
 Thought: I now know the final answer
