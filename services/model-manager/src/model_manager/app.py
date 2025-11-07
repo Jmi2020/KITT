@@ -126,10 +126,12 @@ class ModelListPanel(Static):
 
     DEFAULT_CSS = """
     ModelListPanel {
-        height: auto;
+        height: 1fr;
         border: solid $primary;
         padding: 1 2;
         margin: 1 0;
+        overflow-y: auto;
+        overflow-x: hidden;
     }
 
     ModelListPanel .model-complete {
@@ -139,10 +141,17 @@ class ModelListPanel(Static):
     ModelListPanel .model-incomplete {
         color: $warning;
     }
+
+    ModelListPanel .selected {
+        background: $accent;
+        color: $text;
+    }
     """
 
     registry: reactive[Optional[ModelRegistry]] = reactive(None)
-    selected_family: reactive[Optional[str]] = reactive(None)
+    selected_family_idx: reactive[int] = reactive(0)
+    selected_model_idx: reactive[int] = reactive(-1)  # -1 means family selected, >=0 means model selected
+    expanded_family: reactive[Optional[str]] = reactive(None)
 
     def render(self) -> str:
         """Render model list content."""
@@ -154,18 +163,31 @@ class ModelListPanel(Static):
             f"",
             f"Found {self.registry.total_models} models in {self.registry.total_families} families",
             f"Total size: {self.registry.total_size_gb:.1f} GB",
+            f"[dim]↑/↓: Navigate  Enter: Expand/Switch  Esc: Collapse[/dim]",
             f"",
         ]
 
         # List families
-        for i, family_name in enumerate(sorted(self.registry.families.keys()), 1):
+        sorted_families = sorted(self.registry.families.keys())
+        for i, family_name in enumerate(sorted_families):
             models = self.registry.families[family_name]
-            prefix = "▶" if family_name == self.selected_family else " "
-            lines.append(f"{prefix} {i}. [cyan]{family_name}[/cyan] ({len(models)} models)")
 
-            # Show models if selected
-            if family_name == self.selected_family:
-                for model in models:
+            # Determine selection indicators
+            is_family_selected = (i == self.selected_family_idx and self.selected_model_idx == -1)
+            is_expanded = family_name == self.expanded_family
+
+            # Family line
+            prefix = "▼" if is_expanded else "▶"
+            family_line = f"{prefix} {i + 1}. [cyan]{family_name}[/cyan] ({len(models)} models)"
+
+            if is_family_selected:
+                family_line = f"[reverse]{family_line}[/reverse]"
+
+            lines.append(family_line)
+
+            # Show models if expanded
+            if is_expanded:
+                for j, model in enumerate(models):
                     status_class = (
                         "model-complete" if model.is_complete else "model-incomplete"
                     )
@@ -183,11 +205,32 @@ class ModelListPanel(Static):
                     if model.estimated_params_billions:
                         details.append(f"~{model.estimated_params_billions:.0f}B params")
 
-                    lines.append(
-                        f"   [{status_class}]{status_icon}[/{status_class}] {model.name} [dim]({', '.join(details)})[/dim]"
-                    )
+                    model_line = f"   [{status_class}]{status_icon}[/{status_class}] {model.name} [dim]({', '.join(details)})[/dim]"
+
+                    # Highlight selected model
+                    if i == self.selected_family_idx and j == self.selected_model_idx:
+                        model_line = f"[reverse]{model_line}[/reverse]"
+
+                    lines.append(model_line)
 
         return "\n".join(lines)
+
+    def get_selected_model(self):
+        """Get the currently selected model object."""
+        if not self.registry or self.selected_model_idx < 0:
+            return None
+
+        sorted_families = sorted(self.registry.families.keys())
+        if self.selected_family_idx >= len(sorted_families):
+            return None
+
+        family_name = sorted_families[self.selected_family_idx]
+        models = self.registry.families[family_name]
+
+        if self.selected_model_idx >= len(models):
+            return None
+
+        return models[self.selected_model_idx]
 
 
 class LogPanel(Static):
@@ -270,6 +313,10 @@ class ModelManagerApp(App):
         Binding("t", "restart_server", "Restart"),
         Binding("h", "check_health", "Health"),
         Binding("m", "scan_models", "Scan"),
+        Binding("up", "navigate_up", "Up", show=False),
+        Binding("down", "navigate_down", "Down", show=False),
+        Binding("enter", "select_item", "Select", show=False),
+        Binding("escape", "collapse", "Collapse", show=False),
     ]
 
     def __init__(
@@ -443,6 +490,121 @@ class ModelManagerApp(App):
                 f"Found {reg.total_models} models in {reg.total_families} families",
                 "success",
             )
+
+    def action_navigate_up(self) -> None:
+        """Navigate up in the model list."""
+        if not self.model_panel or not self.model_panel.registry:
+            return
+
+        sorted_families = sorted(self.model_panel.registry.families.keys())
+        if not sorted_families:
+            return
+
+        # If we're in a model, move up within models or back to family
+        if self.model_panel.selected_model_idx >= 0:
+            self.model_panel.selected_model_idx -= 1
+            # If we've gone past the first model, go back to family selection
+            if self.model_panel.selected_model_idx < 0:
+                self.model_panel.selected_model_idx = -1
+
+        # If we're on a family, move to previous family
+        elif self.model_panel.selected_family_idx > 0:
+            self.model_panel.selected_family_idx -= 1
+            # Collapse the previous expanded family
+            self.model_panel.expanded_family = None
+
+    def action_navigate_down(self) -> None:
+        """Navigate down in the model list."""
+        if not self.model_panel or not self.model_panel.registry:
+            return
+
+        sorted_families = sorted(self.model_panel.registry.families.keys())
+        if not sorted_families:
+            return
+
+        family_name = sorted_families[self.model_panel.selected_family_idx]
+        models = self.model_panel.registry.families[family_name]
+
+        # If we're on a family (not expanded or not in models yet)
+        if self.model_panel.selected_model_idx == -1:
+            # If family is expanded, move into first model
+            if self.model_panel.expanded_family == family_name:
+                if models:
+                    self.model_panel.selected_model_idx = 0
+            # Otherwise move to next family
+            elif self.model_panel.selected_family_idx < len(sorted_families) - 1:
+                self.model_panel.selected_family_idx += 1
+
+        # If we're in models, move to next model or next family
+        else:
+            if self.model_panel.selected_model_idx < len(models) - 1:
+                self.model_panel.selected_model_idx += 1
+            # At last model, move to next family
+            elif self.model_panel.selected_family_idx < len(sorted_families) - 1:
+                self.model_panel.selected_family_idx += 1
+                self.model_panel.selected_model_idx = -1
+                self.model_panel.expanded_family = None
+
+    async def action_select_item(self) -> None:
+        """Expand family or switch to selected model."""
+        if not self.model_panel or not self.model_panel.registry:
+            return
+
+        sorted_families = sorted(self.model_panel.registry.families.keys())
+        if not sorted_families:
+            return
+
+        family_name = sorted_families[self.model_panel.selected_family_idx]
+
+        # If on family line, toggle expand/collapse
+        if self.model_panel.selected_model_idx == -1:
+            if self.model_panel.expanded_family == family_name:
+                self.model_panel.expanded_family = None
+            else:
+                self.model_panel.expanded_family = family_name
+        # If on model line, switch to that model
+        else:
+            model = self.model_panel.get_selected_model()
+            if model and model.is_complete:
+                if self.log_panel:
+                    self.log_panel.add_log(f"Switching to {model.name}...", "info")
+
+                try:
+                    # Get the config to determine model alias
+                    config = await asyncio.to_thread(self.config_manager.load)
+
+                    # Determine model path relative to models_dir
+                    model_path = f"{family_name}/{model.name}"
+
+                    state = await asyncio.to_thread(
+                        self.supervisor.switch_model,
+                        model_path,
+                        alias=None,  # Let supervisor determine alias
+                        wait_for_ready=True
+                    )
+
+                    if self.log_panel:
+                        self.log_panel.add_log(
+                            f"Switched to {model.name} (PID: {state.pid})",
+                            "success",
+                        )
+                except Exception as e:
+                    if self.log_panel:
+                        self.log_panel.add_log(f"Failed to switch: {e}", "error")
+            elif model and not model.is_complete:
+                if self.log_panel:
+                    self.log_panel.add_log(
+                        f"Cannot switch to incomplete model: {model.name}",
+                        "warning",
+                    )
+
+    def action_collapse(self) -> None:
+        """Collapse expanded family and return to family selection."""
+        if not self.model_panel:
+            return
+
+        self.model_panel.expanded_family = None
+        self.model_panel.selected_model_idx = -1
 
     async def _update_status(self) -> None:
         """Update status panel."""

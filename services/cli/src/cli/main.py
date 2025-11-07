@@ -12,8 +12,14 @@ from urllib.parse import urlparse
 import httpx
 import typer
 from dotenv import load_dotenv
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.formatted_text import HTML
 from rich.console import Console
-from rich.prompt import Prompt
+from rich.live import Live
+from rich.panel import Panel
+from rich.spinner import Spinner
+from rich.text import Text
 
 load_dotenv()
 
@@ -69,24 +75,16 @@ USER_UUID = _env(
     "KITTY_USER_ID",
     str(uuid.uuid5(uuid.NAMESPACE_DNS, USER_NAME)),
 )
-DEFAULT_MODEL = _env_any(
-    (
-        "KITTY_DEFAULT_MODEL",
-        "LOCAL_MODEL_PRIMARY_ALIAS",
-        "LLAMACPP_PRIMARY_ALIAS",
-        "LOCAL_MODEL_PRIMARY",
-    ),
-    "kitty-primary",
-)
 DEFAULT_VERBOSITY = int(_env("VERBOSITY", "3"))
 
 
 @dataclass
 class SessionState:
+    """Session state for CLI interactions."""
+
     conversation_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str = USER_UUID
     user_name: str = USER_NAME or "ssh-operator"
-    model_alias: Optional[str] = DEFAULT_MODEL
     verbosity: int = DEFAULT_VERBOSITY
     last_artifacts: List[Dict[str, Any]] = field(default_factory=list)
 
@@ -94,11 +92,57 @@ class SessionState:
 state = SessionState()
 
 
+class CommandCompleter(Completer):
+    """Custom completer for "/" commands with descriptions."""
+
+    def __init__(self):
+        self.commands = {
+            "help": "Show this help message",
+            "verbosity": "Set response detail level (1-5)",
+            "cad": "Generate CAD model from description",
+            "list": "List cached CAD artifacts",
+            "queue": "Queue artifact to printer",
+            "exit": "Exit interactive shell",
+        }
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+
+        # Only complete if we're typing a command (starts with /)
+        if not text.startswith("/"):
+            return
+
+        word = text[1:]  # Remove the leading /
+
+        for cmd, description in self.commands.items():
+            if cmd.startswith(word.lower()):
+                yield Completion(
+                    cmd,
+                    start_position=-len(word),
+                    display=f"/{cmd}",
+                    display_meta=description,
+                )
+
+
 def _client() -> httpx.Client:
-    return httpx.Client(timeout=60.0)
+    return httpx.Client(timeout=120.0)
+
+
+def _post_json_with_spinner(
+    url: str, payload: Dict[str, Any], status_text: str = "Thinking"
+) -> Dict[str, Any]:
+    """Make API call with thinking animation."""
+    spinner = Spinner("dots", text=Text(status_text, style="cyan"))
+
+    with Live(spinner, console=console, transient=True):
+        with _client() as client:
+            response = client.post(url, json=payload)
+            response.raise_for_status()
+            return response.json()
 
 
 def _post_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Make API call without spinner (for internal use)."""
     with _client() as client:
         response = client.post(url, json=payload)
         response.raise_for_status()
@@ -164,16 +208,15 @@ def hash_password(
 @app.command()
 def say(
     message: List[str] = typer.Argument(..., help="Message for KITTY"),
-    model: Optional[str] = typer.Option(
-        None, "--model", "-m", help="Override local model alias"
-    ),
     verbosity: Optional[int] = typer.Option(None, "--verbosity", "-v", min=1, max=5),
     no_agent: bool = typer.Option(
         False, "--no-agent", help="Disable agentic mode (direct LLM response)"
     ),
 ) -> None:
-    """Send a one-off conversational message with intelligent agent reasoning."""
+    """Send a conversational message with intelligent agent reasoning.
 
+    Models are automatically managed by the Model Manager - no need to specify.
+    """
     text = " ".join(message)
     formatted_prompt = _format_prompt(text)
     payload: Dict[str, Any] = {
@@ -183,41 +226,60 @@ def say(
         "prompt": formatted_prompt,
         "useAgent": not no_agent,  # Enable agentic mode by default
     }
-    chosen_model = model or state.model_alias or DEFAULT_MODEL
-    if chosen_model:
-        state.model_alias = chosen_model
-        payload["modelAlias"] = chosen_model
     chosen_verbosity = verbosity or state.verbosity or DEFAULT_VERBOSITY
     if chosen_verbosity:
         state.verbosity = chosen_verbosity
         payload["verbosity"] = chosen_verbosity
 
     try:
-        data = _post_json(f"{API_BASE}/api/query", payload)
+        data = _post_json_with_spinner(f"{API_BASE}/api/query", payload, "KITTY is thinking")
+    except httpx.TimeoutException:
+        console.print("[red]Request timed out - check if KITTY services are running")
+        raise typer.Exit(1)
+    except httpx.HTTPStatusError as exc:
+        console.print(f"[red]HTTP {exc.response.status_code}: {exc.response.text}")
+        raise typer.Exit(1) from exc
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]Request failed: {exc}")
         raise typer.Exit(1) from exc
 
-    console.print(f"[green]KITTY:[/] {data.get('result', {}).get('output', '')}")
-    _print_routing(data.get("routing"))
+    output = data.get("result", {}).get("output", "")
+    if output:
+        console.print(Panel(output, title="[bold green]KITTY", border_style="green"))
+    else:
+        console.print("[yellow]No response received")
+
+    # Show routing info if verbosity is high
+    if state.verbosity >= 4:
+        _print_routing(data.get("routing"))
 
 
 @app.command()
 def cad(prompt: List[str] = typer.Argument(..., help="CAD generation prompt")) -> None:
-    """Generate CAD artifacts and store latest results."""
-
+    """Generate CAD artifacts using Zoo/Tripo/local providers."""
     text = " ".join(prompt)
     payload = {"conversationId": state.conversation_id, "prompt": text}
+
     try:
-        data = _post_json(f"{CAD_BASE}/api/cad/generate", payload)
+        data = _post_json_with_spinner(
+            f"{CAD_BASE}/api/cad/generate", payload, "Generating CAD model"
+        )
+    except httpx.TimeoutException:
+        console.print("[red]CAD generation timed out")
+        raise typer.Exit(1)
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]CAD generation failed: {exc}")
         raise typer.Exit(1) from exc
 
     artifacts = data.get("artifacts", [])
     state.last_artifacts = artifacts
-    console.print(f"[green]Generated {len(artifacts)} artifact(s).")
-    _print_artifacts(artifacts)
+
+    if artifacts:
+        console.print(f"\n[green]Generated {len(artifacts)} artifact(s)")
+        _print_artifacts(artifacts)
+        console.print("\n[dim]Use '/list' to view or '/queue <index> <printer>' to print[/dim]")
+    else:
+        console.print("[yellow]No artifacts generated")
 
 
 @app.command()
@@ -260,15 +322,15 @@ def shell(
     conversation: Optional[str] = typer.Option(
         None, "--conversation", "-c", help="Conversation ID override"
     ),
-    model: Optional[str] = typer.Option(
-        None, "--model", "-m", help="Model alias to start with"
-    ),
     verbosity: Optional[int] = typer.Option(
-        None, "--verbosity", "-v", min=1, max=5, help="Verbosity level"
+        None, "--verbosity", "-v", min=1, max=5, help="Verbosity level (1-5)"
     ),
 ) -> None:
-    """Interactive shell interaction."""
+    """Interactive shell for conversational AI and fabrication control.
 
+    Chat with KITTY, generate CAD models, queue prints, and control devices.
+    Models are automatically managed by the Model Manager.
+    """
     if conversation:
         try:
             uuid.UUID(conversation)
@@ -278,87 +340,113 @@ def shell(
                 "[yellow]Conversation IDs must be UUIDs. Generating a new session ID."
             )
             state.conversation_id = str(uuid.uuid4())
-    if model:
-        state.model_alias = model
     if verbosity:
         state.verbosity = verbosity
 
-    console.print("[bold]KITTY interactive shell[/]")
-    console.print(
-        "Commands: /model <alias>, /verbosity <1-5>, /cad <prompt>, /list, /queue <idx> <printer>, /exit"
-    )
-    console.print(
-        f"[dim]Default model: {state.model_alias}  |  Verbosity: {state.verbosity}"
-    )
-    console.print(
-        "[dim]Agentic mode enabled – KITTY will reason about your requests and use tools as needed."
-    )
+    # Welcome header
+    console.print(Panel.fit(
+        "[bold cyan]KITTY Interactive Shell[/bold cyan]\n"
+        "[dim]Intelligent fabrication assistant with agentic reasoning[/dim]",
+        border_style="cyan"
+    ))
+
+    # Commands help
+    console.print("\n[bold]Commands:[/bold]")
+    console.print("  [cyan]/verbosity <1-5>[/cyan]  - Set response detail level")
+    console.print("  [cyan]/cad <prompt>[/cyan]     - Generate CAD models")
+    console.print("  [cyan]/list[/cyan]             - Show cached artifacts")
+    console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact to printer")
+    console.print("  [cyan]/help[/cyan]             - Show this help")
+    console.print("  [cyan]/exit[/cyan]             - Exit shell")
+
+    # Current settings
+    console.print(f"\n[dim]Verbosity: {state.verbosity}/5  |  Session: {state.conversation_id[:8]}...[/dim]")
+    console.print("[dim]Agentic mode active - KITTY can use tools and reason about tasks[/dim]")
+    console.print("[dim]Type '/' and press Tab to see available commands[/dim]\n")
+
+    # Create prompt_toolkit session with command completion
+    session = PromptSession(completer=CommandCompleter())
 
     while True:
         try:
-            line = Prompt.ask("[cyan]you[/]")
+            line = session.prompt(HTML("<ansimagenta>you</ansimagenta>> "))
         except (EOFError, KeyboardInterrupt):
-            console.print("\n[dim]Session ended.[/]")
+            console.print("\n[dim]Session ended. Goodbye![/]")
             break
 
         if not line:
             continue
+
         if line.startswith("/"):
             parts = line[1:].split()
             cmd = parts[0].lower()
             args = parts[1:]
+
             if cmd in {"quit", "exit"}:
+                console.print("[dim]Goodbye![/]")
                 break
-            if cmd == "model":
-                if not args:
-                    console.print(f"[yellow]Current model: {state.model_alias}")
-                else:
-                    state.model_alias = args[0]
-                    console.print(f"[green]Model set to {state.model_alias}")
+
+            if cmd == "help":
+                console.print("\n[bold]Available Commands:[/bold]")
+                console.print("  [cyan]/verbosity <1-5>[/cyan]  - Set verbosity (1=terse, 5=exhaustive)")
+                console.print("  [cyan]/cad <prompt>[/cyan]     - Generate CAD model from description")
+                console.print("  [cyan]/list[/cyan]             - List cached CAD artifacts")
+                console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact #idx to printer")
+                console.print("  [cyan]/help[/cyan]             - Show this help message")
+                console.print("  [cyan]/exit[/cyan]             - Exit interactive shell")
+                console.print("\n[dim]Type any message to chat with KITTY[/dim]\n")
                 continue
+
             if cmd == "verbosity":
                 if not args:
-                    console.print(f"[yellow]Current verbosity: {state.verbosity}")
+                    console.print(f"[yellow]Current verbosity: {state.verbosity}/5")
                 else:
                     try:
                         level = int(args[0])
                         if not (1 <= level <= 5):
                             raise ValueError
                         state.verbosity = level
-                        console.print(f"[green]Verbosity set to {level}")
+                        console.print(f"[green]Verbosity set to {level}/5")
                     except ValueError:
-                        console.print("[red]Verbosity must be between 1 and 5.")
+                        console.print("[red]Verbosity must be between 1 and 5")
                 continue
+
             if cmd == "cad":
                 if not args:
                     console.print("[yellow]Usage: /cad <prompt>")
+                    console.print("[dim]Example: /cad design a wall mount bracket[/dim]")
                 else:
                     cad(" ".join(args).split())
                 continue
+
             if cmd == "list":
-                _print_artifacts(state.last_artifacts)
+                if state.last_artifacts:
+                    console.print(f"\n[bold]Cached Artifacts ({len(state.last_artifacts)}):[/bold]")
+                    _print_artifacts(state.last_artifacts)
+                else:
+                    console.print("[yellow]No artifacts cached. Use /cad to generate models")
                 continue
+
             if cmd == "queue":
                 if len(args) < 2:
                     console.print("[yellow]Usage: /queue <artifact_index> <printer_id>")
+                    console.print("[dim]Example: /queue 1 printer_01[/dim]")
                 else:
                     try:
                         idx = int(args[0])
                     except ValueError:
-                        console.print("[red]Artifact index must be an integer.")
+                        console.print("[red]Artifact index must be a number")
                         continue
                     queue(idx, args[1])
                 continue
-            if cmd == "models":
-                models()
-                continue
 
             console.print(f"[yellow]Unknown command: /{cmd}")
+            console.print("[dim]Type /help for available commands[/dim]")
             continue
 
-        # default to conversation
+        # Default to conversation
         try:
-            say([line], model=None, verbosity=None)
+            say([line], verbosity=None)
         except typer.Exit:
             continue
 

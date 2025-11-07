@@ -13,6 +13,125 @@
 
 ---
 
+## 🚀 Quick Command Reference
+
+### Start/Stop KITTY
+
+```bash
+# Start llama.cpp + all Docker services
+./ops/scripts/start-kitty.sh
+
+# Stop everything
+./ops/scripts/stop-kitty.sh
+
+# Check service status
+docker compose -f infra/compose/docker-compose.yml ps
+```
+
+### CLI Interface
+
+```bash
+# Install CLI (one-time)
+pip install -e services/cli/
+
+# Launch interactive shell
+kitty-cli shell
+
+# Inside the shell:
+> /help                        # Show available commands
+> /verbosity 3                 # Set response detail (1-5)
+> /cad Create a hex box        # Generate CAD model
+> /list                        # Show cached artifacts
+> /queue 1 printer_01          # Queue artifact to printer
+> /exit                        # Exit shell
+
+# Quick one-off queries
+kitty-cli say "What printers are online?"
+kitty-cli say "Turn on bench lights"
+```
+
+### Model Manager TUI
+
+```bash
+# Install Model Manager (one-time)
+pip install -e services/model-manager/
+
+# Launch TUI interface
+kitty-model-manager tui
+
+# TUI Commands:
+# s - Start server
+# x - Stop server
+# t - Restart server
+# h - Check health
+# m - Scan for models
+# r - Refresh status
+# q - Quit
+
+# CLI Commands (non-interactive)
+kitty-model-manager start              # Start llama.cpp server
+kitty-model-manager stop               # Stop server
+kitty-model-manager restart            # Restart server
+kitty-model-manager status             # Show current status
+kitty-model-manager scan               # Scan for available models
+kitty-model-manager switch <model>     # Switch to different model
+```
+
+### Web Interfaces
+
+```bash
+# Access web interfaces (after starting KITTY)
+open http://localhost:4173             # Main UI
+open http://localhost:8080/docs        # API Documentation (Swagger)
+open http://localhost:3000             # Grafana (metrics)
+open http://localhost:9090             # Prometheus
+open http://localhost:9001             # MinIO Console
+```
+
+### Development Commands
+
+```bash
+# Run tests
+pytest tests/unit -v                   # Unit tests
+pytest tests/integration -v            # Integration tests
+pytest tests/e2e -v                    # End-to-end tests
+
+# Linting and formatting
+ruff check services/ --fix             # Auto-fix linting issues
+ruff format services/                  # Format Python code
+pre-commit run --all-files             # Run all pre-commit hooks
+
+# Database migrations
+alembic -c services/common/alembic.ini upgrade head    # Apply migrations
+alembic -c services/common/alembic.ini current         # Show current version
+```
+
+### Useful Utility Commands
+
+```bash
+# View logs
+docker compose -f infra/compose/docker-compose.yml logs brain      # Brain service logs
+docker compose -f infra/compose/docker-compose.yml logs -f gateway # Follow gateway logs
+tail -f .logs/llamacpp.log                                         # llama.cpp logs
+
+# Rebuild specific service
+docker compose -f infra/compose/docker-compose.yml build --no-cache brain
+
+# Generate admin password hash
+python -c "from services.common.src.common.security import hash_password; print(hash_password('your-password'))"
+
+# Discover Home Assistant instances
+python ops/scripts/discover-homeassistant.py --all
+
+# Benchmark llama.cpp performance
+./ops/scripts/benchmark-llamacpp.sh
+
+# Test CAD generation
+./tests/test_cad_e2e.sh
+```
+
+---
+
 ## 🎯 What is KITTY?
 
 KITTY transforms your Mac Studio into a conversational command center for your entire fabrication lab. It's like having a knowledgeable assistant who:
