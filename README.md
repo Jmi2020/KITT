@@ -35,8 +35,8 @@ KITTY uses a layered architecture that must start in a specific order:
 
 ```
 1. llama.cpp Servers (Dual-Model)
-   ├─ Q4 Model (Port 8083) - Fast Tool Orchestrator
-   └─ F16 Model (Port 8082) - Deep Reasoning Engine
+   ├─ Q4 Model (Port 8083) - Athene V2 Agent (Tool Orchestrator)
+   └─ F16 Model (Port 8082) - Llama 3.3 70B (Deep Reasoning)
                     ↓
 2. Docker Services
    ├─ Brain (Port 8000) - Routes queries to llama.cpp
@@ -68,7 +68,7 @@ cp .env.example .env
 
 # 2. Edit .env to set dual-model configuration:
 #    LLAMACPP_MODELS_DIR=/Users/Shared/Coding/models
-#    LLAMACPP_Q4_MODEL=llama-3-70b/Llama-3.3-70B-Instruct-UD-Q4_K_XL.gguf
+#    LLAMACPP_Q4_MODEL=athene-v2-agent/Athene-V2-Agent-Q4_K_M.gguf
 #    LLAMACPP_F16_MODEL=llama-3-70b/Llama-3.3-70B-Instruct-F16/...gguf
 
 # 3. Start everything with validated startup script
