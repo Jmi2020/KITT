@@ -19,3 +19,7 @@ This file tracks prompt-token measurements while we tune KITTY's context budgets
 | 2025-11-08 | example: CLI `/agent on` + time-sensitive | TBD           | TBD         | TBD                    | TBD          |       |
 
 Add new rows as we iterate. When adjusting budgets, record before/after runs for easy comparison.
+
+## Environment Notes
+
+- 2025-11-08: Local prompt measurements required the `anthropic` client and a stub `deepseek` module so Python could import the full brain module tree outside Docker. These packages are already present inside the Compose stack; the temporary installation only affects bare-metal scripts used for measurement.
