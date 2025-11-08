@@ -93,6 +93,7 @@ cleanup() {
         echo "Troubleshooting:"
         echo "  - Q4 server logs: tail -f .logs/llamacpp-q4.log"
         echo "  - F16 server logs: tail -f .logs/llamacpp-f16.log"
+        echo "  - Hermes summary logs: tail -f .logs/llamacpp-summary.log"
         echo "  - Docker logs: docker compose -f infra/compose/docker-compose.yml logs"
         echo "  - Check ports: lsof -i :8083,8082,8000,8080"
     fi
@@ -135,8 +136,15 @@ docker compose -f infra/compose/docker-compose.yml down > /dev/null 2>&1 || true
 # Stop any llama.cpp processes on dual-model ports
 Q4_PORT="${LLAMACPP_Q4_PORT:-8083}"
 F16_PORT="${LLAMACPP_F16_PORT:-8082}"
+SUMMARY_PORT="${LLAMACPP_SUMMARY_PORT:-8085}"
+SUMMARY_ENABLED="${LLAMACPP_SUMMARY_ENABLED:-1}"
 
-for port in $Q4_PORT $F16_PORT; do
+PORTS_TO_STOP=($Q4_PORT $F16_PORT)
+if is_enabled "$SUMMARY_ENABLED"; then
+    PORTS_TO_STOP+=($SUMMARY_PORT)
+fi
+
+for port in "${PORTS_TO_STOP[@]}"; do
     if lsof -i :$port > /dev/null 2>&1; then
         print_status "Stopping llama.cpp on port $port"
         lsof -ti :$port | xargs kill -9 2>/dev/null || true
@@ -156,12 +164,15 @@ echo ""
 # Step 4: Check for existing llama.cpp servers or start dual-model setup
 Q4_PORT="${LLAMACPP_Q4_PORT:-8083}"
 F16_PORT="${LLAMACPP_F16_PORT:-8082}"
+SUMMARY_PORT="${LLAMACPP_SUMMARY_PORT:-8085}"
+SUMMARY_ENABLED="${LLAMACPP_SUMMARY_ENABLED:-1}"
 
 print_status "Checking for dual-model llama.cpp servers..."
 
-# Check if both servers are already running
+# Check if servers are already running
 Q4_RUNNING=false
 F16_RUNNING=false
+SUMMARY_RUNNING=false
 
 if curl -sf "http://localhost:$Q4_PORT/health" > /dev/null 2>&1; then
     Q4_RUNNING=true
@@ -173,7 +184,14 @@ if curl -sf "http://localhost:$F16_PORT/health" > /dev/null 2>&1; then
     print_success "F16 server already running on port $F16_PORT"
 fi
 
-if [ "$Q4_RUNNING" = true ] && [ "$F16_RUNNING" = true ]; then
+if is_enabled "$SUMMARY_ENABLED"; then
+    if curl -sf "http://localhost:$SUMMARY_PORT/health" > /dev/null 2>&1; then
+        SUMMARY_RUNNING=true
+        print_success "Hermes summary server already running on port $SUMMARY_PORT"
+    fi
+fi
+
+if [ "$Q4_RUNNING" = true ] && [ "$F16_RUNNING" = true ] && { ! is_enabled "$SUMMARY_ENABLED" || [ "$SUMMARY_RUNNING" = true ]; }; then
     print_status "Using existing dual-model servers"
 else
     # At least one server is not running - check if models are configured
@@ -203,9 +221,12 @@ else
     fi
 
     # Start dual-model servers
-    print_status "Starting dual-model llama.cpp servers..."
+    print_status "Starting llama.cpp servers (Q4/F16${SUMMARY_ENABLED:+/Hermes})..."
     print_status "Q4 (Tool Orchestrator): ${LLAMACPP_Q4_MODEL}"
     print_status "F16 (Reasoning Engine): ${LLAMACPP_F16_MODEL}"
+    if is_enabled "$SUMMARY_ENABLED"; then
+        print_status "Hermes Summary (kitty-summary): ${LLAMACPP_SUMMARY_MODEL:-default Hermes 3 Q4}"
+    fi
 
     "$SCRIPT_DIR/start-llamacpp-dual.sh" > .logs/llamacpp-dual.log 2>&1 &
     DUAL_PID=$!
@@ -232,7 +253,18 @@ else
             exit 1
         fi
 
-        print_success "Dual-model servers started (Q4 PID: $Q4_PID, F16 PID: $F16_PID)"
+        if is_enabled "$SUMMARY_ENABLED" && [ -f .logs/llamacpp-summary.pid ]; then
+            SUMMARY_PID=$(cat .logs/llamacpp-summary.pid)
+            if ! kill -0 $SUMMARY_PID 2>/dev/null; then
+                print_warning "Hermes summary server failed to start"
+                echo "Last 20 lines of summary log:"
+                tail -20 .logs/llamacpp-summary.log
+            else
+                print_success "Hermes summary server started (PID: $SUMMARY_PID)"
+            fi
+        fi
+
+        print_success "llama.cpp servers started (Q4 PID: $Q4_PID, F16 PID: $F16_PID)"
     else
         print_error "Failed to create PID files for dual-model servers"
         exit 1
@@ -251,6 +283,16 @@ else
         echo "Last 30 lines of F16 log:"
         tail -30 .logs/llamacpp-f16.log
         exit 1
+    fi
+
+    if is_enabled "$SUMMARY_ENABLED"; then
+        if ! wait_for_http "http://localhost:$SUMMARY_PORT/health" "Hermes summary server" 60; then
+            print_warning "Hermes summary server did not become healthy"
+            if [ -f .logs/llamacpp-summary.log ]; then
+                echo "Last 30 lines of summary log:"
+                tail -30 .logs/llamacpp-summary.log
+            fi
+        fi
     fi
 fi
 
@@ -322,6 +364,9 @@ echo ""
 # Check all services
 check_process "$Q4_PORT" "Q4 server (Tool Orchestrator)" || true
 check_process "$F16_PORT" "F16 server (Reasoning Engine)" || true
+if is_enabled "$SUMMARY_ENABLED"; then
+    check_process "$SUMMARY_PORT" "Hermes summary server" || true
+fi
 check_process 8000 "Brain service" || true
 check_process 8080 "Gateway service" || true
 check_process 5432 "PostgreSQL" || true
@@ -339,6 +384,9 @@ echo "Logs:"
 echo "  - Q4 server: tail -f .logs/llamacpp-q4.log"
 echo "  - F16 server: tail -f .logs/llamacpp-f16.log"
 echo "  - Dual startup: tail -f .logs/llamacpp-dual.log"
+if is_enabled "$SUMMARY_ENABLED"; then
+    echo "  - Hermes summary: tail -f .logs/llamacpp-summary.log"
+fi
 echo "  - Docker: docker compose -f infra/compose/docker-compose.yml logs -f"
 echo ""
 
@@ -348,3 +396,11 @@ echo ""
 
 print_success "KITTY stack is ready!"
 echo ""
+# Helpers
+is_enabled() {
+    local value="$1"
+    case "${value,,}" in
+        1|true|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
