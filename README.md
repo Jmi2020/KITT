@@ -164,6 +164,8 @@ kitty-cli say "What printers are online?"
 kitty-cli say "Turn on bench lights"
 ```
 
+> **Long-running prompts**: Some research-heavy queries (multi-stage web extractions) can take several minutes. The CLI now waits up to 600 s by default (`KITTY_CLI_TIMEOUT`). Raise this env var if you need even longer windows.
+
 #### Interactive CLI + Tool Routing
 
 The CLI now mirrors the full ReAct stack that KITTY uses internally:

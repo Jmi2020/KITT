@@ -77,6 +77,7 @@ USER_UUID = _env(
     str(uuid.uuid5(uuid.NAMESPACE_DNS, USER_NAME)),
 )
 DEFAULT_VERBOSITY = int(_env("VERBOSITY", "3"))
+CLI_TIMEOUT = float(_env("KITTY_CLI_TIMEOUT", "600"))
 
 
 @dataclass
@@ -131,7 +132,7 @@ class CommandCompleter(Completer):
 
 
 def _client() -> httpx.Client:
-    return httpx.Client(timeout=120.0)
+    return httpx.Client(timeout=CLI_TIMEOUT)
 
 
 def _post_json_with_spinner(
