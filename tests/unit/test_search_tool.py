@@ -104,3 +104,23 @@ async def test_search_falls_back_to_duckduckgo(monkeypatch):
     tool = SearchTool()
     result = await tool.search("test query")
     assert result["metadata"]["provider"] == "duckduckgo"
+
+
+def test_normalize_local_url_remaps_inside_container():
+    original = "http://localhost:8888/search"
+    remapped = SearchTool._normalize_local_url(
+        original,
+        inside_container=True,
+        gateway_host="host.docker.internal",
+    )
+    assert remapped == "http://host.docker.internal:8888/search"
+
+
+def test_normalize_local_url_noop_outside_container():
+    original = "http://localhost:8888/search"
+    remapped = SearchTool._normalize_local_url(
+        original,
+        inside_container=False,
+        gateway_host="host.docker.internal",
+    )
+    assert remapped == original

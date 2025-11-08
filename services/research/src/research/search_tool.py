@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 from duckduckgo_search import DDGS
@@ -39,8 +39,18 @@ class SearchTool:
         self._brave_endpoint = (
             brave_endpoint
             or os.getenv("BRAVE_SEARCH_ENDPOINT")
-            or "https://api.search.brave.com/res/v1/search"
+            or "https://api.search.brave.com/res/v1/web/search"
         )
+
+        self._gateway_host = os.getenv("DOCKER_HOST_GATEWAY", "host.docker.internal")
+        self._inside_container = bool(os.getenv("KITTY_IN_CONTAINER") == "1" or os.path.exists("/.dockerenv"))
+
+        if self._searxng_url:
+            self._searxng_url = self._normalize_local_url(
+                self._searxng_url,
+                inside_container=self._inside_container,
+                gateway_host=self._gateway_host,
+            )
 
         self._brave_client: Optional[BraveSearchClient] = None
 
@@ -182,6 +192,26 @@ class SearchTool:
             return domain
         except Exception:  # noqa: BLE001
             return ""
+
+    @staticmethod
+    def _normalize_local_url(
+        url: Optional[str],
+        *,
+        inside_container: bool,
+        gateway_host: str,
+    ) -> Optional[str]:
+        if not url or not inside_container:
+            return url
+
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if hostname not in {"localhost", "127.0.0.1"}:
+            return url
+
+        port = parsed.port
+        netloc = f"{gateway_host}:{port}" if port else gateway_host
+        new_parsed = parsed._replace(netloc=netloc)
+        return urlunparse(new_parsed)
 
 
 __all__ = ["SearchTool"]

@@ -16,7 +16,7 @@ class BraveSearchClient:
     def __init__(
         self,
         api_key: str,
-        endpoint: str = "https://api.search.brave.com/res/v1/search",
+        endpoint: str = "https://api.search.brave.com/res/v1/web/search",
         timeout: float = 10.0,
         safesearch: str = "moderate",
     ) -> None:
@@ -24,7 +24,7 @@ class BraveSearchClient:
         self._endpoint = endpoint
         self._timeout = timeout
         self._safesearch = safesearch
-        self._client = httpx.AsyncClient(timeout=timeout)
+        self._client = httpx.AsyncClient(timeout=timeout, follow_redirects=True)
 
     async def search(
         self,
