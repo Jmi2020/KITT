@@ -869,6 +869,40 @@ LOG_LEVEL=INFO                   # DEBUG, INFO, WARNING, ERROR
 PROMETHEUS_ENABLED=true
 ```
 
+### Local Context & Completion Limits
+
+KITTY’s llama.cpp servers enforce two key limits:
+
+- **Context window (`LLAMACPP_CTX`)** – how many tokens (prompt + answer) fit in memory.
+- **Completion limit (`LLAMACPP_N_PREDICT`)** – maximum tokens the model may emit per request.
+
+By default we cap completions at **896 tokens** with a 90 s HTTP timeout. When KITTY hits the limit you’ll see a CLI warning (“output hit the token limit”). Ask the assistant to continue or raise the limit.
+
+**Adjusting the limit**
+
+1. Open `.env` (or use the Model Manager TUI) and set:
+   ```bash
+   LLAMACPP_N_PREDICT=1200      # or higher for long-form answers
+   LLAMACPP_TIMEOUT=120        # seconds; keep slightly above expected runtime
+   LLAMACPP_CTX=12288          # optional, if your model supports larger context
+   ```
+2. Restart the llama.cpp service (`./ops/scripts/start-llamacpp.sh` or via Model Manager) and `docker compose … restart brain`.
+
+**Mac Studio (M2 Ultra, 24c CPU / 60c GPU, 192–256 GB unified memory) suggestions**
+
+- Use the Metal backend with **flash attention** enabled.
+- 30–40 GPU layers per model (as already configured) keeps VRAM usage comfortable.
+- Safe starting values:
+  ```bash
+  LLAMACPP_CTX=12288
+  LLAMACPP_N_PREDICT=1500
+  LLAMACPP_TIMEOUT=150
+  ```
+  This still leaves plenty of headroom in unified memory while allowing multi-page answers. Monitor `kitty-cli` warnings or `llama-server.log`; if completions routinely stop early, raise `LLAMACPP_N_PREDICT` another 200–300 tokens.
+- Remember that huge contexts slow generation. Treat the above as a ceiling and lower it for latency-sensitive workflows.
+
+Free up prompt space by using `/remember` and `/memories` rather than replaying entire chat histories; long-term facts go into the Memory MCP server, while each session keeps a clean llama.cpp context.
+
 ---
 
 ## 🧪 Testing
