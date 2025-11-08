@@ -84,6 +84,15 @@ KITTY> [Generates CAD via Zoo/Tripo]
 you> /queue 1 printer_01
 KITTY> [Queues artifact to printer]
 
+you> /remember Operator prefers PLA on Voron 2.4
+KITTY> [Long-term note saved via memory MCP]
+
+you> /memories PLA
+KITTY> [Displays previously stored notes]
+
+you> /reset
+KITTY> [Generates a fresh conversation ID; llama.cpp context cleared]
+
 you> /exit
 ```
 
@@ -98,6 +107,13 @@ kitty-cli cad "design a wall mount"
 
 # List available models
 kitty-cli models
+
+# Store/recall long-term notes without keeping a giant prompt
+kitty-cli shell <<'EOF'
+/remember Filament stock low on CF-PLA
+/memories PLA
+/reset
+EOF
 ```
 
 ## Configuration
