@@ -11,6 +11,16 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Helper to treat various truthy env inputs consistently
+is_enabled() {
+    local value="${1:-}"
+    value="${value,,}"
+    case "$value" in
+        1|true|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -396,11 +406,3 @@ echo ""
 
 print_success "KITTY stack is ready!"
 echo ""
-# Helpers
-is_enabled() {
-    local value="$1"
-    case "${value,,}" in
-        1|true|yes|on) return 0 ;;
-        *) return 1 ;;
-    esac
-}
