@@ -13,6 +13,18 @@
 
 ---
 
+## 🎯 Vision: A Maker Space for Technical AI
+
+I want to build a maker space purpose-built for technical AI: a place where models such as Claude, GPT-5, Llama, Qwen, and Mistral can run research and directly control fabrication hardware. The core will be a cluster of Mac Studios providing energy-efficient, reliable compute and a secure network interface to the devices we care about most — primarily 3D printers, but also CNC machines, test rigs, and sensing equipment.
+
+This environment will let models investigate materials, estimate production costs, run simulations, and then orchestrate fabrication steps. By combining on-device processing with curated research pipelines, we can shorten the loop from idea to physical prototype. The facility will prioritize sustainable, ethically sourced materials and robotic procurement workflows that reduce supply-chain impacts and improve repeatability.
+
+KITTY will serve as the orchestration layer: lightweight processes that can spin up for a single query and spin down when finished, or remain active for deeper, after-hours projects. A practical starting cadence could be one KITTY-owned project per week, giving it controlled access to printers, inventories, and simulation resources so it can propose, prototype, and iterate. Let's give KITTY the tools and permissions it needs to thrive and to create useful, verifiable improvements for humans and machines alike.
+
+> 📖 **Full Vision & Roadmap**: See [Reference/NorthStar/ProjectVision.md](Reference/NorthStar/ProjectVision.md) for the complete multi-phase implementation plan.
+
+---
+
 ## 🚀 Quick Command Reference
 
 ### 🎬 First Time Setup
