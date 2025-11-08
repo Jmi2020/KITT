@@ -29,6 +29,7 @@ from .ml_local_client import MLXLocalClient
 from .permission import PermissionManager
 from .pricing import estimate_cost
 from .tool_registry import get_tools_for_prompt
+from .summarizer import HermesSummarizer
 from ..tools.model_config import detect_model_format
 from ..usage_stats import UsageStats
 
@@ -107,6 +108,7 @@ class BrainRouter:
         self._slo_calculator = slo_calculator or SLOCalculator()
         self._permission = permission_manager or PermissionManager()
         self._prompt_builder = KittySystemPrompt()
+        self._summarizer = HermesSummarizer()
 
         # Initialize tool MCP client with Perplexity integration and ReAct agent
         self._tool_mcp = tool_mcp_client or ToolMCPClient(perplexity_client=self._mcp)
@@ -143,15 +145,11 @@ class BrainRouter:
         # Check for agentic routing
         if request.use_agent:
             result = await self._invoke_agent(request)
-            self._record(request, result, cache_key=cache_key)
-            self._record_usage(result)
-            return result
+            return await self._finalize_result(request, result, cache_key=cache_key)
 
         result = await self._invoke_local(request)
         if request.force_tier == RoutingTier.local:
-            self._record(request, result)
-            self._record_usage(result)
-            return result
+            return await self._finalize_result(request, result)
 
         # Check if escalation is needed
         needs_escalation = (
@@ -228,9 +226,7 @@ class BrainRouter:
                         if frontier_result:
                             result = frontier_result
 
-        self._record(request, result, cache_key=cache_key)
-        self._record_usage(result)
-        return result
+        return await self._finalize_result(request, result, cache_key=cache_key)
 
     async def _invoke_local(self, request: RoutingRequest) -> RoutingResult:
         start = time.perf_counter()
@@ -587,6 +583,46 @@ Based on the tool results above, provide a comprehensive answer to the original 
         provider = (result.metadata or {}).get("provider", result.tier.value)
         cost = _COST_BY_TIER.get(result.tier, 0.0)
         UsageStats.record(provider=provider, tier=result.tier.value, cost=cost)
+
+    async def _finalize_result(
+        self, request: RoutingRequest, result: RoutingResult, cache_key: Optional[str] = None
+    ) -> RoutingResult:
+        result = await self._maybe_summarize(result)
+        self._record(request, result, cache_key=cache_key)
+        self._record_usage(result)
+        return result
+
+    async def _maybe_summarize(self, result: RoutingResult) -> RoutingResult:
+        if not self._summarizer.enabled:
+            return result
+
+        metadata = result.metadata or {}
+        provider = metadata.get("provider")
+        if provider != "react_agent":
+            return result
+
+        agent_steps = metadata.get("agent_steps") or []
+        truncated = bool(metadata.get("truncated"))
+        output_text = result.output or ""
+
+        if not self._summarizer.should_summarize(
+            output_len=len(output_text), truncated=truncated, has_agent_steps=bool(agent_steps)
+        ):
+            return result
+
+        summary = await self._summarizer.summarize(output_text, agent_steps=agent_steps)
+        if not summary:
+            return result
+
+        updated_metadata = dict(metadata)
+        updated_metadata.setdefault("raw_output", output_text)
+        updated_metadata["summary_provider"] = self._summarizer.alias
+        updated_metadata["summary_applied"] = True
+
+        result.output = summary
+        result.metadata = updated_metadata
+        UsageStats.record(provider=self._summarizer.alias, tier="local", cost=0.0)
+        return result
 
 
 __all__ = ["BrainRouter", "RoutingRequest", "RoutingResult"]

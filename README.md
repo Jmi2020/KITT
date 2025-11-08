@@ -137,6 +137,9 @@ docker compose -f infra/compose/docker-compose.yml up -d --build
 
 # Check service status
 docker compose -f infra/compose/docker-compose.yml ps
+
+# Optional: Hermes 3 summary server (q4) boots automatically from the same script.
+# Toggle with LLAMACPP_SUMMARY_ENABLED=0 or point LLAMACPP_SUMMARY_MODEL to another GGUF.
 ```
 
 ### CLI Interface
@@ -170,6 +173,8 @@ kitty-cli usage --refresh 5
 ```
 
 > **Long-running prompts**: Some research-heavy queries (multi-stage web extractions) can take several minutes. The CLI now waits up to 900 s by default (`KITTY_CLI_TIMEOUT`). Raise this env var if you need even longer windows.
+>
+> **Hermes summaries**: When Athene/ReAct responses get lengthy, a dedicated Hermes 3 (kitty-summary) server now rewrites the result + agent trace into a tight brief so the CLI doesn’t truncate key facts. Disable with `HERMES_SUMMARY_ENABLED=0` or view the original text via routing metadata.
 
 #### Interactive CLI + Tool Routing
 
