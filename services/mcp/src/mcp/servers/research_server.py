@@ -287,11 +287,24 @@ class ResearchMCPServer(MCPServer):
             self._deduplicator.add(description, url)
             filtered_results.append(result)
 
+        enriched_results = []
+        for entry in filtered_results[:3]:
+            content_snippet = None
+            fetch_result = await self._web_tool.fetch(entry["url"])
+            if fetch_result["success"]:
+                content_snippet = fetch_result.get("content")
+            enriched_results.append(
+                {
+                    **entry,
+                    "content_snippet": content_snippet,
+                }
+            )
+
         return ToolResult(
             success=True,
             data={
                 "query": query,
-                "results": filtered_results,
+                "results": enriched_results,
                 "total_results": len(filtered_results),
                 "filtered_count": len(results) - len(filtered_results),
                 "provider": provider,
