@@ -26,4 +26,6 @@ Python 3.11 (services), TypeScript 5.x (PWA), Bash (ops), YAML (compose): Follow
 - 001-KITTY: Added Python 3.11 (services), TypeScript 5.x (PWA), Bash (ops), YAML (compose) + FastAPI, Pydantic, paho-mqtt, SQLAlchemy, Home Assistant API, OctoPrint REST, Perplexity MCP SDK, Zoo CAD SDK, Tripo API, CadQuery/FreeCAD, llama.cpp/MLX runtimes, Whisper.cpp, Piper
 
 <!-- MANUAL ADDITIONS START -->
+- 2025-11-06: **Cornerstone** — All tool-capable queries now flow through the `<user_query>` wrapper produced by `KittySystemPrompt` (`services/brain/src/brain/prompts/unified.py`). This keeps tool instructions intact, locks temperature to 0, and prevents hallucinated tools; see `README.md` (CLI workflow) for operator guidance.
+- 2025-11-06: **Autonomy Guardrails** — `/api/autonomy/status` + Prometheus gauges expose daily budget, idle state, and readiness (scheduled vs. exploration) driven by `ResourceManager`. Configure with `AUTONOMOUS_ENABLED`, `AUTONOMOUS_DAILY_BUDGET_USD`, and `AUTONOMOUS_IDLE_THRESHOLD_MINUTES=120`.
 <!-- MANUAL ADDITIONS END -->

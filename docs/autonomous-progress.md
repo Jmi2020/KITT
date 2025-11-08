@@ -304,7 +304,7 @@
 |-----------|--------|
 | Project & Task Lifecycle | ✅ Database models exist (100%) |
 | Project Management Infrastructure | ✅ ProjectManager created (100%) |
-| Resource Management | ✅ ResourceManager exists (70%) - needs integration |
+| Resource Management | ✅ ResourceManager + `/api/autonomy/*` (budget gating, Prom metrics) |
 | Scheduling Infrastructure | ✅ APScheduler integrated (100%) |
 
 ### Phase 2 - Knowledge Base (Months 2-3)
@@ -381,7 +381,25 @@
    Autonomous scheduler started and jobs registered
    ```
 
-5. **On Monday at 9am UTC, you'll see**:
+5. **Query autonomy status anytime**:
+   ```bash
+   curl -s http://localhost:8000/api/autonomy/status | jq
+   ```
+   - Shows idle state, CPU/RAM usage, GPU availability, and if KITTY can run scheduled vs. exploration workloads.
+
+6. **Inspect multi-day budget summary**:
+   ```bash
+   curl -s "http://localhost:8000/api/autonomy/budget?days=7" | jq
+   ```
+   - Confirms spend per day and verifies the `$5/day` ceiling.
+
+7. **Check Prometheus metrics**:
+   ```bash
+   curl -s http://localhost:8000/metrics | rg "kitty_autonomy"
+   ```
+   - Gauges: `kitty_autonomy_budget_available_usd`, `kitty_autonomy_ready_state`, CPU/RAM/GPU, idle flag.
+
+8. **On Monday at 9am UTC, you'll see**:
    ```
    🤖 Weekly autonomous cycle starting (test job)
    ```
@@ -423,6 +441,12 @@
 ### Modified Files
 1. `services/brain/pyproject.toml` - Added apscheduler, psutil dependencies
 2. `services/brain/src/brain/app.py` - Added lifespan context manager, scheduler integration
+
+### Updates (Nov 2025)
+- `services/brain/src/brain/autonomous/resource_manager.py` - v1 integration (session factory, workload-aware idle detection, Prometheus hook)
+- `services/brain/src/brain/routes/autonomy.py` - REST surface for status + budget (`/api/autonomy/status`, `/api/autonomy/budget`)
+- `services/brain/src/brain/metrics/__init__.py` - New `kitty_autonomy_*` gauges
+- `tests/unit/test_resource_manager.py`, `tests/unit/test_autonomy_routes.py` - Coverage for gating logic and new endpoints
 
 ---
 

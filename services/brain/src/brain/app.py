@@ -15,9 +15,10 @@ from common.logging import configure_logging
 from .autonomous.scheduler import get_scheduler
 from .logging_config import setup_reasoning_logging
 from .metrics import router as metrics_router
+from .routes.autonomy import router as autonomy_router
+from .routes.models import router as models_router
 from .routes.projects import router as projects_router
 from .routes.query import router as query_router
-from .routes.models import router as models_router
 
 # Configure standard logging
 configure_logging()
@@ -86,6 +87,7 @@ app = FastAPI(title="KITTY Brain API", lifespan=lifespan)
 app.include_router(query_router)
 app.include_router(projects_router)
 app.include_router(models_router)
+app.include_router(autonomy_router)
 app.include_router(metrics_router)
 
 

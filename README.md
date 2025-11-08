@@ -192,6 +192,21 @@ Agent mode enabled
 
 If a tool fails (e.g., network issue), the agent now reports the error in the trace instead of crashing, so you can immediately retry.
 
+### Autonomy Status & Budget
+
+Keep tabs on KITTY's bounded autonomy before enabling weekly projects:
+
+```bash
+# Evaluate whether KITTY can run scheduled or exploration workloads
+curl -s "http://localhost:8000/api/autonomy/status?workload=scheduled" | jq
+
+# Review the last 7 days of autonomous spend vs. the $5/day ceiling
+curl -s "http://localhost:8000/api/autonomy/budget?days=7" | jq
+```
+
+- Gauges such as `kitty_autonomy_budget_available_usd` and `kitty_autonomy_ready_state` are exposed on `/metrics` for Prometheus/Grafana dashboards.
+- `.env` toggles: `AUTONOMOUS_ENABLED=true`, `AUTONOMOUS_DAILY_BUDGET_USD=5.00`, `AUTONOMOUS_IDLE_THRESHOLD_MINUTES=120`.
+
 ### Unified Launcher TUI (Recommended!)
 
 **The easiest way to manage KITTY** - single command interface with live system monitoring:

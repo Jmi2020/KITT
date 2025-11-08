@@ -93,7 +93,7 @@ class Settings(BaseSettings):
     # Autonomous Operations
     autonomous_enabled: bool = False
     autonomous_daily_budget_usd: float = 5.00
-    autonomous_idle_threshold_minutes: int = 30
+    autonomous_idle_threshold_minutes: int = 120
     autonomous_cpu_threshold_percent: float = 20.0
     autonomous_memory_threshold_percent: float = 70.0
     autonomous_user_id: str = "system-autonomous"

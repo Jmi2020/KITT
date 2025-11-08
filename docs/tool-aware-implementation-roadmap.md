@@ -32,6 +32,11 @@ Transforming KITTY into a tool-aware agent using full MCP protocol, ReAct patter
    - Parses and returns `tool_calls` list
    - Backwards compatible
 
+4. ✅ `<user_query>` wrapper + unified prompt builder (`services/brain/src/brain/prompts/unified.py`, documented in `README.md`)
+   - Keeps tool instructions + registry in every request while forcing temp=0
+   - Prevents hallucinated tool names/params before ReAct loop begins
+   - Cornerstone dependency for all subsequent MCP/tool orchestration work
+
 ### Phase 2.1: MCP Server Framework ✅
 
 **Commit**: `2ccc379` - MCP server framework
