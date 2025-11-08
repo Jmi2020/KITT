@@ -276,6 +276,10 @@ class BrainRouter:
             "host": self._config.llamacpp.host,
             "tools_used": len(tool_calls) if tool_calls else 0,
         }
+        if response.get("stop_type"):
+            metadata["stop_reason"] = response.get("stop_type")
+        if response.get("truncated"):
+            metadata["truncated"] = True
 
         # Log routing decision
         log_routing_decision(
@@ -521,6 +525,10 @@ Based on the tool results above, provide a comprehensive answer to the original 
             "tools_used": str(len([s for s in agent_result.steps if s.action])),
             "success": str(agent_result.success),
         }
+        if agent_result.truncated:
+            metadata["truncated"] = True
+        if agent_result.stop_reason:
+            metadata["stop_reason"] = agent_result.stop_reason
 
         if agent_result.error:
             metadata["error"] = agent_result.error

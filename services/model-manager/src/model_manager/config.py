@@ -51,7 +51,7 @@ class ConfigManager:
             port=int(config.get("LLAMACPP_PORT", "8080")),
             binary=config.get("LLAMACPP_BIN", "llama-server"),
             context_size=int(config.get("LLAMACPP_CTX", "8192")),
-            n_predict=int(config.get("LLAMACPP_N_PREDICT", "512")),
+            n_predict=int(config.get("LLAMACPP_N_PREDICT", "896")),
             temperature=float(config.get("LLAMACPP_TEMPERATURE", "0.7")),
             top_p=float(config.get("LLAMACPP_TOP_P", "0.95")),
             repeat_penalty=float(config.get("LLAMACPP_REPEAT_PENALTY", "1.1")),

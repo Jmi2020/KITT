@@ -221,6 +221,12 @@ def _print_routing(routing: Optional[Dict[str, Any]], *, show_trace: bool = Fals
     if show_trace and metadata:
         _print_agent_trace(metadata)
 
+    if metadata.get("truncated"):
+        console.print(
+            "[yellow]Note:[/] Model output hit the local token limit. "
+            "Ask KITTY to continue or raise LLAMACPP_N_PREDICT for longer replies."
+        )
+
 
 def _print_artifacts(artifacts: List[Dict[str, Any]]) -> None:
     if not artifacts:

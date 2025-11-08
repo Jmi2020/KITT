@@ -40,6 +40,8 @@ class AgentResult:
     success: bool
     error: Optional[str] = None
     iterations: int = 0
+    truncated: bool = False
+    stop_reason: Optional[str] = None
 
 
 class ReActAgent:
@@ -199,12 +201,17 @@ class ReActAgent:
                 steps=[],
                 success=True,
                 iterations=0,
+                truncated=response.get("truncated", False),
+                stop_reason=response.get("stop_type"),
             )
 
         # ReAct loop
         history: List[AgentStep] = []
 
         tools_used = 0
+
+        truncated_flag = False
+        stop_reason: Optional[str] = None
 
         for iteration in range(self._max_iterations):
             logger.info(f"ReAct iteration {iteration + 1}/{self._max_iterations}")
@@ -217,6 +224,10 @@ class ReActAgent:
 
             # Get LLM response with tools
             response = await self._llm.generate(prompt=prompt, tools=tools)
+            if response.get("truncated"):
+                truncated_flag = True
+            if response.get("stop_type"):
+                stop_reason = response.get("stop_type")
 
             # Parse response
             text = response["response"]
@@ -319,6 +330,8 @@ class ReActAgent:
                         steps=history,
                         success=True,
                         iterations=iteration + 1,
+                        truncated=truncated_flag,
+                        stop_reason=stop_reason,
                     )
                 continue
 
@@ -354,6 +367,8 @@ class ReActAgent:
             success=False,
             error="Max iterations exceeded",
             iterations=self._max_iterations,
+            truncated=truncated_flag,
+            stop_reason=stop_reason,
         )
 
     async def run_single_action(

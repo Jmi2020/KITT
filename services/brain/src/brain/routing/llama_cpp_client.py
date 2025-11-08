@@ -113,10 +113,15 @@ class LlamaCppClient:
             else:
                 logger.warning("No tool calls found in model response despite tools being provided")
 
+        stop_type = data.get("stop_type")
+        truncated = bool(data.get("truncated") or (stop_type == "limit"))
+
         return {
             "response": cleaned_text,
             "tool_calls": tool_calls,
             "raw": data,
+            "stop_type": stop_type,
+            "truncated": truncated,
         }
 
 

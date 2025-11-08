@@ -26,7 +26,7 @@ class TestConfigManager:
             "LLAMACPP_PORT": "8080",
             "LLAMACPP_BIN": "llama-server",
             "LLAMACPP_CTX": "8192",
-            "LLAMACPP_N_PREDICT": "512",
+            "LLAMACPP_N_PREDICT": "896",
             "LLAMACPP_TEMPERATURE": "0.7",
             "LLAMACPP_TOP_P": "0.95",
             "LLAMACPP_REPEAT_PENALTY": "1.1",
@@ -64,7 +64,7 @@ class TestConfigManager:
         config = manager.load()
 
         assert config.context_size == 8192
-        assert config.n_predict == 512
+        assert config.n_predict == 896
         assert config.temperature == 0.7
         assert config.top_p == 0.95
         assert config.repeat_penalty == 1.1
