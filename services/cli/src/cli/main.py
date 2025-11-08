@@ -105,6 +105,9 @@ class CommandCompleter(Completer):
             "cad": "Generate CAD model from description",
             "list": "List cached CAD artifacts",
             "queue": "Queue artifact to printer",
+            "reset": "Start a fresh conversation session",
+            "remember": "Store a long-term memory note",
+            "memories": "Search saved memory notes",
             "exit": "Exit interactive shell",
         }
 
@@ -229,6 +232,53 @@ def _print_artifacts(artifacts: List[Dict[str, Any]]) -> None:
             f"type={artifact.get('artifactType')} "
             f"url={artifact.get('location')}"
         )
+
+
+def _start_new_session() -> None:
+    state.conversation_id = str(uuid.uuid4())
+    state.last_artifacts = []
+    console.print(
+        f"[green]Started new session: {state.conversation_id[:8]}... "
+        "(conversation context cleared)"
+    )
+
+
+def _remember_note(content: str) -> None:
+    payload = {
+        "conversationId": state.conversation_id,
+        "userId": state.user_id,
+        "content": content,
+    }
+    try:
+        _post_json(f"{API_BASE}/api/memory/remember", payload)
+        console.print("[green]Saved to long-term memory.")
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to save memory: {exc}")
+
+
+def _search_memories(query: str, limit: int = 5) -> None:
+    payload = {
+        "conversationId": state.conversation_id,
+        "userId": state.user_id,
+        "query": query or "*",
+        "limit": limit,
+    }
+    try:
+        data = _post_json(f"{API_BASE}/api/memory/search", payload)
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to search memories: {exc}")
+        return
+
+    memories = data.get("memories", [])
+    if not memories:
+        console.print("[yellow]No matching memories found.")
+        return
+
+    console.print(f"[bold]Memories ({len(memories)}):[/bold]")
+    for idx, memory in enumerate(memories, start=1):
+        snippet = memory.get("content", "").strip()
+        created = memory.get("created_at", "")
+        console.print(f"[cyan]{idx}[/] {created} | {snippet}")
 
 
 def _format_prompt(user_prompt: str) -> str:
@@ -435,6 +485,9 @@ def shell(
     console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact to printer")
     console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace (no args toggles)")
     console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode (tool orchestration)")
+    console.print("  [cyan]/remember <note>[/cyan]  - Store a long-term memory note")
+    console.print("  [cyan]/memories [query][/cyan] - Search saved memories")
+    console.print("  [cyan]/reset[/cyan]            - Start a new conversation session")
     console.print("  [cyan]/help[/cyan]             - Show this help")
     console.print("  [cyan]/exit[/cyan]             - Exit shell")
 
@@ -477,6 +530,9 @@ def shell(
                 console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact #idx to printer")
                 console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace view")
                 console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode")
+                console.print("  [cyan]/remember <note>[/cyan]  - Store a long-term memory note")
+                console.print("  [cyan]/memories [query][/cyan] - Search saved memories")
+                console.print("  [cyan]/reset[/cyan]            - Start a new conversation session")
                 console.print("  [cyan]/help[/cyan]             - Show this help message")
                 console.print("  [cyan]/exit[/cyan]             - Exit interactive shell")
                 console.print("\n[dim]Type any message to chat with KITTY[/dim]\n")
@@ -494,6 +550,22 @@ def shell(
                         console.print(f"[green]Verbosity set to {level}/5")
                     except ValueError:
                         console.print("[red]Verbosity must be between 1 and 5")
+                continue
+
+            if cmd == "reset":
+                _start_new_session()
+                continue
+
+            if cmd == "remember":
+                if not args:
+                    console.print("[yellow]Usage: /remember <note to store>")
+                else:
+                    _remember_note(" ".join(args))
+                continue
+
+            if cmd in {"memories", "recall"}:
+                query = " ".join(args)
+                _search_memories(query)
                 continue
 
             if cmd == "cad":

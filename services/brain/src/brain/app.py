@@ -19,6 +19,7 @@ from .routes.autonomy import router as autonomy_router
 from .routes.models import router as models_router
 from .routes.projects import router as projects_router
 from .routes.query import router as query_router
+from .routes.memory import router as memory_router
 
 # Configure standard logging
 configure_logging()
@@ -88,6 +89,7 @@ app.include_router(query_router)
 app.include_router(projects_router)
 app.include_router(models_router)
 app.include_router(autonomy_router)
+app.include_router(memory_router)
 app.include_router(metrics_router)
 
 

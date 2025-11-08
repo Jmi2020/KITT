@@ -93,6 +93,14 @@ class BrainOrchestrator:
                 limit=3,
                 score_threshold=0.75,
             )
+            if not memories and user_id:
+                memories = await self._memory.search_memories(
+                    query=prompt,
+                    conversation_id=None,
+                    user_id=user_id,
+                    limit=3,
+                    score_threshold=0.7,
+                )
             if memories:
                 memory_context = "\n".join(
                     [f"[Memory {i+1}]: {m.content}" for i, m in enumerate(memories)]
