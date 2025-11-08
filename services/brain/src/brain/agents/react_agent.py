@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -29,6 +30,7 @@ class AgentStep:
     action: Optional[str] = None
     action_input: Optional[Dict[str, Any]] = None
     observation: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
     is_final: bool = False
 
 
@@ -164,6 +166,63 @@ class ReActAgent:
             parts.append(f"Action Input: {step.action_input}")
             parts.append(f"Observation: {step.observation}")
         return "\n".join(parts)
+
+    def _ground_final_answer(self, answer: str, query: str, history: List[AgentStep]) -> str:
+        """Ensure final answer aligns with latest web_search data."""
+        keywords = ["current", "latest", "approval", "president", "leader", "poll"]
+        if not any(key in query.lower() for key in keywords):
+            return answer
+
+        for step in reversed(history):
+            if step.action != "web_search" or not step.data:
+                continue
+            results = (step.data.get("data") or {}).get("results") or []
+            if not results:
+                continue
+            web_entities = self._extract_entities_from_results(results)
+            if not web_entities:
+                continue
+            answer_entities = self._extract_entities(answer)
+            if answer_entities & web_entities:
+                return answer
+
+            top = results[0]
+            snippet = top.get("content_snippet") or top.get("description") or ""
+            title = top.get("title") or top.get("url")
+            source = top.get("source") or top.get("url")
+            fallback = (
+                f"Search results highlight {title} ({source}).\n"
+                f"Snippet: {snippet.strip() or 'No snippet available.'}"
+            )
+            return (
+                "Unable to verify the previous summary against fetched sources, so "
+                "here is the direct excerpt from the top result:\n"
+                f"{fallback}"
+            )
+
+        return answer
+
+    def _extract_entities_from_results(self, results: List[Dict[str, Any]]) -> set[str]:
+        entities: set[str] = set()
+        for entry in results:
+            text = " ".join(
+                filter(
+                    None,
+                    [
+                        entry.get("title"),
+                        entry.get("description"),
+                        entry.get("content_snippet"),
+                    ],
+                )
+            )
+            entities.update(self._extract_entities(text))
+        return entities
+
+    def _extract_entities(self, text: str) -> set[str]:
+        if not text:
+            return set()
+        matches = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b", text)
+        return {m.strip() for m in matches}
 
     def _summarize_tool_observation(self, action: str, result: Dict[str, Any]) -> str:
         """Condense tool output so we do not exceed llama.cpp context limits."""
@@ -316,6 +375,7 @@ class ReActAgent:
                         action=action,
                         action_input=action_input,
                         observation=observation,
+                        data=result,
                     )
                 )
                 tools_used += 1
@@ -326,9 +386,10 @@ class ReActAgent:
             if "Final Answer:" in text:
                 if freshness_required and tools_used == 0 and self._tool_mcp:
                     logger.info("Freshness required but no tools used; forcing web_search fallback.")
+                    forced_result = None
                     try:
-                        forced = await self._tool_mcp.execute_tool("web_search", {"query": query})
-                        observation = self._summarize_tool_observation("web_search", forced)
+                        forced_result = await self._tool_mcp.execute_tool("web_search", {"query": query})
+                        observation = self._summarize_tool_observation("web_search", forced_result)
                     except Exception as exc:  # noqa: BLE001
                         observation = f"Forced web_search failed: {exc}"
                         logger.error(observation)
@@ -348,6 +409,7 @@ class ReActAgent:
                             action="web_search",
                             action_input={"query": query},
                             observation=observation,
+                            data=forced_result,
                         )
                     )
                     tools_used += 1
@@ -356,6 +418,7 @@ class ReActAgent:
                 if tools_used > 0 or not freshness_required:
                     # Extract final answer
                     final_answer = text.split("Final Answer:")[-1].strip()
+                    final_answer = self._ground_final_answer(final_answer, query, history)
                     history.append(
                         AgentStep(
                             thought=thought,
