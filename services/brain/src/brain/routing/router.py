@@ -238,6 +238,7 @@ class BrainRouter:
                 tools=tools,
                 model_format=model_format.value,
                 query=request.prompt,
+                freshness_required=request.freshness_required,
             )
 
         # Pass tools to llama client
@@ -493,7 +494,9 @@ Based on the tool results above, provide a comprehensive answer to the original 
         start = time.perf_counter()
 
         # Run ReAct agent
-        agent_result = await self._agent.run(request.prompt)
+        agent_result = await self._agent.run(
+            request.prompt, freshness_required=request.freshness_required
+        )
 
         latency = int((time.perf_counter() - start) * 1000)
 

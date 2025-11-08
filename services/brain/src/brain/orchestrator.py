@@ -12,7 +12,7 @@ from common.config import settings
 from .memory import MemoryClient
 from .models.context import ConversationContext, DeviceSelection
 from .routing.router import BrainRouter, RoutingRequest, RoutingResult
-from .routing.tool_registry import should_enable_tools_auto
+from .routing.freshness import is_time_sensitive_query
 from .skills.home_assistant import HomeAssistantSkill
 from .state.mqtt_context_store import MQTTContextStore
 
@@ -106,7 +106,8 @@ class BrainOrchestrator:
 
         agentic_mode = use_agent or settings.agentic_mode_enabled
 
-        requires_fresh = freshness_required or should_enable_tools_auto(prompt)
+        time_sensitive = is_time_sensitive_query(prompt)
+        requires_fresh = freshness_required or time_sensitive
 
         routing_request = RoutingRequest(
             conversation_id=conversation_id,

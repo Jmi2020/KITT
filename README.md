@@ -169,6 +169,7 @@ The CLI now mirrors the full ReAct stack that KITTY uses internally:
 - `/trace` (or `kitty-cli say --trace "...")` streams the ReAct chain-of-thought plus tool calls.
 - `/agent` (or `--agent/--no-agent`) enables the Athene V2 Q4 orchestrator so KITTY can call tools such as `web_search`, `generate_cad`, or delegate to the F16 reasoning model.
 - When agent mode is **off** (default), you get a direct llama.cpp answer. Turn it **on** for live research, CAD, or device orchestration.
+- Prompts now include the current UTC timestamp, and if you mention “today/current/latest,” KITTY auto-marks the request as time-sensitive so the agent knows to hit `web_search` (or other MCP tools) instead of trusting stale training data.
 
 Under the hood:
 

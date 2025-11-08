@@ -78,6 +78,38 @@ class TestUnifiedPromptBasics:
         assert "Thought:" in prompt or "Action:" in prompt or "Observation:" in prompt
         assert "web_search" in prompt  # Tool should be documented
 
+    def test_cli_mode_includes_freshness_note(self):
+        """Ensure CLI prompts include freshness instructions when required."""
+        prompt_builder = KittySystemPrompt()
+        prompt = prompt_builder.build(
+            mode="cli",
+            verbosity=3,
+            query="What is the latest BTC price?",
+            freshness_required=True,
+        )
+
+        assert "Freshness requirement" in prompt
+        assert "utc_timestamp" in prompt
+
+    def test_agent_mode_includes_freshness_note(self):
+        """Ensure agent prompts highlight freshness requirements."""
+        prompt_builder = KittySystemPrompt()
+        mock_tools = [
+            {
+                "type": "function",
+                "function": {"name": "web_search", "description": "", "parameters": {"type": "object"}},
+            }
+        ]
+        prompt = prompt_builder.build(
+            mode="agent",
+            tools=mock_tools,
+            verbosity=3,
+            query="Get today's news",
+            freshness_required=True,
+        )
+
+        assert "Fresh Data Required" in prompt
+
     def test_voice_mode_prompt_generation(self):
         """Test voice mode prompt generation with TTS-friendly output."""
         prompt_builder = KittySystemPrompt()

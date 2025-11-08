@@ -71,7 +71,11 @@ class ReActAgent:
         self._prompt_builder = KittySystemPrompt()
 
     def _build_react_prompt(
-        self, query: str, tools: List[Dict[str, Any]], history: List[AgentStep]
+        self,
+        query: str,
+        tools: List[Dict[str, Any]],
+        history: List[AgentStep],
+        freshness_required: bool = False,
     ) -> str:
         """Build ReAct prompt with query, tools, and history.
 
@@ -106,11 +110,12 @@ class ReActAgent:
             model_format=self._model_format.value,
             context=context,
             query=query,
+            freshness_required=freshness_required,
         )
 
         return prompt
 
-    async def run(self, query: str) -> AgentResult:
+    async def run(self, query: str, freshness_required: bool = False) -> AgentResult:
         """Execute ReAct loop to answer query.
 
         Args:
@@ -139,7 +144,9 @@ class ReActAgent:
             logger.info(f"ReAct iteration {iteration + 1}/{self._max_iterations}")
 
             # Build prompt with current history
-            prompt = self._build_react_prompt(query, tools, history)
+            prompt = self._build_react_prompt(
+                query, tools, history, freshness_required=freshness_required
+            )
 
             # Get LLM response with tools
             response = await self._llm.generate(prompt=prompt, tools=tools)

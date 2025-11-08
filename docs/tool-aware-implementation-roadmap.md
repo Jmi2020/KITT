@@ -36,6 +36,9 @@ Transforming KITTY into a tool-aware agent using full MCP protocol, ReAct patter
    - Keeps tool instructions + registry in every request while forcing temp=0
    - Prevents hallucinated tool names/params before ReAct loop begins
    - Cornerstone dependency for all subsequent MCP/tool orchestration work
+5. ✅ Time-sensitivity heuristics + timestamp injection (`services/brain/src/brain/routing/freshness.py`)
+   - Auto-flags prompts that mention “today/current/latest” topics and sets `freshness_required`
+   - Prompt builder now embeds current UTC time + warning so agents prefer `web_search` for live data
 
 ### Phase 2.1: MCP Server Framework ✅
 

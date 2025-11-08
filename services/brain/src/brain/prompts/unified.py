@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import datetime, timezone
 from string import Formatter
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from common.config import settings
 
@@ -66,6 +67,7 @@ ination-resistant with explicit constraints
         context: Optional[str] = None,
         query: Optional[str] = None,
         history: Optional[List[Any]] = None,
+        freshness_required: bool = False,
     ) -> str:
         """Build unified system prompt for specific interface and model.
 
@@ -93,6 +95,8 @@ ination-resistant with explicit constraints
         """
         sections = []
 
+        timestamp_iso, timestamp_human = self._current_time_strings()
+
         # 1. Identity & Mission
         sections.append(self._identity)
 
@@ -111,7 +115,11 @@ ination-resistant with explicit constraints
         if mode == "voice":
             sections.append(self._build_voice_ux(verbosity))
         elif mode == "agent":
-            sections.append(self._build_react_pattern(query, history))
+            sections.append(
+                self._build_react_pattern(
+                    query, history, timestamp_human, timestamp_iso, freshness_required
+                )
+            )
         else:  # cli mode
             sections.append(self._build_cli_ux(verbosity))
 
@@ -130,7 +138,18 @@ ination-resistant with explicit constraints
         prompt = "\n\n".join(filter(None, sections))
 
         if query and mode != "agent":
-            prompt += f"\n\n<user_query>\n{query}\n</user_query>"
+            freshness_note = ""
+            if freshness_required:
+                freshness_note = (
+                    "\nFreshness requirement: This request needs up-to-date information. "
+                    "Verify answers with live tools (e.g., web_search) instead of relying solely on training data."
+                )
+            prompt += (
+                f"\n\n<user_query utc_timestamp=\"{timestamp_iso}\">\n"
+                f"Current datetime: {timestamp_human} (UTC){freshness_note}\n"
+                f"{query}\n"
+                f"</user_query>"
+            )
 
         # Perform environment variable substitution
         prompt = self._substitute_env_vars(prompt)
@@ -448,7 +467,12 @@ When sharing external links, use Google Search hyperlinks with emoji labels:
 Example: [🤖 llama.cpp optimization](https://www.google.com/search?q=llama.cpp+optimization+tips)"""
 
     def _build_react_pattern(
-        self, query: Optional[str], history: Optional[List[Any]]
+        self,
+        query: Optional[str],
+        history: Optional[List[Any]],
+        timestamp_human: Optional[str] = None,
+        timestamp_iso: Optional[str] = None,
+        freshness_required: bool = False,
     ) -> str:
         """Build ReAct (Reasoning + Acting) pattern instructions for agent mode.
 
@@ -468,6 +492,19 @@ Example: [🤖 llama.cpp optimization](https://www.google.com/search?q=llama.cpp
                     history_text += f"Action: {step.action}\n"
                     history_text += f"Action Input: {step.action_input}\n"
                     history_text += f"Observation: {step.observation}\n"
+
+        timestamp_section = ""
+        if timestamp_human and timestamp_iso:
+            timestamp_section = (
+                f"\n**Current UTC Time**: {timestamp_human} (ISO: {timestamp_iso})"
+            )
+
+        freshness_section = ""
+        if freshness_required:
+            freshness_section = (
+                "\n**Fresh Data Required**: Your training data may be stale. "
+                "Use live tools (e.g., web_search) to confirm any time-sensitive details before giving a final answer."
+            )
 
         query_section = f"\n**Current Query**: {query}" if query else ""
         history_section = f"\n**Previous Steps**:\n{history_text}" if history_text else ""
@@ -493,7 +530,7 @@ You are operating in agent mode with iterative reasoning and tool use.
 ```
 Thought: I now know the final answer
 Final Answer: [your complete answer to the user]
-```{query_section}{history_section}"""
+```{query_section}{history_section}{timestamp_section}{freshness_section}"""
 
     def _build_verbosity_section(self, verbosity: int) -> str:
         """Build verbosity-specific instructions.
@@ -518,6 +555,13 @@ Final Answer: [your complete answer to the user]
 
 Adjust your response length and detail level according to this verbosity setting while
 maintaining clarity and completeness appropriate for the user's needs."""
+
+    def _current_time_strings(self) -> Tuple[str, str]:
+        """Return current UTC time in ISO and human-readable formats."""
+        now = datetime.now(timezone.utc)
+        iso = now.isoformat().replace("+00:00", "Z")
+        human = now.strftime("%A, %B %d %Y %H:%M:%S")
+        return iso, human
 
     def _substitute_env_vars(self, prompt: str) -> str:
         """Substitute environment variables in prompt.

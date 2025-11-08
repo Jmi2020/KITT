@@ -28,4 +28,5 @@ Python 3.11 (services), TypeScript 5.x (PWA), Bash (ops), YAML (compose): Follow
 <!-- MANUAL ADDITIONS START -->
 - 2025-11-06: **Cornerstone** — All tool-capable queries now flow through the `<user_query>` wrapper produced by `KittySystemPrompt` (`services/brain/src/brain/prompts/unified.py`). This keeps tool instructions intact, locks temperature to 0, and prevents hallucinated tools; see `README.md` (CLI workflow) for operator guidance.
 - 2025-11-06: **Autonomy Guardrails** — `/api/autonomy/status` + Prometheus gauges expose daily budget, idle state, and readiness (scheduled vs. exploration) driven by `ResourceManager`. Configure with `AUTONOMOUS_ENABLED`, `AUTONOMOUS_DAILY_BUDGET_USD`, and `AUTONOMOUS_IDLE_THRESHOLD_MINUTES=120`.
+- 2025-11-06: **Freshness Heuristics** — Time-sensitive prompts now auto-set `freshness_required`, embed the current UTC timestamp, and instruct the LLM to prefer live tools (`web_search`) for anything after its training cutoff (`services/brain/src/brain/routing/freshness.py`, `KittySystemPrompt`).
 <!-- MANUAL ADDITIONS END -->
