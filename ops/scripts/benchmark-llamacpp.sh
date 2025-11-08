@@ -1,28 +1,60 @@
 #!/usr/bin/env bash
-# GPU performance benchmark for llama.cpp
+# GPU performance benchmark for llama.cpp (dual-model architecture)
 # Tests throughput with various prompt sizes and measures GPU utilization
+# Usage: ./benchmark-llamacpp.sh [q4|f16|both] [model-alias]
 
 set -euo pipefail
 
-LLAMACPP_HOST="${LLAMACPP_HOST:-http://localhost:8080}"
-MODEL_ALIAS="${1:-kitty-primary}"
+# Default to benchmarking both models
+MODE="${1:-both}"
+MODEL_ALIAS="${2:-}"
+
+# Determine which hosts to benchmark based on mode
+case "$MODE" in
+  q4)
+    HOSTS=("http://localhost:8083")
+    ALIASES=("${MODEL_ALIAS:-kitty-q4}")
+    NAMES=("Q4 (Tool Orchestrator)")
+    ;;
+  f16)
+    HOSTS=("http://localhost:8082")
+    ALIASES=("${MODEL_ALIAS:-kitty-f16}")
+    NAMES=("F16 (Reasoning Engine)")
+    ;;
+  both)
+    HOSTS=("http://localhost:8083" "http://localhost:8082")
+    ALIASES=("${MODEL_ALIAS:-kitty-q4}" "${MODEL_ALIAS:-kitty-f16}")
+    NAMES=("Q4 (Tool Orchestrator)" "F16 (Reasoning Engine)")
+    ;;
+  *)
+    echo "Usage: $0 [q4|f16|both] [model-alias]" >&2
+    echo "  q4:   Benchmark Q4 server only (port 8083)" >&2
+    echo "  f16:  Benchmark F16 server only (port 8082)" >&2
+    echo "  both: Benchmark both servers (default)" >&2
+    exit 1
+    ;;
+esac
+
 OUTPUT_FILE="benchmark-results-$(date +%Y%m%d-%H%M%S).txt"
 
 echo "===========================================" | tee "$OUTPUT_FILE"
-echo "llama.cpp GPU Benchmark" | tee -a "$OUTPUT_FILE"
+echo "llama.cpp Dual-Model GPU Benchmark" | tee -a "$OUTPUT_FILE"
 echo "===========================================" | tee -a "$OUTPUT_FILE"
-echo "Host: $LLAMACPP_HOST" | tee -a "$OUTPUT_FILE"
-echo "Model: $MODEL_ALIAS" | tee -a "$OUTPUT_FILE"
+echo "Mode: $MODE" | tee -a "$OUTPUT_FILE"
 echo "Date: $(date)" | tee -a "$OUTPUT_FILE"
 echo "" | tee -a "$OUTPUT_FILE"
 
 # Function to run a benchmark test
 benchmark_test() {
-  local name="$1"
-  local prompt="$2"
-  local n_predict="${3:-128}"
+  local host="$1"
+  local model_alias="$2"
+  local name="$3"
+  local prompt="$4"
+  local n_predict="${5:-128}"
 
   echo "Test: $name" | tee -a "$OUTPUT_FILE"
+  echo "Host: $host" | tee -a "$OUTPUT_FILE"
+  echo "Model: $model_alias" | tee -a "$OUTPUT_FILE"
   echo "Prompt length: ${#prompt} chars" | tee -a "$OUTPUT_FILE"
   echo "Generating $n_predict tokens..." | tee -a "$OUTPUT_FILE"
 
@@ -35,10 +67,10 @@ benchmark_test() {
   # Run the completion request
   start_time=$(date +%s.%N)
 
-  response=$(curl -s -X POST "$LLAMACPP_HOST/v1/completions" \
+  response=$(curl -s -X POST "$host/v1/completions" \
     -H "Content-Type: application/json" \
     -d "{
-      \"model\": \"$MODEL_ALIAS\",
+      \"model\": \"$model_alias\",
       \"prompt\": \"$prompt\",
       \"max_tokens\": $n_predict,
       \"temperature\": 0.7,
@@ -73,35 +105,50 @@ benchmark_test() {
   echo "" | tee -a "$OUTPUT_FILE"
 }
 
-# Check if server is running
-if ! curl -s "$LLAMACPP_HOST/health" >/dev/null 2>&1; then
-  echo "ERROR: llama.cpp server not responding at $LLAMACPP_HOST" | tee -a "$OUTPUT_FILE"
-  exit 1
-fi
+# Benchmark all configured servers
+for i in "${!HOSTS[@]}"; do
+  host="${HOSTS[$i]}"
+  alias="${ALIASES[$i]}"
+  name="${NAMES[$i]}"
 
-echo "Server is responding. Starting benchmark tests..." | tee -a "$OUTPUT_FILE"
-echo "" | tee -a "$OUTPUT_FILE"
+  echo "=========================================" | tee -a "$OUTPUT_FILE"
+  echo "Benchmarking: $name" | tee -a "$OUTPUT_FILE"
+  echo "=========================================" | tee -a "$OUTPUT_FILE"
 
-# Test 1: Short prompt (prefill test)
-benchmark_test "short-prompt" \
-  "What is the capital of France?" \
-  64
+  # Check if server is running
+  if ! curl -s "$host/health" >/dev/null 2>&1; then
+    echo "ERROR: Server not responding at $host" | tee -a "$OUTPUT_FILE"
+    echo "Skipping $name..." | tee -a "$OUTPUT_FILE"
+    echo "" | tee -a "$OUTPUT_FILE"
+    continue
+  fi
 
-# Test 2: Medium prompt (balanced test)
-benchmark_test "medium-prompt" \
-  "Explain the concept of GPU offloading in machine learning models. Include details about memory transfer, compute efficiency, and the differences between CPU and GPU execution." \
-  128
+  echo "Server is responding. Starting benchmark tests..." | tee -a "$OUTPUT_FILE"
+  echo "" | tee -a "$OUTPUT_FILE"
 
-# Test 3: Long prompt (prefill stress test)
-long_prompt="Context: $(printf 'This is background information about a complex topic. %.0s' {1..50}) Question: Based on this context, provide a detailed analysis."
-benchmark_test "long-prompt" \
-  "$long_prompt" \
-  128
+  # Test 1: Short prompt (prefill test)
+  benchmark_test "$host" "$alias" "short-prompt-${alias}" \
+    "What is the capital of France?" \
+    64
 
-# Test 4: Generation test (decode stress test)
-benchmark_test "generation-test" \
-  "Write a detailed technical explanation of neural network inference:" \
-  256
+  # Test 2: Medium prompt (balanced test)
+  benchmark_test "$host" "$alias" "medium-prompt-${alias}" \
+    "Explain the concept of GPU offloading in machine learning models. Include details about memory transfer, compute efficiency, and the differences between CPU and GPU execution." \
+    128
+
+  # Test 3: Long prompt (prefill stress test)
+  long_prompt="Context: $(printf 'This is background information about a complex topic. %.0s' {1..50}) Question: Based on this context, provide a detailed analysis."
+  benchmark_test "$host" "$alias" "long-prompt-${alias}" \
+    "$long_prompt" \
+    128
+
+  # Test 4: Generation test (decode stress test)
+  benchmark_test "$host" "$alias" "generation-test-${alias}" \
+    "Write a detailed technical explanation of neural network inference:" \
+    256
+
+  echo "" | tee -a "$OUTPUT_FILE"
+done
 
 echo "===========================================" | tee -a "$OUTPUT_FILE"
 echo "Benchmark Complete" | tee -a "$OUTPUT_FILE"
