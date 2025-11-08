@@ -172,6 +172,7 @@ The CLI now mirrors the full ReAct stack that KITTY uses internally:
 - `/trace` (or `kitty-cli say --trace "...")` streams the ReAct chain-of-thought plus tool calls.
 - `/agent` (or `--agent/--no-agent`) enables the Athene V2 Q4 orchestrator so KITTY can call tools such as `web_search`, `generate_cad`, or delegate to the F16 reasoning model.
 - `/remember <note>` stores highlights (preferences, project context, TODOs) in the Memory MCP server so you don’t need to keep entire transcripts in the prompt. `/memories [query]` searches those notes, and `/reset` rotates the conversation ID so llama.cpp always starts from a fresh context.
+- **Paid providers (Perplexity MCP, OpenAI/Anthropic frontier)** now require the override keyword (default: `omega`) to be included in your prompt. Without it, KITTY will stay on free/local tools even if confidence is low. Example: `omega what's the latest CPI reading?`
 - When agent mode is **off** (default), you get a direct llama.cpp answer. Turn it **on** for live research, CAD, or device orchestration.
 - Prompts now include the current UTC timestamp, and if you mention “today/current/latest,” KITTY auto-marks the request as time-sensitive so the agent knows to hit `web_search` (or other MCP tools) instead of trusting stale training data.
 
@@ -752,6 +753,7 @@ KITTY implements custom MCP servers to expose tools to the ReAct agent:
 3. **Memory MCP Server**: `store_memory`, `recall_memory`
 
    - Brain exposes `/api/memory/remember` and `/api/memory/search`, which proxy to the mem0 MCP server (Qdrant + embeddings). The CLI’s `/remember` and `/memories` map to these endpoints so operators can persist durable facts (e.g., “prefers ABS on Voron”) while still clearing conversational context via `/reset`.
+   - Paid research helpers (`research_deep`, frontier escalations) are only offered when the prompt contains the override keyword (default `omega`). This ensures accidental questions don’t burn credits now that SearXNG/Brave/DuckDuckGo/Jina provide free coverage.
 4. **Broker MCP Server**: `execute_command`, `list_commands`
 5. **Research MCP Server**: `web_search`, `fetch_webpage`, `get_citations`
 

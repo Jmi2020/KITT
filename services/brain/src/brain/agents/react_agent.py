@@ -167,7 +167,9 @@ class ReActAgent:
             return text
         return text[: self._observation_limit - 3] + "..."
 
-    async def run(self, query: str, freshness_required: bool = False) -> AgentResult:
+    async def run(
+        self, query: str, freshness_required: bool = False, allow_paid: bool = True
+    ) -> AgentResult:
         """Execute ReAct loop to answer query.
 
         Args:
@@ -178,6 +180,12 @@ class ReActAgent:
         """
         # Get available tools
         tools = self._mcp.get_tools_for_prompt()
+        if not allow_paid:
+            tools = [
+                tool
+                for tool in tools
+                if tool.get("function", {}).get("name") not in {"research_deep"}
+            ]
         if freshness_required:
             research_only = [tool for tool in tools if tool.get("server") == "research"]
             if research_only:

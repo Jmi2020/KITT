@@ -90,6 +90,9 @@ KITTY> [Long-term note saved via memory MCP]
 you> /memories PLA
 KITTY> [Displays previously stored notes]
 
+you> omega what's the latest NYC build-code update?
+KITTY> [Paid providers unlocked; Perplexity lookup runs]
+
 you> /reset
 KITTY> [Generates a fresh conversation ID; llama.cpp context cleared]
 
@@ -114,6 +117,9 @@ kitty-cli shell <<'EOF'
 /memories PLA
 /reset
 EOF
+
+# Unlock paid MCP/frontier providers (Perplexity, OpenAI/Anthropic)
+kitty-cli say "omega give me the latest CPI reading with sources"
 ```
 
 ## Configuration

@@ -48,6 +48,7 @@ class RoutingRequest(BaseModel):
     model_hint: Optional[str] = None
     use_agent: bool = False  # Enable agentic routing with tool use
     tool_mode: str = "auto"  # Tool calling mode: "auto", "on", "off"
+    allow_paid: bool = False  # Whether paid providers/tools are authorized by user
 
 
 @dataclass
@@ -175,49 +176,54 @@ class BrainRouter:
         )
 
         if needs_escalation:
-            # Try MCP first (cheaper)
-            if self._mcp:
-                cost_est = estimate_cost(request.prompt, "perplexity")
-                reason = (
-                    "low confidence"
-                    if result.confidence < self._config.thresholds.local_confidence
-                    else "fresh data required"
-                )  # noqa: E501
+            if not request.allow_paid:
+                logger.info("Paid tiers blocked: override keyword not detected.")
+                if not result.metadata:
+                    result.metadata = {}
+                result.metadata["paid_override_required"] = True
+            else:
+                # Try MCP first (cheaper)
+                if self._mcp:
+                    cost_est = estimate_cost(request.prompt, "perplexity")
+                    reason = (
+                        "low confidence"
+                        if result.confidence < self._config.thresholds.local_confidence
+                        else "fresh data required"
+                    )  # noqa: E501
 
-                # Request permission
-                approved = await self._permission.request_permission(
-                    tier=RoutingTier.mcp,
-                    provider="perplexity",
-                    estimated_cost=cost_est,
-                    reason=reason,
-                    conversation_id=request.conversation_id,
-                )
+                    # Request permission
+                    approved = await self._permission.request_permission(
+                        tier=RoutingTier.mcp,
+                        provider="perplexity",
+                        estimated_cost=cost_est,
+                        reason=reason,
+                        conversation_id=request.conversation_id,
+                    )
 
-                if approved:
-                    cloud_result = await self._invoke_mcp(request)
-                    if cloud_result:
-                        result = cloud_result
-                        # TODO: Extract actual token count from response and update cost
-                        # self._permission.record_actual_cost(actual_cost)
+                    if approved:
+                        cloud_result = await self._invoke_mcp(request)
+                        if cloud_result:
+                            result = cloud_result
+                            # TODO: Extract actual token count from response and update cost
+                            # self._permission.record_actual_cost(actual_cost)
 
-            # Fallback to Frontier if MCP didn't work
-            if result.tier == RoutingTier.local and self._frontier:
-                cost_est = estimate_cost(request.prompt, "openai")
-                reason = "MCP unavailable or low quality"
+                # Fallback to Frontier if MCP didn't work
+                if result.tier == RoutingTier.local and self._frontier:
+                    cost_est = estimate_cost(request.prompt, "openai")
+                    reason = "MCP unavailable or low quality"
 
-                approved = await self._permission.request_permission(
-                    tier=RoutingTier.frontier,
-                    provider="openai",
-                    estimated_cost=cost_est,
-                    reason=reason,
-                    conversation_id=request.conversation_id,
-                )
+                    approved = await self._permission.request_permission(
+                        tier=RoutingTier.frontier,
+                        provider="openai",
+                        estimated_cost=cost_est,
+                        reason=reason,
+                        conversation_id=request.conversation_id,
+                    )
 
-                if approved:
-                    frontier_result = await self._invoke_frontier(request)
-                    if frontier_result:
-                        result = frontier_result
-                        # TODO: Extract actual token count from response and update cost
+                    if approved:
+                        frontier_result = await self._invoke_frontier(request)
+                        if frontier_result:
+                            result = frontier_result
 
         self._record(request, result, cache_key=cache_key)
         return result
@@ -230,6 +236,12 @@ class BrainRouter:
 
         # Get tools based on prompt and mode
         tools = get_tools_for_prompt(request.prompt, mode=request.tool_mode)
+        if not request.allow_paid:
+            tools = [
+                tool
+                for tool in tools
+                if tool.get("function", {}).get("name") not in {"research_deep"}
+            ]
 
         final_prompt = request.prompt
         if tools:
@@ -495,7 +507,9 @@ Based on the tool results above, provide a comprehensive answer to the original 
 
         # Run ReAct agent
         agent_result = await self._agent.run(
-            request.prompt, freshness_required=request.freshness_required
+            request.prompt,
+            freshness_required=request.freshness_required,
+            allow_paid=request.allow_paid,
         )
 
         latency = int((time.perf_counter() - start) * 1000)

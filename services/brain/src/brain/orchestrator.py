@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 from typing import Any, Dict
 
 from common.credentials import HomeAssistantCredentials
@@ -83,11 +85,20 @@ class BrainOrchestrator:
         use_agent: bool = False,
         tool_mode: str = "auto",
     ) -> RoutingResult:
+        override_token = os.getenv("API_OVERRIDE_PASSWORD", "omega") or ""
+        allow_paid = False
+        cleaned_prompt = prompt
+        if override_token:
+            token_pattern = re.compile(rf"\b{re.escape(override_token)}\b", re.IGNORECASE)
+            if token_pattern.search(prompt):
+                allow_paid = True
+                cleaned_prompt = token_pattern.sub("", prompt).strip()
+
         # Retrieve relevant memories
-        enriched_prompt = prompt
+        enriched_prompt = cleaned_prompt
         try:
             memories = await self._memory.search_memories(
-                query=prompt,
+                query=cleaned_prompt,
                 conversation_id=conversation_id,
                 user_id=user_id,
                 limit=3,
@@ -106,7 +117,7 @@ class BrainOrchestrator:
                     [f"[Memory {i+1}]: {m.content}" for i, m in enumerate(memories)]
                 )
                 enriched_prompt = (
-                    f"<relevant_context>\n{memory_context}\n</relevant_context>\n\n" f"{prompt}"
+                    f"<relevant_context>\n{memory_context}\n</relevant_context>\n\n" f"{cleaned_prompt}"
                 )
         except Exception:
             # If memory service is unavailable, continue without memories
@@ -127,6 +138,7 @@ class BrainOrchestrator:
             model_hint=model_hint,
             use_agent=agentic_mode,
             tool_mode=tool_mode,
+            allow_paid=allow_paid,
         )
         result = await self._router.route(routing_request)
 
