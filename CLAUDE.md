@@ -424,3 +424,4 @@ This serves as a reference for voice interaction patterns and OpenAI API integra
 - API integration guide: `Research/APIinfo.md` - 18+ external system integrations with auth patterns
 - Voice-to-print workflows: `Research/VoiceToPrint.md`
 - Reference implementations: `Reference/JarvisV3/` (Streamlit voice assistant with OpenAI realtime API)
+- Docker Brain current build time: 15 m 14 s, Model loading time: 5 m

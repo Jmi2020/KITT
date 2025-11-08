@@ -23,10 +23,11 @@ from .audit_store import RoutingAuditStore
 from .cloud_clients import FrontierClient, MCPClient
 from .config import RoutingConfig, get_routing_config
 from .cost_tracker import CostTracker
-from .llama_cpp_client import LlamaCppClient
+from .multi_server_client import MultiServerLlamaCppClient
 from .ml_local_client import MLXLocalClient
 from .permission import PermissionManager
 from .pricing import estimate_cost
+from .tool_registry import get_tools_for_prompt
 
 # Import ReAct agent and tool MCP client
 from ..agents import ReActAgent
@@ -44,6 +45,7 @@ class RoutingRequest(BaseModel):
     freshness_required: bool = False
     model_hint: Optional[str] = None
     use_agent: bool = False  # Enable agentic routing with tool use
+    tool_mode: str = "auto"  # Tool calling mode: "auto", "on", "off"
 
 
 @dataclass
@@ -71,7 +73,7 @@ class BrainRouter:
     def __init__(
         self,
         config: Optional[RoutingConfig] = None,
-        llama_client: Optional[LlamaCppClient] = None,
+        llama_client: Optional[MultiServerLlamaCppClient] = None,
         mlx: Optional[MLXLocalClient] = None,
         audit_store: Optional[RoutingAuditStore] = None,
         cache: Optional[SemanticCache] = None,
@@ -83,7 +85,7 @@ class BrainRouter:
         tool_mcp_client: Optional[ToolMCPClient] = None,
     ) -> None:
         self._config = config or get_routing_config()
-        self._llama = llama_client or LlamaCppClient(self._config.llamacpp)
+        self._llama = llama_client or MultiServerLlamaCppClient()
         self._mlx = mlx or MLXLocalClient()
         self._audit = audit_store or RoutingAuditStore()
         self._cache = cache or (SemanticCache() if settings.semantic_cache_enabled else None)
@@ -103,10 +105,12 @@ class BrainRouter:
 
         # Initialize tool MCP client with Perplexity integration and ReAct agent
         self._tool_mcp = tool_mcp_client or ToolMCPClient(perplexity_client=self._mcp)
+        # Agent uses Q4 orchestrator for tool calling
         self._agent = ReActAgent(
             llm_client=self._llama,
             mcp_client=self._tool_mcp,
             max_iterations=10,
+            model_alias="kitty-q4",
         )
 
     async def route(self, request: RoutingRequest) -> RoutingResult:
@@ -217,14 +221,26 @@ class BrainRouter:
 
     async def _invoke_local(self, request: RoutingRequest) -> RoutingResult:
         start = time.perf_counter()
-        model_alias = request.model_hint or (
-            self._config.local_models[0] if self._config.local_models else None
-        )
-        response = await self._llama.generate(request.prompt, model_alias)
+        # Default to Q4 orchestrator model for tool calling
+        model_alias = request.model_hint or "kitty-q4"
+
+        # Get tools based on prompt and mode
+        tools = get_tools_for_prompt(request.prompt, mode=request.tool_mode)
+
+        # Pass tools to llama client
+        response = await self._llama.generate(request.prompt, model_alias, tools=tools)
+
+        # Handle tool calls if present
+        tool_calls = response.get("tool_calls", [])
+        if tool_calls:
+            logger.info(f"Model requested {len(tool_calls)} tool calls")
+            output = await self._execute_tools(tool_calls, request.prompt, model_alias)
+        else:
+            output = (
+                response.get("response") or response.get("output") or response.get("completion") or ""
+            )
+
         latency = int((time.perf_counter() - start) * 1000)
-        output = (
-            response.get("response") or response.get("output") or response.get("completion") or ""
-        )
         confidence = 0.85 if output else 0.0
         metadata = {
             "provider": "llamacpp",
@@ -232,6 +248,7 @@ class BrainRouter:
             or self._config.llamacpp.model_alias
             or self._config.local_models[0],
             "host": self._config.llamacpp.host,
+            "tools_used": len(tool_calls) if tool_calls else 0,
         }
 
         # Log routing decision
@@ -315,6 +332,121 @@ class BrainRouter:
             confidence=0.9,
             latency_ms=latency,
             metadata=metadata,
+        )
+
+    async def _execute_tools(
+        self, tool_calls: list, original_prompt: str, model_alias: Optional[str]
+    ) -> str:
+        """Execute tool calls and return formatted response.
+
+        Args:
+            tool_calls: List of tool call objects from model
+            original_prompt: Original user prompt
+            model_alias: Model alias for follow-up call
+
+        Returns:
+            Final response after tool execution
+        """
+        tool_results = []
+
+        for tool_call in tool_calls:
+            try:
+                function_name = tool_call.get("function", {}).get("name")
+                arguments = tool_call.get("function", {}).get("arguments", {})
+
+                logger.info(f"Executing tool: {function_name} with args: {arguments}")
+
+                if function_name == "web_search":
+                    # Execute web search via MCP (Perplexity)
+                    if self._mcp:
+                        query = arguments.get("query", "")
+                        result = await self._mcp.query({"query": query})
+                        tool_results.append(
+                            {
+                                "tool": "web_search",
+                                "query": query,
+                                "result": result.get("output") or result.get("text", "No results"),
+                            }
+                        )
+                    else:
+                        tool_results.append(
+                            {"tool": "web_search", "error": "MCP client not available"}
+                        )
+
+                elif function_name == "generate_cad":
+                    # Execute CAD generation via CAD service
+                    description = arguments.get("description", "")
+                    format_type = arguments.get("format", "step")
+                    # TODO: Call CAD service endpoint
+                    tool_results.append(
+                        {
+                            "tool": "generate_cad",
+                            "description": description,
+                            "result": f"CAD generation queued for: {description} (format: {format_type})",
+                        }
+                    )
+
+                elif function_name == "reason_with_f16":
+                    # Delegate to F16 reasoning engine
+                    query = arguments.get("query", "")
+                    context = arguments.get("context", "")
+
+                    # Build reasoning prompt
+                    reasoning_prompt = query
+                    if context:
+                        reasoning_prompt = f"Context:\n{context}\n\nQuestion: {query}"
+
+                    logger.info(f"Delegating to F16 reasoning engine: {query[:100]}...")
+
+                    # Call F16 model (no tools)
+                    f16_response = await self._llama.generate(
+                        reasoning_prompt,
+                        model="kitty-f16",
+                        tools=None
+                    )
+                    f16_output = (
+                        f16_response.get("response")
+                        or f16_response.get("output")
+                        or f16_response.get("completion")
+                        or "No response from F16 model"
+                    )
+
+                    tool_results.append(
+                        {
+                            "tool": "reason_with_f16",
+                            "query": query,
+                            "result": f16_output,
+                        }
+                    )
+
+                else:
+                    tool_results.append({"tool": function_name, "error": "Unknown tool"})
+
+            except Exception as exc:
+                logger.error(f"Tool execution failed: {exc}")
+                tool_results.append(
+                    {"tool": function_name if "function_name" in locals() else "unknown", "error": str(exc)}
+                )
+
+        # Format tool results for final response
+        results_text = "\n\n".join(
+            [
+                f"Tool: {r['tool']}\nResult: {r.get('result', r.get('error', 'Unknown'))}"
+                for r in tool_results
+            ]
+        )
+
+        # Call model again with tool results to get final answer
+        follow_up_prompt = f"""Original question: {original_prompt}
+
+Tool execution results:
+{results_text}
+
+Based on the tool results above, provide a comprehensive answer to the original question."""
+
+        response = await self._llama.generate(follow_up_prompt, model_alias, tools=None)
+        return (
+            response.get("response") or response.get("output") or response.get("completion") or results_text
         )
 
     async def _invoke_agent(self, request: RoutingRequest) -> RoutingResult:

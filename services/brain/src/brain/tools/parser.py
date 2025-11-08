@@ -39,6 +39,8 @@ def parse_tool_calls(
     """
     if format_type == ToolCallFormat.QWEN_XML:
         return _parse_qwen_xml(text)
+    elif format_type == ToolCallFormat.LLAMA_JSON:
+        return _parse_llama_json(text)
     elif format_type == ToolCallFormat.MISTRAL_JSON:
         return _parse_mistral_json(text)
     elif format_type == ToolCallFormat.GEMMA_FUNCTION:
@@ -85,6 +87,83 @@ def _parse_qwen_xml(text: str) -> tuple[List[ToolCall], str]:
 
     # Remove all tool call XML from text to get remaining content
     cleaned_text = re.sub(pattern, "", text, flags=re.DOTALL).strip()
+
+    return tool_calls, cleaned_text
+
+
+def _parse_llama_json(text: str) -> tuple[List[ToolCall], str]:
+    """Parse Llama 3.1+/3.3 Pythonic function call format.
+
+    Llama 3.3 outputs function calls in square brackets:
+    [func_name1(param1=value1, param2=value2), func_name2(param3=value3)]
+
+    Args:
+        text: LLM response text
+
+    Returns:
+        Tuple of (list of ToolCall objects, remaining text without tool calls)
+    """
+    import ast
+
+    tool_calls: List[ToolCall] = []
+
+    # Look for square bracket wrapper [...]
+    bracket_pattern = r'\[(.*?)\]'
+    bracket_match = re.search(bracket_pattern, text, re.DOTALL)
+
+    if not bracket_match:
+        # No bracketed tool calls found
+        return [], text
+
+    raw_full = bracket_match.group(0)
+    content = bracket_match.group(1).strip()
+
+    if not content:
+        return [], text
+
+    # Pattern to match Python-style function calls: func_name(param1=value1, param2='value2')
+    # Match function calls inside the brackets
+    pattern = r'(\w+)\(([^)]*)\)'
+
+    for match in re.finditer(pattern, content):
+        func_name = match.group(1)
+        params_str = match.group(2).strip()
+        raw_call = match.group(0)
+
+        # Skip common Python built-ins that aren't tool calls
+        if func_name in ['print', 'range', 'len', 'str', 'int', 'float', 'bool', 'list', 'dict']:
+            continue
+
+        # Parse parameters (param=value pairs)
+        arguments = {}
+        if params_str:
+            # Split parameters by comma (outside quotes)
+            param_pattern = r'(\w+)\s*=\s*([^,]+?)(?=,\s*\w+\s*=|$)'
+            param_matches = re.finditer(param_pattern, params_str)
+
+            for param_match in param_matches:
+                param_name = param_match.group(1).strip()
+                param_value = param_match.group(2).strip()
+
+                # Use ast.literal_eval for safe evaluation
+                try:
+                    arguments[param_name] = ast.literal_eval(param_value)
+                except (ValueError, SyntaxError):
+                    # If literal_eval fails, keep as string (remove quotes if present)
+                    if param_value.startswith(("'", '"')) and param_value.endswith(("'", '"')):
+                        arguments[param_name] = param_value[1:-1]
+                    else:
+                        arguments[param_name] = param_value
+
+        tool_call = ToolCall(
+            name=func_name,
+            arguments=arguments,
+            raw_xml=raw_call,
+        )
+        tool_calls.append(tool_call)
+
+    # Remove the bracketed tool calls from text
+    cleaned_text = text.replace(raw_full, "").strip()
 
     return tool_calls, cleaned_text
 

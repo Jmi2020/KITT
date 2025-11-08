@@ -80,6 +80,7 @@ class BrainOrchestrator:
         freshness_required: bool = False,
         model_hint: str | None = None,
         use_agent: bool = False,
+        tool_mode: str = "auto",
     ) -> RoutingResult:
         # Retrieve relevant memories
         enriched_prompt = prompt
@@ -113,6 +114,7 @@ class BrainOrchestrator:
             freshness_required=freshness_required,
             model_hint=model_hint,
             use_agent=agentic_mode,
+            tool_mode=tool_mode,
         )
         result = await self._router.route(routing_request)
 

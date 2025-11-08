@@ -1,5 +1,3 @@
-version: "3.9"
-
 x-service-env: &service-env
   PYTHONPATH: /app
   SETTINGS_MODULE: services.common.config

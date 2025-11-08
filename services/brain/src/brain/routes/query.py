@@ -32,6 +32,7 @@ class QueryInput(BaseModel):
     verbosity: Optional[int] = None
     model_alias: Optional[str] = Field(default=None, alias="modelAlias")
     use_agent: bool = Field(default=True, alias="useAgent")
+    tool_mode: str = Field(default="auto", alias="toolMode")
 
 
 class QueryResponse(BaseModel):
@@ -81,6 +82,7 @@ async def post_query(
         freshness_required=body.freshness_required,
         model_hint=body.model_alias,
         use_agent=body.use_agent,
+        tool_mode=body.tool_mode,
     )
     routing_details = None
     if verbosity_level >= VerbosityLevel.CONCISE:

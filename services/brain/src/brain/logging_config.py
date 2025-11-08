@@ -159,15 +159,8 @@ def setup_reasoning_logging(
         Path(log_file).parent.mkdir(parents=True, exist_ok=True)
 
         file_handler = logging.FileHandler(log_file)
-        file_handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s - %(name)s - %(levelname)s - "
-                "%(reasoning_type)s - %(model_used)s - "
-                "%(tier)s - %(confidence)s - %(cost)s - "
-                "%(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
-            )
-        )
+        # Use ReasoningFormatter which handles optional fields gracefully
+        file_handler.setFormatter(ReasoningFormatter())
         root_logger.addHandler(file_handler)
 
     # Add ML-ready JSONL file handler if specified

@@ -19,7 +19,7 @@ _performance = get_performance_settings()
 class LlamaCppConfig(BaseModel):
     host: str = Field(default=settings.llamacpp_host)
     n_predict: int = Field(default=512, ge=1)
-    temperature: float = Field(default=0.7, ge=0.0)
+    temperature: float = Field(default=0.1, ge=0.0)  # Low temperature (0.0-0.2) required for reliable Llama 3.3 tool calling
     top_p: float = Field(default=0.95, ge=0.0, le=1.0)
     repeat_penalty: float = Field(default=1.1, ge=0.0)
     stop_tokens: List[str] = Field(default_factory=list)
@@ -49,7 +49,7 @@ def get_routing_config() -> RoutingConfig:
     llama_cfg = LlamaCppConfig(
         host=os.getenv("LLAMACPP_HOST", settings.llamacpp_host),
         n_predict=int(os.getenv("LLAMACPP_N_PREDICT", "512")),
-        temperature=float(os.getenv("LLAMACPP_TEMPERATURE", "0.7")),
+        temperature=float(os.getenv("LLAMACPP_TEMPERATURE", "0.1")),
         top_p=float(os.getenv("LLAMACPP_TOP_P", "0.95")),
         repeat_penalty=float(os.getenv("LLAMACPP_REPEAT_PENALTY", "1.1")),
         stop_tokens=stop_tokens,

@@ -17,6 +17,8 @@ def get_tool_call_examples(format_type: ToolCallFormat) -> str:
     """
     if format_type == ToolCallFormat.QWEN_XML:
         return _get_qwen_xml_examples()
+    elif format_type == ToolCallFormat.LLAMA_JSON:
+        return _get_llama_json_examples()
     elif format_type == ToolCallFormat.MISTRAL_JSON:
         return _get_mistral_json_examples()
     elif format_type == ToolCallFormat.GEMMA_FUNCTION:
@@ -44,6 +46,32 @@ Thought: I need to find information about GPU optimization. I'll search the web.
 <tool_call>{{"name": "web_search", "arguments": {{"query": "llama.cpp Metal GPU optimization", "max_results": 5}}}}</tool_call>
 
 DO NOT make up URLs or fake results. ALWAYS use tools when the user requests an action that requires them."""
+
+
+def _get_llama_json_examples() -> str:
+    """Get Llama 3.1+/3.3 function calling format examples."""
+    return """IMPORTANT: When you need to use a tool, you MUST put it in square brackets:
+[func_name(param1=value1, param2=value2)]
+
+For multiple tool calls:
+[func_name1(param1=value1), func_name2(param2=value2)]
+
+You MUST NOT include any other text if you call a function.
+
+Example - Search the web:
+[web_search(query='llama.cpp Metal GPU optimization', max_results=5)]
+
+Example - Generate a CAD model:
+[generate_cad_model(prompt='sphere 2 inches diameter')]
+
+Example - Control a device:
+[control_device(domain='light', service='turn_on', entity_id='light.living_room')]
+
+Example - Multiple calls:
+[web_search(query='PLA filament density'), web_search(query='PLA print temperature')]
+
+DO NOT make up URLs or fake results. ALWAYS use tools when the user requests an action that requires them.
+If your knowledge is outdated or you need current information, USE web_search tool BEFORE declining to answer."""
 
 
 def _get_mistral_json_examples() -> str:

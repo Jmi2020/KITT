@@ -99,12 +99,28 @@ class ReActAgent:
         # Get model-specific tool call examples
         tool_examples = get_tool_call_examples(self._model_format)
 
-        prompt = f"""You are an AI assistant with access to tools. Answer the user's question by reasoning step-by-step and using tools when needed.
+        prompt = f"""You are an expert in composing functions. You are given a question and a set of possible functions.
+
+Based on the question, you will need to make one or more function/tool calls to achieve the purpose.
+
+If none of the functions can be used, point it out.
+
+If the given question lacks the parameters required by the function, also point it out.
+
+You should only return the function call in tools call sections.
+
+If you decide to invoke any of the function(s), you MUST put it in the format of [func_name1(params_name1=params_value1, params_name2=params_value2...), func_name2(params)]
 
 Available Tools:
 {tools_text}
 
 {tool_examples}
+
+IMPORTANT - When to use tools:
+- If the user asks about "latest", "current", "recent", or "today's" information → USE web_search
+- If your knowledge cutoff prevents you from answering → USE web_search BEFORE declining
+- If the user explicitly requests "search" or "find" → USE the appropriate tool
+- DO NOT say "I cannot provide current information" without first trying web_search!
 
 When you have enough information to answer:
 Thought: I now know the final answer
