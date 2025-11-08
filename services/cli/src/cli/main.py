@@ -86,10 +86,10 @@ class SessionState:
     conversation_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str = USER_UUID
     user_name: str = USER_NAME or "ssh-operator"
-    verbosity: int = DEFAULT_VERBOSITY
+    verbosity: int = max(DEFAULT_VERBOSITY, 4)
     last_artifacts: List[Dict[str, Any]] = field(default_factory=list)
-    show_trace: bool = False
-    agent_enabled: bool = False
+    show_trace: bool = True
+    agent_enabled: bool = True
 
 
 state = SessionState()
@@ -275,12 +275,12 @@ def say(
     agent: Optional[bool] = typer.Option(
         None,
         "--agent/--no-agent",
-        help="Enable ReAct agent mode (defaults to session setting, currently off).",
+        help="Enable ReAct agent mode (defaults to session setting, currently on).",
     ),
     trace: Optional[bool] = typer.Option(
         None,
         "--trace/--no-trace",
-        help="Show agent reasoning trace and tool calls (forces verbosity≥4).",
+        help="Show agent reasoning trace and tool calls (forces verbosity≥4, enabled by default).",
     ),
 ) -> None:
     """Send a conversational message with intelligent agent reasoning.
@@ -439,8 +439,9 @@ def shell(
     console.print("  [cyan]/exit[/cyan]             - Exit shell")
 
     # Current settings
+    effective = max(state.verbosity, 4) if state.show_trace else state.verbosity
     agent_status = "ON" if state.agent_enabled else "OFF"
-    console.print(f"\n[dim]Verbosity: {state.verbosity}/5  |  Session: {state.conversation_id[:8]}...[/dim]")
+    console.print(f"\n[dim]Verbosity: {effective}/5  |  Session: {state.conversation_id[:8]}...[/dim]")
     console.print(f"[dim]Agent mode: {agent_status} (use /agent to toggle)[/dim]")
     trace_status = "ON" if state.show_trace else "OFF"
     console.print(f"[dim]Trace mode: {trace_status} (use /trace to toggle)[/dim]")

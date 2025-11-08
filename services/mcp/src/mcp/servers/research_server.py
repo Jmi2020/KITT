@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict
@@ -50,7 +51,13 @@ class ResearchMCPServer(MCPServer):
         )
 
         # Initialize research tools
-        self._search_tool = SearchTool() if SearchTool else None
+        searx_base = os.getenv("SEARXNG_BASE_URL")
+        brave_key = os.getenv("BRAVE_SEARCH_API_KEY")
+        self._search_tool = (
+            SearchTool(searxng_url=searx_base, brave_api_key=brave_key)
+            if SearchTool
+            else None
+        )
         self._web_tool = WebTool() if WebTool else None
         self._deduplicator = SimHashDeduplicator() if SimHashDeduplicator else None
         self._citations = CitationTracker() if CitationTracker else None
@@ -252,7 +259,7 @@ class ResearchMCPServer(MCPServer):
         query = arguments["query"]
         max_results = arguments.get("max_results", 10)
 
-        logger.info("DuckDuckGo search for: %s", query)
+        logger.info("web_search for: %s", query)
         search_result = await self._search_tool.search(query, max_results=max_results)
 
         if not search_result["success"]:
@@ -261,6 +268,8 @@ class ResearchMCPServer(MCPServer):
                 error=search_result.get("error", "Search failed"),
                 metadata={"query": query},
             )
+
+        provider = (search_result.get("metadata") or {}).get("provider", "duckduckgo")
 
         # Filter duplicates using SimHash
         results = search_result["results"]
@@ -285,12 +294,14 @@ class ResearchMCPServer(MCPServer):
                 "results": filtered_results,
                 "total_results": len(filtered_results),
                 "filtered_count": len(results) - len(filtered_results),
+                "provider": provider,
             },
             metadata={
                 "tool": "web_search",
                 "query": query,
                 "total_found": len(results),
                 "after_dedup": len(filtered_results),
+                "provider": provider,
             },
         )
 

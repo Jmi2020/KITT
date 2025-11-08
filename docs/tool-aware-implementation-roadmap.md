@@ -39,6 +39,10 @@ Transforming KITTY into a tool-aware agent using full MCP protocol, ReAct patter
 5. ✅ Time-sensitivity heuristics + timestamp injection (`services/brain/src/brain/routing/freshness.py`)
    - Auto-flags prompts that mention “today/current/latest” topics and sets `freshness_required`
    - Prompt builder now embeds current UTC time + warning so agents prefer `web_search` for live data
+6. ✅ Multi-backend `web_search` (SearXNG → Brave → DuckDuckGo) with Perplexity last
+   - `services/research/src/research/search_tool.py` now cascades through self-hosted + freemium providers before paid APIs
+   - `.env`: `SEARXNG_BASE_URL`, `BRAVE_SEARCH_API_KEY`, `BRAVE_SEARCH_ENDPOINT`
+   - Research MCP server automatically picks the best available backend; Perplexity credits only burn when `research_deep` is explicitly invoked
 
 ### Phase 2.1: MCP Server Framework ✅
 

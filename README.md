@@ -208,6 +208,25 @@ curl -s "http://localhost:8000/api/autonomy/budget?days=7" | jq
 - Gauges such as `kitty_autonomy_budget_available_usd` and `kitty_autonomy_ready_state` are exposed on `/metrics` for Prometheus/Grafana dashboards.
 - `.env` toggles: `AUTONOMOUS_ENABLED=true`, `AUTONOMOUS_DAILY_BUDGET_USD=5.00`, `AUTONOMOUS_IDLE_THRESHOLD_MINUTES=120`.
 
+### Web Search Stack (SearXNG → Brave → DuckDuckGo → Perplexity)
+
+1. **Run SearXNG locally (free, private)**
+   ```bash
+   mkdir -p infra/search/searxng
+   # drop the docker-compose snippet from Research/Web_searchTooloptions.md
+   docker compose -f infra/search/searxng/docker-compose.yml up -d
+   ```
+   Set `SEARXNG_BASE_URL=http://localhost:8888` in `.env`. KITTY will hit this self-hosted metasearch first.
+
+2. **Add Brave as the freemium fallback**
+   - Sign up at https://api.search.brave.com/ (2 000 queries/day free).
+   - Put the key in `.env` (`BRAVE_SEARCH_API_KEY`), keep the default endpoint unless you’re in a different region.
+   - Brave only triggers when SearXNG is down or returns zero results.
+
+3. **Perplexity is now the last resort**
+   - `web_search` will exhaust the two free tiers before calling `research_deep`.
+   - Routing telemetry (`metadata.provider`) shows which backend served each query so you can monitor savings.
+
 ### Unified Launcher TUI (Recommended!)
 
 **The easiest way to manage KITTY** - single command interface with live system monitoring:

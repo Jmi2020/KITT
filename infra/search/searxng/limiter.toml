@@ -1,0 +1,16 @@
+[global]
+  strategy = "moving-window"
+  window = 60
+  cost = 1
+  penalty = 10
+  group = true
+
+[[rules]]
+  name = "search"
+  match = "^/"
+  method = "GET"
+  window = 1
+  cost = 1
+  penalty = 60
+  group = true
+

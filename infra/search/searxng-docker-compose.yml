@@ -1,0 +1,21 @@
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    ports:
+      - "8888:8080"
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8888/
+      - SEARXNG_SEARCH__FORMATS__0=html
+      - SEARXNG_SEARCH__FORMATS__1=json
+      - SEARXNG_LIMITER=false
+      - SEARXNG_BOTDETECTION__ENABLED=false
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:rw
+    networks:
+      - search-net
+
+networks:
+  search-net:
+    driver: bridge
