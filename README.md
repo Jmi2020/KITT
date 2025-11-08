@@ -161,6 +161,37 @@ kitty-cli say "What printers are online?"
 kitty-cli say "Turn on bench lights"
 ```
 
+#### Interactive CLI + Tool Routing
+
+The CLI now mirrors the full ReAct stack that KITTY uses internally:
+
+- `kitty-cli shell` keeps state (conversation id, verbosity, trace/agent toggles).
+- `/trace` (or `kitty-cli say --trace "...")` streams the ReAct chain-of-thought plus tool calls.
+- `/agent` (or `--agent/--no-agent`) enables the Athene V2 Q4 orchestrator so KITTY can call tools such as `web_search`, `generate_cad`, or delegate to the F16 reasoning model.
+- When agent mode is **off** (default), you get a direct llama.cpp answer. Turn it **on** for live research, CAD, or device orchestration.
+
+Under the hood:
+
+1. The CLI includes a compact system prompt + `<user_query>` wrapper whenever tools are passed to kitty-q4 (port 8083). That keeps prompts under 2k tokens, so tool instructions don’t get lost.
+2. `brain.routing.tool_registry` auto-enables the entire toolset when the prompt implies “fresh data” (latest/price/news/etc.). Those heuristics also set `freshness_required=True`, so routing will escalate beyond cached local responses.
+3. Parsed tool calls are delivered as dataclasses; `_execute_tools` now accepts both dicts and dataclasses, logs each invocation, and forwards results into the follow-up completion.
+4. Successful tool runs (e.g., Perplexity web search) return structured answers which the ReAct agent summarizes back through kitty-q4/F16 before reaching the CLI.
+
+**Example workflow**
+
+```
+> /trace
+Trace mode enabled (verbosity forced to >=4)
+
+> /agent on
+Agent mode enabled
+
+> perform a web search to find the best tacos in Seattle
+# Trace shows kitty-q4 invoking web_search, Perplexity results, and the final ranked list
+```
+
+If a tool fails (e.g., network issue), the agent now reports the error in the trace instead of crashing, so you can immediately retry.
+
 ### Unified Launcher TUI (Recommended!)
 
 **The easiest way to manage KITTY** - single command interface with live system monitoring:
