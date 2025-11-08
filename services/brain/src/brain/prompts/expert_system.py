@@ -1,8 +1,23 @@
-"""Expert system prompt templates for KITTY with chain-of-thought reasoning."""
+"""Expert system prompt templates for KITTY with chain-of-thought reasoning.
+
+DEPRECATED: This module is being replaced by the unified prompts system.
+Please migrate to `brain.prompts.unified.KittySystemPrompt` which provides:
+- Consistent prompts across all interfaces (CLI, voice, agent)
+- Built-in hallucination prevention
+- Temperature=0 enforcement for tool calling
+- Chain-of-thought decision framework
+- Tool call validation integration
+
+See docs/unified-prompts-implementation-plan.md for migration guide.
+"""
 
 from __future__ import annotations
 
+import logging
+import warnings
 from typing import Any, Dict, List
+
+logger = logging.getLogger(__name__)
 
 
 def get_expert_system_prompt(
@@ -13,6 +28,8 @@ def get_expert_system_prompt(
 ) -> str:
     """Generate an expert system prompt with chain-of-thought reasoning.
 
+    DEPRECATED: Use KittySystemPrompt from brain.prompts.unified instead.
+
     Args:
         user_query: The user's question or request
         verbosity: 1-5 scale (1=terse, 3=detailed, 5=exhaustive)
@@ -22,6 +39,13 @@ def get_expert_system_prompt(
     Returns:
         Formatted prompt for the LLM
     """
+    warnings.warn(
+        "get_expert_system_prompt() is deprecated and will be removed in a future release. "
+        "Please migrate to brain.prompts.unified.KittySystemPrompt for improved hallucination "
+        "prevention, tool call validation, and unified interface support.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     verbosity_desc = {
         1: "extremely terse",

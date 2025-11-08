@@ -8,9 +8,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from brain.routing.llama_cpp_client import LlamaCppClient
+from brain.routing.tool_validator import ToolCallValidator
 from brain.tools.mcp_client import MCPClient
 from brain.tools.model_config import detect_model_format
 from brain.logging_config import log_agent_step
+from brain.prompts.unified import KittySystemPrompt
 
 from .prompt_templates import get_tool_call_examples
 
@@ -65,6 +67,9 @@ class ReActAgent:
         self._model_format = detect_model_format(model_alias or "qwen2.5")
         logger.info(f"ReAct agent initialized with format: {self._model_format.value}")
 
+        # Initialize unified prompt builder
+        self._prompt_builder = KittySystemPrompt()
+
     def _build_react_prompt(
         self, query: str, tools: List[Dict[str, Any]], history: List[AgentStep]
     ) -> str:
@@ -76,17 +81,9 @@ class ReActAgent:
             history: Previous reasoning steps
 
         Returns:
-            Formatted ReAct prompt
+            Formatted ReAct prompt using unified KittySystemPrompt
         """
-        # Format tools
-        tools_desc = []
-        for tool in tools:
-            func = tool["function"]
-            tools_desc.append(f"- {func['name']}: {func['description']}")
-
-        tools_text = "\n".join(tools_desc)
-
-        # Format history
+        # Format history for context
         history_text = ""
         for i, step in enumerate(history, 1):
             history_text += f"\nIteration {i}:\n"
@@ -96,39 +93,21 @@ class ReActAgent:
                 history_text += f"Action Input: {step.action_input}\n"
                 history_text += f"Observation: {step.observation}\n"
 
-        # Get model-specific tool call examples
-        tool_examples = get_tool_call_examples(self._model_format)
+        # Add history to context if exists
+        context = None
+        if history_text:
+            context = f"Previous reasoning steps:{history_text}"
 
-        prompt = f"""You are an expert in composing functions. You are given a question and a set of possible functions.
+        # Use unified prompt builder with agent mode
+        prompt = self._prompt_builder.build(
+            mode="agent",
+            tools=tools,
+            verbosity=3,  # Default to detailed verbosity for agent mode
+            model_format=self._model_format.value,
+            context=context,
+            query=query,
+        )
 
-Based on the question, you will need to make one or more function/tool calls to achieve the purpose.
-
-If none of the functions can be used, point it out.
-
-If the given question lacks the parameters required by the function, also point it out.
-
-You should only return the function call in tools call sections.
-
-If you decide to invoke any of the function(s), you MUST put it in the format of [func_name1(params_name1=params_value1, params_name2=params_value2...), func_name2(params)]
-
-Available Tools:
-{tools_text}
-
-{tool_examples}
-
-IMPORTANT - When to use tools:
-- If the user asks about "latest", "current", "recent", or "today's" information → USE web_search
-- If your knowledge cutoff prevents you from answering → USE web_search BEFORE declining
-- If the user explicitly requests "search" or "find" → USE the appropriate tool
-- DO NOT say "I cannot provide current information" without first trying web_search!
-
-When you have enough information to answer:
-Thought: I now know the final answer
-Final Answer: [your answer to the user]
-
-User Question: {query}
-{history_text}
-"""
         return prompt
 
     async def run(self, query: str) -> AgentResult:
@@ -195,20 +174,30 @@ User Question: {query}
                 action = tool_call.name
                 action_input = tool_call.arguments
 
-                logger.info(f"Executing tool: {action}({action_input})")
+                # Validate tool call before execution
+                validator = ToolCallValidator(tools)
+                validation = validator.validate_tool_call(action, action_input)
 
-                # Execute tool
-                try:
-                    result = await self._mcp.execute_tool(action, action_input)
+                if not validation.valid:
+                    # Validation failed - use error as observation to guide model
+                    observation = f"Tool call validation failed: {validation.error_message}"
+                    logger.warning(f"Invalid tool call: {action}({action_input}) - {validation.error_message}")
 
-                    if result["success"]:
-                        observation = f"Success: {result['data']}"
-                    else:
-                        observation = f"Error: {result['error']}"
+                else:
+                    # Validation passed - execute tool
+                    logger.info(f"Executing tool: {action}({action_input})")
 
-                except Exception as e:
-                    logger.error(f"Tool execution failed: {e}")
-                    observation = f"Tool execution failed: {str(e)}"
+                    try:
+                        result = await self._mcp.execute_tool(action, action_input)
+
+                        if result["success"]:
+                            observation = f"Success: {result['data']}"
+                        else:
+                            observation = f"Error: {result['error']}"
+
+                    except Exception as e:
+                        logger.error(f"Tool execution failed: {e}")
+                        observation = f"Tool execution failed: {str(e)}"
 
                 # Log agent step with action
                 log_agent_step(

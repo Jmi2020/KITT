@@ -1,0 +1,707 @@
+# KITTY Unified System Prompts - Implementation Plan
+
+**Project**: Unify system prompts across voice and CLI interfaces
+**Goal**: Consistent, hallucination-resistant tool calling with temperature=0
+**Timeline**: 4 phases over 2-3 weeks
+**Status**: Phase 1 - In Progress
+
+---
+
+## Overview
+
+This plan implements a unified system prompt architecture that ensures consistency between voice and CLI interfaces while adding hallucination prevention, confidence-based routing, and proper tool calling validation.
+
+**Key Deliverables**:
+1. `services/brain/src/brain/prompts/unified.py` - Unified prompt builder
+2. `services/brain/src/brain/routing/tool_validator.py` - Tool call validator
+3. Updated ReAct agent with hallucination prevention
+4. Updated llama_cpp_client with temperature enforcement
+5. Voice service migration to unified prompts
+
+---
+
+## Phase 1: Foundation (Days 1-3)
+
+### Objectives
+- Create unified prompt module
+- Extract and reorganize existing prompt content
+- Add hallucination prevention framework
+- Add chain-of-thought decision framework
+
+### Tasks
+
+#### 1.1 Create `services/brain/src/brain/prompts/unified.py`
+**Priority**: CRITICAL
+**Time**: 4-6 hours
+
+**Acceptance Criteria**:
+- ✅ Module exists with `KittySystemPrompt` class
+- ✅ Supports mode switching: cli, voice, agent
+- ✅ Extracts identity/safety/routing from VOICE_SYSTEM_PROMPT
+- ✅ Adds hallucination prevention section
+- ✅ Adds chain-of-thought decision framework
+- ✅ Unit tests pass
+
+**Implementation**:
+```python
+class KittySystemPrompt:
+    """Unified system prompt builder for all KITTY interfaces."""
+
+    def __init__(self, config: Settings):
+        self.config = config
+        self.identity = self._load_identity()
+        self.safety = self._load_safety()
+        self.routing = self._load_routing()
+        self.hallucination_prevention = self._load_hallucination_prevention()
+        self.reasoning_framework = self._load_reasoning_framework()
+
+    def build(self,
+             mode: str = "cli",
+             tools: List[Dict] = None,
+             verbosity: int = 3,
+             model_format: str = "qwen") -> str:
+        """Build prompt for specific interface and model."""
+        pass
+```
+
+**Testing**:
+```bash
+pytest tests/unit/test_unified_prompts.py -v
+```
+
+#### 1.2 Extract Prompt Sections
+**Priority**: HIGH
+**Time**: 2-3 hours
+
+**Acceptance Criteria**:
+- ✅ Identity section extracted from VOICE_SYSTEM_PROMPT
+- ✅ Safety model extracted from VOICE_SYSTEM_PROMPT
+- ✅ Routing policy extracted from VOICE_SYSTEM_PROMPT
+- ✅ All sections are reusable Python strings
+- ✅ Environment variable substitution works ({USER_NAME}, etc.)
+
+#### 1.3 Add Hallucination Prevention Section
+**Priority**: CRITICAL
+**Time**: 2 hours
+
+**Acceptance Criteria**:
+- ✅ Explicit "NEVER make up tools" instructions
+- ✅ Temperature=0 guidance
+- ✅ Confidence threshold requirements
+- ✅ "Ask user if uncertain" pattern
+
+**Content**:
+```
+## Core Constraints (CRITICAL)
+
+1. NEVER make up tool names, function calls, or parameters
+2. ONLY call tools explicitly provided in the tool registry below
+3. NEVER fabricate IDs, values, or results
+4. If uncertain about a tool or parameter, ASK the user
+5. Use temperature=0 for all tool calling (deterministic)
+
+## Decision Checklist
+
+Before calling ANY tool, verify:
+- ✓ Tool exists in available tools list
+- ✓ You have ALL required parameters
+- ✓ Parameter values are NOT guessed or assumed
+- ✓ Your confidence is ≥ 0.7 for this choice
+
+If ANY check fails → Ask user instead of proceeding
+```
+
+#### 1.4 Add Chain-of-Thought Framework
+**Priority**: HIGH
+**Time**: 2 hours
+
+**Acceptance Criteria**:
+- ✅ 4-step reasoning framework defined
+- ✅ Integrates with existing expert_system.py patterns
+- ✅ Works with both cli and agent modes
+
+**Content**:
+```
+## Decision Framework
+
+Before responding, follow these steps:
+
+### Step 1: Analyze the Request
+- What exactly is the user asking?
+- What information do I already know?
+- Do I need external tools or information?
+
+### Step 2: Check Available Tools
+- Review the tool registry
+- Which tool(s), if any, match this request?
+- Do I have all required parameters?
+
+### Step 3: Assess Confidence
+- High (0.9+): Tool clearly applies, all params available → Proceed
+- Medium (0.7-0.89): Tool likely applies, minor uncertainty → Ask for confirmation
+- Low (<0.7): Tool unclear or params missing → Ask user
+
+### Step 4: Execute Decision
+- If confidence ≥ 0.9 → Call tool with proper JSON format
+- If confidence 0.7-0.89 → Ask user for confirmation
+- If confidence < 0.7 → Explain limitation and ask for clarification
+```
+
+---
+
+## Phase 2: Integration (Days 4-7)
+
+### Objectives
+- Integrate unified prompts into ReAct agent
+- Add temperature enforcement
+- Create tool call validator
+- Update llama_cpp_client
+
+### Tasks
+
+#### 2.1 Update ReAct Agent (`services/brain/src/brain/agents/react_agent.py`)
+**Priority**: CRITICAL
+**Time**: 3-4 hours
+
+**Acceptance Criteria**:
+- ✅ Uses `KittySystemPrompt.build(mode="agent")`
+- ✅ Includes hallucination prevention
+- ✅ Enforces temperature=0 for tool calls
+- ✅ Validates tool calls before execution
+- ✅ Integration tests pass
+
+**Changes**:
+```python
+from brain.prompts.unified import KittySystemPrompt
+
+class ReActAgent:
+    def __init__(self, llm_client, mcp_client, max_iterations=10, model_alias=None):
+        self._llm = llm_client
+        self._mcp = mcp_client
+        self._max_iterations = max_iterations
+        self._model_format = detect_model_format(model_alias or "qwen2.5")
+
+        # NEW: Use unified prompt builder
+        self._prompt_builder = KittySystemPrompt(settings)
+
+    def _build_react_prompt(self, query, tools, history):
+        """Build ReAct prompt using unified system."""
+        return self._prompt_builder.build(
+            mode="agent",
+            tools=tools,
+            model_format=self._model_format,
+            verbosity=3,
+            query=query,
+            history=history,
+        )
+```
+
+#### 2.2 Create Tool Validator (`services/brain/src/brain/routing/tool_validator.py`)
+**Priority**: HIGH
+**Time**: 3-4 hours
+
+**Acceptance Criteria**:
+- ✅ Validates tool existence
+- ✅ Validates required parameters
+- ✅ Validates parameter types
+- ✅ Returns (is_valid, error_message) tuple
+- ✅ Determines if error is retryable
+- ✅ Unit tests cover all validation scenarios
+
+**Implementation**:
+```python
+import jsonschema
+from typing import Dict, List, Tuple
+
+class ToolCallValidator:
+    """Validates tool calls against JSON schemas."""
+
+    def __init__(self, tool_schemas: Dict[str, Dict]):
+        self.schemas = tool_schemas
+
+    def validate(self, tool_call: Dict) -> Tuple[bool, str]:
+        """Validate tool call against schema."""
+        # Implementation from docs/system-prompt-analysis.md
+        pass
+
+    def should_retry(self, error: str) -> bool:
+        """Check if validation error is retryable."""
+        pass
+```
+
+#### 2.3 Add Temperature Enforcement (`services/brain/src/brain/routing/llama_cpp_client.py`)
+**Priority**: CRITICAL
+**Time**: 1-2 hours
+
+**Acceptance Criteria**:
+- ✅ All tool calling requests use temperature=0.0
+- ✅ Logs when temperature is overridden
+- ✅ Existing tests still pass
+
+**Changes**:
+```python
+async def generate(self, prompt: str, tools: List[Dict] = None, **kwargs):
+    """Generate with automatic temperature control for tool calling."""
+
+    # Enforce temperature=0 for tool calling
+    if tools:
+        original_temp = kwargs.get('temperature')
+        kwargs['temperature'] = 0.0
+        kwargs['top_p'] = 1.0
+
+        if original_temp and original_temp != 0.0:
+            logger.warning(
+                f"Tool calling mode: overriding temperature {original_temp} → 0.0 (deterministic)"
+            )
+        else:
+            logger.info("Tool calling mode: temperature=0.0 (deterministic)")
+
+    # ... rest of implementation
+```
+
+#### 2.4 Update Expert System (`services/brain/src/brain/prompts/expert_system.py`)
+**Priority**: MEDIUM
+**Time**: 2 hours
+
+**Acceptance Criteria**:
+- ✅ Uses unified prompt builder internally
+- ✅ Maintains backward compatibility
+- ✅ Adds deprecation warning
+
+**Changes**:
+```python
+from brain.prompts.unified import KittySystemPrompt
+import warnings
+
+def get_expert_system_prompt(user_query, verbosity=3, context=None, mode="spoken"):
+    """Generate expert system prompt (DEPRECATED - use KittySystemPrompt).
+
+    This function is maintained for backward compatibility but will be
+    removed in a future version. Use KittySystemPrompt.build() instead.
+    """
+    warnings.warn(
+        "get_expert_system_prompt is deprecated. Use KittySystemPrompt.build() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+
+    builder = KittySystemPrompt(settings)
+    return builder.build(
+        mode="cli" if mode == "written" else "voice",
+        verbosity=verbosity,
+        context=context,
+    )
+```
+
+---
+
+## Phase 3: Testing & Validation (Days 8-10)
+
+### Objectives
+- Test unified prompts in isolation
+- Test CLI integration
+- Test agent integration
+- Measure hallucination rate and tool accuracy
+- Compare before/after metrics
+
+### Tasks
+
+#### 3.1 Unit Tests
+**Priority**: CRITICAL
+**Time**: 4 hours
+
+**Test Files**:
+- `tests/unit/test_unified_prompts.py`
+- `tests/unit/test_tool_validator.py`
+- `tests/unit/test_react_agent_unified.py`
+
+**Test Cases**:
+```python
+# tests/unit/test_unified_prompts.py
+
+def test_unified_prompt_cli_mode():
+    """Test CLI mode prompt generation."""
+    builder = KittySystemPrompt(settings)
+    prompt = builder.build(mode="cli", verbosity=3)
+
+    assert "KITTY" in prompt
+    assert "NEVER make up" in prompt  # Hallucination prevention
+    assert "temperature=0" in prompt
+    assert "Decision Framework" in prompt
+
+def test_unified_prompt_agent_mode():
+    """Test agent mode with tools."""
+    tools = [{"function": {"name": "web_search", "description": "Search web"}}]
+    builder = KittySystemPrompt(settings)
+    prompt = builder.build(mode="agent", tools=tools)
+
+    assert "web_search" in prompt
+    assert "NEVER make up tool names" in prompt
+
+def test_hallucination_prevention_included():
+    """Ensure hallucination prevention is in all modes."""
+    builder = KittySystemPrompt(settings)
+
+    for mode in ["cli", "voice", "agent"]:
+        prompt = builder.build(mode=mode)
+        assert "NEVER make up" in prompt
+        assert "temperature=0" in prompt
+```
+
+#### 3.2 Integration Tests
+**Priority**: HIGH
+**Time**: 4 hours
+
+**Test Files**:
+- `tests/integration/test_cli_with_unified_prompts.py`
+- `tests/integration/test_agent_tool_calling.py`
+
+**Test Cases**:
+```python
+# tests/integration/test_cli_with_unified_prompts.py
+
+async def test_cli_query_with_unified_prompt():
+    """Test CLI query uses unified prompt."""
+    request = RoutingRequest(
+        conversation_id="test",
+        request_id="123",
+        prompt="What is 2 + 2?",
+    )
+
+    result = await router.route(request)
+    assert result.output == "4" or "4" in result.output
+    assert result.tier == RoutingTier.local
+
+async def test_cli_tool_calling_format():
+    """Test tool calls use proper JSON format."""
+    request = RoutingRequest(
+        conversation_id="test",
+        request_id="456",
+        prompt="Search the web for latest Python news",
+        use_agent=True,
+    )
+
+    result = await router.route(request)
+    # Should call web_search tool
+    assert "Python" in result.output
+```
+
+#### 3.3 Hallucination Rate Measurement
+**Priority**: HIGH
+**Time**: 3 hours
+
+**Script**: `tests/metrics/measure_hallucination_rate.py`
+
+**Test Scenarios**:
+```python
+# Scenarios designed to trigger hallucinations
+test_scenarios = [
+    "Use the fictional_tool to do something",  # Non-existent tool
+    "Search for X using tool Y",  # Tool exists but params wrong
+    "Generate a CAD model",  # Missing required params
+    "Control device with ID abc123",  # Potentially fabricated ID
+]
+
+# Measure:
+# 1. How many times does model make up a tool?
+# 2. How many times does model fabricate parameters?
+# 3. How many times does model ask for clarification instead?
+```
+
+**Acceptance Criteria**:
+- ✅ Hallucination rate < 5% (target from analysis doc)
+- ✅ "Ask user" rate > 80% when params missing
+- ✅ Never calls non-existent tools
+
+#### 3.4 Tool Accuracy Measurement
+**Priority**: HIGH
+**Time**: 2 hours
+
+**Script**: `tests/metrics/measure_tool_accuracy.py`
+
+**Test Cases**:
+```python
+# Valid tool call scenarios
+valid_scenarios = [
+    ("Search web for llama.cpp", "web_search"),
+    ("Generate a bracket CAD model", "generate_cad_model"),
+    ("What's the temperature?", None),  # No tool needed
+]
+
+# Measure:
+# 1. Correct tool selection rate
+# 2. Correct parameter extraction rate
+# 3. False positive rate (calling tool when not needed)
+```
+
+**Acceptance Criteria**:
+- ✅ Tool selection accuracy ≥ 95%
+- ✅ Parameter extraction accuracy ≥ 90%
+- ✅ False positive rate < 10%
+
+---
+
+## Phase 4: Voice Integration (Days 11-14)
+
+### Objectives
+- Migrate voice service to unified prompts
+- Ensure TTS-friendly output
+- Test voice → tool calling flow
+- Update documentation
+
+### Tasks
+
+#### 4.1 Update Voice Service (`services/voice/src/voice/dependencies.py`)
+**Priority**: HIGH
+**Time**: 2-3 hours
+
+**Acceptance Criteria**:
+- ✅ Uses `KittySystemPrompt.build(mode="voice")`
+- ✅ Maintains TTS-friendly output
+- ✅ Environment variable substitution works
+- ✅ Voice tests pass
+
+**Changes**:
+```python
+from brain.prompts.unified import KittySystemPrompt
+from brain.routing.tool_registry import get_tools_for_prompt
+
+@lru_cache(maxsize=1)
+def get_parser() -> VoiceParser:
+    """Get voice parser with unified system prompt."""
+
+    # Build voice-specific prompt with unified system
+    prompt_builder = KittySystemPrompt(settings)
+
+    # Get voice-specific tools (subset of all tools)
+    tools = get_tools_for_prompt(context="voice")
+
+    rendered = prompt_builder.build(
+        mode="voice",
+        tools=tools,
+        verbosity=settings.verbosity,
+        model_format="qwen",  # Or from settings
+    )
+
+    return VoiceParser(rendered)
+```
+
+#### 4.2 Voice Integration Testing
+**Priority**: HIGH
+**Time**: 3 hours
+
+**Test Cases**:
+- Voice command → direct response (no tool)
+- Voice command → tool call → response
+- Voice command → missing params → asks for clarification
+- Voice command → TTS-friendly formatting
+
+**Acceptance Criteria**:
+- ✅ All voice test scenarios pass
+- ✅ TTS output maintains natural language
+- ✅ Tool calling works from voice
+- ✅ Voice and CLI give consistent tool selections
+
+#### 4.3 Documentation Updates
+**Priority**: MEDIUM
+**Time**: 2 hours
+
+**Files to Update**:
+- `CLAUDE.md` - Add unified prompts section
+- `docs/project-overview.md` - Update system prompt architecture
+- `services/brain/README.md` - Document KittySystemPrompt usage
+
+**Acceptance Criteria**:
+- ✅ CLAUDE.md explains unified prompt system
+- ✅ Examples show how to use KittySystemPrompt
+- ✅ Migration guide for future prompt changes
+- ✅ Deprecation notices for old functions
+
+---
+
+## Testing Strategy
+
+### Unit Tests
+```bash
+# Run all unit tests
+pytest tests/unit/ -v
+
+# Run specific prompt tests
+pytest tests/unit/test_unified_prompts.py -v
+pytest tests/unit/test_tool_validator.py -v
+```
+
+### Integration Tests
+```bash
+# Run integration tests (requires running services)
+pytest tests/integration/ -v --integration
+
+# Test CLI flow
+pytest tests/integration/test_cli_with_unified_prompts.py -v
+
+# Test agent flow
+pytest tests/integration/test_agent_tool_calling.py -v
+```
+
+### Metrics Collection
+```bash
+# Measure hallucination rate
+python tests/metrics/measure_hallucination_rate.py
+
+# Measure tool accuracy
+python tests/metrics/measure_tool_accuracy.py
+
+# Compare before/after
+python tests/metrics/compare_prompt_versions.py
+```
+
+### Manual Testing
+```bash
+# Test CLI with unified prompts
+kitty-cli say "What is 2 + 2?"
+kitty-cli say "Search the web for latest AI news"
+kitty-cli say "Generate a CAD model"  # Should ask for details
+
+# Test with verbose logging
+REASONING_LOG_LEVEL=DEBUG kitty-cli say "Search for Python"
+```
+
+---
+
+## Rollback Plan
+
+### If Issues Arise
+
+**Immediate Rollback** (< 5 minutes):
+```bash
+# Revert unified prompts integration
+git revert <commit-hash>
+docker compose -f infra/compose/docker-compose.yml restart brain
+```
+
+**Partial Rollback** (keep validator, revert prompts):
+```python
+# In services/brain/src/brain/agents/react_agent.py
+# Comment out unified prompt usage, restore old prompt
+# self._build_react_prompt = self._build_react_prompt_old
+```
+
+**Gradual Migration**:
+- Phase 1-2: Keep old prompts as fallback
+- Phase 3: A/B test (50% old, 50% new)
+- Phase 4: Full migration after validation
+
+---
+
+## Success Metrics
+
+| Metric | Baseline | Target | Post-Implementation |
+|--------|----------|--------|---------------------|
+| Tool call accuracy | TBD | ≥95% | TBD |
+| Hallucination rate | TBD | <5% | TBD |
+| Confidence accuracy | N/A | ≥80% | TBD |
+| Voice/CLI consistency | ~0% | ≥90% | TBD |
+| Temperature compliance | Unknown | 100% | TBD |
+| Test coverage | TBD | ≥85% | TBD |
+
+### How to Measure
+
+**Before Implementation**:
+```bash
+# Baseline metrics
+python tests/metrics/baseline_measurement.py > baseline.json
+```
+
+**After Implementation**:
+```bash
+# Post-implementation metrics
+python tests/metrics/post_implementation_measurement.py > post_impl.json
+
+# Compare
+python tests/metrics/compare_metrics.py baseline.json post_impl.json
+```
+
+---
+
+## Dependencies
+
+### External
+- Python 3.10+
+- jsonschema library (for validation)
+- pytest (for testing)
+- Running llama.cpp servers (Q4 + F16)
+
+### Internal
+- services/common/src/common/config.py
+- services/brain/src/brain/routing/llama_cpp_client.py
+- services/brain/src/brain/tools/mcp_client.py
+- services/brain/src/brain/prompts/expert_system.py
+
+---
+
+## Risk Assessment
+
+| Risk | Probability | Impact | Mitigation |
+|------|-------------|--------|------------|
+| Regression in tool calling | Medium | High | Comprehensive tests, gradual rollout |
+| Voice UX degradation | Low | Medium | TTS-friendly mode, user testing |
+| Performance degradation | Low | Low | Prompts optimized for length |
+| Breaking changes in API | Low | High | Backward compatibility layer |
+
+---
+
+## Timeline
+
+### Week 1
+- **Day 1-2**: Phase 1 (Foundation) - unified.py module
+- **Day 3-4**: Phase 2 (Integration) - ReAct agent, validator
+- **Day 5**: Testing Phase 2 changes
+
+### Week 2
+- **Day 6-7**: Phase 3 (Testing) - metrics, validation
+- **Day 8-9**: Phase 4 (Voice) - voice integration
+- **Day 10**: Final testing, documentation
+
+### Week 3 (Buffer)
+- **Day 11-12**: Bug fixes, refinement
+- **Day 13-14**: Production deployment, monitoring
+
+---
+
+## Next Steps
+
+1. **Review this plan** - Get team alignment
+2. **Set up measurement baseline** - Run baseline metrics
+3. **Begin Phase 1** - Create unified.py module
+4. **Daily standup** - Track progress against plan
+5. **Weekly review** - Adjust plan based on learnings
+
+---
+
+## Appendix: File Checklist
+
+### New Files
+- [ ] `services/brain/src/brain/prompts/unified.py`
+- [ ] `services/brain/src/brain/routing/tool_validator.py`
+- [ ] `tests/unit/test_unified_prompts.py`
+- [ ] `tests/unit/test_tool_validator.py`
+- [ ] `tests/integration/test_cli_with_unified_prompts.py`
+- [ ] `tests/integration/test_agent_tool_calling.py`
+- [ ] `tests/metrics/measure_hallucination_rate.py`
+- [ ] `tests/metrics/measure_tool_accuracy.py`
+- [ ] `tests/metrics/baseline_measurement.py`
+
+### Modified Files
+- [ ] `services/brain/src/brain/agents/react_agent.py`
+- [ ] `services/brain/src/brain/routing/llama_cpp_client.py`
+- [ ] `services/brain/src/brain/prompts/expert_system.py`
+- [ ] `services/voice/src/voice/dependencies.py`
+- [ ] `CLAUDE.md`
+- [ ] `docs/project-overview.md`
+
+---
+
+**Plan Version**: 1.0
+**Last Updated**: 2025-01-07
+**Owner**: System Architecture Team
+**Status**: Ready for Implementation

@@ -46,10 +46,20 @@ class LlamaCppClient:
                 - tool_calls: List of ToolCall objects if tools were invoked
                 - raw: Raw API response
         """
+        # Enforce temperature=0 for tool calling (hallucination prevention)
+        temperature = self._config.temperature
+        if tools:
+            if temperature != 0:
+                logger.warning(
+                    f"Overriding temperature {temperature} -> 0 for tool calling "
+                    "(deterministic output required for hallucination prevention)"
+                )
+            temperature = 0
+
         payload: Dict[str, Any] = {
             "prompt": prompt,
             "n_predict": self._config.n_predict,
-            "temperature": self._config.temperature,
+            "temperature": temperature,
             "top_p": self._config.top_p,
             "repeat_penalty": self._config.repeat_penalty,
             "stream": self._config.stream,
