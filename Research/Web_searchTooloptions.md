@@ -2,7 +2,9 @@
 
 ## Overview
 
-This guide covers integrating web search capabilities into **llama.cpp** running **Athene V2 Agent** and **Llama 3.3 70B**. You'll find setup instructions for both free and paid options.
+This guide covers integrating web search capabilities into **llama.cpp** running **Athene V2 Agent** and **Llama 3.3 70B**. You'll find setup instructions for both free and paid options.  
+
+> KITTY Status (Nov 2025): Search queries now route through **SearXNG → Brave → DuckDuckGo** and full article extraction is handled by **Jina Reader** with a BeautifulSoup fallback. Configure `SEARXNG_BASE_URL`, `BRAVE_SEARCH_API_KEY`, and `JINA_API_KEY` in `.env` to mirror this setup.
 
 > **KITTY integration (2025-11-06)**  
 > The brain service now routes `web_search` through a three-tier cascade:

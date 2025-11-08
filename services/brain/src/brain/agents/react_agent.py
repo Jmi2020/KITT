@@ -140,6 +140,8 @@ class ReActAgent:
         # ReAct loop
         history: List[AgentStep] = []
 
+        tools_used = 0
+
         for iteration in range(self._max_iterations):
             logger.info(f"ReAct iteration {iteration + 1}/{self._max_iterations}")
 
@@ -160,20 +162,53 @@ class ReActAgent:
 
             # Check if final answer
             if "Final Answer:" in text:
-                # Extract final answer
-                final_answer = text.split("Final Answer:")[-1].strip()
-                history.append(
-                    AgentStep(
+                if freshness_required and tools_used == 0 and self._tool_mcp:
+                    logger.info("Freshness required but no tools used; forcing web_search fallback.")
+                    try:
+                        forced = await self._tool_mcp.execute_tool("web_search", {"query": query})
+                        if forced.get("success"):
+                            observation = f"Success: {forced.get('data')}"
+                        else:
+                            observation = f"Error: {forced.get('error', 'unknown error')}"
+                    except Exception as exc:  # noqa: BLE001
+                        observation = f"Forced web_search failed: {exc}"
+                        logger.error(observation)
+
+                    log_agent_step(
+                        logger=logger,
+                        iteration=iteration + 1,
                         thought=thought,
-                        is_final=True,
+                        action="web_search({'query': query})",
+                        observation=observation,
+                        model=self._model_format.value,
                     )
-                )
-                return AgentResult(
-                    answer=final_answer,
-                    steps=history,
-                    success=True,
-                    iterations=iteration + 1,
-                )
+                    history.append(
+                        AgentStep(
+                            thought="Forced web_search due to freshness requirement.",
+                            action="web_search",
+                            action_input={"query": query},
+                            observation=observation,
+                        )
+                    )
+                    tools_used += 1
+                    continue
+
+                if tools_used > 0 or not freshness_required:
+                    # Extract final answer
+                    final_answer = text.split("Final Answer:")[-1].strip()
+                    history.append(
+                        AgentStep(
+                            thought=thought,
+                            is_final=True,
+                        )
+                    )
+                    return AgentResult(
+                        answer=final_answer,
+                        steps=history,
+                        success=True,
+                        iterations=iteration + 1,
+                    )
+                continue
 
             # Check for tool calls
             if tool_calls:
@@ -225,6 +260,7 @@ class ReActAgent:
                         observation=observation,
                     )
                 )
+                tools_used += 1
 
             else:
                 # No tool call and no final answer - just reasoning
@@ -243,6 +279,13 @@ class ReActAgent:
                         thought=thought,
                     )
                 )
+
+        if freshness_required and tools_used == 0 and self._tool_mcp:
+            logger.info("Max iterations reached without tool usage; forcing final web_search.")
+            forced = await self.run_single_action(query, "web_search", {"query": query})
+            forced.steps = history + forced.steps
+            forced.iterations = self._max_iterations
+            return forced
 
         # Max iterations reached
         return AgentResult(
@@ -267,7 +310,7 @@ class ReActAgent:
             Agent result
         """
         try:
-            result = await self._mcp.execute_tool(tool_name, tool_args)
+            result = await self._tool_mcp.execute_tool(tool_name, tool_args)
 
             if result["success"]:
                 observation = f"Success: {result['data']}"

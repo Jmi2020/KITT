@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
@@ -30,6 +31,9 @@ class WebTool:
         timeout: int = 30,
         max_content_length: int = 10_000_000,  # 10MB
         user_agent: Optional[str] = None,
+        enable_jina: bool = True,
+        jina_base_url: Optional[str] = None,
+        jina_api_key: Optional[str] = None,
     ) -> None:
         """Initialize WebTool.
 
@@ -45,6 +49,13 @@ class WebTool:
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/120.0.0.0 Safari/537.36"
         )
+        self._jina_enabled = enable_jina and os.getenv("JINA_READER_DISABLED", "false").lower() not in {
+            "1",
+            "true",
+            "yes",
+        }
+        self._jina_base_url = jina_base_url or os.getenv("JINA_READER_BASE_URL", "https://r.jina.ai")
+        self._jina_api_key = jina_api_key or os.getenv("JINA_API_KEY")
 
     async def fetch(self, url: str) -> Dict[str, Any]:
         """Fetch and parse web content.
@@ -66,6 +77,12 @@ class WebTool:
                 - metadata (dict): Additional metadata
         """
         try:
+            if self._jina_enabled and self._jina_base_url:
+                jina_result = await self._fetch_via_jina(url)
+                if jina_result["success"]:
+                    return jina_result
+                logger.warning("Jina reader failed for %s: %s", url, jina_result.get("error"))
+
             async with httpx.AsyncClient(
                 timeout=self.timeout,
                 follow_redirects=True,
@@ -115,6 +132,7 @@ class WebTool:
                         "content_length": content_length,
                         "status_code": response.status_code,
                         "content_type": response.headers.get("content-type", ""),
+                        "provider": "beautifulsoup",
                     },
                 }
 
@@ -144,6 +162,60 @@ class WebTool:
                 "error": f"Unexpected error: {str(exc)}",
                 "metadata": {},
             }
+
+    async def _fetch_via_jina(self, url: str) -> Dict[str, Any]:
+        """Attempt to extract content using Jina Reader API."""
+        api_url = f"{self._jina_base_url.rstrip('/')}/{url}"
+        headers = {
+            "Accept": "application/json",
+        }
+        if self._jina_api_key:
+            headers["Authorization"] = f"Bearer {self._jina_api_key}"
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(api_url, headers=headers)
+            response.raise_for_status()
+
+        try:
+            payload = response.json()
+        except ValueError:
+            text = response.text
+            return {
+                "success": True,
+                "url": url,
+                "final_url": url,
+                "title": "",
+                "description": "",
+                "author": "",
+                "content": text.strip(),
+                "metadata": {
+                    "provider": "jina_reader",
+                },
+            }
+
+        data = payload.get("data", payload)
+        content = data.get("content") or data.get("markdown", "")
+        if not content:
+            return {
+                "success": False,
+                "url": url,
+                "error": "Jina reader returned empty content",
+                "metadata": {"provider": "jina_reader"},
+            }
+
+        return {
+            "success": True,
+            "url": url,
+            "final_url": data.get("url", url),
+            "title": data.get("title", ""),
+            "description": data.get("description", ""),
+            "author": data.get("author", ""),
+            "content": content.strip(),
+            "metadata": {
+                "provider": "jina_reader",
+                "usage": data.get("usage", {}),
+            },
+        }
 
     def _extract_title(self, soup: BeautifulSoup) -> str:
         """Extract page title from HTML.

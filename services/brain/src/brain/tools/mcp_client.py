@@ -123,6 +123,8 @@ class MCPClient:
             ToolDefinition if found, None otherwise
         """
         for server in self._servers.values():
+            if not hasattr(server, "get_tool"):
+                continue
             tool_def = server.get_tool(tool_name)
             if tool_def:
                 return tool_def
@@ -141,6 +143,8 @@ class MCPClient:
         """
         # Find which server has this tool
         for server_name, server in self._servers.items():
+            if not hasattr(server, "get_tool"):
+                continue
             tool_def = server.get_tool(tool_name)
             if tool_def:
                 # Execute tool on this server

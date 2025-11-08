@@ -43,6 +43,10 @@ Transforming KITTY into a tool-aware agent using full MCP protocol, ReAct patter
    - `services/research/src/research/search_tool.py` now cascades through self-hosted + freemium providers before paid APIs
    - `.env`: `SEARXNG_BASE_URL`, `BRAVE_SEARCH_API_KEY`, `BRAVE_SEARCH_ENDPOINT`
    - Research MCP server automatically picks the best available backend; Perplexity credits only burn when `research_deep` is explicitly invoked
+7. ✅ Web extraction tooling (Jina Reader → BeautifulSoup fallback)
+   - `services/research/src/research/web_tool.py` tries Jina Reader first for clean Markdown, then drops to local parsing
+   - `.env`: `JINA_API_KEY`, `JINA_READER_BASE_URL`, `JINA_READER_DISABLED`
+   - `fetch_webpage` tool now returns full article text so the agent can cite real content after `web_search`
 
 ### Phase 2.1: MCP Server Framework ✅
 

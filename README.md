@@ -208,7 +208,7 @@ curl -s "http://localhost:8000/api/autonomy/budget?days=7" | jq
 - Gauges such as `kitty_autonomy_budget_available_usd` and `kitty_autonomy_ready_state` are exposed on `/metrics` for Prometheus/Grafana dashboards.
 - `.env` toggles: `AUTONOMOUS_ENABLED=true`, `AUTONOMOUS_DAILY_BUDGET_USD=5.00`, `AUTONOMOUS_IDLE_THRESHOLD_MINUTES=120`.
 
-### Web Search Stack (SearXNG → Brave → DuckDuckGo → Perplexity)
+### Web Search + Extraction Stack (SearXNG → Brave → DuckDuckGo → Perplexity → Jina Reader)
 
 1. **Run SearXNG locally (free, private)**
    ```bash
@@ -223,9 +223,13 @@ curl -s "http://localhost:8000/api/autonomy/budget?days=7" | jq
    - Put the key in `.env` (`BRAVE_SEARCH_API_KEY`), keep the default endpoint unless you’re in a different region.
    - Brave only triggers when SearXNG is down or returns zero results.
 
-3. **Perplexity is now the last resort**
-   - `web_search` will exhaust the two free tiers before calling `research_deep`.
-   - Routing telemetry (`metadata.provider`) shows which backend served each query so you can monitor savings.
+3. **Full article extraction with Jina Reader (plus local fallback)**
+   - Set `JINA_API_KEY` (free tier works) and KITTY will fetch the full article via `fetch_webpage` after each search hit.
+   - If Jina is unavailable, we fall back to the built-in BeautifulSoup parser to keep responses flowing.
+
+4. **Perplexity is now the last resort**
+   - `web_search` + `fetch_webpage` will exhaust free tiers before calling `research_deep`.
+   - Routing telemetry (`metadata.provider`) shows which backend and extractor handled the query so you can monitor savings.
 
 ### Unified Launcher TUI (Recommended!)
 
