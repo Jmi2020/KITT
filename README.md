@@ -17,41 +17,94 @@
 
 ### 🎬 First Time Setup
 
-**Option 1: TUI-First Workflow (Recommended)**
+#### Understanding the Startup Order
 
-The easiest way to get started is using the Model Manager TUI to interactively select and start models:
+KITTY uses a layered architecture that must start in a specific order:
+
+```
+1. llama.cpp Servers (Dual-Model)
+   ├─ Q4 Model (Port 8083) - Fast Tool Orchestrator
+   └─ F16 Model (Port 8082) - Deep Reasoning Engine
+                    ↓
+2. Docker Services
+   ├─ Brain (Port 8000) - Routes queries to llama.cpp
+   ├─ Gateway (Port 8080) - Public API
+   ├─ CAD, Fabrication, Safety, etc.
+   └─ PostgreSQL, Redis, Prometheus, etc.
+                    ↓
+3. User Interfaces
+   ├─ kitty-cli - Command line interface
+   ├─ Web UI (Port 4173)
+   └─ Voice interface
+```
+
+**The Easy Way** - `./ops/scripts/start-kitty-validated.sh` handles this entire sequence automatically:
+1. Checks for running llama.cpp servers (or starts them if configured in `.env`)
+2. Starts all Docker services
+3. Validates health of each component
+4. Shows you what's ready and where to access it
+
+---
+
+#### Step-by-Step Startup Guide
+
+**Automated Startup (Recommended)**
+
+```bash
+# 1. Copy and configure .env
+cp .env.example .env
+
+# 2. Edit .env to set dual-model configuration:
+#    LLAMACPP_MODELS_DIR=/Users/Shared/Coding/models
+#    LLAMACPP_Q4_MODEL=llama-3-70b/Llama-3.3-70B-Instruct-UD-Q4_K_XL.gguf
+#    LLAMACPP_F16_MODEL=llama-3-70b/Llama-3.3-70B-Instruct-F16/...gguf
+
+# 3. Start everything with validated startup script
+./ops/scripts/start-kitty-validated.sh
+# This automatically:
+# ✓ Starts Q4 llama.cpp server (port 8083)
+# ✓ Starts F16 llama.cpp server (port 8082)
+# ✓ Waits for both to be healthy
+# ✓ Starts all Docker services
+# ✓ Validates each service
+# ✓ Shows you access points and log locations
+```
+
+**Manual Startup (Advanced)**
+
+If you want more control over the startup process:
+
+```bash
+# Step 1: Start llama.cpp dual-model servers FIRST
+./ops/scripts/start-llamacpp-dual.sh
+# Wait for both servers to be ready (check .logs/llamacpp-q4.log and .logs/llamacpp-f16.log)
+
+# Step 2: Start Docker services (they connect to llama.cpp)
+docker compose -f infra/compose/docker-compose.yml up -d --build
+
+# Step 3: Wait for services to be healthy
+docker compose -f infra/compose/docker-compose.yml ps
+
+# Step 4: Use KITTY interfaces
+kitty-cli shell
+```
+
+**Alternative: TUI Model Manager Workflow**
+
+For interactive model selection without editing `.env`:
 
 ```bash
 # 1. Install Model Manager
 pip install -e services/model-manager/
 
-# 2. Launch TUI and select a model
+# 2. Launch TUI and select models
 kitty-model-manager tui
-# Use arrow keys to browse models
-# Press Enter to expand families and select models
-# Press 's' to start the selected model
+# Use arrow keys to browse available models
+# Press 's' to start the dual-model servers
 
-# 3. Start KITTY services (in a new terminal)
-./ops/scripts/start-kitty-validated.sh
+# 3. Start Docker services (in a new terminal)
+docker compose -f infra/compose/docker-compose.yml up -d --build
 ```
-
-**Option 2: Auto-Bootstrap Workflow**
-
-For automation or CI environments, configure models in `.env` for automatic startup:
-
-```bash
-# 1. Copy example configuration
-cp .env.example .env
-
-# 2. Edit .env to set model paths:
-#    LLAMACPP_MODELS_DIR=/Users/Shared/Coding/models
-#    LLAMACPP_PRIMARY_MODEL=family/model.gguf
-
-# 3. Start everything (auto-loads configured model)
-./ops/scripts/start-kitty-validated.sh
-```
-
-> **Note**: If no model is configured and no server is running, the startup script will show helpful instructions.
 
 ---
 
