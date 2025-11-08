@@ -14,7 +14,7 @@ os.environ.setdefault("SETTINGS_MODULE", "services.common.config")
 
 pytest.importorskip("pydantic_settings")
 
-from brain.agents.react_agent import ReActAgent  # type: ignore[import]
+from brain.agents.react_agent import AgentStep, ReActAgent  # type: ignore[import]
 from brain.tools.parser import ToolCall  # type: ignore[import]
 
 
@@ -46,6 +46,7 @@ class DummyMCPClient:
                         "required": ["query"],
                     },
                 },
+                "server": "research",
             }
         ]
 
@@ -122,3 +123,20 @@ async def test_agent_forces_web_search_when_no_tool_used():
     assert len(mcp.executed) == 1, "Forced fallback should run web_search once"
     assert result.success
     assert any(step.action == "web_search" for step in result.steps)
+
+
+def test_history_window_trims_prompt_history():
+    llama = DummyLlamaClient(responses=[])
+    mcp = DummyMCPClient()
+    agent = ReActAgent(llm_client=llama, mcp_client=mcp, max_iterations=1, model_alias="qwen2.5")
+    agent._history_window = 2
+
+    history = [
+        AgentStep(thought="first"),
+        AgentStep(thought="second"),
+        AgentStep(thought="third"),
+    ]
+
+    trimmed = agent._history_for_prompt(history)
+    assert len(trimmed) == 2
+    assert [step.thought for step in trimmed] == ["second", "third"]

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -64,6 +65,8 @@ class ReActAgent:
         # Keep a dedicated reference for direct tool execution / fallbacks
         self._tool_mcp = mcp_client
         self._max_iterations = max_iterations
+        self._history_window = max(int(os.getenv("AGENT_HISTORY_STEPS", "4")), 0)
+        self._observation_limit = max(int(os.getenv("AGENT_OBSERVATION_CHARS", "2000")), 256)
 
         # Detect model format for tool calling (default to Qwen if not specified)
         self._model_format = detect_model_format(model_alias or "qwen2.5")
@@ -117,6 +120,53 @@ class ReActAgent:
 
         return prompt
 
+    def _history_for_prompt(self, history: List[AgentStep]) -> List[AgentStep]:
+        """Limit history injected into the prompt to avoid blowing context."""
+        if self._history_window <= 0 or len(history) <= self._history_window:
+            return history
+        return history[-self._history_window :]
+
+    def _summarize_tool_observation(self, action: str, result: Dict[str, Any]) -> str:
+        """Condense tool output so we do not exceed llama.cpp context limits."""
+        if not result.get("success"):
+            message = result.get("error") or "unknown error"
+            return self._truncate_observation(f"{action} failed: {message}")
+
+        data = result.get("data")
+        if isinstance(data, dict):
+            metadata = data.get("metadata") or {}
+            provider = metadata.get("provider") or (result.get("metadata") or {}).get("server")
+            prefix = f"{action} via {provider}" if provider else action
+
+            results = data.get("results")
+            if isinstance(results, list) and results:
+                snippets = []
+                for item in results[:3]:
+                    title = (item.get("title") or item.get("url") or "untitled").strip()
+                    source = item.get("source") or ""
+                    entry = title
+                    if source:
+                        entry += f" ({source})"
+                    snippets.append(entry[:120])
+                summary = "; ".join(snippets)
+                total = data.get("total_results")
+                if isinstance(total, int):
+                    summary = f"{summary} (total {total})"
+                return self._truncate_observation(f"{prefix}: {summary}")
+
+            return self._truncate_observation(f"{prefix}: {str(data)[:300]}")
+
+        if isinstance(data, list):
+            preview = "; ".join(str(item) for item in data[:3])
+            return self._truncate_observation(f"{action} returned list: {preview}")
+
+        return self._truncate_observation(f"{action} success: {str(data)}")
+
+    def _truncate_observation(self, text: str) -> str:
+        if len(text) <= self._observation_limit:
+            return text
+        return text[: self._observation_limit - 3] + "..."
+
     async def run(self, query: str, freshness_required: bool = False) -> AgentResult:
         """Execute ReAct loop to answer query.
 
@@ -128,6 +178,10 @@ class ReActAgent:
         """
         # Get available tools
         tools = self._mcp.get_tools_for_prompt()
+        if freshness_required:
+            research_only = [tool for tool in tools if tool.get("server") == "research"]
+            if research_only:
+                tools = research_only
 
         if not tools:
             # No tools available - just answer directly
@@ -148,8 +202,9 @@ class ReActAgent:
             logger.info(f"ReAct iteration {iteration + 1}/{self._max_iterations}")
 
             # Build prompt with current history
+            prompt_history = self._history_for_prompt(history)
             prompt = self._build_react_prompt(
-                query, tools, history, freshness_required=freshness_required
+                query, tools, prompt_history, freshness_required=freshness_required
             )
 
             # Get LLM response with tools
@@ -183,15 +238,10 @@ class ReActAgent:
 
                     try:
                         result = await self._mcp.execute_tool(action, action_input)
-
-                        if result["success"]:
-                            observation = f"Success: {result['data']}"
-                        else:
-                            observation = f"Error: {result['error']}"
-
+                        observation = self._summarize_tool_observation(action, result)
                     except Exception as e:
                         logger.error(f"Tool execution failed: {e}")
-                        observation = f"Tool execution failed: {str(e)}"
+                        observation = self._truncate_observation(f"Tool execution failed: {str(e)}")
 
                 # Log agent step with action
                 log_agent_step(
@@ -222,13 +272,11 @@ class ReActAgent:
                     logger.info("Freshness required but no tools used; forcing web_search fallback.")
                     try:
                         forced = await self._tool_mcp.execute_tool("web_search", {"query": query})
-                        if forced.get("success"):
-                            observation = f"Success: {forced.get('data')}"
-                        else:
-                            observation = f"Error: {forced.get('error', 'unknown error')}"
+                        observation = self._summarize_tool_observation("web_search", forced)
                     except Exception as exc:  # noqa: BLE001
                         observation = f"Forced web_search failed: {exc}"
                         logger.error(observation)
+                        observation = self._truncate_observation(observation)
 
                     log_agent_step(
                         logger=logger,
@@ -316,14 +364,9 @@ class ReActAgent:
         try:
             result = await self._tool_mcp.execute_tool(tool_name, tool_args)
 
-            if result["success"]:
-                observation = f"Success: {result['data']}"
-                success = True
-                error = None
-            else:
-                observation = f"Error: {result['error']}"
-                success = False
-                error = result["error"]
+            success = bool(result.get("success"))
+            observation = self._summarize_tool_observation(tool_name, result)
+            error = result.get("error") if not success else None
 
             step = AgentStep(
                 thought=f"Executing {tool_name}",
