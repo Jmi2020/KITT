@@ -61,6 +61,8 @@ class ReActAgent:
         """
         self._llm = llm_client
         self._mcp = mcp_client
+        # Keep a dedicated reference for direct tool execution / fallbacks
+        self._tool_mcp = mcp_client
         self._max_iterations = max_iterations
 
         # Detect model format for tool calling (default to Qwen if not specified)
@@ -160,56 +162,6 @@ class ReActAgent:
             # Extract thought
             thought = text.strip()
 
-            # Check if final answer
-            if "Final Answer:" in text:
-                if freshness_required and tools_used == 0 and self._tool_mcp:
-                    logger.info("Freshness required but no tools used; forcing web_search fallback.")
-                    try:
-                        forced = await self._tool_mcp.execute_tool("web_search", {"query": query})
-                        if forced.get("success"):
-                            observation = f"Success: {forced.get('data')}"
-                        else:
-                            observation = f"Error: {forced.get('error', 'unknown error')}"
-                    except Exception as exc:  # noqa: BLE001
-                        observation = f"Forced web_search failed: {exc}"
-                        logger.error(observation)
-
-                    log_agent_step(
-                        logger=logger,
-                        iteration=iteration + 1,
-                        thought=thought,
-                        action="web_search({'query': query})",
-                        observation=observation,
-                        model=self._model_format.value,
-                    )
-                    history.append(
-                        AgentStep(
-                            thought="Forced web_search due to freshness requirement.",
-                            action="web_search",
-                            action_input={"query": query},
-                            observation=observation,
-                        )
-                    )
-                    tools_used += 1
-                    continue
-
-                if tools_used > 0 or not freshness_required:
-                    # Extract final answer
-                    final_answer = text.split("Final Answer:")[-1].strip()
-                    history.append(
-                        AgentStep(
-                            thought=thought,
-                            is_final=True,
-                        )
-                    )
-                    return AgentResult(
-                        answer=final_answer,
-                        steps=history,
-                        success=True,
-                        iterations=iteration + 1,
-                    )
-                continue
-
             # Check for tool calls
             if tool_calls:
                 tool_call = tool_calls[0]  # Use first tool call
@@ -261,6 +213,58 @@ class ReActAgent:
                     )
                 )
                 tools_used += 1
+                # Run next iteration to let the model observe tool output before answering
+                continue
+
+            # Check if final answer (only when no tool call to execute)
+            if "Final Answer:" in text:
+                if freshness_required and tools_used == 0 and self._tool_mcp:
+                    logger.info("Freshness required but no tools used; forcing web_search fallback.")
+                    try:
+                        forced = await self._tool_mcp.execute_tool("web_search", {"query": query})
+                        if forced.get("success"):
+                            observation = f"Success: {forced.get('data')}"
+                        else:
+                            observation = f"Error: {forced.get('error', 'unknown error')}"
+                    except Exception as exc:  # noqa: BLE001
+                        observation = f"Forced web_search failed: {exc}"
+                        logger.error(observation)
+
+                    log_agent_step(
+                        logger=logger,
+                        iteration=iteration + 1,
+                        thought=thought,
+                        action="web_search({'query': query})",
+                        observation=observation,
+                        model=self._model_format.value,
+                    )
+                    history.append(
+                        AgentStep(
+                            thought="Forced web_search due to freshness requirement.",
+                            action="web_search",
+                            action_input={"query": query},
+                            observation=observation,
+                        )
+                    )
+                    tools_used += 1
+                    continue
+
+                if tools_used > 0 or not freshness_required:
+                    # Extract final answer
+                    final_answer = text.split("Final Answer:")[-1].strip()
+                    history.append(
+                        AgentStep(
+                            thought=thought,
+                            is_final=True,
+                        )
+                    )
+                    return AgentResult(
+                        answer=final_answer,
+                        steps=history,
+                        success=True,
+                        iterations=iteration + 1,
+                    )
+                continue
 
             else:
                 # No tool call and no final answer - just reasoning
