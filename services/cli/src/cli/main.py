@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import urlparse
 
@@ -20,6 +22,7 @@ from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.spinner import Spinner
+from rich.table import Table
 from rich.text import Text
 
 load_dotenv()
@@ -77,7 +80,7 @@ USER_UUID = _env(
     str(uuid.uuid5(uuid.NAMESPACE_DNS, USER_NAME)),
 )
 DEFAULT_VERBOSITY = int(_env("VERBOSITY", "3"))
-CLI_TIMEOUT = float(_env("KITTY_CLI_TIMEOUT", "600"))
+CLI_TIMEOUT = float(_env("KITTY_CLI_TIMEOUT", "900"))
 
 
 @dataclass
@@ -106,6 +109,7 @@ class CommandCompleter(Completer):
             "cad": "Generate CAD model from description",
             "list": "List cached CAD artifacts",
             "queue": "Queue artifact to printer",
+            "usage": "Show provider usage dashboard",
             "reset": "Start a fresh conversation session",
             "remember": "Store a long-term memory note",
             "memories": "Search saved memory notes",
@@ -152,6 +156,13 @@ def _post_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Make API call without spinner (for internal use)."""
     with _client() as client:
         response = client.post(url, json=payload)
+        response.raise_for_status()
+        return response.json()
+
+
+def _get_json(url: str) -> Dict[str, Any]:
+    with _client() as client:
+        response = client.get(url)
         response.raise_for_status()
         return response.json()
 
@@ -293,6 +304,92 @@ def _format_prompt(user_prompt: str) -> str:
     return user_prompt
 
 
+def _fetch_usage_metrics() -> Dict[str, Dict[str, Any]]:
+    return _get_json(f"{API_BASE}/api/usage/metrics")
+
+
+def _format_last_used(value: Optional[str]) -> str:
+    if not value:
+        return "—"
+    try:
+        # Support FastAPI's ISO formatting with timezone info
+        ts = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return ts.strftime("%Y-%m-%d %H:%M:%S") + " UTC"
+    except ValueError:
+        return value
+
+
+def _build_usage_table(metrics: Dict[str, Dict[str, Any]]) -> Table:
+    table = Table(show_edge=False, header_style="bold cyan")
+    table.add_column("Provider", overflow="fold")
+    table.add_column("Tier")
+    table.add_column("Calls", justify="right")
+    table.add_column("Cost (USD)", justify="right")
+    table.add_column("Last Used", overflow="fold")
+
+    if not metrics:
+        table.add_row("—", "—", "0", "$0.00", "No usage recorded")
+        return table
+
+    for provider in sorted(metrics.keys()):
+        entry = metrics[provider]
+        tier = entry.get("tier", "—")
+        calls = entry.get("calls", 0)
+        cost = float(entry.get("total_cost", 0.0))
+        last_used = _format_last_used(entry.get("last_used"))
+        table.add_row(
+            provider,
+            tier,
+            f"{calls}",
+            f"${cost:.4f}",
+            last_used,
+        )
+
+    return table
+
+
+def _render_usage_panel(metrics: Dict[str, Dict[str, Any]]) -> Panel:
+    timestamp = datetime.utcnow().strftime("%H:%M:%S UTC")
+    return Panel(
+        _build_usage_table(metrics),
+        title="[bold cyan]Provider Usage[/bold cyan]",
+        subtitle=f"Updated {timestamp}",
+        border_style="cyan",
+    )
+
+
+def _display_usage_dashboard(refresh: Optional[int] = None, *, exit_on_error: bool = True) -> None:
+    try:
+        metrics = _fetch_usage_metrics()
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to fetch usage metrics: {exc}")
+        if exit_on_error:
+            raise typer.Exit(1) from exc
+        return
+
+    interval = refresh or 0
+    if interval <= 0:
+        console.print(_render_usage_panel(metrics))
+        return
+
+    console.print(
+        f"[dim]Live dashboard refreshes every {interval}s. Press Ctrl+C to stop.[/dim]"
+    )
+    try:
+        with Live(console=console, refresh_per_second=4) as live:
+            while True:
+                live.update(_render_usage_panel(metrics))
+                time.sleep(interval)
+                metrics = _fetch_usage_metrics()
+    except KeyboardInterrupt:
+        console.print("\n[dim]Stopped usage dashboard.[/dim]")
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Usage dashboard error: {exc}")
+        if exit_on_error:
+            raise typer.Exit(1) from exc
+        return
+
+
 @app.command()
 def models() -> None:
     """List known local/frontier models."""
@@ -311,6 +408,20 @@ def models() -> None:
         console.print("[bold]Frontier providers:[/]")
         for item in frontier:
             console.print(f" - {item}")
+
+
+@app.command()
+def usage(
+    refresh: Optional[int] = typer.Option(
+        None,
+        "--refresh",
+        "-r",
+        min=2,
+        help="Refresh interval in seconds for live dashboard (default: no refresh).",
+    ),
+) -> None:
+    """Display provider-level usage stats and recent paid calls."""
+    _display_usage_dashboard(refresh)
 
 
 @app.command()
@@ -490,6 +601,7 @@ def shell(
     console.print("  [cyan]/cad <prompt>[/cyan]     - Generate CAD models")
     console.print("  [cyan]/list[/cyan]             - Show cached artifacts")
     console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact to printer")
+    console.print("  [cyan]/usage [seconds][/cyan]  - Show usage dashboard (auto-refresh optional)")
     console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace (no args toggles)")
     console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode (tool orchestration)")
     console.print("  [cyan]/remember <note>[/cyan]  - Store a long-term memory note")
@@ -535,6 +647,9 @@ def shell(
                 console.print("  [cyan]/cad <prompt>[/cyan]     - Generate CAD model from description")
                 console.print("  [cyan]/list[/cyan]             - List cached CAD artifacts")
                 console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact #idx to printer")
+                console.print(
+                    "  [cyan]/usage [seconds][/cyan]  - Show provider usage dashboard"
+                )
                 console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace view")
                 console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode")
                 console.print("  [cyan]/remember <note>[/cyan]  - Store a long-term memory note")
@@ -581,6 +696,19 @@ def shell(
                     console.print("[dim]Example: /cad design a wall mount bracket[/dim]")
                 else:
                     cad(" ".join(args).split())
+                continue
+
+            if cmd == "usage":
+                interval = None
+                if args:
+                    try:
+                        interval = int(args[0])
+                        if interval < 2:
+                            raise ValueError
+                    except ValueError:
+                        console.print("[red]Usage: /usage [refresh_seconds>=2]")
+                        continue
+                _display_usage_dashboard(interval, exit_on_error=False)
                 continue
 
             if cmd == "list":

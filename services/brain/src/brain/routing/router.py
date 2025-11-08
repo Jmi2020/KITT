@@ -30,6 +30,7 @@ from .permission import PermissionManager
 from .pricing import estimate_cost
 from .tool_registry import get_tools_for_prompt
 from ..tools.model_config import detect_model_format
+from ..usage_stats import UsageStats
 
 # Import ReAct agent and tool MCP client
 from ..agents import ReActAgent
@@ -143,11 +144,13 @@ class BrainRouter:
         if request.use_agent:
             result = await self._invoke_agent(request)
             self._record(request, result, cache_key=cache_key)
+            self._record_usage(result)
             return result
 
         result = await self._invoke_local(request)
         if request.force_tier == RoutingTier.local:
             self._record(request, result)
+            self._record_usage(result)
             return result
 
         # Check if escalation is needed
@@ -226,6 +229,7 @@ class BrainRouter:
                             result = frontier_result
 
         self._record(request, result, cache_key=cache_key)
+        self._record_usage(result)
         return result
 
     async def _invoke_local(self, request: RoutingRequest) -> RoutingResult:
@@ -578,6 +582,11 @@ Based on the tool results above, provide a comprehensive answer to the original 
             cost=cost,
             local_ratio=local_ratio,
         )
+
+    def _record_usage(self, result: RoutingResult) -> None:
+        provider = (result.metadata or {}).get("provider", result.tier.value)
+        cost = _COST_BY_TIER.get(result.tier, 0.0)
+        UsageStats.record(provider=provider, tier=result.tier.value, cost=cost)
 
 
 __all__ = ["BrainRouter", "RoutingRequest", "RoutingResult"]

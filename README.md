@@ -156,15 +156,20 @@ kitty-cli shell
 > /queue 1 printer_01          # Queue artifact to printer
 > /remember Ordered more PLA   # Save a long-term note
 > /memories PLA                # Recall saved notes (optional query)
+> /usage 5                     # Monitor paid provider usage (refresh every 5s)
 > /reset                       # Start a fresh conversation/session
 > /exit                        # Exit shell
 
 # Quick one-off queries
 kitty-cli say "What printers are online?"
 kitty-cli say "Turn on bench lights"
+
+# Monitor paid usage / provider cost
+kitty-cli usage
+kitty-cli usage --refresh 5
 ```
 
-> **Long-running prompts**: Some research-heavy queries (multi-stage web extractions) can take several minutes. The CLI now waits up to 600 s by default (`KITTY_CLI_TIMEOUT`). Raise this env var if you need even longer windows.
+> **Long-running prompts**: Some research-heavy queries (multi-stage web extractions) can take several minutes. The CLI now waits up to 900 s by default (`KITTY_CLI_TIMEOUT`). Raise this env var if you need even longer windows.
 
 #### Interactive CLI + Tool Routing
 

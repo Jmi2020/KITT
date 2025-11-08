@@ -10,6 +10,7 @@ from common.db.models import RoutingTier
 
 from ..routing.permission import PermissionManager
 from ..logging_config import log_tool_execution
+from ..usage_stats import UsageStats
 from .mcp_client import MCPClient
 
 logger = logging.getLogger("brain.tools")
@@ -132,6 +133,8 @@ class SafeToolExecutor:
             model=self._get_tool_provider(tool_name),
         )
 
+        UsageStats.record(provider=tool_name, tier="tool", cost=cost)
+
         return result
 
     async def _check_hazard_safety(
@@ -243,6 +246,9 @@ class SafeToolExecutor:
             "execute_command": 0.0,  # Free (local execution)
             "list_commands": 0.0,
             "get_command_schema": 0.0,
+            "research_deep": 0.002,
+            "web_search": 0.0,
+            "fetch_webpage": 0.0,
         }
         return cost_map.get(tool_name, 0.01)  # Default to 1 cent
 
