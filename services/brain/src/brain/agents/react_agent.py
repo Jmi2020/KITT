@@ -14,6 +14,7 @@ from brain.tools.mcp_client import MCPClient
 from brain.tools.model_config import detect_model_format
 from brain.logging_config import log_agent_step
 from brain.prompts.unified import KittySystemPrompt
+from ..utils.tokens import count_tokens
 
 from .prompt_templates import get_tool_call_examples
 
@@ -76,6 +77,7 @@ class ReActAgent:
 
         # Initialize unified prompt builder
         self._prompt_builder = KittySystemPrompt()
+        self._history_token_budget = int(os.getenv("AGENT_HISTORY_TOKEN_BUDGET", "8000"))
 
     def _build_react_prompt(
         self,
@@ -123,10 +125,45 @@ class ReActAgent:
         return prompt
 
     def _history_for_prompt(self, history: List[AgentStep]) -> List[AgentStep]:
-        """Limit history injected into the prompt to avoid blowing context."""
-        if self._history_window <= 0 or len(history) <= self._history_window:
-            return history
-        return history[-self._history_window :]
+        """Limit history injected into the prompt with a token budget."""
+        if not history:
+            return []
+
+        budget = self._history_token_budget
+        if budget <= 0:
+            return history[-self._history_window :] if self._history_window else history
+
+        trimmed: List[AgentStep] = []
+        total_tokens = 0
+
+        for step in reversed(history):
+            step_text = self._step_to_text(step)
+            tokens = count_tokens(step_text)
+
+            if trimmed and total_tokens + tokens > budget:
+                break
+
+            trimmed.append(step)
+            total_tokens += tokens
+
+            if total_tokens >= budget:
+                break
+
+        trimmed.reverse()
+
+        if not trimmed:
+            return history[-self._history_window :] if self._history_window else history
+
+        return trimmed
+
+    def _step_to_text(self, step: AgentStep) -> str:
+        """Convert an agent step to text for token counting."""
+        parts = [f"Thought: {step.thought}"]
+        if step.action:
+            parts.append(f"Action: {step.action}")
+            parts.append(f"Action Input: {step.action_input}")
+            parts.append(f"Observation: {step.observation}")
+        return "\n".join(parts)
 
     def _summarize_tool_observation(self, action: str, result: Dict[str, Any]) -> str:
         """Condense tool output so we do not exceed llama.cpp context limits."""

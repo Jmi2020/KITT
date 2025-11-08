@@ -130,6 +130,7 @@ def test_history_window_trims_prompt_history():
     mcp = DummyMCPClient()
     agent = ReActAgent(llm_client=llama, mcp_client=mcp, max_iterations=1, model_alias="qwen2.5")
     agent._history_window = 2
+    agent._history_token_budget = 1
 
     history = [
         AgentStep(thought="first"),
@@ -138,5 +139,5 @@ def test_history_window_trims_prompt_history():
     ]
 
     trimmed = agent._history_for_prompt(history)
-    assert len(trimmed) == 2
-    assert [step.thought for step in trimmed] == ["second", "third"]
+    assert len(trimmed) == 1
+    assert trimmed[0].thought == "third"

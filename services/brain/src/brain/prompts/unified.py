@@ -20,6 +20,7 @@ from string import Formatter
 from typing import Any, Dict, List, Optional, Tuple
 
 from common.config import settings
+from ..utils.tokens import count_tokens
 
 # Prompt section imports
 from .tool_formatter import format_tools_for_prompt, format_tools_compact
@@ -93,49 +94,56 @@ ination-resistant with explicit constraints
             ...     query="Search for Python news"
             ... )
         """
-        sections = []
+        sections: List[Tuple[str, str]] = []
 
         timestamp_iso, timestamp_human = self._current_time_strings()
 
         # 1. Identity & Mission
-        sections.append(self._identity)
+        sections.append(("identity", self._identity))
 
         # 2. Hallucination Prevention (CRITICAL - always include)
-        sections.append(self._hallucination_prevention)
+        sections.append(("hallucination_prevention", self._hallucination_prevention))
 
         # 3. Decision Framework (chain-of-thought)
-        sections.append(self._reasoning_framework)
+        sections.append(("reasoning_framework", self._reasoning_framework))
 
         # 4. Tool Calling Format (if tools provided)
+        tool_section_text = ""
+        tool_format_text = ""
         if tools:
-            sections.append(self._build_tool_section(tools, model_format))
-            sections.append(self._build_tool_calling_format(model_format))
+            tool_section_text = self._build_tool_section(tools, model_format)
+            tool_format_text = self._build_tool_calling_format(model_format)
+            sections.append(("tool_definitions", tool_section_text))
+            sections.append(("tool_format", tool_format_text))
 
         # 5. Mode-Specific Sections
         if mode == "voice":
-            sections.append(self._build_voice_ux(verbosity))
+            sections.append(("mode_voice", self._build_voice_ux(verbosity)))
         elif mode == "agent":
             sections.append(
-                self._build_react_pattern(
-                    query, history, timestamp_human, timestamp_iso, freshness_required
+                (
+                    "mode_agent",
+                    self._build_react_pattern(
+                        query, history, timestamp_human, timestamp_iso, freshness_required
+                    )
                 )
             )
         else:  # cli mode
-            sections.append(self._build_cli_ux(verbosity))
+            sections.append(("mode_cli", self._build_cli_ux(verbosity)))
 
         # 6. Routing Policy & Safety (always include)
-        sections.append(self._routing_policy)
-        sections.append(self._safety_model)
+        sections.append(("routing_policy", self._routing_policy))
+        sections.append(("safety", self._safety_model))
 
         # 7. Verbosity Instructions
-        sections.append(self._build_verbosity_section(verbosity))
+        sections.append(("verbosity", self._build_verbosity_section(verbosity)))
 
         # 8. Context (if provided)
         if context:
-            sections.append(f"\n<relevant_context>\n{context}\n</relevant_context>\n")
+            sections.append(("context", f"\n<relevant_context>\n{context}\n</relevant_context>\n"))
 
         # Join all sections with double newlines
-        prompt = "\n\n".join(filter(None, sections))
+        prompt = "\n\n".join(text for _, text in sections if text)
 
         if query and mode != "agent":
             freshness_note = ""
@@ -144,15 +152,21 @@ ination-resistant with explicit constraints
                     "\nFreshness requirement: This request needs up-to-date information. "
                     "Verify answers with live tools (e.g., web_search) instead of relying solely on training data."
                 )
-            prompt += (
-                f"\n\n<user_query utc_timestamp=\"{timestamp_iso}\">\n"
+            user_query_text = (
+                f"<user_query utc_timestamp=\"{timestamp_iso}\">\n"
                 f"Current datetime: {timestamp_human} (UTC){freshness_note}\n"
                 f"{query}\n"
                 f"</user_query>"
             )
+            sections.append(("user_query", user_query_text))
+            prompt = f"{prompt}\n\n{user_query_text}" if prompt else user_query_text
 
         # Perform environment variable substitution
         prompt = self._substitute_env_vars(prompt)
+        if os.getenv("PROMPT_TOKEN_LOG", "").lower() in {"1", "true", "yes"}:
+            breakdown = {name: count_tokens(text) for name, text in sections if text}
+            breakdown["total"] = count_tokens(prompt)
+            logging.getLogger("brain.prompt_budget").info("Prompt token breakdown: %s", breakdown)
 
         return prompt
 
