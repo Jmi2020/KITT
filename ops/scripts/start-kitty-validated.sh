@@ -91,9 +91,10 @@ cleanup() {
         print_error "Startup failed. Check logs for details."
         echo ""
         echo "Troubleshooting:"
-        echo "  - llama.cpp logs: tail -f .logs/llamacpp.log"
+        echo "  - Q4 server logs: tail -f .logs/llamacpp-q4.log"
+        echo "  - F16 server logs: tail -f .logs/llamacpp-f16.log"
         echo "  - Docker logs: docker compose -f infra/compose/docker-compose.yml logs"
-        echo "  - Check ports: lsof -i :8082,8000,8080"
+        echo "  - Check ports: lsof -i :8083,8082,8000,8080"
     fi
 }
 trap cleanup EXIT
@@ -131,14 +132,17 @@ print_status "Stopping any existing services..."
 # Stop Docker services
 docker compose -f infra/compose/docker-compose.yml down > /dev/null 2>&1 || true
 
-# Stop any llama.cpp processes on our ports
-if [ -n "$LLAMACPP_PORT" ]; then
-    if lsof -i :$LLAMACPP_PORT > /dev/null 2>&1; then
-        print_status "Stopping llama.cpp on port $LLAMACPP_PORT"
-        lsof -ti :$LLAMACPP_PORT | xargs kill -9 2>/dev/null || true
-        sleep 2
+# Stop any llama.cpp processes on dual-model ports
+Q4_PORT="${LLAMACPP_Q4_PORT:-8083}"
+F16_PORT="${LLAMACPP_F16_PORT:-8082}"
+
+for port in $Q4_PORT $F16_PORT; do
+    if lsof -i :$port > /dev/null 2>&1; then
+        print_status "Stopping llama.cpp on port $port"
+        lsof -ti :$port | xargs kill -9 2>/dev/null || true
     fi
-fi
+done
+sleep 2
 
 print_success "Cleanup complete"
 echo ""
@@ -149,112 +153,103 @@ mkdir -p .logs
 print_success "Log directory ready"
 echo ""
 
-# Step 4: Check for existing llama.cpp server or start new one
-LLAMACPP_PORT="${LLAMACPP_PORT:-8082}"
-print_status "Checking for llama.cpp server on port $LLAMACPP_PORT..."
+# Step 4: Check for existing llama.cpp servers or start dual-model setup
+Q4_PORT="${LLAMACPP_Q4_PORT:-8083}"
+F16_PORT="${LLAMACPP_F16_PORT:-8082}"
 
-if curl -sf "http://localhost:$LLAMACPP_PORT/health" > /dev/null 2>&1; then
-    # Server already running - get model info
-    MODEL_INFO=$(curl -sf "http://localhost:$LLAMACPP_PORT/v1/models" 2>/dev/null)
-    MODEL_NAME=$(echo "$MODEL_INFO" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+print_status "Checking for dual-model llama.cpp servers..."
 
-    print_success "llama.cpp server already running"
-    print_status "Current model: $MODEL_NAME"
-    print_status "Using existing server on port $LLAMACPP_PORT"
+# Check if both servers are already running
+Q4_RUNNING=false
+F16_RUNNING=false
+
+if curl -sf "http://localhost:$Q4_PORT/health" > /dev/null 2>&1; then
+    Q4_RUNNING=true
+    print_success "Q4 server already running on port $Q4_PORT"
+fi
+
+if curl -sf "http://localhost:$F16_PORT/health" > /dev/null 2>&1; then
+    F16_RUNNING=true
+    print_success "F16 server already running on port $F16_PORT"
+fi
+
+if [ "$Q4_RUNNING" = true ] && [ "$F16_RUNNING" = true ]; then
+    print_status "Using existing dual-model servers"
 else
-    # No server running - check if model is configured
-    if [ -z "$LLAMACPP_PRIMARY_MODEL" ] || [ -z "$LLAMACPP_MODELS_DIR" ]; then
-        print_error "No llama.cpp server running and no model configured"
+    # At least one server is not running - check if models are configured
+    if [ -z "$LLAMACPP_Q4_MODEL" ] || [ -z "$LLAMACPP_F16_MODEL" ] || [ -z "$LLAMACPP_MODELS_DIR" ]; then
+        print_error "Dual-model servers not running and models not configured"
         echo ""
-        print_warning "Start a model first using Model Manager TUI:"
-        echo "  ${GREEN}kitty-model-manager tui${NC}"
-        echo ""
-        print_warning "Or configure a model in .env for automatic bootstrap:"
+        print_warning "Configure dual-model setup in .env:"
         echo "  LLAMACPP_MODELS_DIR=/Users/Shared/Coding/models"
-        echo "  LLAMACPP_PRIMARY_MODEL=family/model.gguf"
+        echo "  LLAMACPP_Q4_MODEL=family/q4-model.gguf"
+        echo "  LLAMACPP_F16_MODEL=family/f16-model.gguf"
         echo ""
         exit 1
     fi
 
-    # Model is configured - start server
-    print_status "Starting llama.cpp server..."
+    # Check if model files exist
+    Q4_MODEL_PATH="${LLAMACPP_MODELS_DIR}/${LLAMACPP_Q4_MODEL}"
+    F16_MODEL_PATH="${LLAMACPP_MODELS_DIR}/${LLAMACPP_F16_MODEL}"
 
-    LLAMACPP_HOST="${LLAMACPP_HOST:-0.0.0.0}"
-    LLAMACPP_CTX="${LLAMACPP_CTX:-8192}"
-    LLAMACPP_N_GPU_LAYERS="${LLAMACPP_N_GPU_LAYERS:-999}"
-    LLAMACPP_THREADS="${LLAMACPP_THREADS:-20}"
-    LLAMACPP_BATCH_SIZE="${LLAMACPP_BATCH_SIZE:-4096}"
-    LLAMACPP_UBATCH_SIZE="${LLAMACPP_UBATCH_SIZE:-1024}"
-    LLAMACPP_PARALLEL="${LLAMACPP_PARALLEL:-6}"
-    LLAMACPP_FLASH_ATTN="${LLAMACPP_FLASH_ATTN:-1}"
-
-    # Determine model to load
-    MODEL_PATH="${LLAMACPP_MODELS_DIR}/${LLAMACPP_PRIMARY_MODEL}"
-    if [ ! -f "$MODEL_PATH" ]; then
-        print_error "Model not found: $MODEL_PATH"
-        print_warning "Check your .env configuration or use Model Manager TUI:"
-        echo "  ${GREEN}kitty-model-manager tui${NC}"
+    if [ ! -f "$Q4_MODEL_PATH" ]; then
+        print_error "Q4 model not found: $Q4_MODEL_PATH"
         exit 1
     fi
 
-    print_status "Model: $LLAMACPP_PRIMARY_MODEL"
-    print_status "Port: $LLAMACPP_PORT"
-    print_status "GPU Layers: $LLAMACPP_N_GPU_LAYERS"
-
-    normalize_flash_attn() {
-        local input="${1:-}"
-        local val
-        val="$(printf '%s' "$input" | tr '[:upper:]' '[:lower:]')"
-        case "$val" in
-            1|true|on|yes) echo "on" ;;
-            0|false|off|no) echo "off" ;;
-            auto) echo "auto" ;;
-            "" ) echo "" ;;
-            *) echo "$1" ;;
-        esac
-    }
-
-    FLASH_ATTN_VALUE=$(normalize_flash_attn "${LLAMACPP_FLASH_ATTN:-auto}")
-    FLASH_ARGS=()
-    if [ -n "$FLASH_ATTN_VALUE" ]; then
-        FLASH_ARGS=(--flash-attn "$FLASH_ATTN_VALUE")
-    fi
-
-    # Start llama.cpp server
-    llama-server \
-        --model "$MODEL_PATH" \
-        --host "$LLAMACPP_HOST" \
-        --port "$LLAMACPP_PORT" \
-        --ctx-size "$LLAMACPP_CTX" \
-        --n-gpu-layers "$LLAMACPP_N_GPU_LAYERS" \
-        --threads "$LLAMACPP_THREADS" \
-        --batch-size "$LLAMACPP_BATCH_SIZE" \
-        --ubatch-size "$LLAMACPP_UBATCH_SIZE" \
-        -np "$LLAMACPP_PARALLEL" \
-        "${FLASH_ARGS[@]}" \
-        --log-disable \
-        > .logs/llamacpp.log 2>&1 &
-
-    LLAMA_PID=$!
-    echo "$LLAMA_PID" > .logs/llamacpp.pid
-
-    sleep 3
-
-    # Check if llama-server is still running
-    if ! kill -0 $LLAMA_PID 2>/dev/null; then
-        print_error "llama-server failed to start"
-        echo "Last 20 lines of log:"
-        tail -20 .logs/llamacpp.log
+    if [ ! -f "$F16_MODEL_PATH" ]; then
+        print_error "F16 model not found: $F16_MODEL_PATH"
         exit 1
     fi
 
-    print_success "llama-server started (PID: $LLAMA_PID)"
+    # Start dual-model servers
+    print_status "Starting dual-model llama.cpp servers..."
+    print_status "Q4 (Tool Orchestrator): ${LLAMACPP_Q4_MODEL}"
+    print_status "F16 (Reasoning Engine): ${LLAMACPP_F16_MODEL}"
 
-    # Wait for llama.cpp to be ready
-    if ! wait_for_http "http://localhost:$LLAMACPP_PORT/health" "llama.cpp server" 60; then
-        print_error "llama.cpp server did not become healthy"
-        echo "Last 30 lines of log:"
-        tail -30 .logs/llamacpp.log
+    "$SCRIPT_DIR/start-llamacpp-dual.sh" > .logs/llamacpp-dual.log 2>&1 &
+    DUAL_PID=$!
+
+    sleep 5
+
+    # Check if PIDs exist
+    if [ -f .logs/llamacpp-q4.pid ] && [ -f .logs/llamacpp-f16.pid ]; then
+        Q4_PID=$(cat .logs/llamacpp-q4.pid)
+        F16_PID=$(cat .logs/llamacpp-f16.pid)
+
+        # Verify both processes are still running
+        if ! kill -0 $Q4_PID 2>/dev/null; then
+            print_error "Q4 server failed to start"
+            echo "Last 20 lines of Q4 log:"
+            tail -20 .logs/llamacpp-q4.log
+            exit 1
+        fi
+
+        if ! kill -0 $F16_PID 2>/dev/null; then
+            print_error "F16 server failed to start"
+            echo "Last 20 lines of F16 log:"
+            tail -20 .logs/llamacpp-f16.log
+            exit 1
+        fi
+
+        print_success "Dual-model servers started (Q4 PID: $Q4_PID, F16 PID: $F16_PID)"
+    else
+        print_error "Failed to create PID files for dual-model servers"
+        exit 1
+    fi
+
+    # Wait for both servers to be ready
+    if ! wait_for_http "http://localhost:$Q4_PORT/health" "Q4 server" 60; then
+        print_error "Q4 server did not become healthy"
+        echo "Last 30 lines of Q4 log:"
+        tail -30 .logs/llamacpp-q4.log
+        exit 1
+    fi
+
+    if ! wait_for_http "http://localhost:$F16_PORT/health" "F16 server" 60; then
+        print_error "F16 server did not become healthy"
+        echo "Last 30 lines of F16 log:"
+        tail -30 .logs/llamacpp-f16.log
         exit 1
     fi
 fi
@@ -325,7 +320,8 @@ echo "╚═══════════════════════�
 echo ""
 
 # Check all services
-check_process "$LLAMACPP_PORT" "llama.cpp" || true
+check_process "$Q4_PORT" "Q4 server (Tool Orchestrator)" || true
+check_process "$F16_PORT" "F16 server (Reasoning Engine)" || true
 check_process 8000 "Brain service" || true
 check_process 8080 "Gateway service" || true
 check_process 5432 "PostgreSQL" || true
@@ -340,7 +336,9 @@ echo "  - Gateway API: http://localhost:8080/docs"
 echo ""
 
 echo "Logs:"
-echo "  - llama.cpp: tail -f .logs/llamacpp.log"
+echo "  - Q4 server: tail -f .logs/llamacpp-q4.log"
+echo "  - F16 server: tail -f .logs/llamacpp-f16.log"
+echo "  - Dual startup: tail -f .logs/llamacpp-dual.log"
 echo "  - Docker: docker compose -f infra/compose/docker-compose.yml logs -f"
 echo ""
 

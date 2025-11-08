@@ -15,6 +15,9 @@ Q4_PARALLEL="${LLAMACPP_Q4_PARALLEL:-4}"
 Q4_TEMPERATURE="${LLAMACPP_Q4_TEMPERATURE:-0.1}"
 Q4_BATCH_SIZE="${LLAMACPP_Q4_BATCH_SIZE:-4096}"
 Q4_UBATCH_SIZE="${LLAMACPP_Q4_UBATCH_SIZE:-1024}"
+Q4_N_GPU_LAYERS="${LLAMACPP_Q4_N_GPU_LAYERS:-35}"
+Q4_THREADS="${LLAMACPP_Q4_THREADS:-24}"
+Q4_FLASH_ATTN="${LLAMACPP_Q4_FLASH_ATTN:-1}"
 
 # F16 Model Configuration (Reasoning Engine - Port 8082)
 F16_MODEL="${LLAMACPP_F16_MODEL:-llama-3-70b/Llama-3.3-70B-Instruct-F16/Llama-3.3-70B-Instruct-F16-00001-of-00004.gguf}"
@@ -25,6 +28,9 @@ F16_PARALLEL="${LLAMACPP_F16_PARALLEL:-2}"
 F16_TEMPERATURE="${LLAMACPP_F16_TEMPERATURE:-0.2}"
 F16_BATCH_SIZE="${LLAMACPP_F16_BATCH_SIZE:-2048}"
 F16_UBATCH_SIZE="${LLAMACPP_F16_UBATCH_SIZE:-512}"
+F16_N_GPU_LAYERS="${LLAMACPP_F16_N_GPU_LAYERS:-30}"
+F16_THREADS="${LLAMACPP_F16_THREADS:-24}"
+F16_FLASH_ATTN="${LLAMACPP_F16_FLASH_ATTN:-1}"
 
 # Shared Configuration
 N_GPU_LAYERS="${LLAMACPP_N_GPU_LAYERS:-999}"
@@ -67,14 +73,16 @@ normalize_flash() {
 }
 
 flash_value=$(normalize_flash "$FLASH_ATTN")
+q4_flash_value=$(normalize_flash "$Q4_FLASH_ATTN")
+f16_flash_value=$(normalize_flash "$F16_FLASH_ATTN")
 
 # Build Q4 command (Tool Orchestrator)
 q4_cmd=(
   "$LLAMACPP_BIN"
   --port "$Q4_PORT"
-  --n_gpu_layers "$N_GPU_LAYERS"
+  --n_gpu_layers "$Q4_N_GPU_LAYERS"
   --ctx-size "$Q4_CTX"
-  --threads "$THREADS"
+  --threads "$Q4_THREADS"
   --batch-size "$Q4_BATCH_SIZE"
   --ubatch-size "$Q4_UBATCH_SIZE"
   -np "$Q4_PARALLEL"
@@ -82,8 +90,8 @@ q4_cmd=(
   --alias "$Q4_ALIAS"
 )
 
-if [[ -n "$flash_value" ]]; then
-  q4_cmd+=(--flash-attn "$flash_value")
+if [[ -n "$q4_flash_value" ]]; then
+  q4_cmd+=(--flash-attn "$q4_flash_value")
 fi
 
 if [[ "$TOOL_CALLING" == "1" || "$TOOL_CALLING" == "true" ]]; then
@@ -94,9 +102,9 @@ fi
 f16_cmd=(
   "$LLAMACPP_BIN"
   --port "$F16_PORT"
-  --n_gpu_layers "$N_GPU_LAYERS"
+  --n_gpu_layers "$F16_N_GPU_LAYERS"
   --ctx-size "$F16_CTX"
-  --threads "$THREADS"
+  --threads "$F16_THREADS"
   --batch-size "$F16_BATCH_SIZE"
   --ubatch-size "$F16_UBATCH_SIZE"
   -np "$F16_PARALLEL"
@@ -104,8 +112,8 @@ f16_cmd=(
   --alias "$F16_ALIAS"
 )
 
-if [[ -n "$flash_value" ]]; then
-  f16_cmd+=(--flash-attn "$flash_value")
+if [[ -n "$f16_flash_value" ]]; then
+  f16_cmd+=(--flash-attn "$f16_flash_value")
 fi
 
 if [[ "$TOOL_CALLING" == "1" || "$TOOL_CALLING" == "true" ]]; then

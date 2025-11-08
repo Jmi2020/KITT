@@ -193,9 +193,11 @@ alembic -c services/common/alembic.ini current         # Show current version
 # View logs
 docker compose -f infra/compose/docker-compose.yml logs brain      # Brain service logs
 docker compose -f infra/compose/docker-compose.yml logs -f gateway # Follow gateway logs
-tail -f .logs/llamacpp.log                                         # llama.cpp logs
-# Stop llama.cpp if you launched it manually
-./ops/scripts/stop-llamacpp.sh
+tail -f .logs/llamacpp-q4.log                                      # Q4 server logs (Tool Orchestrator)
+tail -f .logs/llamacpp-f16.log                                     # F16 server logs (Reasoning Engine)
+tail -f .logs/llamacpp-dual.log                                    # Dual-server startup logs
+# Stop llama.cpp servers if you launched them manually
+./ops/scripts/stop-llamacpp-dual.sh
 
 # Rebuild specific service
 docker compose -f infra/compose/docker-compose.yml build --no-cache brain
@@ -372,7 +374,9 @@ Command     (STT)     (Intent)   (Generate)   (Auto)     (Queue)
 
 **Logs:**
 - Structured JSON via Python logging
-- llama.cpp logs in `.logs/llamacpp.log`
+- Q4 server logs in `.logs/llamacpp-q4.log`
+- F16 server logs in `.logs/llamacpp-f16.log`
+- Dual-server startup logs in `.logs/llamacpp-dual.log`
 - Routing decisions with confidence scores
 - Tool use audit trail in PostgreSQL
 
@@ -536,29 +540,36 @@ curl http://localhost:8080/api/routing/logs
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     Mac Studio Host                         │
-│  ┌──────────────┐         ┌─────────────────────────────┐  │
-│  │ llama.cpp    │◄────────┤  Docker Compose Services    │  │
-│  │ (Metal GPU)  │         │                             │  │
-│  │              │         │  ┌──────────┐ ┌──────────┐  │  │
-│  │ • Qwen2.5    │         │  │ Gateway  │ │  Brain   │  │  │
-│  │ • Llama 3    │         │  │  (REST)  │ │ (Router) │  │  │
-│  │ • Gemma      │         │  └────┬─────┘ └────┬─────┘  │  │
-│  └──────────────┘         │       │            │        │  │
-│                           │       │       ┌────▼─────┐  │  │
-│  ┌──────────────┐         │       │       │ ReAct    │  │  │
-│  │ Whisper.cpp  │         │       │       │ Agent    │  │  │
-│  │ (Voice STT)  │         │       │       └────┬─────┘  │  │
-│  └──────────────┘         │       │            │        │  │
-│                           │       │       ┌────▼─────┐  │  │
-│                           │       │       │   MCP    │  │  │
-│                           │       │       │ Servers  │  │  │
-│                           │       │       └────┬─────┘  │  │
-│                           │       │            │        │  │
-│                           │  ┌────▼────────────▼─────┐  │  │
-│                           │  │  CAD │ Fab │ Safety  │  │  │
-│                           │  │ Voice│ UI  │ Memory  │  │  │
-│                           │  └──────────────────────┘  │  │
-│                           └─────────────────────────────┘  │
+│  ┌───────────────────────────────┐  ┌──────────────────┐   │
+│  │ Dual llama.cpp Servers        │  │ Docker Compose   │   │
+│  │ (Metal GPU + CPU Hybrid)      │◄─┤ Services         │   │
+│  │                               │  │                  │   │
+│  │ ┌──────────┐  ┌─────────────┐│  │ ┌──────────┐    │   │
+│  │ │Q4 Server │  │ F16 Server  ││  │ │ Gateway  │    │   │
+│  │ │Tool      │  │ Reasoning   ││  │ │  (REST)  │    │   │
+│  │ │Calling   │  │ Engine      ││  │ └────┬─────┘    │   │
+│  │ │Port 8083 │  │ Port 8082   ││  │      │          │   │
+│  │ └──────────┘  └─────────────┘│  │ ┌────▼─────┐    │   │
+│  │ • 35 GPU layers (Q4)          │  │ │  Brain   │    │   │
+│  │ • 30 GPU layers (F16)         │  │ │ (Router) │    │   │
+│  │ • 24 P-cores shared           │  │ └────┬─────┘    │   │
+│  └───────────────────────────────┘  │      │          │   │
+│                                      │ ┌────▼─────┐    │   │
+│  ┌──────────────┐                   │ │ ReAct    │    │   │
+│  │ Whisper.cpp  │                   │ │ Agent    │    │   │
+│  │ (Voice STT)  │                   │ └────┬─────┘    │   │
+│  └──────────────┘                   │      │          │   │
+│                                      │ ┌────▼─────┐    │   │
+│                                      │ │   MCP    │    │   │
+│                                      │ │ Servers  │    │   │
+│                                      │ └────┬─────┘    │   │
+│                                      │      │          │   │
+│                                      │ ┌────▼───────┐  │   │
+│                                      │ │  CAD │ Fab │  │   │
+│                                      │ │Voice │ UI  │  │   │
+│                                      │ │Safety│Mem  │  │   │
+│                                      │ └────────────┘  │   │
+│                                      └──────────────────┘   │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐  │
 │  │              Storage Layer                          │  │
@@ -653,13 +664,21 @@ LLAMACPP_PRIMARY_ALIAS=kitty-primary
 LLAMACPP_CODER_MODEL=Qwen2.5-Coder-32B-Instruct-GGUF/qwen2.5-coder-32b-instruct-q4_k_m.gguf
 LLAMACPP_CODER_ALIAS=kitty-coder
 
-# GPU Optimization (M3 Ultra)
-LLAMACPP_N_GPU_LAYERS=999        # Offload all layers to Metal GPU
-LLAMACPP_THREADS=20              # P-cores only
-LLAMACPP_BATCH_SIZE=4096         # Prefill batch
-LLAMACPP_UBATCH_SIZE=1024        # Kernel tiling
-LLAMACPP_PARALLEL=6              # Concurrent sequences
-LLAMACPP_FLASH_ATTN=1            # Metal-optimized attention
+# Dual-Model Architecture (Q4 Tool Orchestrator + F16 Reasoning Engine)
+LLAMACPP_Q4_MODEL=llama-3-70b/Llama-3.3-70B-Instruct-UD-Q4_K_XL.gguf
+LLAMACPP_Q4_PORT=8083
+LLAMACPP_Q4_N_GPU_LAYERS=35      # Hybrid: 35 layers to GPU, rest to CPU
+LLAMACPP_Q4_THREADS=24           # M3 Ultra has 24 P-cores (not 20!)
+LLAMACPP_Q4_PARALLEL=4           # Concurrent sequences for tool calling
+
+LLAMACPP_F16_MODEL=llama-3-70b/Llama-3.3-70B-Instruct-F16/Llama-3.3-70B-Instruct-F16-00001-of-00004.gguf
+LLAMACPP_F16_PORT=8082
+LLAMACPP_F16_N_GPU_LAYERS=30     # Hybrid: 30 layers to GPU (memory-intensive)
+LLAMACPP_F16_THREADS=24          # Shared P-cores with Q4
+LLAMACPP_F16_PARALLEL=2          # Lower concurrency for deep reasoning
+
+# GPU/CPU Hybrid Benefits: 20-40% throughput increase by utilizing both
+# Research: Research/GPUandCPU.md
 
 # Cloud APIs (optional)
 OPENAI_API_KEY=sk-...
