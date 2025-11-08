@@ -92,8 +92,8 @@ async def post_query(
             routing_details["latencyMs"] = routing_result.latency_ms
         if verbosity_level >= VerbosityLevel.COMPREHENSIVE:
             routing_details["cached"] = routing_result.cached
-            if routing_result.metadata:
-                routing_details["metadata"] = routing_result.metadata
+        if routing_result.metadata:
+            routing_details["metadata"] = routing_result.metadata
         if verbosity_level >= VerbosityLevel.EXHAUSTIVE:
             routing_details["verbosityLevel"] = int(verbosity_level)
             routing_details["verbosityDescription"] = describe_level(verbosity_level)

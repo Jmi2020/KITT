@@ -248,7 +248,11 @@ class TaskScheduler:
             tasks: List of tasks
 
         Returns:
-            Dictionary with counts by status and priority
+            Dictionary with counts by status and priority.
+
+        Notes:
+            - `by_priority` reflects work that is not currently blocked by unmet
+              dependencies so operators can focus on actionable tasks.
         """
         stats = {
             "total": len(tasks),
@@ -262,13 +266,16 @@ class TaskScheduler:
 
         for task in tasks:
             stats["by_status"][task.status.value] += 1
-            stats["by_priority"][task.priority.value] += 1
 
-            # Count blocked tasks
+            blocked = False
             if task.status == TaskStatus.pending and task.depends_on:
                 dependency = task_map.get(task.depends_on)
                 if dependency and dependency.status != TaskStatus.completed:
                     stats["blocked_by_dependencies"] += 1
+                    blocked = True
+
+            if not blocked:
+                stats["by_priority"][task.priority.value] += 1
 
         # Convert defaultdicts to regular dicts for JSON serialization
         stats["by_status"] = dict(stats["by_status"])

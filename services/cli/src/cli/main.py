@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 import httpx
 import typer
+from typer.models import OptionInfo
 from dotenv import load_dotenv
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
@@ -87,6 +88,8 @@ class SessionState:
     user_name: str = USER_NAME or "ssh-operator"
     verbosity: int = DEFAULT_VERBOSITY
     last_artifacts: List[Dict[str, Any]] = field(default_factory=list)
+    show_trace: bool = False
+    agent_enabled: bool = False
 
 
 state = SessionState()
@@ -149,11 +152,71 @@ def _post_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         return response.json()
 
 
-def _print_routing(routing: Optional[Dict[str, Any]]) -> None:
+def _print_agent_trace(metadata: Dict[str, Any]) -> None:
+    """Pretty-print agent reasoning steps if present."""
+    steps = metadata.get("agent_steps")
+    if not steps:
+        return
+
+    console.print("\n[bold magenta]Agent trace[/bold magenta]")
+    for idx, step in enumerate(steps, 1):
+        lines = []
+        thought = step.get("thought")
+        if thought:
+            lines.append(f"[cyan]Thought:[/] {thought}")
+        action = step.get("action")
+        if action:
+            action_input = step.get("action_input")
+            action_text = f"{action}({action_input})" if action_input else action
+            lines.append(f"[cyan]Action:[/] {action_text}")
+        observation = step.get("observation")
+        if observation:
+            lines.append(f"[cyan]Observation:[/] {observation}")
+        if not lines:
+            continue
+        console.print(
+            Panel(
+                "\n".join(lines),
+                title=f"Step {idx}",
+                border_style="magenta",
+            )
+        )
+
+
+def _print_routing(routing: Optional[Dict[str, Any]], *, show_trace: bool = False) -> None:
     if not routing:
         return
-    console.print("[dim]Routing:")
-    console.print(routing)
+    tier = routing.get("tier")
+    confidence = routing.get("confidence")
+    latency = routing.get("latencyMs")
+    cached = routing.get("cached")
+    metadata = routing.get("metadata") or {}
+
+    summary_parts = []
+    if tier:
+        summary_parts.append(f"tier={tier}")
+    if confidence is not None:
+        summary_parts.append(f"confidence={confidence:.2f}")
+    if latency is not None:
+        summary_parts.append(f"latency={latency}ms")
+    if cached is not None:
+        summary_parts.append(f"cached={cached}")
+
+    provider = metadata.get("provider")
+    model = metadata.get("model")
+    if provider:
+        summary_parts.append(f"provider={provider}")
+    if model:
+        summary_parts.append(f"model={model}")
+    tools_used = metadata.get("tools_used")
+    if tools_used is not None:
+        summary_parts.append(f"tools={tools_used}")
+
+    if summary_parts:
+        console.print("[dim]Routing:[/] " + ", ".join(summary_parts))
+
+    if show_trace and metadata:
+        _print_agent_trace(metadata)
 
 
 def _print_artifacts(artifacts: List[Dict[str, Any]]) -> None:
@@ -209,8 +272,15 @@ def hash_password(
 def say(
     message: List[str] = typer.Argument(..., help="Message for KITTY"),
     verbosity: Optional[int] = typer.Option(None, "--verbosity", "-v", min=1, max=5),
-    no_agent: bool = typer.Option(
-        False, "--no-agent", help="Disable agentic mode (direct LLM response)"
+    agent: Optional[bool] = typer.Option(
+        None,
+        "--agent/--no-agent",
+        help="Enable ReAct agent mode (defaults to session setting, currently off).",
+    ),
+    trace: Optional[bool] = typer.Option(
+        None,
+        "--trace/--no-trace",
+        help="Show agent reasoning trace and tool calls (forces verbosity≥4).",
     ),
 ) -> None:
     """Send a conversational message with intelligent agent reasoning.
@@ -224,12 +294,19 @@ def say(
         "userId": state.user_id,
         "intent": "chat.prompt",
         "prompt": formatted_prompt,
-        "useAgent": not no_agent,  # Enable agentic mode by default
     }
+    if isinstance(agent, OptionInfo):
+        agent = None
+
+    use_agent = state.agent_enabled if agent is None else agent
+    state.agent_enabled = use_agent
+    payload["useAgent"] = use_agent
     chosen_verbosity = verbosity or state.verbosity or DEFAULT_VERBOSITY
-    if chosen_verbosity:
-        state.verbosity = chosen_verbosity
-        payload["verbosity"] = chosen_verbosity
+    trace_enabled = state.show_trace if trace is None else trace
+    effective_verbosity = max(chosen_verbosity, 4) if trace_enabled else chosen_verbosity
+    if effective_verbosity:
+        state.verbosity = effective_verbosity
+        payload["verbosity"] = effective_verbosity
 
     try:
         data = _post_json_with_spinner(f"{API_BASE}/api/query", payload, "KITTY is thinking")
@@ -249,9 +326,9 @@ def say(
     else:
         console.print("[yellow]No response received")
 
-    # Show routing info if verbosity is high
-    if state.verbosity >= 4:
-        _print_routing(data.get("routing"))
+    # Show routing info / traces when requested
+    if state.verbosity >= 4 or trace_enabled:
+        _print_routing(data.get("routing"), show_trace=trace_enabled)
 
 
 @app.command()
@@ -356,12 +433,17 @@ def shell(
     console.print("  [cyan]/cad <prompt>[/cyan]     - Generate CAD models")
     console.print("  [cyan]/list[/cyan]             - Show cached artifacts")
     console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact to printer")
+    console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace (no args toggles)")
+    console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode (tool orchestration)")
     console.print("  [cyan]/help[/cyan]             - Show this help")
     console.print("  [cyan]/exit[/cyan]             - Exit shell")
 
     # Current settings
+    agent_status = "ON" if state.agent_enabled else "OFF"
     console.print(f"\n[dim]Verbosity: {state.verbosity}/5  |  Session: {state.conversation_id[:8]}...[/dim]")
-    console.print("[dim]Agentic mode active - KITTY can use tools and reason about tasks[/dim]")
+    console.print(f"[dim]Agent mode: {agent_status} (use /agent to toggle)[/dim]")
+    trace_status = "ON" if state.show_trace else "OFF"
+    console.print(f"[dim]Trace mode: {trace_status} (use /trace to toggle)[/dim]")
     console.print("[dim]Type '/' and press Tab to see available commands[/dim]\n")
 
     # Create prompt_toolkit session with command completion
@@ -392,6 +474,8 @@ def shell(
                 console.print("  [cyan]/cad <prompt>[/cyan]     - Generate CAD model from description")
                 console.print("  [cyan]/list[/cyan]             - List cached CAD artifacts")
                 console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact #idx to printer")
+                console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace view")
+                console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode")
                 console.print("  [cyan]/help[/cyan]             - Show this help message")
                 console.print("  [cyan]/exit[/cyan]             - Exit interactive shell")
                 console.print("\n[dim]Type any message to chat with KITTY[/dim]\n")
@@ -425,6 +509,43 @@ def shell(
                     _print_artifacts(state.last_artifacts)
                 else:
                     console.print("[yellow]No artifacts cached. Use /cad to generate models")
+                continue
+
+            if cmd == "trace":
+                if not args:
+                    state.show_trace = not state.show_trace
+                    console.print(
+                        f"[green]Trace mode {'enabled' if state.show_trace else 'disabled'} "
+                        f"({'verbosity forced to >=4' if state.show_trace else 'responses back to normal'})"
+                    )
+                else:
+                    setting = args[0].lower()
+                    if setting in {"on", "true", "1"}:
+                        state.show_trace = True
+                        console.print("[green]Trace mode enabled (verbosity forced to >=4)")
+                    elif setting in {"off", "false", "0"}:
+                        state.show_trace = False
+                        console.print("[green]Trace mode disabled")
+                    else:
+                        console.print("[red]Usage: /trace on|off")
+                continue
+
+            if cmd == "agent":
+                if not args:
+                    state.agent_enabled = not state.agent_enabled
+                    console.print(
+                        f"[green]Agent mode {'enabled' if state.agent_enabled else 'disabled'}"
+                    )
+                else:
+                    setting = args[0].lower()
+                    if setting in {"on", "true", "1"}:
+                        state.agent_enabled = True
+                        console.print("[green]Agent mode enabled")
+                    elif setting in {"off", "false", "0"}:
+                        state.agent_enabled = False
+                        console.print("[green]Agent mode disabled")
+                    else:
+                        console.print("[red]Usage: /agent on|off")
                 continue
 
             if cmd == "queue":

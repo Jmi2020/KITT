@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import hashlib
 import time
-from dataclasses import dataclass
-from typing import Dict, Optional
+from dataclasses import dataclass, asdict
+from typing import Any, Dict, Optional
 
 import logging
 
@@ -19,6 +19,7 @@ from common.cache import CacheRecord, SemanticCache
 from ..metrics import record_decision
 from ..metrics.slo import SLOCalculator
 from ..logging_config import log_routing_decision, log_confidence_analysis
+from ..prompts.unified import KittySystemPrompt
 from .audit_store import RoutingAuditStore
 from .cloud_clients import FrontierClient, MCPClient
 from .config import RoutingConfig, get_routing_config
@@ -28,6 +29,7 @@ from .ml_local_client import MLXLocalClient
 from .permission import PermissionManager
 from .pricing import estimate_cost
 from .tool_registry import get_tools_for_prompt
+from ..tools.model_config import detect_model_format
 
 # Import ReAct agent and tool MCP client
 from ..agents import ReActAgent
@@ -55,7 +57,7 @@ class RoutingResult:
     confidence: float
     latency_ms: int
     cached: bool = False
-    metadata: Optional[Dict[str, str]] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 def _hash_prompt(prompt: str) -> str:
@@ -102,6 +104,7 @@ class BrainRouter:
         self._cost_tracker = cost_tracker or CostTracker()
         self._slo_calculator = slo_calculator or SLOCalculator()
         self._permission = permission_manager or PermissionManager()
+        self._prompt_builder = KittySystemPrompt()
 
         # Initialize tool MCP client with Perplexity integration and ReAct agent
         self._tool_mcp = tool_mcp_client or ToolMCPClient(perplexity_client=self._mcp)
@@ -223,12 +226,22 @@ class BrainRouter:
         start = time.perf_counter()
         # Default to Q4 orchestrator model for tool calling
         model_alias = request.model_hint or "kitty-q4"
+        model_format = detect_model_format(model_alias)
 
         # Get tools based on prompt and mode
         tools = get_tools_for_prompt(request.prompt, mode=request.tool_mode)
 
+        final_prompt = request.prompt
+        if tools:
+            final_prompt = self._prompt_builder.build(
+                mode="cli",
+                tools=tools,
+                model_format=model_format.value,
+                query=request.prompt,
+            )
+
         # Pass tools to llama client
-        response = await self._llama.generate(request.prompt, model_alias, tools=tools)
+        response = await self._llama.generate(final_prompt, model_alias, tools=tools)
 
         # Handle tool calls if present
         tool_calls = response.get("tool_calls", [])
@@ -351,8 +364,27 @@ class BrainRouter:
 
         for tool_call in tool_calls:
             try:
-                function_name = tool_call.get("function", {}).get("name")
-                arguments = tool_call.get("function", {}).get("arguments", {})
+                function_name = None
+                arguments: Dict[str, Any] = {}
+
+                if hasattr(tool_call, "name"):
+                    function_name = getattr(tool_call, "name")
+                    arguments = getattr(tool_call, "arguments", {}) or {}
+                elif isinstance(tool_call, dict):
+                    if "function" in tool_call:
+                        func = tool_call.get("function") or {}
+                        function_name = func.get("name")
+                        arguments = func.get("arguments", {}) or {}
+                    else:
+                        function_name = tool_call.get("name")
+                        arguments = tool_call.get("arguments", {}) or {}
+
+                if not isinstance(arguments, dict):
+                    arguments = {}
+
+                if not function_name:
+                    logger.warning("Received tool call without function name: %s", tool_call)
+                    continue
 
                 logger.info(f"Executing tool: {function_name} with args: {arguments}")
 
@@ -466,7 +498,7 @@ Based on the tool results above, provide a comprehensive answer to the original 
         latency = int((time.perf_counter() - start) * 1000)
 
         # Format agent result as RoutingResult
-        metadata = {
+        metadata: Dict[str, Any] = {
             "provider": "react_agent",
             "iterations": str(agent_result.iterations),
             "tools_used": str(len([s for s in agent_result.steps if s.action])),
@@ -475,6 +507,8 @@ Based on the tool results above, provide a comprehensive answer to the original 
 
         if agent_result.error:
             metadata["error"] = agent_result.error
+        if agent_result.steps:
+            metadata["agent_steps"] = [asdict(step) for step in agent_result.steps]
 
         # High confidence if agent succeeded
         confidence = 0.9 if agent_result.success else 0.5

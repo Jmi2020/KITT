@@ -12,6 +12,7 @@ from common.config import settings
 from .memory import MemoryClient
 from .models.context import ConversationContext, DeviceSelection
 from .routing.router import BrainRouter, RoutingRequest, RoutingResult
+from .routing.tool_registry import should_enable_tools_auto
 from .skills.home_assistant import HomeAssistantSkill
 from .state.mqtt_context_store import MQTTContextStore
 
@@ -105,13 +106,15 @@ class BrainOrchestrator:
 
         agentic_mode = use_agent or settings.agentic_mode_enabled
 
+        requires_fresh = freshness_required or should_enable_tools_auto(prompt)
+
         routing_request = RoutingRequest(
             conversation_id=conversation_id,
             request_id=request_id,
             prompt=enriched_prompt,
             user_id=user_id,
             force_tier=force_tier,
-            freshness_required=freshness_required,
+            freshness_required=requires_fresh,
             model_hint=model_hint,
             use_agent=agentic_mode,
             tool_mode=tool_mode,

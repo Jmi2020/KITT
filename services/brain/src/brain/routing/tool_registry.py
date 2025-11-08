@@ -178,37 +178,43 @@ def get_tools_for_prompt(
     if mode == "off":
         return []
 
-    # Check for forced tools first
+    selected: List[Dict[str, Any]] = []
+    selected_names: set[str] = set()
+
+    def _add_tool(name: str) -> None:
+        if name in TOOL_DEFINITIONS and name not in selected_names:
+            selected.append(TOOL_DEFINITIONS[name])
+            selected_names.add(name)
+
+    # Forced tools take precedence
     if forced_tools:
-        tools = []
         for tool_name in forced_tools:
-            if tool_name in TOOL_DEFINITIONS:
-                tools.append(TOOL_DEFINITIONS[tool_name])
-        if tools:
-            logger.info(f"Using forced tools: {forced_tools}")
-            return tools
+            _add_tool(tool_name)
+        if selected:
+            logger.info(f"Using forced tools: {sorted(selected_names)}")
 
-    # Check for explicit keywords
+    # Keyword-triggered tool (still allow additional auto tools)
     forced_tool = detect_forced_tool(prompt)
-    if forced_tool and forced_tool in TOOL_DEFINITIONS:
-        logger.info(f"Using keyword-triggered tool: {forced_tool}")
-        return [TOOL_DEFINITIONS[forced_tool]]
+    if forced_tool:
+        logger.info(f"Keyword-triggered tool detected: {forced_tool}")
+        _add_tool(forced_tool)
 
-    # Auto mode: smart detection
-    if mode == "auto":
-        if should_enable_tools_auto(prompt):
-            # Enable all tools for now (can be refined later)
-            logger.info("Auto-enabling all available tools")
-            return list(TOOL_DEFINITIONS.values())
-        else:
-            logger.info("No tools needed for this prompt")
-            return []
+    # Auto mode: heuristics determine additional tools
+    if mode == "auto" and should_enable_tools_auto(prompt):
+        logger.info("Auto-enabling full toolset based on prompt heuristics")
+        for name in TOOL_DEFINITIONS:
+            _add_tool(name)
 
-    # Mode == "on": always enable all tools
+    # Mode == "on": always include everything
     if mode == "on":
-        logger.info("Tools forced on: enabling all tools")
-        return list(TOOL_DEFINITIONS.values())
+        logger.info("Tool mode 'on' - enabling all tools")
+        for name in TOOL_DEFINITIONS:
+            _add_tool(name)
 
+    if selected:
+        return selected
+
+    logger.info("Tool detector returned no tools for this prompt")
     return []
 
 

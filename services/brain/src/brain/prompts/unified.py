@@ -56,7 +56,6 @@ ination-resistant with explicit constraints
         self._reasoning_framework = self._load_reasoning_framework()
         self._routing_policy = self._load_routing_policy()
         self._safety_model = self._load_safety_model()
-        self._tool_calling_format = self._load_tool_calling_format()
 
     def build(
         self,
@@ -106,6 +105,7 @@ ination-resistant with explicit constraints
         # 4. Tool Calling Format (if tools provided)
         if tools:
             sections.append(self._build_tool_section(tools, model_format))
+            sections.append(self._build_tool_calling_format(model_format))
 
         # 5. Mode-Specific Sections
         if mode == "voice":
@@ -128,6 +128,9 @@ ination-resistant with explicit constraints
 
         # Join all sections with double newlines
         prompt = "\n\n".join(filter(None, sections))
+
+        if query and mode != "agent":
+            prompt += f"\n\n<user_query>\n{query}\n</user_query>"
 
         # Perform environment variable substitution
         prompt = self._substitute_env_vars(prompt)
@@ -277,43 +280,70 @@ Before executing ANY hazardous action, verify:
 - Ways to bypass safety interlocks
 - Fabrication instructions for dangerous items without proper context"""
 
-    def _load_tool_calling_format(self) -> str:
-        """Load tool calling format instructions."""
-        return """## Tool Calling Format (Exact JSON Required)
+    def _build_tool_calling_format(self, model_format: str) -> str:
+        """Build tool-calling instructions tailored to the model."""
+        fmt = (model_format or "generic").lower()
 
-**Standard Format**:
-```json
-{"tool": "tool_name", "parameters": {"param1": "value1", "param2": "value2"}}
+        if "qwen" in fmt or "athene" in fmt:
+            return """## Tool Calling Format (Qwen / Athene XML)
+
+Wrap each tool invocation inside `<tool_call> ... </tool_call>` using strict JSON:
+
+```
+<tool_call>
+{"name": "web_search", "arguments": {"query": "latest gold price"}}
+</tool_call>
 ```
 
-**Critical Format Rules**:
-- Use double quotes (not single quotes)
-- Tool name must match exactly (case-sensitive)
-- All required parameters must be present
-- Parameter values must match expected types:
-  - Strings: "value"
-  - Numbers: 123 or 45.67
-  - Booleans: true or false
-  - Arrays: ["item1", "item2"]
-  - Objects: {"key": "value"}
-- Do NOT include comments or extra text with JSON
-- Do NOT use placeholders like <value> or TBD
+Rules:
+- JSON must include `name` and `arguments`
+- Use double quotes and literal values (no placeholders)
+- Output one `<tool_call>` block per action before the final answer
+- After tool responses, continue reasoning outside the blocks and deliver the answer"""
 
-**Examples**:
+        if "llama" in fmt:
+            return """## Tool Calling Format (Llama 3.x Function List)
 
-✅ CORRECT:
-```json
-{"tool": "web_search", "parameters": {"query": "latest Python news"}}
-{"tool": "generate_cad_model", "parameters": {"prompt": "L-bracket", "provider": "zoo"}}
+Emit tool calls as a Python-style list:
+
+```
+[web_search(query="latest gold price")]
 ```
 
-❌ INCORRECT:
+Multiple calls are comma-separated within the brackets:
+
+```
+[web_search(query="current ETH price"), reason_with_f16(query="summarize impact")]
+```
+
+Rules:
+- Include the surrounding brackets `[...]`
+- Use exact tool names and keyword arguments
+- Quote strings, keep numbers numeric
+- After the bracketed block, continue reasoning and provide the final answer."""
+
+        if "mistral" in fmt:
+            return """## Tool Calling Format (Mistral JSON)
+
+Use `[TOOL_CALLS]` followed by a JSON array:
+
+```
+[TOOL_CALLS]
+[{"name": "web_search", "arguments": {"query": "latest gold price"}}]
+```
+
+Rules follow standard JSON syntax (double quotes, required keys, no comments)."""
+
+        # Generic fallback
+        return """## Tool Calling Format (Generic JSON)
+
 ```json
-{"tool": "Web_Search", ...}  // Wrong case
-{"tool": "web_search", "query": "..."}  // Missing "parameters" wrapper
-{"tool": "web_search", "parameters": {"query": <user input>}}  // Placeholder instead of value
-{'tool': 'web_search', ...}  // Single quotes instead of double
-```"""
+{"tool": "tool_name", "parameters": {"param1": "value1"}}
+```
+
+- Use double quotes
+- Include all required parameters in the `parameters` object
+- No comments or placeholders inside the JSON snippet"""
 
     def _build_tool_section(self, tools: List[Dict[str, Any]], model_format: str) -> str:
         """Build tool registry section with available tools.

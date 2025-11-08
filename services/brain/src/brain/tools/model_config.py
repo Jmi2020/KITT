@@ -58,7 +58,7 @@ def detect_model_format(model_path_or_alias: str) -> ToolCallFormat:
         return ToolCallFormat.QWEN_XML
     # kitty-q4 = Athene V2 Agent (from LLAMACPP_Q4_MODEL)
     elif "kitty-q4" in model_lower or "athene" in model_lower:
-        return ToolCallFormat.QWEN_XML
+        return ToolCallFormat.LLAMA_JSON
     # Model path-based detection
     elif "qwen" in model_lower or "qwen2.5" in model_lower or "qwen3" in model_lower:
         return ToolCallFormat.QWEN_XML
