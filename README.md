@@ -170,6 +170,7 @@ kitty-cli shell
 > /queue 1 printer_01          # Queue artifact to printer
 > /remember Ordered more PLA   # Save a long-term note
 > /memories PLA                # Recall saved notes (optional query)
+> /vision gandalf rubber duck  # Search & store reference images
 > /usage 5                     # Monitor paid provider usage (refresh every 5s)
 > /reset                       # Start a fresh conversation/session
 > /exit                        # Exit shell
@@ -177,6 +178,7 @@ kitty-cli shell
 # Quick one-off queries
 kitty-cli say "What printers are online?"
 kitty-cli say "Turn on bench lights"
+kitty-cli images "gandalf rubber duck" --max-results 6
 
 # Monitor paid usage / provider cost
 kitty-cli usage

@@ -110,6 +110,7 @@ class CommandCompleter(Completer):
             "list": "List cached CAD artifacts",
             "queue": "Queue artifact to printer",
             "usage": "Show provider usage dashboard",
+            "vision": "Search + select reference images",
             "reset": "Start a fresh conversation session",
             "remember": "Store a long-term memory note",
             "memories": "Search saved memory notes",
@@ -163,6 +164,14 @@ def _post_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 def _get_json(url: str) -> Dict[str, Any]:
     with _client() as client:
         response = client.get(url)
+        response.raise_for_status()
+        return response.json()
+
+
+def _vision_post(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    url = f"{API_BASE}/api/vision/{path}"
+    with _client() as client:
+        response = client.post(url, json=payload)
         response.raise_for_status()
         return response.json()
 
@@ -424,6 +433,138 @@ def usage(
     _display_usage_dashboard(refresh)
 
 
+def _prompt_for_selection(count: int, picks: Optional[str]) -> List[int]:
+    selection = picks or console.input("Select image #s (comma separated, blank to skip): ")
+    if not selection:
+        return []
+    chosen: List[int] = []
+    for part in selection.replace(" ", "").split(","):
+        if not part:
+            continue
+        try:
+            idx = int(part)
+        except ValueError:
+            console.print(f"[red]Invalid selection '{part}' ignored")
+            continue
+        if 1 <= idx <= count:
+            chosen.append(idx)
+        else:
+            console.print(f"[red]Selection {idx} out of range (1-{count})")
+    return chosen
+
+
+def _run_vision_flow(
+    query: str,
+    *,
+    max_results: int = 8,
+    min_score: float = 0.0,
+    picks: Optional[str] = None,
+) -> None:
+    payload = {"query": query, "max_results": max_results}
+    try:
+        search = _vision_post("search", payload)
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Image search failed: {exc}")
+        raise typer.Exit(1) from exc
+
+    results = search.get("results", [])
+    if not results:
+        console.print("[yellow]No images found.")
+        return
+
+    try:
+        filtered = _vision_post(
+            "filter",
+            {"query": query, "images": results, "min_score": min_score},
+        )
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Image filter failed: {exc}")
+        raise typer.Exit(1) from exc
+
+    ranked = filtered.get("results", results)
+    if not ranked:
+        console.print("[yellow]No images passed the filter threshold.")
+        return
+
+    table = Table(title=f"Vision results for '{query}'", show_lines=False)
+    table.add_column("#", justify="right", style="cyan")
+    table.add_column("Score")
+    table.add_column("Title")
+    table.add_column("Source")
+    table.add_column("Image URL")
+    for idx, item in enumerate(ranked, start=1):
+        table.add_row(
+            str(idx),
+            f"{item.get('score', 0):.2f}",
+            (item.get("title") or "")[:40],
+            item.get("source") or "",
+            item.get("image_url") or "",
+        )
+    console.print(table)
+
+    selections = _prompt_for_selection(len(ranked), picks)
+    if not selections:
+        console.print("[dim]No selections made")
+        return
+
+    chosen_images: List[Dict[str, Any]] = []
+    for idx in selections:
+        entry = ranked[idx - 1]
+        chosen_images.append(
+            {
+                "id": entry.get("id"),
+                "image_url": entry.get("image_url"),
+                "title": entry.get("title"),
+                "source": entry.get("source"),
+                "caption": entry.get("description"),
+            }
+        )
+
+    try:
+        stored = _vision_post(
+            "store",
+            {
+                "session_id": state.conversation_id,
+                "images": chosen_images,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to store selections: {exc}")
+        raise typer.Exit(1) from exc
+
+    stored_items = stored.get("stored", [])
+    if not stored_items:
+        console.print("[yellow]Selections failed to store.")
+        return
+
+    console.print(f"[green]Stored {len(stored_items)} reference image(s):")
+    for item in stored_items:
+        console.print(
+            f" - {item.get('title') or 'untitled'} | source={item.get('source')} "
+            f"| url={item.get('download_url')}"
+        )
+
+
+@app.command()
+def images(
+    query: List[str] = typer.Argument(..., help="Image search query"),
+    max_results: int = typer.Option(8, "--max-results", "-k", min=1, max=24),
+    min_score: float = typer.Option(0.0, "--min-score", min=0.0, max=1.0),
+    picks: Optional[str] = typer.Option(
+        None,
+        "--pick",
+        help="Comma-separated selections (skip interactive prompt)",
+    ),
+) -> None:
+    """Search and select reference images for future use."""
+
+    text = " ".join(query).strip()
+    if not text:
+        console.print("[red]Please provide a query.")
+        raise typer.Exit(1)
+    _run_vision_flow(text, max_results=max_results, min_score=min_score, picks=picks)
+
+
 @app.command()
 def hash_password(
     password: str = typer.Argument(..., help="Password to hash with bcrypt"),
@@ -601,6 +742,7 @@ def shell(
     console.print("  [cyan]/cad <prompt>[/cyan]     - Generate CAD models")
     console.print("  [cyan]/list[/cyan]             - Show cached artifacts")
     console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact to printer")
+    console.print("  [cyan]/vision <query>[/cyan]   - Search & store reference images")
     console.print("  [cyan]/usage [seconds][/cyan]  - Show usage dashboard (auto-refresh optional)")
     console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace (no args toggles)")
     console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode (tool orchestration)")
@@ -647,6 +789,7 @@ def shell(
                 console.print("  [cyan]/cad <prompt>[/cyan]     - Generate CAD model from description")
                 console.print("  [cyan]/list[/cyan]             - List cached CAD artifacts")
                 console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact #idx to printer")
+                console.print("  [cyan]/vision <query>[/cyan]   - Search/select reference images")
                 console.print(
                     "  [cyan]/usage [seconds][/cyan]  - Show provider usage dashboard"
                 )
@@ -696,6 +839,13 @@ def shell(
                     console.print("[dim]Example: /cad design a wall mount bracket[/dim]")
                 else:
                     cad(" ".join(args).split())
+                continue
+
+            if cmd == "vision":
+                if not args:
+                    console.print("[yellow]Usage: /vision <query>")
+                else:
+                    _run_vision_flow(" ".join(args))
                 continue
 
             if cmd == "usage":
