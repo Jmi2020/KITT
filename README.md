@@ -141,6 +141,11 @@ docker compose -f infra/compose/docker-compose.yml ps
 # Optional: Hermes 3 summary server (q4) boots automatically from the same script.
 # Toggle with LLAMACPP_SUMMARY_ENABLED=0 or point LLAMACPP_SUMMARY_MODEL to another GGUF.
 
+# Gemma 3 Vision (kitty-vision) also launches automatically. Set
+#   LLAMACPP_VISION_MODEL=/path/to/gemma-3-27b-it-q4_k_m.gguf
+#   LLAMACPP_VISION_MMPROJ=/path/to/gemma-3-27b-it-mmproj-bf16.gguf
+# if you store the GGUF files elsewhere, or disable with LLAMACPP_VISION_ENABLED=0.
+
 # Capture a memory baseline (writes to .logs/memory/…)
 ./ops/scripts/memory-snapshot.sh
 

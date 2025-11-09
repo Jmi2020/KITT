@@ -3,6 +3,15 @@
 # Launches Q4 (tool orchestrator) and F16 (reasoning engine) on separate ports
 set -euo pipefail
 
+is_enabled() {
+  local value="${1:-1}"
+  value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+  case "$value" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 LLAMACPP_BIN="${LLAMACPP_BIN:-llama-server}"
 MODELS_DIR="${LLAMACPP_MODELS_DIR:-/Users/Shared/Coding/models}"
 
@@ -45,6 +54,21 @@ SUMMARY_N_GPU_LAYERS="${LLAMACPP_SUMMARY_N_GPU_LAYERS:-999}"
 SUMMARY_THREADS="${LLAMACPP_SUMMARY_THREADS:-12}"
 SUMMARY_FLASH_ATTN="${LLAMACPP_SUMMARY_FLASH_ATTN:-1}"
 
+# Vision (Gemma 3) Server (Default ON - Port 8086)
+VISION_ENABLED="${LLAMACPP_VISION_ENABLED:-1}"
+VISION_MODEL="${LLAMACPP_VISION_MODEL:-gemma-3-27b-it-GGUF/gemma-3-27b-it-q4_k_m.gguf}"
+VISION_MMPROJ="${LLAMACPP_VISION_MMPROJ:-gemma-3-27b-it-GGUF/gemma-3-27b-it-mmproj-bf16.gguf}"
+VISION_ALIAS="${LLAMACPP_VISION_ALIAS:-kitty-vision}"
+VISION_PORT="${LLAMACPP_VISION_PORT:-8086}"
+VISION_CTX="${LLAMACPP_VISION_CTX:-8192}"
+VISION_PARALLEL="${LLAMACPP_VISION_PARALLEL:-2}"
+VISION_TEMPERATURE="${LLAMACPP_VISION_TEMPERATURE:-0.0}"
+VISION_BATCH_SIZE="${LLAMACPP_VISION_BATCH_SIZE:-1024}"
+VISION_UBATCH_SIZE="${LLAMACPP_VISION_UBATCH_SIZE:-256}"
+VISION_N_GPU_LAYERS="${LLAMACPP_VISION_N_GPU_LAYERS:-999}"
+VISION_THREADS="${LLAMACPP_VISION_THREADS:-16}"
+VISION_FLASH_ATTN="${LLAMACPP_VISION_FLASH_ATTN:-1}"
+
 # Shared Configuration
 N_GPU_LAYERS="${LLAMACPP_N_GPU_LAYERS:-999}"
 THREADS="${LLAMACPP_THREADS:-$(sysctl -n hw.logicalcpu)}"
@@ -71,6 +95,28 @@ if [[ ! -f "$f16_path" ]]; then
   exit 1
 fi
 
+vision_enabled=false
+summary_enabled=false
+
+if is_enabled "$VISION_ENABLED"; then
+  vision_enabled=true
+  vision_path="$MODELS_DIR/$VISION_MODEL"
+  vision_mmproj_path="$MODELS_DIR/$VISION_MMPROJ"
+  if [[ ! -f "$vision_path" ]]; then
+    echo "Error: Vision model file not found at $vision_path" >&2
+    exit 1
+  fi
+  if [[ ! -f "$vision_mmproj_path" ]]; then
+    echo "Error: Vision mmproj file not found at $vision_mmproj_path" >&2
+    echo "Download the mmproj GGUF referenced in models/gemma-3-27b-it-GGUF/README.md or set LLAMACPP_VISION_MMPROJ." >&2
+    exit 1
+  fi
+fi
+
+if is_enabled "$SUMMARY_ENABLED"; then
+  summary_enabled=true
+fi
+
 # Normalize flash-attn value
 normalize_flash() {
   local input="${1:-}"
@@ -89,6 +135,7 @@ flash_value=$(normalize_flash "$FLASH_ATTN")
 q4_flash_value=$(normalize_flash "$Q4_FLASH_ATTN")
 f16_flash_value=$(normalize_flash "$F16_FLASH_ATTN")
 summary_flash_value=$(normalize_flash "$SUMMARY_FLASH_ATTN")
+vision_flash_value=$(normalize_flash "$VISION_FLASH_ATTN")
 
 # Build Q4 command (Tool Orchestrator)
 q4_cmd=(
@@ -158,10 +205,9 @@ f16_pid=$!
 echo "$f16_pid" > .logs/llamacpp-f16.pid
 echo "F16 server started (PID: $f16_pid)"
 
-# Optionally start Hermes summarizer
 summary_pid=""
-if [[ "$SUMMARY_ENABLED" != "0" && "$SUMMARY_ENABLED" != "false" ]]; then
-  summary_path="$MODELS_DIR/$SUMMARY_MODEL"
+summary_path="$MODELS_DIR/$SUMMARY_MODEL"
+if $summary_enabled; then
   if [[ -f "$summary_path" ]]; then
     summary_cmd=(
       "$LLAMACPP_BIN"
@@ -189,7 +235,38 @@ if [[ "$SUMMARY_ENABLED" != "0" && "$SUMMARY_ENABLED" != "false" ]]; then
     echo "Summary server started (PID: $summary_pid)"
   else
     echo "Warning: Hermes summary model not found at $summary_path (summary disabled)"
+    summary_enabled=false
   fi
+fi
+
+# Start Gemma vision server if enabled
+vision_pid=""
+if $vision_enabled; then
+  vision_cmd=(
+    "$LLAMACPP_BIN"
+    --port "$VISION_PORT"
+    --n_gpu_layers "$VISION_N_GPU_LAYERS"
+    --ctx-size "$VISION_CTX"
+    --threads "$VISION_THREADS"
+    --batch-size "$VISION_BATCH_SIZE"
+    --ubatch-size "$VISION_UBATCH_SIZE"
+    -np "$VISION_PARALLEL"
+    --model "$vision_path"
+    --mmproj "$vision_mmproj_path"
+    --alias "$VISION_ALIAS"
+  )
+
+  if [[ -n "$vision_flash_value" ]]; then
+    vision_cmd+=(--flash-attn "$vision_flash_value")
+  fi
+
+  echo "Starting Gemma vision server on port $VISION_PORT:"
+  printf '  %q' "${vision_cmd[@]}"
+  echo
+  "${vision_cmd[@]}" > .logs/llamacpp-vision.log 2>&1 &
+  vision_pid=$!
+  echo "$vision_pid" > .logs/llamacpp-vision.pid
+  echo "Vision server started (PID: $vision_pid)"
 fi
 
 # Setup cleanup handler
@@ -204,7 +281,10 @@ cleanup() {
   if [[ -n "${summary_pid:-}" ]]; then
     kill "$summary_pid" 2>/dev/null || true
   fi
-  rm -f .logs/llamacpp-q4.pid .logs/llamacpp-f16.pid .logs/llamacpp-summary.pid
+  if [[ -n "${vision_pid:-}" ]]; then
+    kill "$vision_pid" 2>/dev/null || true
+  fi
+  rm -f .logs/llamacpp-q4.pid .logs/llamacpp-f16.pid .logs/llamacpp-summary.pid .logs/llamacpp-vision.pid
   echo "Servers stopped"
 }
 
@@ -212,11 +292,21 @@ trap cleanup EXIT INT TERM
 
 # Wait for processes
 echo "Servers running. Press Ctrl+C to stop."
-echo "Logs: .logs/llamacpp-q4.log, .logs/llamacpp-f16.log, .logs/llamacpp-summary.log"
+log_paths=(".logs/llamacpp-q4.log" ".logs/llamacpp-f16.log")
+if [[ -n "$summary_pid" ]]; then
+  log_paths+=(".logs/llamacpp-summary.log")
+fi
+if [[ -n "$vision_pid" ]]; then
+  log_paths+=(".logs/llamacpp-vision.log")
+fi
+echo "Logs: ${log_paths[*]}"
 
 pids=("$q4_pid" "$f16_pid")
 if [[ -n "$summary_pid" ]]; then
   pids+=("$summary_pid")
+fi
+if [[ -n "$vision_pid" ]]; then
+  pids+=("$vision_pid")
 fi
 
 wait "${pids[@]}"

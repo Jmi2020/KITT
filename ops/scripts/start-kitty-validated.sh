@@ -148,10 +148,17 @@ Q4_PORT="${LLAMACPP_Q4_PORT:-8083}"
 F16_PORT="${LLAMACPP_F16_PORT:-8082}"
 SUMMARY_PORT="${LLAMACPP_SUMMARY_PORT:-8085}"
 SUMMARY_ENABLED="${LLAMACPP_SUMMARY_ENABLED:-1}"
+VISION_PORT="${LLAMACPP_VISION_PORT:-8086}"
+VISION_ENABLED="${LLAMACPP_VISION_ENABLED:-1}"
+VISION_PORT="${LLAMACPP_VISION_PORT:-8086}"
+VISION_ENABLED="${LLAMACPP_VISION_ENABLED:-1}"
 
 PORTS_TO_STOP=($Q4_PORT $F16_PORT)
 if is_enabled "$SUMMARY_ENABLED"; then
     PORTS_TO_STOP+=($SUMMARY_PORT)
+fi
+if is_enabled "$VISION_ENABLED"; then
+    PORTS_TO_STOP+=($VISION_PORT)
 fi
 
 for port in "${PORTS_TO_STOP[@]}"; do
@@ -183,6 +190,7 @@ print_status "Checking for dual-model llama.cpp servers..."
 Q4_RUNNING=false
 F16_RUNNING=false
 SUMMARY_RUNNING=false
+VISION_RUNNING=false
 
 if curl -sf "http://localhost:$Q4_PORT/health" > /dev/null 2>&1; then
     Q4_RUNNING=true
@@ -201,7 +209,16 @@ if is_enabled "$SUMMARY_ENABLED"; then
     fi
 fi
 
-if [ "$Q4_RUNNING" = true ] && [ "$F16_RUNNING" = true ] && { ! is_enabled "$SUMMARY_ENABLED" || [ "$SUMMARY_RUNNING" = true ]; }; then
+if is_enabled "$VISION_ENABLED"; then
+    if curl -sf "http://localhost:$VISION_PORT/health" > /dev/null 2>&1; then
+        VISION_RUNNING=true
+        print_success "Vision server already running on port $VISION_PORT"
+    fi
+fi
+
+if [ "$Q4_RUNNING" = true ] && [ "$F16_RUNNING" = true ] \
+   && { ! is_enabled "$SUMMARY_ENABLED" || [ "$SUMMARY_RUNNING" = true ]; } \
+   && { ! is_enabled "$VISION_ENABLED" || [ "$VISION_RUNNING" = true ]; }; then
     print_status "Using existing dual-model servers"
 else
     # At least one server is not running - check if models are configured
@@ -231,11 +248,22 @@ else
     fi
 
     # Start dual-model servers
-    print_status "Starting llama.cpp servers (Q4/F16${SUMMARY_ENABLED:+/Hermes})..."
+    extra_components=""
+    if is_enabled "$SUMMARY_ENABLED"; then
+        extra_components="${extra_components}/Hermes"
+    fi
+    if is_enabled "$VISION_ENABLED"; then
+        extra_components="${extra_components}/Vision"
+    fi
+    print_status "Starting llama.cpp servers (Q4/F16${extra_components})..."
     print_status "Q4 (Tool Orchestrator): ${LLAMACPP_Q4_MODEL}"
     print_status "F16 (Reasoning Engine): ${LLAMACPP_F16_MODEL}"
     if is_enabled "$SUMMARY_ENABLED"; then
         print_status "Hermes Summary (kitty-summary): ${LLAMACPP_SUMMARY_MODEL:-default Hermes 3 Q4}"
+    fi
+    if is_enabled "$VISION_ENABLED"; then
+        print_status "Vision (kitty-vision): ${LLAMACPP_VISION_MODEL:-default Gemma 3 GGUF}"
+        print_status "Vision mmproj: ${LLAMACPP_VISION_MMPROJ:-gemma-3-27b-it-mmproj-bf16.gguf}"
     fi
 
     "$SCRIPT_DIR/start-llamacpp-dual.sh" > .logs/llamacpp-dual.log 2>&1 &
@@ -274,6 +302,18 @@ else
             fi
         fi
 
+        if is_enabled "$VISION_ENABLED" && [ -f .logs/llamacpp-vision.pid ]; then
+            VISION_PID=$(cat .logs/llamacpp-vision.pid)
+            if ! kill -0 $VISION_PID 2>/dev/null; then
+                print_error "Vision server failed to start"
+                echo "Last 20 lines of vision log:"
+                tail -20 .logs/llamacpp-vision.log
+                exit 1
+            else
+                print_success "Vision server started (PID: $VISION_PID)"
+            fi
+        fi
+
         print_success "llama.cpp servers started (Q4 PID: $Q4_PID, F16 PID: $F16_PID)"
     else
         print_error "Failed to create PID files for dual-model servers"
@@ -302,6 +342,17 @@ else
                 echo "Last 30 lines of summary log:"
                 tail -30 .logs/llamacpp-summary.log
             fi
+        fi
+    fi
+
+    if is_enabled "$VISION_ENABLED"; then
+        if ! wait_for_http "http://localhost:$VISION_PORT/health" "Vision server" 60; then
+            print_error "Vision server did not become healthy"
+            if [ -f .logs/llamacpp-vision.log ]; then
+                echo "Last 30 lines of vision log:"
+                tail -30 .logs/llamacpp-vision.log
+            fi
+            exit 1
         fi
     fi
 fi
@@ -377,6 +428,9 @@ check_process "$F16_PORT" "F16 server (Reasoning Engine)" || true
 if is_enabled "$SUMMARY_ENABLED"; then
     check_process "$SUMMARY_PORT" "Hermes summary server" || true
 fi
+if is_enabled "$VISION_ENABLED"; then
+    check_process "$VISION_PORT" "Vision server" || true
+fi
 check_process 8000 "Brain service" || true
 check_process 8080 "Gateway service" || true
 check_process 5432 "PostgreSQL" || true
@@ -396,6 +450,9 @@ echo "  - F16 server: tail -f .logs/llamacpp-f16.log"
 echo "  - Dual startup: tail -f .logs/llamacpp-dual.log"
 if is_enabled "$SUMMARY_ENABLED"; then
     echo "  - Hermes summary: tail -f .logs/llamacpp-summary.log"
+fi
+if is_enabled "$VISION_ENABLED"; then
+    echo "  - Vision server: tail -f .logs/llamacpp-vision.log"
 fi
 echo "  - Docker: docker compose -f infra/compose/docker-compose.yml logs -f"
 echo ""

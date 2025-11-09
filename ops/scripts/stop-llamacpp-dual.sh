@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 Q4_PID_FILE="$REPO_ROOT/.logs/llamacpp-q4.pid"
 F16_PID_FILE="$REPO_ROOT/.logs/llamacpp-f16.pid"
+SUMMARY_PID_FILE="$REPO_ROOT/.logs/llamacpp-summary.pid"
+VISION_PID_FILE="$REPO_ROOT/.logs/llamacpp-vision.pid"
 PROCESS_NAME="${LLAMACPP_PROCESS_NAME:-llama-server}"
 
 stop_pid() {
@@ -42,6 +44,22 @@ if [[ -f "$F16_PID_FILE" ]]; then
   F16_PID="$(cat "$F16_PID_FILE")"
   stop_pid "$F16_PID" "F16 server"
   rm -f "$F16_PID_FILE"
+  stopped_any=true
+fi
+
+# Stop summary server
+if [[ -f "$SUMMARY_PID_FILE" ]]; then
+  SUMMARY_PID="$(cat "$SUMMARY_PID_FILE")"
+  stop_pid "$SUMMARY_PID" "Hermes summary server"
+  rm -f "$SUMMARY_PID_FILE"
+  stopped_any=true
+fi
+
+# Stop vision server
+if [[ -f "$VISION_PID_FILE" ]]; then
+  VISION_PID="$(cat "$VISION_PID_FILE")"
+  stop_pid "$VISION_PID" "Vision server"
+  rm -f "$VISION_PID_FILE"
   stopped_any=true
 fi
 
