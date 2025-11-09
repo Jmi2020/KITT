@@ -92,6 +92,7 @@ class SessionState:
     user_name: str = USER_NAME or "ssh-operator"
     verbosity: int = max(DEFAULT_VERBOSITY, 4)
     last_artifacts: List[Dict[str, Any]] = field(default_factory=list)
+    stored_images: List[Dict[str, Any]] = field(default_factory=list)
     show_trace: bool = True
     agent_enabled: bool = True
 
@@ -521,12 +522,12 @@ def _run_vision_flow(
         )
 
     try:
-        stored = _vision_post(
-            "store",
-            {
-                "session_id": state.conversation_id,
-                "images": chosen_images,
-            },
+    stored = _vision_post(
+        "store",
+        {
+            "session_id": state.conversation_id,
+            "images": chosen_images,
+        },
         )
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]Failed to store selections: {exc}")
@@ -543,6 +544,7 @@ def _run_vision_flow(
             f" - {item.get('title') or 'untitled'} | source={item.get('source')} "
             f"| url={item.get('download_url')}"
         )
+    state.stored_images.extend(stored_items)
 
 
 @app.command()
@@ -644,7 +646,12 @@ def say(
 def cad(prompt: List[str] = typer.Argument(..., help="CAD generation prompt")) -> None:
     """Generate CAD artifacts using Zoo/Tripo/local providers."""
     text = " ".join(prompt)
-    payload = {"conversationId": state.conversation_id, "prompt": text}
+    payload: Dict[str, Any] = {
+        "conversationId": state.conversation_id,
+        "prompt": text,
+    }
+    if state.stored_images:
+        payload["imageRefs"] = [item["download_url"] for item in state.stored_images]
 
     try:
         data = _post_json_with_spinner(
@@ -743,6 +750,7 @@ def shell(
     console.print("  [cyan]/list[/cyan]             - Show cached artifacts")
     console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact to printer")
     console.print("  [cyan]/vision <query>[/cyan]   - Search & store reference images")
+    console.print("  [cyan]/images[/cyan]           - List stored reference images")
     console.print("  [cyan]/usage [seconds][/cyan]  - Show usage dashboard (auto-refresh optional)")
     console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace (no args toggles)")
     console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode (tool orchestration)")
@@ -790,6 +798,7 @@ def shell(
                 console.print("  [cyan]/list[/cyan]             - List cached CAD artifacts")
                 console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact #idx to printer")
                 console.print("  [cyan]/vision <query>[/cyan]   - Search/select reference images")
+                console.print("  [cyan]/images[/cyan]           - Show stored reference images")
                 console.print(
                     "  [cyan]/usage [seconds][/cyan]  - Show provider usage dashboard"
                 )
@@ -846,6 +855,18 @@ def shell(
                     console.print("[yellow]Usage: /vision <query>")
                 else:
                     _run_vision_flow(" ".join(args))
+                continue
+
+            if cmd == "images":
+                if not state.stored_images:
+                    console.print("[yellow]No stored reference images.")
+                else:
+                    console.print("[bold]Stored reference images:[/bold]")
+                    for idx, item in enumerate(state.stored_images, 1):
+                        console.print(
+                            f" [cyan]{idx}[/] {item.get('title') or 'untitled'} "
+                            f"| source={item.get('source','')} | url={item.get('download_url')}"
+                        )
                 continue
 
             if cmd == "usage":
