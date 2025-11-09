@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Dashboard from './pages/Dashboard';
 import FabricationConsole from './pages/FabricationConsole';
 import Projects from './pages/Projects';
 import WallTerminal from './pages/WallTerminal';
+import VisionGallery from './pages/VisionGallery';
 import useRemoteMode from './hooks/useRemoteMode';
 
 const App = () => {
-  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'wall'>('dashboard');
+  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'wall' | 'vision'>('dashboard');
   const remoteMode = useRemoteMode();
 
   const renderView = () => {
@@ -17,10 +18,20 @@ const App = () => {
         return <FabricationConsole />;
       case 'wall':
         return <WallTerminal remoteMode={remoteMode} />;
+      case 'vision':
+        return <VisionGallery />;
       default:
         return <Dashboard remoteMode={remoteMode} />;
     }
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const viewParam = params.get('view');
+    if (viewParam === 'vision') {
+      setActiveView('vision');
+    }
+  }, []);
 
   return (
     <div className="kitty-app">
@@ -31,6 +42,7 @@ const App = () => {
           <button onClick={() => setActiveView('projects')}>Projects</button>
           <button onClick={() => setActiveView('console')}>Fabrication Console</button>
           <button onClick={() => setActiveView('wall')}>Wall Terminal</button>
+          <button onClick={() => setActiveView('vision')}>Vision Gallery</button>
         </nav>
       </header>
       <main>{renderView()}</main>

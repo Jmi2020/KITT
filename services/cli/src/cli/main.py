@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 
 import httpx
 import typer
@@ -74,6 +74,7 @@ API_BASE = _first_valid_url(
     "http://localhost:8000",
 )
 CAD_BASE = _env("KITTY_CAD_API", "http://localhost:8200")
+UI_BASE = _env("KITTY_UI_BASE", "http://localhost:4173")
 USER_NAME = _env("USER_NAME", "ssh-operator")
 USER_UUID = _env(
     "KITTY_USER_ID",
@@ -462,6 +463,8 @@ def _run_vision_flow(
     picks: Optional[str] = None,
 ) -> None:
     payload = {"query": query, "max_results": max_results}
+    gallery_link = f"{UI_BASE}/?view=vision&session={state.conversation_id}&query={quote_plus(query)}"
+    console.print(f"[dim]Open gallery for manual selection: {gallery_link}")
     try:
         search = _vision_post("search", payload)
     except Exception as exc:  # noqa: BLE001

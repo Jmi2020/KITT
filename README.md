@@ -171,6 +171,7 @@ kitty-cli shell
 > /remember Ordered more PLA   # Save a long-term note
 > /memories PLA                # Recall saved notes (optional query)
 > /vision gandalf rubber duck  # Search & store reference images
+> /images                      # List stored reference image links
 > /usage 5                     # Monitor paid provider usage (refresh every 5s)
 > /reset                       # Start a fresh conversation/session
 > /exit                        # Exit shell
@@ -183,6 +184,29 @@ kitty-cli images "gandalf rubber duck" --max-results 6
 # Monitor paid usage / provider cost
 kitty-cli usage
 kitty-cli usage --refresh 5
+```
+
+The CLI prints a gallery link (default `http://localhost:4173/?view=vision&session=...&query=...`) whenever image selection would help. Override the target with `KITTY_UI_BASE` if your React UI runs elsewhere.
+
+### Vision Web Gallery
+
+```bash
+cd services/ui && pnpm install        # first-time setup
+
+# Run the React app in dark mode (default http://localhost:4173)
+pnpm dev --host 0.0.0.0 --port 4173
+
+# Forward the port in VS Code Remote SSH
+# Command Palette → "Ports: Focus on Ports View" → "Forward a Port" (4173)
+# Share the forwarded URL with teammates who need to pick images
+```
+
+Env knobs:
+
+```env
+KITTY_UI_BASE=http://your-ui-host:4173     # where the React gallery is served
+KITTY_CLI_API_BASE=http://gateway:8080     # optional override for CLI API target
+VITE_API_BASE=http://gateway:8080          # UI fetches vision endpoints from the gateway
 ```
 
 > **Long-running prompts**: Some research-heavy queries (multi-stage web extractions) can take several minutes. The CLI now waits up to 900 s by default (`KITTY_CLI_TIMEOUT`). Raise this env var if you need even longer windows.
