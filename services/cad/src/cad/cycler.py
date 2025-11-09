@@ -34,18 +34,24 @@ class CADCycler:
         artifact_store: ArtifactStore,
         local_runner: Optional[LocalMeshRunner] = None,
         freecad_runner: Optional[FreeCADRunner] = None,
+        max_tripo_images: int = 2,
     ) -> None:
         self._zoo = zoo_client
         self._tripo = tripo_client
         self._store = artifact_store
         self._local_runner = local_runner
         self._freecad = freecad_runner
+        self._max_tripo_images = max(1, max_tripo_images)
 
     async def run(
-        self, prompt: str, references: Optional[Dict[str, str]] = None
+        self,
+        prompt: str,
+        references: Optional[Dict[str, str]] = None,
+        image_refs: Optional[List[str]] = None,
     ) -> List[CADArtifact]:
         artifacts: List[CADArtifact] = []
         references = references or {}
+        image_refs = image_refs or []
 
         # Zoo parametric generation
         try:
@@ -73,10 +79,20 @@ class CADCycler:
 
         # Tripo cloud mesh
         if self._tripo:
+            tripo_urls: List[str] = []
+            tripo_urls.extend(image_refs[: self._max_tripo_images])
+            extra_url = references.get("image_url")
+            if extra_url:
+                tripo_urls.append(extra_url)
+            unique_urls: List[str] = []
+            seen: set[str] = set()
+            for url in tripo_urls:
+                if url and url not in seen:
+                    seen.add(url)
+                    unique_urls.append(url)
             try:
-                image_url = references.get("image_url")
-                if image_url:
-                    mesh = await self._tripo.image_to_mesh(image_url)
+                for url in unique_urls[: self._max_tripo_images]:
+                    mesh = await self._tripo.image_to_mesh(url)
                     data = mesh.get("data", {})
                     mesh_url = data.get("model_url")
                     if mesh_url:
@@ -86,7 +102,7 @@ class CADCycler:
                                 provider="tripo",
                                 artifact_type="glb",
                                 location=stored,
-                                metadata={"thumbnail": data.get("thumbnail", "")},
+                                metadata={"thumbnail": data.get("thumbnail", ""), "source_image": url},
                             )
                         )
             except Exception as exc:  # noqa: BLE001

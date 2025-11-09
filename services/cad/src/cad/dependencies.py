@@ -50,6 +50,7 @@ def get_cad_cycler() -> CADCycler:
         artifact_store=get_artifact_store(),
         local_runner=get_local_mesh_runner(),
         freecad_runner=get_freecad_runner(),
+        max_tripo_images=settings.tripo_max_image_refs,
     )
 
 

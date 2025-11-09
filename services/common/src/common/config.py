@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     zoo_api_key: Optional[str] = None
     tripo_api_base: str = "https://api.tripo.ai"
     tripo_api_key: Optional[str] = None
+    tripo_max_image_refs: int = 2
 
     # UniFi Access
     unifi_access_base_url: Optional[str] = None

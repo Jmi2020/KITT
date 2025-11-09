@@ -17,6 +17,7 @@ class GenerateRequest(BaseModel):
     conversation_id: str = Field(..., alias="conversationId")
     prompt: str
     references: Optional[Dict[str, str]] = None
+    image_refs: Optional[List[str]] = Field(default=None, alias="imageRefs")
 
 
 class ArtifactResponse(BaseModel):
@@ -35,7 +36,9 @@ class GenerateResponse(BaseModel):
 async def generate_cad(
     body: GenerateRequest, cycler=Depends(get_cad_cycler)
 ) -> GenerateResponse:
-    artifacts: List[CADArtifact] = await cycler.run(body.prompt, body.references)
+    artifacts: List[CADArtifact] = await cycler.run(
+        body.prompt, body.references, body.image_refs
+    )
     return GenerateResponse(
         conversation_id=body.conversation_id,
         artifacts=[

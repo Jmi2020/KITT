@@ -9,16 +9,27 @@ import mimetypes
 import os
 import re
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
-try:
+
+try:  # pragma: no cover - optional dependency
     from duckduckgo_search import DDGS
-except ImportError:  # pragma: no cover - optional dependency
+except ImportError:
     DDGS = None  # type: ignore[assignment]
+
+try:  # optional CLIP dependencies
+    import torch
+    import open_clip  # type: ignore
+    from PIL import Image
+except ImportError:  # pragma: no cover
+    torch = None  # type: ignore[assignment]
+    open_clip = None  # type: ignore[assignment]
+    Image = None  # type: ignore[assignment]
 
 from minio import Minio
 
@@ -227,6 +238,10 @@ class VisionMCPServer(MCPServer):
         safe_level = os.getenv("IMAGE_SEARCH_SAFESEARCH", "moderate")
         self._searcher = ImageSearchClient(searx_url=searx_url, safe_level=safe_level)
         self._store = ReferenceStore()
+        self._clip = ClipScorer.create()
+        self._clip_weight = float(os.getenv("VISION_CLIP_WEIGHT", "0.7")) if self._clip else 0.0
+        self._clip_max_images = int(os.getenv("VISION_CLIP_MAX_IMAGES", "8"))
+        self._image_timeout = float(os.getenv("VISION_IMAGE_TIMEOUT", "10"))
         self._register_tools()
 
     def _register_tools(self) -> None:
@@ -258,8 +273,8 @@ class VisionMCPServer(MCPServer):
             ToolDefinition(
                 name="image_filter",
                 description=(
-                    "Compute lightweight relevance scores for candidate images. "
-                    "Uses keyword overlap as a fast heuristic (Gemma-based vision scoring planned)."
+                    "Compute relevance scores for candidate images using keyword heuristics "
+                    "and CLIP-based scoring when available."
                 ),
                 parameters={
                     "type": "object",
@@ -326,7 +341,7 @@ class VisionMCPServer(MCPServer):
         if tool_name == "image_search":
             return await self._tool_image_search(arguments)
         if tool_name == "image_filter":
-            return self._tool_image_filter(arguments)
+            return await self._tool_image_filter(arguments)
         if tool_name == "store_selection":
             return await self._tool_store_selection(arguments)
         return ToolResult(success=False, error=f"Tool '{tool_name}' not found")
@@ -337,27 +352,38 @@ class VisionMCPServer(MCPServer):
         hits = await self._searcher.search(query, max_results=max_results)
         return ToolResult(success=True, data={"results": [hit.to_dict() for hit in hits]})
 
-    def _tool_image_filter(self, args: Dict[str, Any]) -> ToolResult:
+    async def _tool_image_filter(self, args: Dict[str, Any]) -> ToolResult:
         query = args.get("query", "").lower()
         tokens = [t for t in re.split(r"\W+", query) if t]
         min_score = float(args.get("min_score", 0.0))
         results: List[Dict[str, Any]] = []
-        for image in args.get("images", []):
-            text = " ".join(
-                filter(
-                    None,
-                    [
-                        str(image.get("title", "")),
-                        str(image.get("description", "")),
-                        str(image.get("source", "")),
-                    ],
-                )
-            ).lower()
-            score = self._score(tokens, text)
-            if score >= min_score:
-                item = dict(image)
-                item["score"] = round(score, 3)
-                results.append(item)
+        clip_enabled = self._clip is not None and self._clip_weight > 0
+        async with httpx.AsyncClient(timeout=self._image_timeout) as client:
+            for idx, image in enumerate(args.get("images", [])):
+                text = " ".join(
+                    filter(
+                        None,
+                        [
+                            str(image.get("title", "")),
+                            str(image.get("description", "")),
+                            str(image.get("source", "")),
+                        ],
+                    )
+                ).lower()
+                heuristic = self._score(tokens, text)
+                clip_score = None
+                if clip_enabled and idx < self._clip_max_images:
+                    clip_score = await self._score_clip(client, query, image.get("image_url"))
+                final_score = heuristic
+                if clip_score is not None:
+                    clip_norm = (clip_score + 1) / 2  # [-1,1] -> [0,1]
+                    final_score = (1 - self._clip_weight) * heuristic + self._clip_weight * clip_norm
+                if final_score >= min_score:
+                    item = dict(image)
+                    item["score"] = round(final_score, 3)
+                    if clip_score is not None:
+                        item["clip_score"] = round(clip_score, 3)
+                    results.append(item)
         results.sort(key=lambda item: item.get("score", 0), reverse=True)
         return ToolResult(success=True, data={"results": results})
 
@@ -403,6 +429,71 @@ class VisionMCPServer(MCPServer):
 
     async def fetch_resource(self, uri: str) -> Dict[str, Any]:  # noqa: D401
         raise ValueError(f"No resources available for {self.name}")
+
+    async def _score_clip(
+        self, client: httpx.AsyncClient, query: str, url: Optional[str]
+    ) -> Optional[float]:
+        if not self._clip or not url:
+            return None
+        try:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            return self._clip.score(query, resp.content)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.debug("CLIP scoring failed for %s: %s", url, exc)
+            return None
+
+
+class ClipScorer:
+    """Optional CLIP scorer using open_clip if available."""
+
+    def __init__(self, model: Any, preprocess: Any, tokenizer: Any, device: str) -> None:
+        self._model = model
+        self._preprocess = preprocess
+        self._tokenizer = tokenizer
+        self._device = device
+        self._pos_templates = ["{}", "a high quality photo of {}", "a close-up of {}"]
+        self._neg_templates = ["cartoon {}", "toy {}", "statue {}"]
+
+    @classmethod
+    def create(cls) -> Optional["ClipScorer"]:
+        if torch is None or open_clip is None or Image is None:
+            LOGGER.info("CLIP scorer unavailable (missing torch/open_clip/Pillow)")
+            return None
+        try:
+            device = "cpu"
+            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():  # type: ignore[attr-defined]
+                device = "mps"
+            model, _, preprocess = open_clip.create_model_and_transforms(
+                "ViT-B-32", pretrained="laion2b_s34b_b79k", device=device
+            )
+            tokenizer = open_clip.get_tokenizer("ViT-B-32")
+            return cls(model, preprocess, tokenizer, device)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Failed to initialize CLIP scorer: %s", exc)
+            return None
+
+    def score(self, query: str, image_bytes: bytes) -> float:
+        image = Image.open(BytesIO(image_bytes)).convert("RGB")
+        image_input = self._preprocess(image).unsqueeze(0)
+        positives = [template.format(query) for template in self._pos_templates]
+        negatives = [template.format(query) for template in self._neg_templates]
+        with torch.no_grad():
+            image_features = self._model.encode_image(image_input.to(self._device))
+            pos_features = self._encode_text(positives)
+            neg_features = self._encode_text(negatives)
+        image_features /= image_features.norm(dim=-1, keepdim=True)
+        pos_features /= pos_features.norm(dim=-1, keepdim=True)
+        neg_features /= neg_features.norm(dim=-1, keepdim=True)
+        pos_score = (image_features @ pos_features.T).max().item()
+        neg_score = (image_features @ neg_features.T).max().item()
+        return pos_score - neg_score
+
+    def _encode_text(self, prompts: List[str]):
+        tokens = self._tokenizer(prompts)
+        with torch.no_grad():
+            features = self._model.encode_text(tokens.to(self._device))
+        return features
 
 
 __all__ = ["VisionMCPServer"]

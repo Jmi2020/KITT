@@ -21,7 +21,8 @@ async def test_reference_store_local(tmp_path: Path):
     assert saved.read_bytes() == b"hello"
 
 
-def test_image_filter_scores_by_keyword():
+@pytest.mark.asyncio
+async def test_image_filter_scores_by_keyword():
     server = VisionMCPServer()
     args = {
         "query": "gandalf rubber duck",
@@ -31,7 +32,7 @@ def test_image_filter_scores_by_keyword():
         ],
         "min_score": 0.1,
     }
-    result = server._tool_image_filter(args)
+    result = await server._tool_image_filter(args)
     scores = [item["score"] for item in result.data["results"]]
     assert scores[0] >= scores[-1]
     assert result.data["results"][0]["id"] == "1"
