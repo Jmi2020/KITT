@@ -53,7 +53,7 @@ def get_routing_config() -> RoutingConfig:
         top_p=float(os.getenv("LLAMACPP_TOP_P", "0.95")),
         repeat_penalty=float(os.getenv("LLAMACPP_REPEAT_PENALTY", "1.1")),
         stop_tokens=stop_tokens,
-        timeout_seconds=float(os.getenv("LLAMACPP_TIMEOUT", "90")),
+        timeout_seconds=float(os.getenv("LLAMACPP_TIMEOUT", "1200")),
         stream=os.getenv("LLAMACPP_STREAM", "false").lower() in {"1", "true", "yes", "on"},
         api_path=os.getenv("LLAMACPP_API_PATH", "/completion"),
         model_alias=None,
