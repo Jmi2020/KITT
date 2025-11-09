@@ -13,6 +13,7 @@ from .servers import (
     HomeAssistantMCPServer,
     MemoryMCPServer,
     ResearchMCPServer,
+    VisionMCPServer,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "HomeAssistantMCPServer",
     "MemoryMCPServer",
     "ResearchMCPServer",
+    "VisionMCPServer",
 ]

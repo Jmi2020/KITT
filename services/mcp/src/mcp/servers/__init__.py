@@ -5,6 +5,7 @@ from .cad_server import CADMCPServer
 from .homeassistant_server import HomeAssistantMCPServer
 from .memory_server import MemoryMCPServer
 from .research_server import ResearchMCPServer
+from .vision_server import VisionMCPServer
 
 __all__ = [
     "BrokerMCPServer",
@@ -12,4 +13,5 @@ __all__ = [
     "HomeAssistantMCPServer",
     "MemoryMCPServer",
     "ResearchMCPServer",
+    "VisionMCPServer",
 ]

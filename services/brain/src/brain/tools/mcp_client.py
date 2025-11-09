@@ -27,10 +27,19 @@ try:  # noqa: WPS229
         HomeAssistantMCPServer,
         MemoryMCPServer,
         ResearchMCPServer,
+        VisionMCPServer,
         ToolDefinition,
     )
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
-    BrokerMCPServer = CADMCPServer = HomeAssistantMCPServer = MemoryMCPServer = ResearchMCPServer = None  # type: ignore[assignment]
+    BrokerMCPServer = (
+        CADMCPServer
+    ) = (
+        HomeAssistantMCPServer
+    ) = (
+        MemoryMCPServer
+    ) = (
+        ResearchMCPServer
+    ) = VisionMCPServer = None  # type: ignore[assignment]
     ToolDefinition = Dict[str, Any]  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
@@ -92,6 +101,9 @@ class MCPClient:
             # Research server with optional Perplexity integration
             if callable(ResearchMCPServer):
                 self._servers["research"] = ResearchMCPServer(perplexity_client=perplexity_client)
+
+            if callable(VisionMCPServer):
+                self._servers["vision"] = VisionMCPServer()
         except Exception as exc:  # noqa: BLE001
             logger.warning("Disabling MCP tools: %s", exc)
             self._servers.clear()
