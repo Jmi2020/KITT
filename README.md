@@ -140,6 +140,12 @@ docker compose -f infra/compose/docker-compose.yml ps
 
 # Optional: Hermes 3 summary server (q4) boots automatically from the same script.
 # Toggle with LLAMACPP_SUMMARY_ENABLED=0 or point LLAMACPP_SUMMARY_MODEL to another GGUF.
+
+# Capture a memory baseline (writes to .logs/memory/…)
+./ops/scripts/memory-snapshot.sh
+
+# Inspect/clean stray llama.cpp listeners (add --kill to terminate unexpected ones)
+./ops/scripts/llamacpp-watchdog.sh
 ```
 
 ### CLI Interface
@@ -175,6 +181,8 @@ kitty-cli usage --refresh 5
 > **Long-running prompts**: Some research-heavy queries (multi-stage web extractions) can take several minutes. The CLI now waits up to 900 s by default (`KITTY_CLI_TIMEOUT`). Raise this env var if you need even longer windows.
 >
 > **Hermes summaries**: When Athene/ReAct responses get lengthy, a dedicated Hermes 3 (kitty-summary) server now rewrites the result + agent trace into a tight brief so the CLI doesn’t truncate key facts. Disable with `HERMES_SUMMARY_ENABLED=0` or view the original text via routing metadata.
+
+**Memory hygiene:** capture a baseline after each reboot with `./ops/scripts/memory-snapshot.sh`, and if anything feels sluggish run `./ops/scripts/llamacpp-watchdog.sh --kill` to make sure only the expected llama.cpp listeners (kitty-q4 / kitty-f16 / kitty-summary) remain. The watchdog logs to `.logs/llamacpp-watchdog.log`, so you can correlate unexpected restarts with lingering processes.
 
 #### Interactive CLI + Tool Routing
 
