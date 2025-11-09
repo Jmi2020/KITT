@@ -522,12 +522,12 @@ def _run_vision_flow(
         )
 
     try:
-    stored = _vision_post(
-        "store",
-        {
-            "session_id": state.conversation_id,
-            "images": chosen_images,
-        },
+        stored = _vision_post(
+            "store",
+            {
+                "session_id": state.conversation_id,
+                "images": chosen_images,
+            },
         )
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]Failed to store selections: {exc}")
