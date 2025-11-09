@@ -12,7 +12,9 @@ LOG_FILE="$LOG_DIR/llamacpp-watchdog.log"
 EXPECTED_PORTS_DEFAULT="${LLAMACPP_Q4_PORT:-8083} ${LLAMACPP_F16_PORT:-8082}"
 SUMMARY_PORT="${LLAMACPP_SUMMARY_PORT:-8085}"
 SUMMARY_ENABLED="${LLAMACPP_SUMMARY_ENABLED:-1}"
-if [[ -n "${SUMMARY_PORT:-}" ]] && [[ "${SUMMARY_ENABLED,,}" != "0" && "${SUMMARY_ENABLED,,}" != "false" ]]; then
+to_lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+SUMMARY_FLAG=$(to_lower "$SUMMARY_ENABLED")
+if [[ -n "${SUMMARY_PORT:-}" ]] && [[ "$SUMMARY_FLAG" != "0" && "$SUMMARY_FLAG" != "false" ]]; then
   EXPECTED_PORTS_DEFAULT+=" ${SUMMARY_PORT}"
 fi
 EXPECTED_PORTS="${LLAMACPP_EXPECTED_PORTS:-$EXPECTED_PORTS_DEFAULT}"
@@ -36,12 +38,15 @@ if ! command -v lsof >/dev/null 2>&1; then
   exit 0
 fi
 
-declare -A expected_map
-for port in $EXPECTED_PORTS; do
-  if [[ -n "$port" ]]; then
-    expected_map["$port"]=1
-  fi
-done
+is_expected_port() {
+  local target="$1"
+  for port in $EXPECTED_PORTS; do
+    if [[ -n "$port" && "$port" == "$target" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 format_bytes() {
   local rss_kb="$1"
@@ -66,7 +71,7 @@ while IFS= read -r line; do
   mem_kb=$(ps -o rss= -p "$pid" 2>/dev/null || echo "")
   mem_human=$(format_bytes "$mem_kb")
   status="unexpected"
-  if [[ -n "${expected_map[$port]:-}" ]]; then
+  if is_expected_port "$port"; then
     status="expected"
   fi
   log "PID $pid ($command) listening on :$port | RSS $mem_human | $status"
