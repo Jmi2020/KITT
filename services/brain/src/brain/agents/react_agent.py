@@ -87,6 +87,7 @@ class ReActAgent:
         tools: List[Dict[str, Any]],
         history: List[AgentStep],
         freshness_required: bool = False,
+        vision_targets: Optional[List[str]] = None,
     ) -> str:
         """Build ReAct prompt with query, tools, and history.
 
@@ -122,6 +123,7 @@ class ReActAgent:
             context=context,
             query=query,
             freshness_required=freshness_required,
+            vision_targets=vision_targets,
         )
 
         return prompt
@@ -266,7 +268,11 @@ class ReActAgent:
         return text[: self._observation_limit - 3] + "..."
 
     async def run(
-        self, query: str, freshness_required: bool = False, allow_paid: bool = True
+        self,
+        query: str,
+        freshness_required: bool = False,
+        allow_paid: bool = True,
+        vision_targets: Optional[List[str]] = None,
     ) -> AgentResult:
         """Execute ReAct loop to answer query.
 
@@ -315,7 +321,11 @@ class ReActAgent:
             # Build prompt with current history
             prompt_history = self._history_for_prompt(history)
             prompt = self._build_react_prompt(
-                query, tools, prompt_history, freshness_required=freshness_required
+                query,
+                tools,
+                prompt_history,
+                freshness_required=freshness_required,
+                vision_targets=vision_targets,
             )
 
             # Get LLM response with tools

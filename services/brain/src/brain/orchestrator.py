@@ -14,6 +14,7 @@ from common.config import settings
 from .memory import MemoryClient
 from .models.context import ConversationContext, DeviceSelection
 from .routing.router import BrainRouter, RoutingRequest, RoutingResult
+from .routing.vision_policy import analyze_prompt
 from .routing.freshness import is_time_sensitive_query
 from .skills.home_assistant import HomeAssistantSkill
 from .state.mqtt_context_store import MQTTContextStore
@@ -128,6 +129,7 @@ class BrainOrchestrator:
         time_sensitive = is_time_sensitive_query(prompt)
         requires_fresh = freshness_required or time_sensitive
 
+        vision_plan = analyze_prompt(cleaned_prompt)
         routing_request = RoutingRequest(
             conversation_id=conversation_id,
             request_id=request_id,
@@ -139,6 +141,7 @@ class BrainOrchestrator:
             use_agent=agentic_mode,
             tool_mode=tool_mode,
             allow_paid=allow_paid,
+            vision_targets=vision_plan.targets if vision_plan.should_suggest else None,
         )
         result = await self._router.route(routing_request)
 

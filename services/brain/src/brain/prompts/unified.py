@@ -13,6 +13,7 @@ Based on:
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from datetime import datetime, timezone
@@ -69,6 +70,7 @@ ination-resistant with explicit constraints
         query: Optional[str] = None,
         history: Optional[List[Any]] = None,
         freshness_required: bool = False,
+        vision_targets: Optional[List[str]] = None,
     ) -> str:
         """Build unified system prompt for specific interface and model.
 
@@ -138,7 +140,11 @@ ination-resistant with explicit constraints
         # 7. Verbosity Instructions
         sections.append(("verbosity", self._build_verbosity_section(verbosity)))
 
-        # 8. Context (if provided)
+        # 8. Vision plan (if requested)
+        if vision_targets:
+            sections.append(("vision_plan", self._build_vision_section(vision_targets)))
+
+        # 9. Context (if provided)
         if context:
             sections.append(("context", f"\n<relevant_context>\n{context}\n</relevant_context>\n"))
 
@@ -569,6 +575,25 @@ Final Answer: [your complete answer to the user]
 
 Adjust your response length and detail level according to this verbosity setting while
 maintaining clarity and completeness appropriate for the user's needs."""
+
+    def _build_vision_section(self, targets: List[str]) -> str:
+        unique_targets: List[str] = []
+        seen = set()
+        for target in targets:
+            cleaned = target.strip()
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                unique_targets.append(cleaned)
+        joined = ", ".join(unique_targets) if unique_targets else "the requested subject"
+        return (
+            "<vision_plan>\n"
+            "The user likely needs visual references for: "
+            f"{joined}.\n"
+            "- When helpful, call `vision.image_search` followed by `vision.image_filter` to gather candidate images before finalizing answers or triggering CAD.\n"
+            "- If references are approved, store them via `vision.store_selection` so future steps (e.g., Tripo) can reuse them.\n"
+            "- Mention any stored references in the final answer and ask the user to confirm before generating CAD models.\n"
+            "</vision_plan>"
+        )
 
     def _current_time_strings(self) -> Tuple[str, str]:
         """Return current UTC time in ISO and human-readable formats."""

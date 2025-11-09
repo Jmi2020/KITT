@@ -6,7 +6,7 @@ from __future__ import annotations
 import hashlib
 import time
 from dataclasses import dataclass, asdict
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import logging
 
@@ -51,6 +51,7 @@ class RoutingRequest(BaseModel):
     use_agent: bool = False  # Enable agentic routing with tool use
     tool_mode: str = "auto"  # Tool calling mode: "auto", "on", "off"
     allow_paid: bool = False  # Whether paid providers/tools are authorized by user
+    vision_targets: Optional[List[str]] = None
 
 
 @dataclass
@@ -251,6 +252,7 @@ class BrainRouter:
                 model_format=model_format.value,
                 query=request.prompt,
                 freshness_required=request.freshness_required,
+                vision_targets=request.vision_targets,
             )
 
         # Pass tools to llama client
@@ -514,6 +516,7 @@ Based on the tool results above, provide a comprehensive answer to the original 
             request.prompt,
             freshness_required=request.freshness_required,
             allow_paid=request.allow_paid,
+            vision_targets=request.vision_targets,
         )
 
         latency = int((time.perf_counter() - start) * 1000)
