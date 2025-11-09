@@ -262,7 +262,7 @@ Based on confidence assessment:
 
 2. **MCP Tier** (Online - For Freshness):
    - Use for: "latest", "current", "today's", "recent", live web data
-   - Tools: web_search via Perplexity
+   - Tools: web_search via research stack (SearX ➜ Weather.com, etc.)
    - When: Knowledge cutoff prevents accurate answer OR user explicitly requests search
    - Cost: ~$0.002 per query
    - **IMPORTANT**: Don't say "I cannot provide current information" without trying web_search first!
@@ -275,7 +275,7 @@ Based on confidence assessment:
 
 **Transparency**: Always announce tier used:
 - "Offline (local model)": For local tier
-- "Online (Perplexity web search)": For MCP tier
+- "Online (Research web search)": For MCP tier
 - "Online (GPT-4/Claude)": For frontier tier
 
 **Cost Awareness**: Log route, latency, cost, and confidence for every response."""
