@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 # Helper to treat various truthy env inputs consistently
 is_enabled() {
     local value="${1:-}"
-    value="${value,,}"
+    value=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')
     case "$value" in
         1|true|yes|on) return 0 ;;
         *) return 1 ;;
