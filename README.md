@@ -172,6 +172,7 @@ kitty-cli shell
 > /memories PLA                # Recall saved notes (optional query)
 > /vision gandalf rubber duck  # Search & store reference images
 > /images                      # List stored reference image links
+> /generate futuristic drone   # Generate image with Stable Diffusion
 > /usage 5                     # Monitor paid provider usage (refresh every 5s)
 > /reset                       # Start a fresh conversation/session
 > /exit                        # Exit shell
@@ -180,6 +181,11 @@ kitty-cli shell
 kitty-cli say "What printers are online?"
 kitty-cli say "Turn on bench lights"
 kitty-cli images "gandalf rubber duck" --max-results 6
+
+# Generate images with Stable Diffusion
+kitty-cli generate-image "studio photo of a water bottle" --wait
+kitty-cli list-images
+kitty-cli select-image 1
 
 # Monitor paid usage / provider cost
 kitty-cli usage
