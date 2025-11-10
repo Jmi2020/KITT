@@ -1,0 +1,14 @@
+fastapi==0.115.*
+uvicorn[standard]==0.30.*
+redis==5.*
+rq==1.16.*
+boto3==1.35.*
+pydantic==2.*
+pillow==10.*
+pyyaml==6.*
+# Headless generation
+torch==2.*           # auto-detects MPS on macOS
+transformers==4.*
+diffusers==0.30.*
+accelerate==0.34.*
+safetensors==0.4.*
