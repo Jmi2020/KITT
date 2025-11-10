@@ -46,7 +46,7 @@ services:
       - ../../services/brain:/app/services/brain:ro
       - ../../services/mcp:/app/services/mcp:ro
       - ../../services/research:/app/services/research:ro
-      - references_storage:/app/storage
+      - ${KITTY_ARTIFACTS_DIR:-/Users/Shared/KITTY/artifacts}:/app/storage
     ports:
       - "8000:8000"
     networks:
@@ -74,7 +74,7 @@ services:
       - ../../services/common:/app/services/common:ro
       - ../../services/gateway:/app/services/gateway:ro
       - ../../services/mcp:/app/services/mcp:ro
-      - references_storage:/app/storage
+      - ${KITTY_ARTIFACTS_DIR:-/Users/Shared/KITTY/artifacts}:/app/storage
     ports:
       - "8080:8080"
     networks:
@@ -108,7 +108,8 @@ services:
     volumes:
       - ../../services/common:/app/services/common:ro
       - ../../services/cad:/app/services/cad:ro
-      - references_storage:/app/storage
+      - ${KITTY_ARTIFACTS_DIR:-/Users/Shared/KITTY/artifacts}:/app/storage
+      - ${KITTY_ARTIFACTS_DIR:-/Users/Shared/KITTY/artifacts}:/app/artifacts
     ports:
       - "8200:8200"
     networks:
@@ -361,4 +362,3 @@ volumes:
   tempo_data:
   qdrant_data:
   broker-logs:
-  references_storage:
