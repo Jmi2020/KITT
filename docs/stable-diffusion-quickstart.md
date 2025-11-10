@@ -25,24 +25,26 @@ KITTY's Stable Diffusion integration provides:
 
 Create the models directory and download Stable Diffusion models:
 
+**Note:** This uses the same models directory as your llama.cpp models (`/Users/Shared/Coding/models`).
+
 ```bash
-# Create models directory
-mkdir -p /Users/Shared/KITTY/models
+# Models directory should already exist from llama.cpp setup
+# If not: mkdir -p /Users/Shared/Coding/models
 
 # Install Hugging Face CLI if needed
 pip install "huggingface_hub[cli]"
 
 # Download SDXL base model (best quality, ~14GB)
 huggingface-cli download stabilityai/stable-diffusion-xl-base-1.0 \
-  --local-dir /Users/Shared/KITTY/models/sd_xl_base
+  --local-dir /Users/Shared/Coding/models/sd_xl_base
 
 # Download SDXL refiner (optional, for extra quality, ~12GB)
 huggingface-cli download stabilityai/stable-diffusion-xl-refiner-1.0 \
-  --local-dir /Users/Shared/KITTY/models/sd_xl_refiner
+  --local-dir /Users/Shared/Coding/models/sd_xl_refiner
 
 # Download SD 1.5 (faster, smaller, ~8GB)
 huggingface-cli download runwayml/stable-diffusion-v1-5 \
-  --local-dir /Users/Shared/KITTY/models/sd15_base
+  --local-dir /Users/Shared/Coding/models/sd15_base
 ```
 
 **Estimated download time:** 30-60 minutes depending on internet speed.
@@ -54,16 +56,16 @@ Create the models configuration file:
 ```bash
 # Copy the example models.yaml
 cp services/images_service/models.yaml.example \
-   /Users/Shared/KITTY/models/models.yaml
+   /Users/Shared/Coding/models/models.yaml
 ```
 
 The default configuration should work if you followed the paths above. Edit if needed:
 
 ```yaml
-# /Users/Shared/KITTY/models/models.yaml
-sdxl_base: /Users/Shared/KITTY/models/sd_xl_base
-sdxl_refiner: /Users/Shared/KITTY/models/sd_xl_refiner
-sd15_base: /Users/Shared/KITTY/models/sd15_base
+# /Users/Shared/Coding/models/models.yaml
+sdxl_base: /Users/Shared/Coding/models/sd_xl_base
+sdxl_refiner: /Users/Shared/Coding/models/sd_xl_refiner
+sd15_base: /Users/Shared/Coding/models/sd15_base
 ```
 
 ## Step 3: Install Service Dependencies
@@ -254,9 +256,9 @@ curl http://localhost:9000/minio/health/live
 
 **Check models.yaml:**
 ```bash
-cat /Users/Shared/KITTY/models/models.yaml
+cat /Users/Shared/Coding/models/models.yaml
 # Verify paths exist
-ls /Users/Shared/KITTY/models/sd_xl_base
+ls /Users/Shared/Coding/models/sd_xl_base
 ```
 
 ### Generation is slow

@@ -239,7 +239,7 @@ def run_diffusers_job(params: Dict[str, Any]) -> Dict[str, str]:
     global _worker_singleton
 
     if _worker_singleton is None:
-        models_yaml = os.getenv("MODELS_YAML", "/Users/Shared/KITTY/models/models.yaml")
+        models_yaml = os.getenv("MODELS_YAML", "/Users/Shared/Coding/models/models.yaml")
         print(f"[run_diffusers_job] Initializing worker with models: {models_yaml}")
         _worker_singleton = DiffusersWorker(models_yaml)
 
