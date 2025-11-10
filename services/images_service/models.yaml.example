@@ -1,0 +1,16 @@
+# KITTY Stable Diffusion Models Configuration
+# Copy this file to /Users/Shared/KITTY/models/models.yaml
+#
+# Each entry maps a model alias to its local directory path
+# Models should be in Diffusers format (downloaded from Hugging Face)
+
+# SDXL models (1024x1024 native, best quality)
+sdxl_base: /Users/Shared/KITTY/models/sd_xl_base
+sdxl_refiner: /Users/Shared/KITTY/models/sd_xl_refiner
+
+# SD 1.5 models (512x512 native, faster)
+sd15_base: /Users/Shared/KITTY/models/sd15_base
+
+# Optional fine-tuned models (uncomment after download)
+# realistic_vision: /Users/Shared/KITTY/models/realistic_vision
+# dreamshaper: /Users/Shared/KITTY/models/dreamshaper

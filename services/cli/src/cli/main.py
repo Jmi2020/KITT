@@ -75,6 +75,16 @@ API_BASE = _first_valid_url(
     "http://localhost:8000",
 )
 CAD_BASE = _env("KITTY_CAD_API", "http://localhost:8200")
+IMAGES_BASE = _first_valid_url(
+    (
+        os.getenv("IMAGES_BASE"),
+        os.getenv("KITTY_IMAGES_API"),
+        os.getenv("GATEWAY_API"),
+        "http://gateway:8080",
+        "http://localhost:8080",
+    ),
+    "http://localhost:8080",
+)
 UI_BASE = _env("KITTY_UI_BASE", "http://localhost:4173")
 VISION_API_BASE = _first_valid_url(
     (
@@ -884,6 +894,209 @@ def queue(
         raise typer.Exit(1) from exc
 
     console.print(f"[green]Queued print on {printer_id}: {data}")
+
+
+def _images_post(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """POST helper for images service API calls."""
+    url = f"{IMAGES_BASE}/api/images/{endpoint}"
+    try:
+        resp = httpx.post(url, json=payload, timeout=CLI_TIMEOUT)
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPStatusError as exc:
+        console.print(f"[red]Images API error {exc.response.status_code}: {exc.response.text}")
+        raise typer.Exit(1) from exc
+    except httpx.RequestError as exc:
+        console.print(f"[red]Images API request failed: {exc}")
+        raise typer.Exit(1) from exc
+
+
+def _images_get(endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """GET helper for images service API calls."""
+    url = f"{IMAGES_BASE}/api/images/{endpoint}"
+    try:
+        resp = httpx.get(url, params=params or {}, timeout=CLI_TIMEOUT)
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPStatusError as exc:
+        console.print(f"[red]Images API error {exc.response.status_code}: {exc.response.text}")
+        raise typer.Exit(1) from exc
+    except httpx.RequestError as exc:
+        console.print(f"[red]Images API request failed: {exc}")
+        raise typer.Exit(1) from exc
+
+
+@app.command(name="generate-image")
+def generate_image(
+    prompt: List[str] = typer.Argument(..., help="Text prompt for image generation"),
+    width: int = typer.Option(1024, "--width", "-w", help="Image width"),
+    height: int = typer.Option(1024, "--height", "-h", help="Image height"),
+    steps: int = typer.Option(30, "--steps", "-s", help="Number of inference steps"),
+    cfg: float = typer.Option(7.0, "--cfg", "-c", help="Guidance scale"),
+    seed: Optional[int] = typer.Option(None, "--seed", help="Random seed"),
+    model: str = typer.Option("sdxl_base", "--model", "-m", help="Model name"),
+    refiner: Optional[str] = typer.Option(None, "--refiner", "-r", help="Refiner model"),
+    wait: bool = typer.Option(False, "--wait", help="Wait for generation to complete"),
+) -> None:
+    """Generate an image using Stable Diffusion.
+
+    Examples:
+        kitty-cli generate-image "studio photo of a matte black water bottle"
+        kitty-cli generate-image "photoreal robot arm" --width 1024 --height 768 --wait
+        kitty-cli generate-image "futuristic drone" --model sdxl_base --refiner sdxl_refiner
+    """
+    text = " ".join(prompt)
+    payload = {
+        "prompt": text,
+        "width": width,
+        "height": height,
+        "steps": steps,
+        "cfg": cfg,
+        "model": model,
+    }
+    if seed is not None:
+        payload["seed"] = seed
+    if refiner:
+        payload["refiner"] = refiner
+
+    console.print(f"[cyan]Generating image:[/cyan] {text}")
+    console.print(f"[dim]Model: {model}, Size: {width}x{height}, Steps: {steps}")
+
+    # Submit generation job
+    result = _images_post("generate", payload)
+    job_id = result.get("job_id")
+
+    if not job_id:
+        console.print("[red]Failed to get job ID from server")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Job queued:[/green] {job_id}")
+
+    if not wait:
+        console.print(f"[dim]Check status with: kitty-cli image-status {job_id}")
+        console.print(f"[dim]Or list latest with: kitty-cli list-images")
+        return
+
+    # Poll for completion
+    console.print("[cyan]Waiting for generation to complete...")
+    with console.status("[cyan]Generating...", spinner="dots"):
+        while True:
+            status_data = _images_get(f"jobs/{job_id}")
+            status = status_data.get("status")
+
+            if status == "finished":
+                result_data = status_data.get("result", {})
+                png_key = result_data.get("png_key")
+                console.print(f"[green]Image generated successfully!")
+                console.print(f"[cyan]S3 Key:[/cyan] {png_key}")
+                console.print(f"[dim]View in gallery: {UI_BASE}/?view=vision")
+                break
+            elif status == "failed":
+                error = status_data.get("error", "Unknown error")
+                console.print(f"[red]Generation failed: {error}")
+                raise typer.Exit(1)
+            elif status in ("queued", "started"):
+                time.sleep(2)
+            else:
+                console.print(f"[yellow]Unknown status: {status}")
+                time.sleep(2)
+
+
+@app.command(name="image-status")
+def image_status(
+    job_id: str = typer.Argument(..., help="Job ID from generate-image"),
+) -> None:
+    """Check status of an image generation job."""
+    status_data = _images_get(f"jobs/{job_id}")
+    status = status_data.get("status")
+
+    console.print(f"[cyan]Job {job_id}:[/cyan] {status}")
+
+    if status == "finished":
+        result_data = status_data.get("result", {})
+        png_key = result_data.get("png_key")
+        meta_key = result_data.get("meta_key")
+        console.print(f"[green]Image generated successfully!")
+        console.print(f"[cyan]PNG:[/cyan] {png_key}")
+        console.print(f"[cyan]Metadata:[/cyan] {meta_key}")
+        console.print(f"[dim]View in gallery: {UI_BASE}/?view=vision")
+    elif status == "failed":
+        error = status_data.get("error", "Unknown error")
+        console.print(f"[red]Error:[/red] {error}")
+    elif status in ("queued", "started"):
+        console.print("[yellow]Generation in progress...")
+
+
+@app.command(name="list-images")
+def list_images(
+    limit: int = typer.Option(20, "--limit", "-l", help="Number of images to list"),
+) -> None:
+    """List recently generated images."""
+    data = _images_get("latest", {"limit": limit})
+    items = data.get("items", [])
+
+    if not items:
+        console.print("[yellow]No images found.")
+        return
+
+    table = Table(title=f"Latest Generated Images (showing {len(items)})", show_lines=False)
+    table.add_column("#", justify="right", style="cyan")
+    table.add_column("S3 Key", style="green")
+    table.add_column("Size", justify="right")
+    table.add_column("Modified", style="dim")
+
+    for idx, item in enumerate(items, 1):
+        key = item["key"]
+        size_kb = item["size"] / 1024
+        modified = item["last_modified"]
+
+        # Extract filename from key
+        filename = key.split("/")[-1] if "/" in key else key
+
+        table.add_row(
+            str(idx),
+            filename,
+            f"{size_kb:.1f} KB",
+            modified[:19],  # Trim to YYYY-MM-DD HH:MM:SS
+        )
+
+    console.print(table)
+    console.print(f"\n[dim]View in gallery: {UI_BASE}/?view=vision")
+    console.print(f"[dim]Select image with: kitty-cli select-image <#>")
+
+
+@app.command(name="select-image")
+def select_image(
+    index: int = typer.Argument(..., help="Image index from list-images"),
+) -> None:
+    """Select an image and get download URL (for use with CAD/Tripo)."""
+    # Fetch latest images
+    data = _images_get("latest", {"limit": 50})
+    items = data.get("items", [])
+
+    if not items:
+        console.print("[yellow]No images found.")
+        raise typer.Exit(1)
+
+    if index < 1 or index > len(items):
+        console.print(f"[red]Index {index} out of range (1-{len(items)})")
+        raise typer.Exit(1)
+
+    # Get the selected item
+    selected = items[index - 1]
+    key = selected["key"]
+
+    # Call select API
+    select_data = _images_post("select", {"key": key})
+    image_ref = select_data.get("imageRef", {})
+
+    download_url = image_ref.get("downloadUrl")
+    storage_uri = image_ref.get("storageUri")
+
+    console.print(f"[green]Image selected:[/green] {key}")
+    console.print(f"[cyan]Download URL:[/cyan] {download_url}")
+    console.print(f"[cyan]Storage URI:[/cyan] {storage_uri}")
+    console.print(f"\n[dim]Use this URL with Tripo for image-to-3D conversion")
 
 
 @app.command()
