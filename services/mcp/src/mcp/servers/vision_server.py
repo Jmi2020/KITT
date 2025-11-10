@@ -521,7 +521,11 @@ class VisionMCPServer(MCPServer):
         session_id = args.get("session_id", uuid4().hex)
         images = args.get("images", [])
         stored: List[Dict[str, Any]] = []
-        async with httpx.AsyncClient(timeout=30) as client:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0 Safari/537.36",
+            "Referer": "https://www.google.com",
+        }
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=headers) as client:
             for image in images:
                 url = image.get("image_url")
                 if not url:
