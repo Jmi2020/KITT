@@ -150,8 +150,7 @@ SUMMARY_PORT="${LLAMACPP_SUMMARY_PORT:-8085}"
 SUMMARY_ENABLED="${LLAMACPP_SUMMARY_ENABLED:-1}"
 VISION_PORT="${LLAMACPP_VISION_PORT:-8086}"
 VISION_ENABLED="${LLAMACPP_VISION_ENABLED:-1}"
-VISION_PORT="${LLAMACPP_VISION_PORT:-8086}"
-VISION_ENABLED="${LLAMACPP_VISION_ENABLED:-1}"
+VISION_GALLERY_PORT="${VISION_GALLERY_PORT:-5173}"
 
 PORTS_TO_STOP=($Q4_PORT $F16_PORT)
 if is_enabled "$SUMMARY_ENABLED"; then
@@ -454,6 +453,7 @@ if is_enabled "$VISION_ENABLED"; then
 fi
 check_process 8000 "Brain service" || true
 check_process 8080 "Gateway service" || true
+check_process "$VISION_GALLERY_PORT" "Vision Gallery UI" || true
 check_process 5432 "PostgreSQL" || true
 check_process 6379 "Redis" || true
 if is_enabled "$IMAGES_SERVICE_ENABLED"; then
@@ -466,6 +466,7 @@ echo "  - CLI: kitty-cli shell"
 echo "  - Model Manager: kitty-model-manager tui"
 echo "  - Brain API: http://localhost:8000/docs"
 echo "  - Gateway API: http://localhost:8080/docs"
+echo "  - Vision Gallery UI: http://localhost:${VISION_GALLERY_PORT:-5173}/?view=vision"
 if is_enabled "$IMAGES_SERVICE_ENABLED"; then
     echo "  - Images API (SD): http://localhost:8089/docs"
 fi

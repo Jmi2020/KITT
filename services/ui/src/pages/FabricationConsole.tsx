@@ -293,7 +293,10 @@ const FabricationConsole = () => {
       <div className="panel">
         <h3>Printer Selection</h3>
         {printers.length === 0 ? (
-          <p>No printers online. Ensure devices publish to `kitty/devices/<printer>/state`.</p>
+          <p>
+            No printers online. Ensure devices publish to{' '}
+            <code>kitty/devices/&lt;printer&gt;/state</code>.
+          </p>
         ) : (
           <label>
             Printer

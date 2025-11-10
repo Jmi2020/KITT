@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import VisionNyan from '../components/VisionNyan';
 import './VisionGallery.css';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
@@ -13,6 +14,14 @@ interface ImageResult {
   score?: number;
   clip_score?: number;
 }
+
+const STARTER_PROMPTS = [
+  'neon-lit robotics lab surveillance shot',
+  'macro photo of bio-luminescent coral drone',
+  'studio render of modular robot arm for surgery',
+  'retro-futurist rover exploring a sandstorm',
+  'architectural axonometric of floating research hub',
+];
 
 const VisionGallery = () => {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -36,8 +45,14 @@ const VisionGallery = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleSearch = async () => {
-    if (!query.trim()) {
+  const pickRandomPrompt = () => STARTER_PROMPTS[Math.floor(Math.random() * STARTER_PROMPTS.length)];
+
+  const handleSearch = async (inputQuery?: string) => {
+    const nextQuery = typeof inputQuery === 'string' ? inputQuery : query;
+    if (typeof inputQuery === 'string') {
+      setQuery(inputQuery);
+    }
+    if (!nextQuery.trim()) {
       setError('Enter a query to search for images.');
       return;
     }
@@ -48,7 +63,7 @@ const VisionGallery = () => {
       const searchResponse = await fetch(`${API_BASE}/api/vision/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, max_results: maxResults }),
+        body: JSON.stringify({ query: nextQuery, max_results: maxResults }),
       });
       if (!searchResponse.ok) {
         throw new Error(`Search failed (${searchResponse.status})`);
@@ -64,7 +79,7 @@ const VisionGallery = () => {
       const filterResponse = await fetch(`${API_BASE}/api/vision/filter`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, images: rawResults, min_score: minScore }),
+        body: JSON.stringify({ query: nextQuery, images: rawResults, min_score: minScore }),
       });
       if (!filterResponse.ok) {
         throw new Error(`Filter failed (${filterResponse.status})`);
@@ -165,7 +180,7 @@ const VisionGallery = () => {
           Session ID
           <input value={sessionId} onChange={(e) => setSessionId(e.target.value)} />
         </label>
-        <button onClick={handleSearch} disabled={loading}>
+        <button onClick={() => handleSearch()} disabled={loading}>
           {loading ? 'Fetching...' : 'Search & Filter'}
         </button>
         <button onClick={handleStore} disabled={!Object.keys(selected).length || loading}>
@@ -174,28 +189,65 @@ const VisionGallery = () => {
       </div>
       {status && <div className="status">{status}</div>}
       {error && <div className="error">{error}</div>}
-      <div className="gallery-grid">
-        {results.map((item) => (
-          <article key={item.id} className={`gallery-card ${selected[item.id] ? 'selected' : ''}`}>
-            <img src={item.thumbnail_url || item.image_url} alt={item.title || 'candidate'} loading="lazy" />
-            <div className="card-body">
-              <h3>{item.title || 'Untitled'}</h3>
-              <p>{item.source || 'unknown source'}</p>
-              {item.score !== undefined && <p className="score">Score {item.score.toFixed(2)}</p>}
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={Boolean(selected[item.id])}
-                  onChange={() => toggleSelection(item)}
-                />
-                Select
-              </label>
-              <a href={item.image_url} target="_blank" rel="noreferrer">
-                Open full image
-              </a>
+      <div className="gallery-region">
+        {loading && (
+          <div className="loading-state" role="status" aria-live="polite">
+            <span className="spinner" />
+            <p>Scanning creative memory...</p>
+          </div>
+        )}
+        {!loading && !results.length && (
+          <div className="empty-state">
+            <VisionNyan />
+            <div className="empty-graphic">
+              <span />
             </div>
-          </article>
-        ))}
+            <h3>Awaiting your next visual brief</h3>
+            <p>Describe the vibe, medium, or subject you want and we will pull the closest matches.</p>
+            <div className="prompt-chips">
+              {STARTER_PROMPTS.map((prompt) => (
+                <button key={prompt} type="button" onClick={() => handleSearch(prompt)}>
+                  {prompt}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="surprise"
+                onClick={() => {
+                  const surprise = pickRandomPrompt();
+                  handleSearch(surprise);
+                }}
+              >
+                Surprise me
+              </button>
+            </div>
+          </div>
+        )}
+        {results.length > 0 && (
+          <div className="gallery-grid">
+            {results.map((item) => (
+              <article key={item.id} className={`gallery-card ${selected[item.id] ? 'selected' : ''}`}>
+                <img src={item.thumbnail_url || item.image_url} alt={item.title || 'candidate'} loading="lazy" />
+                <div className="card-body">
+                  <h3>{item.title || 'Untitled'}</h3>
+                  <p>{item.source || 'unknown source'}</p>
+                  {item.score !== undefined && <p className="score">Score {item.score.toFixed(2)}</p>}
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(selected[item.id])}
+                      onChange={() => toggleSelection(item)}
+                    />
+                    Select
+                  </label>
+                  <a href={item.image_url} target="_blank" rel="noreferrer">
+                    Open full image
+                  </a>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { connect, MqttClient } from 'mqtt';
+import mqtt, { MqttClient } from 'mqtt';
 
 export interface DeviceState {
   deviceId: string;
@@ -24,7 +24,7 @@ const useKittyContext = (mqttUrl: string = import.meta.env.VITE_MQTT_URL || 'ws:
   const [context, setContext] = useState<KittyContext>({ devices: {}, conversations: {} });
 
   useEffect(() => {
-    const mqttClient = connect(mqttUrl, {
+    const mqttClient = mqtt.connect(mqttUrl, {
       reconnectPeriod: 2000,
     });
 
