@@ -73,12 +73,12 @@ if [[ ! -d ".venv" ]]; then
 fi
 
 # Check if models.yaml exists
-MODELS_YAML="${MODELS_YAML:-/Users/Shared/KITTY/models/models.yaml}"
+MODELS_YAML="${MODELS_YAML:-/Users/Shared/Coding/models/models.yaml}"
 if [[ ! -f "${MODELS_YAML}" ]]; then
     log_warn "models.yaml not found at: ${MODELS_YAML}"
     log_warn "Copy models.yaml.example and configure model paths"
     log_warn "Download models with:"
-    log_warn "  huggingface-cli download stabilityai/stable-diffusion-xl-base-1.0 --local-dir /Users/Shared/KITTY/models/sd_xl_base"
+    log_warn "  huggingface-cli download stabilityai/stable-diffusion-xl-base-1.0 --local-dir /Users/Shared/Coding/models/sd_xl_base"
 fi
 
 # Check if Redis is running
