@@ -16,7 +16,11 @@ from cad.models import ImageReference  # type: ignore  # noqa: E402
 
 
 class DummyZoo:
+    def __init__(self):
+        self.called = False
+
     async def create_model(self, name: str, prompt: str, parameters):  # noqa: D401
+        self.called = True
         return {}
 
     async def poll_status(self, url: str):  # noqa: D401
@@ -33,9 +37,13 @@ class DummyTripo:
     async def upload_image(self, *, data: bytes, filename: str, content_type: str):  # noqa: D401
         self.uploads.append(filename)
         self.upload_payloads.append((data, filename, content_type))
-        return f"http://uploads/{len(self.uploads)}.png"
+        return {
+            "file_token": f"token-{len(self.uploads)}",
+            "file_type": "png",
+            "image_url": f"http://uploads/{len(self.uploads)}.png",
+        }
 
-    async def start_image_job(self, **_: str):  # noqa: D401
+    async def start_image_task(self, **_: str):  # noqa: D401
         task_id = f"task-{len(self.started) + 1}"
         self.started.append(task_id)
         return {"task_id": task_id, "status": "processing", "result": {}}
@@ -144,6 +152,47 @@ async def test_cad_cycler_prefers_tripo_convert(tmp_path: Path):
     assert len(artifacts) == 1
     assert artifacts[0].artifact_type == "stl"
     assert tripo.converts == [("task-1", "convert-1")]
+
+
+@pytest.mark.asyncio
+async def test_cad_cycler_mode_parametric_skips_tripo(tmp_path: Path):
+    tripo = DummyTripo()
+    cycler = CADCycler(
+        zoo_client=DummyZoo(),
+        tripo_client=tripo,
+        artifact_store=DummyStore(),
+        storage_root=tmp_path,
+    )
+    cycler._download_bytes = AsyncMock(return_value=b"mesh")  # type: ignore[attr-defined]
+
+    path = tmp_path / "img.png"
+    path.write_bytes(_make_image_bytes("PNG"))
+    refs = [ImageReference(storage_uri=str(path))]
+
+    await cycler.run("duck", references={}, image_refs=refs, mode="parametric")
+
+    assert tripo.uploads == []
+
+
+@pytest.mark.asyncio
+async def test_cad_cycler_mode_organic_skips_zoo(tmp_path: Path):
+    zoo = DummyZoo()
+    tripo = DummyTripo()
+    cycler = CADCycler(
+        zoo_client=zoo,
+        tripo_client=tripo,
+        artifact_store=DummyStore(),
+        storage_root=tmp_path,
+    )
+    cycler._download_bytes = AsyncMock(return_value=b"stl-data")  # type: ignore[attr-defined]
+
+    path = tmp_path / "img.png"
+    path.write_bytes(_make_image_bytes("PNG"))
+    refs = [ImageReference(storage_uri=str(path))]
+
+    await cycler.run("duck", references={}, image_refs=refs, mode="organic")
+
+    assert zoo.called is False
 
 
 @pytest.mark.asyncio

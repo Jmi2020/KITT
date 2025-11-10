@@ -62,9 +62,12 @@ class GenerateRequest(BaseModel):
     prompt: str
     references: Optional[Dict[str, str]] = None
     image_refs_raw: Optional[List[Any]] = Field(default=None, alias="imageRefs")
+    mode: Optional[str] = Field(default=None, alias="mode")
 
 
 class ArtifactResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     provider: str
     artifact_type: str = Field(..., alias="artifactType")
     location: str
@@ -72,6 +75,8 @@ class ArtifactResponse(BaseModel):
 
 
 class GenerateResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     conversation_id: str = Field(..., alias="conversationId")
     artifacts: List[ArtifactResponse]
 
@@ -103,6 +108,7 @@ async def generate_cad(
         body.prompt,
         body.references,
         parsed_refs or None,
+        mode=body.mode,
     )
     return GenerateResponse(
         conversation_id=body.conversation_id,
