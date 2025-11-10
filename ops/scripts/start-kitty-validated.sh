@@ -401,6 +401,27 @@ fi
 
 echo ""
 
+# Step 6.5: Optionally start images service (Stable Diffusion)
+if is_enabled "$IMAGES_SERVICE_ENABLED"; then
+    print_status "Starting images service (Stable Diffusion)..."
+    "$SCRIPT_DIR/start-images-service.sh" > .logs/images-service-startup.log 2>&1 &
+    IMAGES_PID=$!
+
+    # Wait a moment for startup
+    sleep 3
+
+    # Check if service started
+    if wait_for_http "http://localhost:8089/" "Images service" 15; then
+        print_success "Images service is ready"
+    else
+        print_warning "Images service may need more time to load models"
+    fi
+else
+    print_status "Images service disabled (set IMAGES_SERVICE_ENABLED=true to enable)"
+fi
+
+echo ""
+
 # Step 7: Final validation
 print_status "Running final validation..."
 
@@ -435,6 +456,9 @@ check_process 8000 "Brain service" || true
 check_process 8080 "Gateway service" || true
 check_process 5432 "PostgreSQL" || true
 check_process 6379 "Redis" || true
+if is_enabled "$IMAGES_SERVICE_ENABLED"; then
+    check_process 8089 "Images service (Stable Diffusion)" || true
+fi
 
 echo ""
 echo "Access Points:"
@@ -442,6 +466,9 @@ echo "  - CLI: kitty-cli shell"
 echo "  - Model Manager: kitty-model-manager tui"
 echo "  - Brain API: http://localhost:8000/docs"
 echo "  - Gateway API: http://localhost:8080/docs"
+if is_enabled "$IMAGES_SERVICE_ENABLED"; then
+    echo "  - Images API (SD): http://localhost:8089/docs"
+fi
 echo ""
 
 echo "Logs:"
@@ -453,6 +480,10 @@ if is_enabled "$SUMMARY_ENABLED"; then
 fi
 if is_enabled "$VISION_ENABLED"; then
     echo "  - Vision server: tail -f .logs/llamacpp-vision.log"
+fi
+if is_enabled "$IMAGES_SERVICE_ENABLED"; then
+    echo "  - Images service: tail -f services/images_service/.logs/service.log"
+    echo "  - Images worker: tail -f services/images_service/.logs/rq_worker.log"
 fi
 echo "  - Docker: docker compose -f infra/compose/docker-compose.yml logs -f"
 echo ""
