@@ -1,18 +1,30 @@
 # syntax=docker/dockerfile:1.6
-FROM node:20-alpine AS base
+FROM node:20-alpine AS build
 
 WORKDIR /app
 
-ENV NODE_ENV=production \
-    CI=true
+ENV PNPM_HOME=/root/.local/share/pnpm \
+    PATH="/root/.local/share/pnpm:$PATH"
 
-COPY services/ui/package*.json ./services/ui/
+RUN corepack enable
 
-RUN if [ -f services/ui/package.json ]; then cd services/ui && npm install --include=dev && cd /app; else echo "package.json not present yet" ; fi
+ARG VITE_API_BASE=http://localhost:8080
+ARG VITE_MQTT_URL=ws://localhost:9001
 
-COPY services/ui ./services/ui
+ENV VITE_API_BASE=${VITE_API_BASE} \
+    VITE_MQTT_URL=${VITE_MQTT_URL} \
+    NODE_ENV=production
 
-RUN if [ -f services/ui/package.json ]; then cd services/ui && npm run build || echo "Build skipped (no scripts defined yet)"; fi
+COPY services/ui/pnpm-lock.yaml services/ui/package.json ./
+RUN pnpm install --frozen-lockfile
+
+COPY services/ui/ ./
+RUN pnpm build
+
+FROM nginx:1.27-alpine AS runtime
+
+COPY services/ui/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 4173
-CMD ["sh", "-c", "cd services/ui && npm run preview -- --host 0.0.0.0 --port 4173"]
+CMD ["nginx", "-g", "daemon off;"]
