@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 from common.config import settings
@@ -51,6 +53,18 @@ def get_cad_cycler() -> CADCycler:
         local_runner=get_local_mesh_runner(),
         freecad_runner=get_freecad_runner(),
         max_tripo_images=settings.tripo_max_image_refs,
+        tripo_model_version=settings.tripo_model_version,
+        tripo_texture_quality=settings.tripo_texture_quality,
+        tripo_texture_alignment=settings.tripo_texture_alignment,
+        tripo_orientation=settings.tripo_orientation,
+        tripo_poll_interval=settings.tripo_poll_interval,
+        tripo_poll_timeout=settings.tripo_poll_timeout,
+        storage_root=Path(os.getenv("KITTY_STORAGE_ROOT", "storage")),
+        gateway_internal_url=os.getenv("GATEWAY_INTERNAL_URL"),
+        tripo_convert_enabled=settings.tripo_convert_enabled,
+        tripo_stl_format=settings.tripo_stl_format,
+        tripo_face_limit=settings.tripo_face_limit,
+        tripo_unit=settings.tripo_unit,
     )
 
 

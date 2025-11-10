@@ -528,6 +528,7 @@ class VisionMCPServer(MCPServer):
                             "title": image.get("title"),
                             "source": image.get("source"),
                             "caption": image.get("caption"),
+                            "image_url": url,
                             "storage_uri": meta["storage_uri"],
                             "download_url": meta["url"],
                         }

@@ -8,6 +8,7 @@ storage, and error handling.
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from pathlib import Path
+from io import BytesIO
 
 # CAD service imports
 import sys
@@ -17,11 +18,13 @@ sys.path.insert(
 )
 
 from cad.cycler import CADCycler
+from cad.models import ImageReference
 from cad.providers.zoo_client import ZooClient
 from cad.providers.tripo_client import TripoClient
 from cad.providers.tripo_local import LocalMeshRunner
 from cad.fallback.freecad_runner import FreeCADRunner
 from cad.storage.artifact_store import ArtifactStore
+from PIL import Image
 
 
 @pytest.fixture
@@ -53,15 +56,46 @@ def mock_zoo_client():
 def mock_tripo_client():
     """Mock Tripo cloud API client."""
     client = AsyncMock(spec=TripoClient)
-    client.image_to_mesh = AsyncMock(
-        return_value={
-            "code": 0,
-            "data": {
-                "model_url": "https://tripo.ai/artifacts/mesh.glb",
+    client.upload_image = AsyncMock(return_value="https://tripo.ai/uploads/upload.png")
+    client.start_image_job = AsyncMock(
+        return_value={"task_id": "task-123", "status": "processing", "result": {}}
+    )
+    async def fake_get_task(task_id):
+        if str(task_id).startswith("convert"):
+            return {
+                "task_id": task_id,
+                "status": "completed",
+                "result": {
+                    "model": {
+                        "stl_model": "https://tripo.ai/artifacts/model.stl",
+                    }
+                },
+            }
+        return {
+            "task_id": task_id,
+            "status": "completed",
+            "result": {
+                "model_mesh": {
+                    "url": "https://tripo.ai/artifacts/mesh.glb",
+                    "format": "glb",
+                },
                 "thumbnail": "https://tripo.ai/artifacts/thumbnail.png",
             },
         }
-    )
+
+    client.get_task = AsyncMock(side_effect=fake_get_task)
+
+    convert_counter = {"value": 0}
+
+    async def fake_convert_task(**_kwargs):
+        convert_counter["value"] += 1
+        return {
+            "task_id": f"convert-{convert_counter['value']}",
+            "status": "processing",
+            "result": {},
+        }
+
+    client.start_convert_task = AsyncMock(side_effect=fake_convert_task)
     return client
 
 
@@ -98,7 +132,19 @@ def mock_artifact_store(tmp_path):
 
     store.save_file = mock_save_file
 
+    def mock_save_bytes(content, suffix):
+        return f"minio://generated/{len(content)}{suffix}"
+
+    store.save_bytes = mock_save_bytes
+
     return store
+
+
+def _write_test_image(path: Path, fmt: str = "PNG") -> None:
+    image = Image.new("RGB", (4, 4), color=(255, 0, 0))
+    buffer = BytesIO()
+    image.save(buffer, format=fmt)
+    path.write_bytes(buffer.getvalue())
 
 
 @pytest.fixture
@@ -110,13 +156,16 @@ def cad_cycler(
     mock_freecad_runner,
 ):
     """Create CADCycler with all mocked dependencies."""
-    return CADCycler(
+    cycler = CADCycler(
         zoo_client=mock_zoo_client,
         tripo_client=mock_tripo_client,
         artifact_store=mock_artifact_store,
         local_runner=mock_local_runner,
         freecad_runner=mock_freecad_runner,
+        mesh_converter=lambda _data, _fmt: b"converted-stl",
     )
+    cycler._download_bytes = AsyncMock(return_value=b"converted")  # type: ignore[attr-defined]
+    return cycler
 
 
 @pytest.mark.asyncio
@@ -141,23 +190,27 @@ async def test_zoo_generation_success(cad_cycler, mock_zoo_client):
 
 
 @pytest.mark.asyncio
-async def test_tripo_generation_with_image_url(cad_cycler, mock_tripo_client):
+async def test_tripo_generation_with_image_url(cad_cycler, mock_tripo_client, tmp_path):
     """Test Tripo cloud generation when image_url is provided."""
     prompt = "Convert this image to a 3D mesh"
-    references = {"image_url": "https://example.com/input.png"}
+    image_path = tmp_path / "input.png"
+    _write_test_image(image_path)
+    image_refs = [ImageReference(storage_uri=str(image_path))]
 
-    artifacts = await cad_cycler.run(prompt, references)
+    artifacts = await cad_cycler.run(prompt, {}, image_refs)
 
     # Verify Tripo client was called
-    mock_tripo_client.image_to_mesh.assert_called_once_with(
-        "https://example.com/input.png"
-    )
+    mock_tripo_client.upload_image.assert_called_once()
+    mock_tripo_client.start_image_job.assert_called_once()
+    mock_tripo_client.start_convert_task.assert_called_once()
+    mock_tripo_client.get_task.assert_any_await("task-123")  # type: ignore[attr-defined]
+    mock_tripo_client.get_task.assert_any_await("convert-1")  # type: ignore[attr-defined]
 
     # Find Tripo artifact
     tripo_artifacts = [a for a in artifacts if a.provider == "tripo"]
     assert len(tripo_artifacts) == 1
-    assert tripo_artifacts[0].artifact_type == "glb"
-    assert "mesh.glb" in tripo_artifacts[0].location
+    assert tripo_artifacts[0].artifact_type == "stl"
+    assert tripo_artifacts[0].location.endswith(".stl")
 
 
 @pytest.mark.asyncio
@@ -200,7 +253,7 @@ async def test_freecad_fallback_with_script(cad_cycler, mock_freecad_runner, tmp
 
 @pytest.mark.asyncio
 async def test_zoo_failure_continues_to_next_provider(
-    mock_tripo_client, mock_artifact_store
+    mock_tripo_client, mock_artifact_store, tmp_path
 ):
     """Test that Zoo failure doesn't stop other providers."""
     # Create Zoo client that fails
@@ -211,15 +264,20 @@ async def test_zoo_failure_continues_to_next_provider(
         zoo_client=failing_zoo_client,
         tripo_client=mock_tripo_client,
         artifact_store=mock_artifact_store,
+        mesh_converter=lambda _data, _fmt: b"converted-stl",
     )
+    cycler._download_bytes = AsyncMock(return_value=b"converted")  # type: ignore[attr-defined]
 
     prompt = "Design a part"
-    references = {"image_url": "https://example.com/input.png"}
-    artifacts = await cycler.run(prompt, references)
+    image_path = tmp_path / "input.png"
+    _write_test_image(image_path)
+    image_refs = [ImageReference(storage_uri=str(image_path))]
+    artifacts = await cycler.run(prompt, {}, image_refs)
 
     # Verify Zoo failed but Tripo still ran
     failing_zoo_client.create_model.assert_called_once()
-    mock_tripo_client.image_to_mesh.assert_called_once()
+    mock_tripo_client.upload_image.assert_called_once()
+    mock_tripo_client.start_convert_task.assert_called_once()
 
     # Should have Tripo artifact but not Zoo
     assert len(artifacts) >= 1
@@ -228,35 +286,41 @@ async def test_zoo_failure_continues_to_next_provider(
 
 
 @pytest.mark.asyncio
-async def test_all_providers_fail_returns_empty_list(mock_artifact_store):
+async def test_all_providers_fail_returns_empty_list(mock_artifact_store, tmp_path):
     """Test graceful handling when all providers fail."""
     failing_zoo = AsyncMock(spec=ZooClient)
     failing_zoo.create_model = AsyncMock(side_effect=Exception("Zoo error"))
 
     failing_tripo = AsyncMock(spec=TripoClient)
-    failing_tripo.image_to_mesh = AsyncMock(side_effect=Exception("Tripo error"))
+    failing_tripo.upload_image = AsyncMock(side_effect=Exception("Tripo error"))
+    failing_tripo.start_convert_task = AsyncMock()
 
     cycler = CADCycler(
         zoo_client=failing_zoo,
         tripo_client=failing_tripo,
         artifact_store=mock_artifact_store,
+        tripo_convert_enabled=False,
     )
 
     prompt = "Design a part"
-    references = {"image_url": "https://example.com/input.png"}
-    artifacts = await cycler.run(prompt, references)
+    image_path = tmp_path / "input.png"
+    _write_test_image(image_path)
+    image_refs = [ImageReference(storage_uri=str(image_path))]
+    artifacts = await cycler.run(prompt, {}, image_refs)
 
     # Should return empty list, not raise exception
     assert artifacts == []
 
 
 @pytest.mark.asyncio
-async def test_multiple_providers_return_multiple_artifacts(cad_cycler):
+async def test_multiple_providers_return_multiple_artifacts(cad_cycler, tmp_path):
     """Test that multiple providers can generate artifacts simultaneously."""
     prompt = "Design a bracket"
-    references = {"image_url": "https://example.com/input.png"}
+    image_path = tmp_path / "input.png"
+    _write_test_image(image_path)
+    image_refs = [ImageReference(storage_uri=str(image_path))]
 
-    artifacts = await cad_cycler.run(prompt, references)
+    artifacts = await cad_cycler.run(prompt, {}, image_refs)
 
     # Should have artifacts from both Zoo and Tripo
     providers = {a.provider for a in artifacts}
@@ -332,27 +396,31 @@ async def test_zoo_missing_geometry_url(mock_artifact_store):
 
 
 @pytest.mark.asyncio
-async def test_tripo_missing_model_url(mock_artifact_store):
+async def test_tripo_missing_model_url(mock_artifact_store, tmp_path):
     """Test handling of Tripo response missing model URL."""
     tripo_client = AsyncMock(spec=TripoClient)
-    tripo_client.image_to_mesh = AsyncMock(
-        return_value={
-            "code": 0,
-            "data": {},  # Missing model_url
-        }
+    tripo_client.upload_image = AsyncMock(return_value="https://tripo/uploads/upload.png")
+    tripo_client.start_image_job = AsyncMock(
+        return_value={"task_id": "task-missing", "status": "processing", "result": {}}
+    )
+    tripo_client.get_task = AsyncMock(
+        return_value={"task_id": "task-missing", "status": "completed", "result": {}}
     )
 
     cycler = CADCycler(
         zoo_client=AsyncMock(spec=ZooClient),
         tripo_client=tripo_client,
         artifact_store=mock_artifact_store,
+        tripo_convert_enabled=False,
     )
 
     # Configure Zoo to fail so we only test Tripo
     cycler._zoo.create_model = AsyncMock(side_effect=Exception("Skip Zoo"))
 
-    references = {"image_url": "https://example.com/input.png"}
-    artifacts = await cycler.run("Convert image", references)
+    image_path = tmp_path / "input.png"
+    _write_test_image(image_path)
+    image_refs = [ImageReference(storage_uri=str(image_path))]
+    artifacts = await cycler.run("Convert image", {}, image_refs)
 
     # Should have no Tripo artifacts
     assert all(a.provider != "tripo" for a in artifacts)

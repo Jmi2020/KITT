@@ -101,12 +101,14 @@ services:
     environment:
       <<: *service-env
       SERVICE_NAME: cad
+      GATEWAY_INTERNAL_URL: http://gateway:8080
     depends_on:
       - minio
       - redis
     volumes:
       - ../../services/common:/app/services/common:ro
       - ../../services/cad:/app/services/cad:ro
+      - references_storage:/app/storage
     ports:
       - "8200:8200"
     networks:

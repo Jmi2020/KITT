@@ -662,7 +662,20 @@ def cad(prompt: List[str] = typer.Argument(..., help="CAD generation prompt")) -
         "prompt": text,
     }
     if state.stored_images:
-        payload["imageRefs"] = [item["download_url"] for item in state.stored_images]
+        refs: List[Dict[str, Any]] = []
+        for item in state.stored_images:
+            refs.append(
+                {
+                    "id": item.get("id"),
+                    "downloadUrl": item.get("download_url"),
+                    "storageUri": item.get("storage_uri"),
+                    "sourceUrl": item.get("image_url"),
+                    "title": item.get("title"),
+                    "source": item.get("source"),
+                    "caption": item.get("caption"),
+                }
+            )
+        payload["imageRefs"] = refs
 
     try:
         data = _post_json_with_spinner(

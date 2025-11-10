@@ -1,6 +1,6 @@
 # 🐱 KITTY: Your AI-Powered Fabrication Lab Assistant
 
-> **K**nowledgeable **I**ntelligent **T**ool-using **T**abletop **Y**ielder
+> **K**nowledgeable **I**ntelligent **T**ool-using **T**abletop **Y**ardMaster
 >
 > An offline-first, voice-enabled warehouse orchestrator running on Mac Studio M3 Ultra. Think "JARVIS for your workshop" - but it actually works, runs locally, and won't spy on you.
 
@@ -534,6 +534,8 @@ kitty-cli cad "Create a phone stand with 45° angle and cable management"
 - Metadata tracking (prompts, parameters, lineage)
 - Visual previews in web UI
 - One-click queue to OctoPrint/Klipper
+- Vision references: `/vision` selections are sent as `imageRefs` (download URL + storage URI). The CAD service mounts the shared `references_storage` volume, streams the original bytes to Tripo’s `/upload` endpoint, kicks off `/image-to-3d`, polls `/task/<id>`, then submits a Tripo `/convert` task to emit binary STL (face-limit + unit aware) before falling back to local `trimesh` conversion whenever the API is unavailable.
+- Validation checklist: see `docs/tripo-stl-testing.md` for end-to-end test steps and timeout recommendations.
 
 ### 🎤 **Voice-to-Print Pipeline**
 
@@ -900,6 +902,15 @@ OCTOPRINT_API_KEY=your-api-key
 # CAD Providers
 ZOO_API_KEY=your-zoo-key          # Optional
 TRIPO_API_KEY=your-tripo-key      # Optional
+TRIPO_MODEL_VERSION=v2.5
+TRIPO_TEXTURE_QUALITY=HD
+TRIPO_TEXTURE_ALIGNMENT=align_image
+TRIPO_POLL_INTERVAL=3             # seconds between task status checks
+TRIPO_POLL_TIMEOUT=900            # generation + convert deadline (seconds)
+TRIPO_CONVERT_ENABLED=true        # Use Tripo's /convert task for STL output
+TRIPO_STL_FORMAT=binary           # binary vs ascii STL (when convert enabled)
+TRIPO_FACE_LIMIT=150000           # optional triangle budget for server-side reduction
+TRIPO_UNIT=millimeters            # unit metadata for downstream slicers
 
 # UniFi (for cameras/access)
 UNIFI_URL=https://unifi.local
