@@ -4,11 +4,14 @@ import FabricationConsole from './pages/FabricationConsole';
 import Projects from './pages/Projects';
 import WallTerminal from './pages/WallTerminal';
 import VisionGallery from './pages/VisionGallery';
+import ImageGenerator from './pages/ImageGenerator';
 import useRemoteMode from './hooks/useRemoteMode';
+import { useTheme } from './contexts/ThemeContext';
 
 const App = () => {
-  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'wall' | 'vision'>('dashboard');
+  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'wall' | 'vision' | 'images'>('dashboard');
   const remoteMode = useRemoteMode();
+  const { theme, toggleTheme } = useTheme();
 
   const renderView = () => {
     switch (activeView) {
@@ -20,6 +23,8 @@ const App = () => {
         return <WallTerminal remoteMode={remoteMode} />;
       case 'vision':
         return <VisionGallery />;
+      case 'images':
+        return <ImageGenerator />;
       default:
         return <Dashboard remoteMode={remoteMode} />;
     }
@@ -43,6 +48,10 @@ const App = () => {
           <button onClick={() => setActiveView('console')}>Fabrication Console</button>
           <button onClick={() => setActiveView('wall')}>Wall Terminal</button>
           <button onClick={() => setActiveView('vision')}>Vision Gallery</button>
+          <button onClick={() => setActiveView('images')}>Image Generator</button>
+          <button className="theme-toggle" onClick={toggleTheme} title="Toggle theme">
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
         </nav>
       </header>
       <main>{renderView()}</main>
