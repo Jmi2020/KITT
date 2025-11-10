@@ -17,6 +17,7 @@ class ImageReference:
     title: Optional[str] = None
     source: Optional[str] = None
     caption: Optional[str] = None
+    friendly_name: Optional[str] = None
 
     def dedupe_key(self) -> Optional[str]:
         """Key used to avoid submitting duplicate references."""
@@ -36,6 +37,7 @@ class ReferencePayload:
     data: bytes
     filename: str
     content_type: str
+    friendly_name: Optional[str] = None
 
 
 __all__ = ["ImageReference", "ReferencePayload"]

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends
-from pydantic import AliasChoices, BaseModel, Field
-from pydantic import ConfigDict
+from pydantic import AliasChoices, BaseModel, Field, ConfigDict
 
 from ..cycler import CADArtifact
 from ..dependencies import get_cad_cycler
@@ -39,6 +38,11 @@ class ImageReferencePayload(BaseModel):
     title: Optional[str] = None
     source: Optional[str] = None
     caption: Optional[str] = None
+    friendly_name: Optional[str] = Field(
+        default=None,
+        alias="friendlyName",
+        validation_alias=AliasChoices("friendlyName", "friendly_name"),
+    )
 
     def to_internal(self) -> ImageReference:
         return ImageReference(
@@ -49,6 +53,7 @@ class ImageReferencePayload(BaseModel):
             title=self.title,
             source=self.source,
             caption=self.caption,
+            friendly_name=self.friendly_name,
         )
 
 
@@ -56,9 +61,7 @@ class GenerateRequest(BaseModel):
     conversation_id: str = Field(..., alias="conversationId")
     prompt: str
     references: Optional[Dict[str, str]] = None
-    image_refs: Optional[List[Union[ImageReferencePayload, str]]] = Field(
-        default=None, alias="imageRefs"
-    )
+    image_refs_raw: Optional[List[Any]] = Field(default=None, alias="imageRefs")
 
 
 class ArtifactResponse(BaseModel):
@@ -73,17 +76,28 @@ class GenerateResponse(BaseModel):
     artifacts: List[ArtifactResponse]
 
 
+def _parse_image_ref(item: Any) -> Optional[ImageReference]:
+    if isinstance(item, ImageReferencePayload):
+        return item.to_internal()
+    if isinstance(item, ImageReference):
+        return item
+    if isinstance(item, str):
+        return ImageReference(download_url=item)
+    if isinstance(item, dict):
+        return ImageReferencePayload(**item).to_internal()
+    return None
+
+
 @router.post("/generate", response_model=GenerateResponse)
 async def generate_cad(
     body: GenerateRequest, cycler=Depends(get_cad_cycler)
 ) -> GenerateResponse:
     parsed_refs: List[ImageReference] = []
-    if body.image_refs:
-        for item in body.image_refs:
-            if isinstance(item, ImageReferencePayload):
-                parsed_refs.append(item.to_internal())
-            elif isinstance(item, str):
-                parsed_refs.append(ImageReference(download_url=item))
+    if body.image_refs_raw:
+        for item in body.image_refs_raw:
+            parsed = _parse_image_ref(item)
+            if parsed:
+                parsed_refs.append(parsed)
 
     artifacts: List[CADArtifact] = await cycler.run(
         body.prompt,

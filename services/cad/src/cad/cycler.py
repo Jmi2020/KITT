@@ -373,6 +373,7 @@ class CADCycler:
                 "thumbnail": self._extract_thumbnail(result) or "",
                 "source_image": reference.source_url or reference.download_url or "",
                 "original_format": "stl",
+                "friendly_name": reference.friendly_name or "",
             }
             return CADArtifact(
                 provider="tripo",
@@ -419,6 +420,7 @@ class CADCycler:
             "source_image": reference.source_url or reference.download_url or "",
             "original_format": mesh_format or "",
             "mesh_url": mesh_url,
+            "friendly_name": reference.friendly_name or "",
         }
         return CADArtifact(
             provider="tripo",

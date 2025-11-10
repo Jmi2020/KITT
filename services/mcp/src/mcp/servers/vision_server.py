@@ -294,9 +294,16 @@ class ReferenceStore:
             root.mkdir(parents=True, exist_ok=True)
             self._local_root = root
 
-    async def save(self, session_id: str, image_bytes: bytes, content_type: str) -> Dict[str, str]:
+    async def save(
+        self,
+        session_id: str,
+        image_bytes: bytes,
+        content_type: str,
+        name: Optional[str] = None,
+    ) -> Dict[str, str]:
         ext = mimetypes.guess_extension(content_type) or ".jpg"
-        object_name = f"references/{session_id}/{uuid4().hex}{ext}"
+        slug = self._sanitize_name(name) if name else uuid4().hex
+        object_name = f"references/{session_id}/{slug}-{uuid4().hex}{ext}"
         if self._minio:
             from io import BytesIO
 
@@ -318,6 +325,11 @@ class ReferenceStore:
             "storage_uri": str(path),
             "url": self._public_url(path),
         }
+
+    @staticmethod
+    def _sanitize_name(name: str) -> str:
+        safe = re.sub(r"[^A-Za-z0-9_-]", "-", name).strip("-")
+        return safe or "reference"
 
     def _public_url(self, path: Path) -> str:
         if not self._public_base:
@@ -521,6 +533,7 @@ class VisionMCPServer(MCPServer):
                         session_id=session_id,
                         image_bytes=resp.content,
                         content_type=resp.headers.get("content-type", "image/jpeg"),
+                        name=image.get("name") or image.get("friendly_name"),
                     )
                     stored.append(
                         {
@@ -531,6 +544,8 @@ class VisionMCPServer(MCPServer):
                             "image_url": url,
                             "storage_uri": meta["storage_uri"],
                             "download_url": meta["url"],
+                            "friendly_name": image.get("name") or image.get("friendly_name"),
+                            "friendlyName": image.get("name") or image.get("friendly_name"),
                         }
                     )
                 except Exception as exc:  # noqa: BLE001
