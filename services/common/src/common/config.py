@@ -67,6 +67,14 @@ class Settings(BaseSettings):
     semantic_cache_enabled: bool = True
     agentic_mode_enabled: bool = False
 
+    # Vision / image search providers
+    searxng_base_url: Optional[str] = None
+    image_search_safesearch: str = "moderate"
+    brave_search_api_key: Optional[str] = None
+    brave_search_endpoint: str = "https://api.search.brave.com/res/v1/images/search"
+    image_search_provider: str = "auto"
+    internal_searxng_base_url: Optional[str] = None
+
     # External providers
     perplexity_base_url: str = "https://api.perplexity.ai"
     perplexity_api_key: Optional[str] = None

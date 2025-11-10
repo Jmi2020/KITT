@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from .middleware.remote_mode import RemoteModeMiddleware
 from .routes.routing import router as routing_router
@@ -16,6 +20,10 @@ app.include_router(routing_router)
 app.include_router(devices_router)
 app.include_router(remote_router)
 app.include_router(vision_router)
+
+storage_root = Path(os.getenv("KITTY_STORAGE_ROOT", "storage"))
+storage_root.mkdir(parents=True, exist_ok=True)
+app.mount("/storage", StaticFiles(directory=storage_root), name="storage")
 
 
 @app.get("/healthz")

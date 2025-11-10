@@ -266,18 +266,19 @@ curl -s "http://localhost:8000/api/autonomy/budget?days=7" | jq
 
 ### Web Search + Extraction Stack (SearXNG → Brave → DuckDuckGo → Perplexity → Jina Reader)
 
-1. **Run SearXNG locally (free, private)**
+1. **Run SearXNG locally (free, private)** — already bundled in KITTY
    ```bash
-   mkdir -p infra/search/searxng
-   # drop the docker-compose snippet from Research/Web_searchTooloptions.md
-   docker compose -f infra/search/searxng/docker-compose.yml up -d
+   # start the built-in SearXNG container (listens on the internal name `searxng:8080`)
+    docker compose -f infra/compose/docker-compose.yml up -d searxng
    ```
-   Set `SEARXNG_BASE_URL=http://localhost:8888` in `.env`. KITTY will hit this self-hosted metasearch first.
+   - Containers use `INTERNAL_SEARXNG_BASE_URL=http://searxng:8080` automatically.
+   - If you want host access, expose it via `SEARXNG_BASE_URL=http://localhost:8888` (optional).
 
 2. **Add Brave as the freemium fallback**
    - Sign up at https://api.search.brave.com/ (2 000 queries/day free).
    - Put the key in `.env` (`BRAVE_SEARCH_API_KEY`), keep the default endpoint unless you’re in a different region.
    - Brave only triggers when SearXNG is down or returns zero results.
+   - Advanced knobs: set `IMAGE_SEARCH_PROVIDER=brave|searxng|duckduckgo|auto`, tweak `IMAGE_SEARCH_SAFESEARCH=off|moderate|strict`, or override `BRAVE_SEARCH_ENDPOINT` if Brave launches a regional edge.
 
 3. **Full article extraction with Jina Reader (plus local fallback)**
    - Set `JINA_API_KEY` (free tier works) and KITTY will fetch the full article via `fetch_webpage` after each search hit.

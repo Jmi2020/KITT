@@ -65,22 +65,58 @@ class ImageHit:
 
 
 class ImageSearchClient:
-    """Best-effort image search using SearXNG with DuckDuckGo fallback."""
+    """Image search coordinator supporting SearXNG, Brave, and DuckDuckGo fallback."""
 
-    def __init__(self, searx_url: Optional[str], safe_level: str = "moderate") -> None:
+    def __init__(
+        self,
+        searx_url: Optional[str],
+        safe_level: str = "moderate",
+        brave_api_key: Optional[str] = None,
+        brave_endpoint: Optional[str] = None,
+        provider: str = "auto",
+    ) -> None:
         self._searx_url = searx_url.rstrip("/") if searx_url else None
-        self._safesearch = safe_level
+        self._safesearch = safe_level or "moderate"
+        self._brave_api_key = brave_api_key
+        self._brave_endpoint = brave_endpoint.rstrip("/") if brave_endpoint else None
+        self._provider = (provider or "auto").lower()
 
     async def search(self, query: str, max_results: int = 8) -> List[ImageHit]:
         if not query:
             return []
 
-        if self._searx_url:
-            result = await self._search_searx(query, max_results)
-            if result:
-                return result
+        for strategy in self._strategy_order():
+            if strategy == "brave" and self._brave_api_key and self._brave_endpoint:
+                hits = await self._search_brave(query, max_results)
+            elif strategy == "searxng" and self._searx_url:
+                hits = await self._search_searx(query, max_results)
+            elif strategy == "duckduckgo":
+                hits = await self._search_duckduckgo(query, max_results)
+            else:
+                continue
 
-        return await self._search_duckduckgo(query, max_results)
+            if hits:
+                LOGGER.info("Image search satisfied via %s provider", strategy)
+                return hits
+
+        LOGGER.warning("Image search providers returned no results for query '%s'", query)
+        return []
+
+    def _strategy_order(self) -> List[str]:
+        order: List[str] = []
+        if self._provider == "brave":
+            order.extend(["brave", "searxng", "duckduckgo"])
+        elif self._provider == "searxng":
+            order.extend(["searxng", "duckduckgo"])
+        elif self._provider == "duckduckgo":
+            order.append("duckduckgo")
+        else:
+            if self._searx_url:
+                order.append("searxng")
+            if self._brave_api_key and self._brave_endpoint:
+                order.append("brave")
+            order.append("duckduckgo")
+        return order
 
     async def _search_searx(self, query: str, max_results: int) -> List[ImageHit]:
         url = f"{self._searx_url}/search"
@@ -121,6 +157,54 @@ class ImageSearchClient:
                 )
             )
         return hits
+
+    async def _search_brave(self, query: str, max_results: int) -> List[ImageHit]:
+        params = {
+            "q": query,
+            "count": max(1, min(max_results, 40)),
+            "safesearch": self._brave_safesearch(),
+        }
+        headers = {
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip",
+            "X-Subscription-Token": self._brave_api_key,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.get(self._brave_endpoint, params=params, headers=headers)
+                response.raise_for_status()
+                payload = response.json()
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error("Brave image search failed: %s", exc)
+            return []
+
+        hits: List[ImageHit] = []
+        seen: set[str] = set()
+        for row in payload.get("results", [])[:max_results]:
+            props = row.get("properties") or {}
+            image_url = props.get("url") or row.get("thumbnail") or row.get("url")
+            page_url = row.get("source") or row.get("page_url") or row.get("url")
+            if not image_url or not page_url or image_url in seen:
+                continue
+            seen.add(image_url)
+            hits.append(
+                ImageHit(
+                    id=uuid4().hex,
+                    title=row.get("title") or "Untitled",
+                    image_url=image_url,
+                    page_url=page_url,
+                    thumbnail_url=row.get("thumbnail"),
+                    source=self._extract_source(page_url),
+                    description=row.get("description"),
+                )
+            )
+        return hits
+
+    def _brave_safesearch(self) -> str:
+        level = (self._safesearch or "").lower()
+        if level in {"off", "strict", "moderate"}:
+            return level
+        return "moderate"
 
     async def _search_duckduckgo(self, query: str, max_results: int) -> List[ImageHit]:
         hits: List[ImageHit] = []
@@ -198,6 +282,13 @@ class ReferenceStore:
                 client.make_bucket(self._bucket)
             self._minio = client
 
+        self._public_base = (
+            os.getenv("GATEWAY_PUBLIC_URL")
+            or os.getenv("KITTY_API_BASE")
+            or "http://localhost:8080"
+        ).rstrip("/")
+        self._public_local_root = Path(os.getenv("KITTY_STORAGE_ROOT", "storage"))
+
         if self._minio is None:
             root = self._local_root or Path("storage/references")
             root.mkdir(parents=True, exist_ok=True)
@@ -223,7 +314,19 @@ class ReferenceStore:
         path = self._local_root / object_name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(image_bytes)
-        return {"storage_uri": str(path), "url": str(path)}
+        return {
+            "storage_uri": str(path),
+            "url": self._public_url(path),
+        }
+
+    def _public_url(self, path: Path) -> str:
+        if not self._public_base:
+            return str(path)
+        try:
+            relative = path.relative_to(self._public_local_root)
+        except Exception:
+            relative = path
+        return f"{self._public_base}/storage/{relative.as_posix()}"
 
 
 class VisionMCPServer(MCPServer):
@@ -234,9 +337,23 @@ class VisionMCPServer(MCPServer):
             name="vision",
             description="Image search, lightweight relevance scoring, and reference storage",
         )
-        searx_url = os.getenv("SEARXNG_BASE_URL")
-        safe_level = os.getenv("IMAGE_SEARCH_SAFESEARCH", "moderate")
-        self._searcher = ImageSearchClient(searx_url=searx_url, safe_level=safe_level)
+        searx_url = (
+            os.getenv("INTERNAL_SEARXNG_BASE_URL")
+            or os.getenv("SEARXNG_BASE_URL")
+            or settings.internal_searxng_base_url
+            or settings.searxng_base_url
+        )
+        safe_level = os.getenv("IMAGE_SEARCH_SAFESEARCH", settings.image_search_safesearch)
+        brave_api_key = os.getenv("BRAVE_SEARCH_API_KEY", settings.brave_search_api_key)
+        brave_endpoint = os.getenv("BRAVE_SEARCH_ENDPOINT", settings.brave_search_endpoint)
+        provider = os.getenv("IMAGE_SEARCH_PROVIDER", settings.image_search_provider)
+        self._searcher = ImageSearchClient(
+            searx_url=searx_url,
+            safe_level=safe_level or "moderate",
+            brave_api_key=brave_api_key,
+            brave_endpoint=brave_endpoint,
+            provider=provider or "auto",
+        )
         self._store = ReferenceStore()
         self._clip = ClipScorer.create()
         self._clip_weight = float(os.getenv("VISION_CLIP_WEIGHT", "0.7")) if self._clip else 0.0
@@ -249,8 +366,9 @@ class VisionMCPServer(MCPServer):
             ToolDefinition(
                 name="image_search",
                 description=(
-                    "Search the web for images using SearXNG (if configured) with a DuckDuckGo fallback. "
-                    "Returns normalized hits with titles, image URLs, thumbnails, and source pages."
+                    "Search the web for images using SearXNG (if configured) or Brave Search (when an API key "
+                    "is provided), with DuckDuckGo as a final fallback. Returns normalized hits with titles, "
+                    "image URLs, thumbnails, and source pages."
                 ),
                 parameters={
                     "type": "object",

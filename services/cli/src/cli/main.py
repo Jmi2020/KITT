@@ -66,8 +66,6 @@ API_BASE = _first_valid_url(
     (
         os.getenv("KITTY_API_BASE"),
         os.getenv("KITTY_CLI_API_BASE"),
-        os.getenv("GATEWAY_API"),
-        os.getenv("GATEWAY_PUBLIC_URL"),
         os.getenv("BRAIN_API_BASE"),
         os.getenv("BRAIN_API"),
     ),
@@ -75,6 +73,16 @@ API_BASE = _first_valid_url(
 )
 CAD_BASE = _env("KITTY_CAD_API", "http://localhost:8200")
 UI_BASE = _env("KITTY_UI_BASE", "http://localhost:4173")
+VISION_API_BASE = _first_valid_url(
+    (
+        os.getenv("KITTY_VISION_API_BASE"),
+        os.getenv("GATEWAY_API"),
+        os.getenv("GATEWAY_PUBLIC_URL"),
+        "http://gateway:8080",
+        "http://localhost:8080",
+    ),
+    API_BASE,
+)
 USER_NAME = _env("USER_NAME", "ssh-operator")
 USER_UUID = _env(
     "KITTY_USER_ID",
@@ -171,7 +179,7 @@ def _get_json(url: str) -> Dict[str, Any]:
 
 
 def _vision_post(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    url = f"{API_BASE}/api/vision/{path}"
+    url = f"{VISION_API_BASE}/api/vision/{path}"
     with _client() as client:
         response = client.post(url, json=payload)
         response.raise_for_status()

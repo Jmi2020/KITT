@@ -26,6 +26,12 @@ services:
       BROKER_URL: http://broker:8777
       HOME_ASSISTANT_URL: ${HOME_ASSISTANT_URL:-http://homeassistant:8123}
       HOME_ASSISTANT_TOKEN: ${HOME_ASSISTANT_TOKEN}
+      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://searxng:8080}
+      INTERNAL_SEARXNG_BASE_URL: http://searxng:8080
+      IMAGE_SEARCH_PROVIDER: ${IMAGE_SEARCH_PROVIDER:-auto}
+      IMAGE_SEARCH_SAFESEARCH: ${IMAGE_SEARCH_SAFESEARCH:-moderate}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      BRAVE_SEARCH_ENDPOINT: ${BRAVE_SEARCH_ENDPOINT:-https://api.search.brave.com/res/v1/images/search}
     depends_on:
       - mosquitto
       - redis
@@ -40,6 +46,7 @@ services:
       - ../../services/brain:/app/services/brain:ro
       - ../../services/mcp:/app/services/mcp:ro
       - ../../services/research:/app/services/research:ro
+      - references_storage:/app/storage
     ports:
       - "8000:8000"
     networks:
@@ -55,13 +62,33 @@ services:
       <<: *service-env
       SERVICE_NAME: gateway
       UPSTREAM_BRAIN_URL: http://brain:8000
+      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://searxng:8080}
+      INTERNAL_SEARXNG_BASE_URL: http://searxng:8080
+      IMAGE_SEARCH_PROVIDER: ${IMAGE_SEARCH_PROVIDER:-auto}
+      IMAGE_SEARCH_SAFESEARCH: ${IMAGE_SEARCH_SAFESEARCH:-moderate}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      BRAVE_SEARCH_ENDPOINT: ${BRAVE_SEARCH_ENDPOINT:-https://api.search.brave.com/res/v1/images/search}
     depends_on:
       - brain
     volumes:
       - ../../services/common:/app/services/common:ro
       - ../../services/gateway:/app/services/gateway:ro
+      - ../../services/mcp:/app/services/mcp:ro
+      - references_storage:/app/storage
     ports:
       - "8080:8080"
+    networks:
+      - kitty
+
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    environment:
+      BASE_URL: ${SEARXNG_BASE_URL:-http://localhost:8888}
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-1f2d3c4b5a69788766554433221100ff}
+      SEARXNG_DEBUG: "false"
+    volumes:
+      - ../searxng/settings.yml:/etc/searxng/settings.yml:ro
     networks:
       - kitty
 
@@ -156,8 +183,6 @@ services:
       MQTT_URL: ws://mosquitto:9001
     depends_on:
       - gateway
-    volumes:
-      - ../../services/ui:/app/services/ui:ro
     ports:
       - "4173:4173"
     networks:
@@ -334,3 +359,4 @@ volumes:
   tempo_data:
   qdrant_data:
   broker-logs:
+  references_storage:
