@@ -295,6 +295,27 @@ class ReActAgent:
             if research_only:
                 tools = research_only
 
+        # If the query was flagged for vision references, prioritize those tools.
+        if vision_targets:
+            preferred = {
+                "image_search",
+                "image_filter",
+                "store_selection",
+                "web_search",  # allow quick context if vision search needs text info
+                "fetch_webpage",
+            }
+            filtered = [
+                tool
+                for tool in tools
+                if tool.get("function", {}).get("name") in preferred
+            ]
+            if filtered:
+                logger.info(
+                    "Vision plan detected (%s) - restricting tools to vision set",
+                    ", ".join(vision_targets[:3]),
+                )
+                tools = filtered
+
         if not tools:
             # No tools available - just answer directly
             response = await self._llm.generate(query)

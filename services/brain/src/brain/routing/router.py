@@ -123,7 +123,7 @@ class BrainRouter:
 
     async def route(self, request: RoutingRequest) -> RoutingResult:
         cache_key = _hash_prompt(request.prompt)
-        if self._cache and not request.freshness_required:
+        if self._cache and not request.freshness_required and not request.vision_targets:
             cached = self._cache.fetch(cache_key)
             if cached:
                 result = RoutingResult(
@@ -142,6 +142,12 @@ class BrainRouter:
                     user_id=request.user_id,
                 )
                 return result
+
+        if request.vision_targets:
+            logger.info("Routing vision targets: %s", ", ".join(request.vision_targets))
+            pipeline_result = await self._run_vision_pipeline(request)
+            if pipeline_result:
+                return await self._finalize_result(request, pipeline_result, cache_key=None)
 
         # Check for agentic routing
         if request.use_agent:
@@ -511,6 +517,14 @@ Based on the tool results above, provide a comprehensive answer to the original 
         """
         start = time.perf_counter()
 
+        if request.vision_targets:
+            logger.info(
+                "Routing with vision targets: %s",
+                ", ".join(request.vision_targets[:3]),
+            )
+        else:
+            logger.info("Routing without vision targets")
+
         # Run ReAct agent
         agent_result = await self._agent.run(
             request.prompt,
@@ -528,6 +542,8 @@ Based on the tool results above, provide a comprehensive answer to the original 
             "tools_used": str(len([s for s in agent_result.steps if s.action])),
             "success": str(agent_result.success),
         }
+        if request.vision_targets:
+            metadata["vision_targets"] = request.vision_targets
         if agent_result.truncated:
             metadata["truncated"] = True
         if agent_result.stop_reason:
@@ -552,6 +568,8 @@ Based on the tool results above, provide a comprehensive answer to the original 
     def _record(
         self, request: RoutingRequest, result: RoutingResult, cache_key: Optional[str] = None
     ) -> None:
+        if request.vision_targets:
+            return
         if self._cache and cache_key and not result.cached:
             self._cache.store(
                 CacheRecord(
@@ -603,6 +621,8 @@ Based on the tool results above, provide a comprehensive answer to the original 
         provider = metadata.get("provider")
         if provider != "react_agent":
             return result
+        if metadata.get("vision_targets"):
+            return result
 
         agent_steps = metadata.get("agent_steps") or []
         truncated = bool(metadata.get("truncated"))
@@ -626,6 +646,131 @@ Based on the tool results above, provide a comprehensive answer to the original 
         result.metadata = updated_metadata
         UsageStats.record(provider=self._summarizer.alias, tier="local", cost=0.0)
         return result
+
+    async def _run_vision_pipeline(self, request: RoutingRequest) -> Optional[RoutingResult]:
+        if not self._tool_mcp or not request.vision_targets:
+            if not self._tool_mcp:
+                logger.info("Vision pipeline skipped: MCP client unavailable")
+            return None
+
+        start = time.perf_counter()
+        references: List[Dict[str, Any]] = []
+        tools_used = 0
+
+        for target in request.vision_targets:
+            query = target.strip()
+            if not query:
+                continue
+            logger.info("Vision pipeline starting search for '%s'", query)
+
+            try:
+                search = await self._tool_mcp.execute_tool(
+                    "image_search", {"query": query, "max_results": 8}
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Vision search failed for '%s': %s", query, exc)
+                continue
+
+            tools_used += 1
+            if not search.get("success"):
+                continue
+            images = (search.get("data") or {}).get("results") or []
+            if not images:
+                logger.info("Vision pipeline found 0 images for '%s'", query)
+                continue
+
+            try:
+                filtered = await self._tool_mcp.execute_tool(
+                    "image_filter",
+                    {"query": query, "images": images, "min_score": 0.35},
+                )
+                tools_used += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Vision filter failed for '%s': %s", query, exc)
+                filtered = {"success": False}
+
+            ranked = images
+            if filtered.get("success"):
+                ranked = (filtered.get("data") or {}).get("results") or images
+            top_images = ranked[:3]
+            if not top_images:
+                continue
+
+            stored_urls: Dict[str, str] = {}
+            payload = {
+                "session_id": request.conversation_id,
+                "images": [
+                    {
+                        "id": img.get("id"),
+                        "image_url": img.get("image_url"),
+                        "title": img.get("title"),
+                        "source": img.get("source"),
+                        "caption": img.get("description"),
+                    }
+                    for img in top_images
+                ],
+            }
+
+            try:
+                stored = await self._tool_mcp.execute_tool("store_selection", payload)
+                tools_used += 1
+                if stored.get("success"):
+                    for entry in (stored.get("data") or {}).get("stored", []):
+                        stored_urls[entry.get("id")] = entry.get("download_url") or ""
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Vision storage failed for '%s': %s", query, exc)
+
+            formatted = []
+            for img in top_images:
+                image_id = img.get("id")
+                formatted.append(
+                    {
+                        "title": img.get("title") or "Image",
+                        "image_url": img.get("image_url"),
+                        "source": img.get("source"),
+                        "download_url": stored_urls.get(image_id),
+                    }
+                )
+            references.append({"query": query, "images": formatted})
+            logger.info("Vision pipeline stored %d refs for '%s'", len(formatted), query)
+
+        if not references:
+            logger.info("Vision pipeline produced no references")
+            return None
+
+        lines: List[str] = ["Here are reference images gathered from the vision workflow:\n"]
+        for ref in references:
+            lines.append(f"### {ref['query']}")
+            for idx, image in enumerate(ref["images"], 1):
+                url = image.get("download_url") or image.get("image_url")
+                title = image.get("title") or f"Image {idx}"
+                source = image.get("source") or "unknown source"
+                if url:
+                    lines.append(f"{idx}. [{title}]({url}) — source: {source}")
+                else:
+                    lines.append(f"{idx}. {title} — source: {source}")
+            lines.append("")
+
+        latency = int((time.perf_counter() - start) * 1000)
+        metadata = {
+            "provider": "vision_pipeline",
+            "vision_targets": request.vision_targets,
+            "references": references,
+            "tools_used": str(tools_used),
+        }
+        logger.info(
+            "Vision pipeline returning %d reference sets in %dms",
+            len(references),
+            latency,
+        )
+
+        return RoutingResult(
+            output="\n".join(lines).strip(),
+            tier=RoutingTier.local,
+            confidence=0.92,
+            latency_ms=latency,
+            metadata=metadata,
+        )
 
 
 __all__ = ["BrainRouter", "RoutingRequest", "RoutingResult"]

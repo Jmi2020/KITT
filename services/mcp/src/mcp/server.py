@@ -96,6 +96,10 @@ class MCPServer(ABC):
         """List all tools provided by this server."""
         return list(self._tools.values())
 
+    def get_tool(self, tool_name: str) -> Optional[ToolDefinition]:
+        """Retrieve a specific tool definition by name."""
+        return self._tools.get(tool_name)
+
     def list_resources(self) -> List[ResourceDefinition]:
         """List all resources provided by this server."""
         return list(self._resources.values())

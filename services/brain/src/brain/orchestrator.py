@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from typing import Any, Dict
@@ -18,6 +19,9 @@ from .routing.vision_policy import analyze_prompt
 from .routing.freshness import is_time_sensitive_query
 from .skills.home_assistant import HomeAssistantSkill
 from .state.mqtt_context_store import MQTTContextStore
+
+
+logger = logging.getLogger("brain.orchestrator")
 
 
 class BrainOrchestrator:
@@ -130,6 +134,11 @@ class BrainOrchestrator:
         requires_fresh = freshness_required or time_sensitive
 
         vision_plan = analyze_prompt(cleaned_prompt)
+        logger.info(
+            "Vision plan: should=%s targets=%s",
+            vision_plan.should_suggest,
+            ", ".join(vision_plan.targets) if vision_plan.targets else "—",
+        )
         routing_request = RoutingRequest(
             conversation_id=conversation_id,
             request_id=request_id,
