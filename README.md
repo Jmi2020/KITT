@@ -534,8 +534,63 @@ kitty-cli cad "Create a phone stand with 45° angle and cable management"
 - Metadata tracking (prompts, parameters, lineage)
 - Visual previews in web UI
 - One-click queue to OctoPrint/Klipper
-- Vision references: `/vision` selections are sent as `imageRefs` (download URL + storage URI). The CAD service mounts the shared `references_storage` volume, streams the original bytes to Tripo’s `/upload` endpoint, kicks off `/image-to-3d`, polls `/task/<id>`, then submits a Tripo `/convert` task to emit binary STL (face-limit + unit aware) before falling back to local `trimesh` conversion whenever the API is unavailable.
+- Vision references: `/vision` selections are sent as `imageRefs` (download URL + storage URI). The CAD service mounts the shared `references_storage` volume, streams the original bytes to Tripo's `/upload` endpoint, kicks off `/image-to-3d`, polls `/task/<id>`, then submits a Tripo `/convert` task to emit binary STL (face-limit + unit aware) before falling back to local `trimesh` conversion whenever the API is unavailable.
 - Validation checklist: see `docs/tripo-stl-testing.md` for end-to-end test steps and timeout recommendations.
+
+### 📂 **Accessing Generated Files from macOS Finder**
+
+KITTY stores all generated CAD files in a **shared directory accessible from macOS Finder**, making it easy to open STL files in Fusion 360, Blender, or any other CAD software.
+
+**Setup (one-time):**
+
+```bash
+# Run the setup script to create the artifacts directory
+./ops/scripts/setup-artifacts-dir.sh
+
+# The default location is: /Users/Shared/KITTY/artifacts
+# Files are organized in subdirectories:
+#   cad/       - STL, STEP, OBJ, GLB files
+#   images/    - Reference images
+#   metadata/  - JSON files with generation details
+```
+
+**Accessing Files:**
+
+```bash
+# Open artifacts folder in Finder
+open /Users/Shared/KITTY/artifacts/cad
+
+# Or navigate manually:
+# Finder → Go → Go to Folder (⌘⇧G)
+# Type: /Users/Shared/KITTY/artifacts
+```
+
+**Opening in Fusion 360:**
+
+1. Generate a model: `kitty-cli cad "Create a phone stand with cable routing"`
+2. Open Finder and navigate to `/Users/Shared/KITTY/artifacts/cad/`
+3. Find your STL file (named with timestamp and description)
+4. **Drag & drop** the STL into Fusion 360, or:
+   - Fusion 360 → **File** → **Open** → Browse to artifacts directory
+   - Select your STL file → **Open**
+5. Edit the mesh or use it as a reference for parametric modeling
+
+**File Organization:**
+
+Each generated file includes:
+- **CAD File**: `20251110_a3f2b1c_phone-stand.stl`
+- **Metadata**: `20251110_a3f2b1c_phone-stand.json` (prompt, provider, parameters)
+- Metadata includes the original prompt, provider used, and any reference images
+
+**Custom Location:**
+
+```bash
+# To use a different directory, set in .env:
+KITTY_ARTIFACTS_DIR=/path/to/your/custom/directory
+
+# Then run setup script:
+./ops/scripts/setup-artifacts-dir.sh
+```
 
 ### 🎤 **Voice-to-Print Pipeline**
 
@@ -607,6 +662,9 @@ cp .env.example .env
 # Generate admin password hash
 python -c "from services.common.src.common.security import hash_password; print(hash_password('your-password-here'))"
 # Add to .env: ADMIN_USERS=admin:<hash>
+
+# Setup artifacts directory (for accessing STL files in Fusion 360)
+./ops/scripts/setup-artifacts-dir.sh
 ```
 
 ### Download Models
