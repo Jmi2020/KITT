@@ -726,14 +726,82 @@ def say(
         _print_routing(data.get("routing"), show_trace=trace_enabled)
 
 
+def _infer_cad_mode(prompt: str, has_images: bool) -> str:
+    text = prompt.lower()
+    organic_keywords = {
+        "organic",
+        "sculpt",
+        "statue",
+        "figurine",
+        "creature",
+        "character",
+        "dog",
+        "cat",
+        "animal",
+        "frog",
+        "mesh",
+        "render",
+        "art",
+        "toy",
+    }
+    parametric_keywords = {
+        "bracket",
+        "mount",
+        "plate",
+        "adapter",
+        "housing",
+        "enclosure",
+        "chassis",
+        "hinge",
+        "fixture",
+        "panel",
+        "beam",
+        "flange",
+    }
+    if has_images:
+        return "organic"
+    if any(word in text for word in organic_keywords):
+        return "organic"
+    if any(word in text for word in parametric_keywords):
+        return "parametric"
+    return "auto"
+
+
 @app.command()
-def cad(prompt: List[str] = typer.Argument(..., help="CAD generation prompt")) -> None:
+def cad(
+    prompt: List[str] = typer.Argument(..., help="CAD generation prompt"),
+    organic: bool = typer.Option(
+        False,
+        "--o",
+        "--organic",
+        help="Force Tripo organic workflow",
+        is_flag=True,
+    ),
+    parametric: bool = typer.Option(
+        False,
+        "--p",
+        "--parametric",
+        help="Force Zoo parametric workflow",
+        is_flag=True,
+    ),
+) -> None:
     """Generate CAD artifacts using Zoo/Tripo/local providers."""
+    if organic and parametric:
+        console.print("[red]Choose either --o or --p, not both.")
+        raise typer.Exit(1)
+
     text = " ".join(prompt)
     payload: Dict[str, Any] = {
         "conversationId": state.conversation_id,
         "prompt": text,
     }
+
+    chosen_mode: Optional[str] = None
+    if organic:
+        chosen_mode = "organic"
+    elif parametric:
+        chosen_mode = "parametric"
+
     if state.stored_images:
         refs: List[Dict[str, Any]] = []
         for item in state.stored_images:
@@ -750,6 +818,16 @@ def cad(prompt: List[str] = typer.Argument(..., help="CAD generation prompt")) -
                 }
             )
         payload["imageRefs"] = refs
+        if chosen_mode is None:
+            chosen_mode = "organic"
+
+    if chosen_mode is None:
+        inferred = _infer_cad_mode(text, bool(state.stored_images))
+        if inferred != "auto":
+            chosen_mode = inferred
+
+    if chosen_mode:
+        payload["mode"] = chosen_mode
 
     try:
         data = _post_json_with_spinner(
@@ -945,7 +1023,19 @@ def shell(
                     console.print("[yellow]Usage: /cad <prompt>")
                     console.print("[dim]Example: /cad design a wall mount bracket[/dim]")
                 else:
-                    cad(" ".join(args).split())
+                    organic_flag = False
+                    param_flag = False
+                    prompt_tokens: List[str] = []
+                    for token in args:
+                        lower = token.lower()
+                        if lower in {"--o", "--organic"}:
+                            organic_flag = True
+                            continue
+                        if lower in {"--p", "--parametric"}:
+                            param_flag = True
+                            continue
+                        prompt_tokens.append(token)
+                    cad(prompt_tokens, organic=organic_flag, parametric=param_flag)
                 continue
 
             if cmd == "vision":
