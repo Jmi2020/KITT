@@ -22,6 +22,18 @@ IMAGES_SERVICE_ENABLED=true
 
 **Using the Service:**
 
+**Web UI (Recommended):**
+```
+http://localhost:5173/?view=images
+```
+- Full-featured image generation interface
+- Real-time status updates with live polling
+- Preview generated images instantly
+- Browse recent generations gallery
+- Configure all parameters (model, size, steps, CFG, seed)
+- Optional SDXL refiner for quality boost
+
+**CLI:**
 ```bash
 # Interactive shell
 kitty-cli shell
@@ -32,8 +44,11 @@ kitty-cli shell
 kitty-cli generate-image "futuristic drone" --wait
 kitty-cli list-images --limit 20
 kitty-cli select-image 1  # Get presigned URL for CAD/Tripo
+```
 
-# Direct API access
+**Direct API:**
+```bash
+# Submit generation
 curl -X POST http://localhost:8089/api/images/generate \
   -H "Content-Type: application/json" \
   -d '{"prompt": "water bottle", "width": 1024, "height": 1024}'
