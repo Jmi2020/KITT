@@ -960,12 +960,13 @@ OCTOPRINT_API_KEY=your-api-key
 # CAD Providers
 ZOO_API_KEY=your-zoo-key          # Optional
 TRIPO_API_KEY=your-tripo-key      # Optional
-TRIPO_MODEL_VERSION=v2.5
-TRIPO_TEXTURE_QUALITY=HD
-TRIPO_TEXTURE_ALIGNMENT=align_image
+# Optional Tripo overrides (only set if your account supports them)
+# TRIPO_MODEL_VERSION=v2.5         # Maps to the `version` field on /task
+# TRIPO_TEXTURE_QUALITY=HD
+# TRIPO_TEXTURE_ALIGNMENT=align_image
 TRIPO_POLL_INTERVAL=3             # seconds between task status checks
 TRIPO_POLL_TIMEOUT=900            # generation + convert deadline (seconds)
-TRIPO_CONVERT_ENABLED=true        # Use Tripo's /convert task for STL output
+TRIPO_CONVERT_ENABLED=false       # Optional legacy flow; keep false (local STL conversion is default)
 TRIPO_STL_FORMAT=binary           # binary vs ascii STL (when convert enabled)
 TRIPO_FACE_LIMIT=150000           # optional triangle budget for server-side reduction
 TRIPO_UNIT=millimeters            # unit metadata for downstream slicers

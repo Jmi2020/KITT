@@ -68,9 +68,9 @@ class CADCycler:
         self._local_runner = local_runner
         self._freecad = freecad_runner
         self._max_tripo_images = max(1, max_tripo_images)
-        self._tripo_model_version = tripo_model_version or "v2.5"
-        self._tripo_texture_quality = tripo_texture_quality or "HD"
-        self._tripo_texture_alignment = tripo_texture_alignment or "align_image"
+        self._tripo_model_version = tripo_model_version
+        self._tripo_texture_quality = tripo_texture_quality
+        self._tripo_texture_alignment = tripo_texture_alignment
         self._tripo_orientation = tripo_orientation
         self._tripo_poll_interval = max(1.0, tripo_poll_interval)
         self._tripo_poll_timeout = max(self._tripo_poll_interval, tripo_poll_timeout)
@@ -95,37 +95,43 @@ class CADCycler:
         prompt: str,
         references: Optional[Dict[str, str]] = None,
         image_refs: Optional[Sequence[Any]] = None,
+        mode: Optional[str] = None,
     ) -> List[CADArtifact]:
         artifacts: List[CADArtifact] = []
         references = references or {}
         normalized_refs = self._normalize_image_refs(references, image_refs or [])
+        mode_normalized = (mode or "auto").lower()
+        run_zoo = mode_normalized in {"auto", "parametric"}
+        run_tripo = mode_normalized in {"auto", "organic"}
 
         # Zoo parametric generation
-        try:
-            zoo_job = await self._zoo.create_model(
-                name="kitty-job", prompt=prompt, parameters=references
-            )
-            status_url = zoo_job.get("polling_url") or zoo_job.get("status_url")
-            if status_url:
-                status = await self._zoo.poll_status(status_url)
-                geometry = status.get("geometry", {})
-                if geometry.get("url"):
-                    stored = await self._store.save_from_url(geometry["url"], ".gltf")
-                    artifacts.append(
-                        CADArtifact(
-                            provider="zoo",
-                            artifact_type=geometry.get("format", "gltf"),
-                            location=stored,
-                            metadata={
-                                "credits_used": str(status.get("credits_used", 0))
-                            },
+        if run_zoo:
+            try:
+                zoo_job = await self._zoo.create_model(
+                    name="kitty-job", prompt=prompt, parameters=references
+                )
+                status_url = zoo_job.get("polling_url") or zoo_job.get("status_url")
+                if status_url:
+                    status = await self._zoo.poll_status(status_url)
+                    geometry = status.get("geometry", {})
+                    if geometry.get("url"):
+                        stored = await self._store.save_from_url(geometry["url"], ".gltf")
+                        artifacts.append(
+                            CADArtifact(
+                                provider="zoo",
+                                artifact_type=geometry.get("format", "gltf"),
+                                location=stored,
+                                metadata={
+                                    "credits_used": str(status.get("credits_used", 0))
+                                },
+                            )
                         )
-                    )
-        except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("Zoo generation failed", error=str(exc))
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("Zoo generation failed", error=str(exc))
 
         # Tripo cloud mesh generation
-        artifacts.extend(await self._generate_tripo_meshes(normalized_refs))
+        if run_tripo:
+            artifacts.extend(await self._generate_tripo_meshes(normalized_refs))
 
         # Local fallback
         if self._local_runner and "image_path" in references:
@@ -241,14 +247,15 @@ class CADCycler:
                 )
                 continue
             try:
-                upload_url = await self._tripo.upload_image(
+                upload_meta = await self._tripo.upload_image(
                     data=normalized.data,
                     filename=normalized.filename,
                     content_type=normalized.content_type,
                 )
-                job = await self._tripo.start_image_job(
-                    image_url=upload_url,
-                    model_version=self._tripo_model_version,
+                job = await self._tripo.start_image_task(
+                    file_token=upload_meta.get("file_token"),
+                    file_type=upload_meta.get("file_type"),
+                    version=self._tripo_model_version,
                     texture_quality=self._tripo_texture_quality,
                     texture_alignment=self._tripo_texture_alignment,
                     orientation=self._tripo_orientation,
@@ -332,8 +339,8 @@ class CADCycler:
     async def _await_tripo_completion(self, job: Dict[str, Any]) -> Dict[str, Any]:
         status = (job.get("status") or "").lower()
         task_id = job.get("task_id")
-        result = job.get("result") or {}
-        if status == "completed":
+        result = job.get("result") or job
+        if status in {"completed", "success", "succeeded", "done"}:
             return result
         if not task_id:
             raise RuntimeError("Tripo response missing task_id")
@@ -345,8 +352,8 @@ class CADCycler:
             await asyncio.sleep(self._tripo_poll_interval)
             latest = await self._tripo.get_task(task_id)
             status = (latest.get("status") or "").lower()
-            result = latest.get("result") or {}
-            if status == "completed":
+            result = latest.get("result") or latest
+            if status in {"completed", "success", "succeeded", "done"}:
                 return result
             if status in {"failed", "error"}:
                 raise RuntimeError(f"Tripo job {task_id} failed: {result}")
@@ -363,16 +370,25 @@ class CADCycler:
         reference: ImageReference,
         task_id: Optional[str],
     ) -> Optional[CADArtifact]:
+        full_result = result or {}
+        payload = self._unwrap_tripo_payload(full_result)
+
         convert_payload = await self._convert_tripo_task_to_stl(task_id)
         if convert_payload:
             content, convert_task_id = convert_payload
             location = self._store.save_bytes(content, ".stl")
+            thumbnail = (
+                self._extract_thumbnail(payload)
+                or self._extract_thumbnail(full_result)
+                or ""
+            )
             metadata = {
                 "task_id": task_id or "",
                 "convert_task_id": convert_task_id or "",
-                "thumbnail": self._extract_thumbnail(result) or "",
+                "thumbnail": thumbnail,
                 "source_image": reference.source_url or reference.download_url or "",
                 "original_format": "stl",
+                "friendly_name": reference.friendly_name or "",
             }
             return CADArtifact(
                 provider="tripo",
@@ -381,7 +397,7 @@ class CADCycler:
                 metadata={k: v for k, v in metadata.items() if v},
             )
 
-        mesh_url, mesh_format = self._extract_mesh_url(result)
+        mesh_url, mesh_format = self._extract_mesh_url(payload)
         if not mesh_url:
             LOGGER.warning("Tripo job completed without mesh URL", task_id=task_id)
             return None
@@ -415,10 +431,15 @@ class CADCycler:
         location = self._store.save_bytes(content, suffix)
         metadata = {
             "task_id": task_id or "",
-            "thumbnail": self._extract_thumbnail(result) or "",
+            "thumbnail": (
+                self._extract_thumbnail(payload)
+                or self._extract_thumbnail(full_result)
+                or ""
+            ),
             "source_image": reference.source_url or reference.download_url or "",
             "original_format": mesh_format or "",
             "mesh_url": mesh_url,
+            "friendly_name": reference.friendly_name or "",
         }
         return CADArtifact(
             provider="tripo",
@@ -441,7 +462,8 @@ class CADCycler:
                 unit=self._tripo_unit,
             )
             convert_result = await self._await_tripo_completion(convert_job)
-            stl_url = self._extract_stl_url(convert_result)
+            payload = self._unwrap_tripo_payload(convert_result)
+            stl_url = self._extract_stl_url(payload)
             if not stl_url:
                 LOGGER.warning(
                     "Tripo convert completed without STL URL",
@@ -534,3 +556,13 @@ class CADCycler:
                 if isinstance(url, str) and url.startswith("http"):
                     return url
         return None
+
+    @staticmethod
+    def _unwrap_tripo_payload(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not isinstance(payload, dict):
+            return {}
+        for key in ("result", "output", "model"):
+            inner = payload.get(key)
+            if isinstance(inner, dict):
+                return inner
+        return payload

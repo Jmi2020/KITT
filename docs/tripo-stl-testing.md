@@ -7,7 +7,7 @@ Use this checklist whenever you need to verify that long-running Tripo jobs (5�
 In `.env` (or your shell for an ad-hoc run):
 
 ```bash
-TRIPO_POLL_TIMEOUT=900        # 15 minutes for /image-to-3d + /convert
+TRIPO_POLL_TIMEOUT=900        # 15 minutes for /task completion (image_to_model)
 KITTY_CLI_TIMEOUT=1200        # 20 minutes before the CLI aborts the HTTP call
 ```
 
@@ -25,11 +25,7 @@ kitty-cli cad "High-detail reference-based mesh test"
 
 While it runs:
 
-- CAD logs (`docker compose logs -f cad`) will show:
-  - upload URL
-  - `/image-to-3d` task ID
-  - convert task ID (e.g., `convert-12345`)
-  - STL completion confirmation or fallback warning.
+- CAD logs (`docker compose logs -f cad`) will show upload URLs, `/task` polling, and STL conversion traces (local fallback or remote convert if explicitly enabled).
 - The CLI spinner will continue until the HTTP response is sent or `KITTY_CLI_TIMEOUT` is hit.
 
 ### 4. Validate results
@@ -48,4 +44,4 @@ TRIPO_CONVERT_ENABLED=false
 
 Restart CAD, rerun the job, and confirm the CLI still receives an STL along with a warning in the CAD logs noting that the local converter handled the export.
 
-> Tip: keep `TRIPO_CONVERT_ENABLED=true` in production—local conversion is only intended for temporary outages.
+> Tip: leave `TRIPO_CONVERT_ENABLED=false` unless Tripo re-enables the `/convert` endpoint in your account. The CLI already performs local GLB→STL conversion, so the server-side convert task is optional.

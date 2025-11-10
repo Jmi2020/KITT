@@ -88,13 +88,13 @@ class Settings(BaseSettings):
     tripo_api_base: str = "https://api.tripo3d.ai/v2/openapi"
     tripo_api_key: Optional[str] = None
     tripo_max_image_refs: int = 2
-    tripo_model_version: str = "v2.5"
-    tripo_texture_quality: str = "HD"
-    tripo_texture_alignment: str = "align_image"
+    tripo_model_version: Optional[str] = None
+    tripo_texture_quality: Optional[str] = None
+    tripo_texture_alignment: Optional[str] = None
     tripo_orientation: Optional[str] = None
     tripo_poll_interval: float = 3.0
     tripo_poll_timeout: float = 900.0
-    tripo_convert_enabled: bool = True
+    tripo_convert_enabled: bool = False
     tripo_stl_format: str = "binary"
     tripo_face_limit: Optional[int] = None
     tripo_unit: str = "millimeters"

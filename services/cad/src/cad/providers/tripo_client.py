@@ -19,7 +19,13 @@ class TripoClient:
         if not self._api_key:
             raise RuntimeError("TRIPO_API_KEY not configured")
         raw_base = base_url or settings.tripo_api_base or "https://api.tripo3d.ai/v2/openapi"
-        self._base_url = self._normalize_base(raw_base)
+        self._base_url = raw_base.rstrip("/")
+        if self._base_url.endswith("/v2/openapi"):
+            self._api_prefix = self._base_url
+            self._public_prefix = self._base_url
+        else:
+            self._api_prefix = f"{self._base_url}/v2/openapi"
+            self._public_prefix = self._base_url
 
     @staticmethod
     def _normalize_base(value: str) -> str:
@@ -56,8 +62,8 @@ class TripoClient:
         data: bytes,
         filename: str,
         content_type: Optional[str] = None,
-    ) -> str:
-        """Upload a reference image and return the hosted URL."""
+    ) -> Dict[str, str]:
+        """Upload a reference image and return identifiers for generation."""
 
         if not data:
             raise ValueError("Image payload is empty")
@@ -69,39 +75,47 @@ class TripoClient:
             )
         }
         async with http_client(
-            base_url=self._base_url,
+            base_url=self._public_prefix,
             bearer_token=self._api_key,
             timeout=60.0,
         ) as client:
             response = await client.post("/upload", files=files)
             response.raise_for_status()
-            payload = self._unwrap(response.json())
+            payload = response.json()
 
-        image_url = (
-            payload.get("url")
-            or payload.get("image_url")
-            or payload.get("imageUrl")
-            or payload.get("upload_url")
-        )
-        if not image_url:
-            raise RuntimeError("Tripo upload response missing image URL")
-        LOGGER.info("Tripo reference uploaded", image_url=image_url)
-        return image_url
+        body = payload.get("data") or payload
+        token = body.get("file_token") or body.get("image_token") or body.get("token")
+        if not token:
+            raise RuntimeError(f"Tripo upload response missing token: {payload}")
+        file_type = body.get("file_type") or (filename.split(".")[-1].lower() if "." in filename else "png")
+        image_url = body.get("image_url") or body.get("url")
+        LOGGER.info("Tripo reference uploaded", image_token=token)
+        return {"file_token": token, "file_type": file_type, "image_url": image_url}
 
-    async def start_image_job(
+    async def start_image_task(
         self,
         *,
-        image_url: str,
-        model_version: Optional[str] = None,
+        file_token: str,
+        file_type: Optional[str] = None,
+        version: Optional[str] = None,
         texture_quality: Optional[str] = None,
         texture_alignment: Optional[str] = None,
         orientation: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Kick off an image-to-3D generation task."""
+        """Create an image-to-model task via the unified task endpoint."""
 
-        body: Dict[str, Any] = {"image_url": image_url}
-        if model_version:
-            body["model_version"] = model_version
+        if not file_token:
+            raise ValueError("file_token is required for Tripo task")
+
+        body: Dict[str, Any] = {
+            "type": "image_to_model",
+            "file": {
+                "file_token": file_token,
+                "type": (file_type or "png").lower(),
+            },
+        }
+        if version:
+            body["version"] = version
         if texture_quality:
             body["texture_quality"] = texture_quality
         if texture_alignment:
@@ -110,17 +124,17 @@ class TripoClient:
             body["orientation"] = orientation
 
         async with http_client(
-            base_url=self._base_url,
+            base_url=self._api_prefix,
             bearer_token=self._api_key,
             timeout=30.0,
         ) as client:
-            response = await client.post("/image-to-3d", json=body)
+            response = await client.post("/task", json=body)
             response.raise_for_status()
             payload = self._unwrap(response.json())
 
         job = self._normalize_job(payload)
         LOGGER.info(
-            "Tripo image job created",
+            "Tripo image task created",
             task_id=job.get("task_id"),
             status=job.get("status"),
         )
@@ -130,7 +144,7 @@ class TripoClient:
         """Fetch the latest status for a generation task."""
 
         async with http_client(
-            base_url=self._base_url,
+            base_url=self._api_prefix,
             bearer_token=self._api_key,
             timeout=30.0,
         ) as client:
@@ -163,7 +177,7 @@ class TripoClient:
             body["unit"] = unit
 
         async with http_client(
-            base_url=self._base_url,
+            base_url=self._api_prefix,
             bearer_token=self._api_key,
             timeout=30.0,
         ) as client:

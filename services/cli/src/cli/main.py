@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set
 from urllib.parse import quote_plus, urlparse
 
 import httpx
@@ -24,6 +25,8 @@ from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
+
+from .storage import load_stored_images, save_stored_images
 
 load_dotenv()
 
@@ -90,6 +93,34 @@ USER_UUID = _env(
 )
 DEFAULT_VERBOSITY = int(_env("VERBOSITY", "3"))
 CLI_TIMEOUT = float(_env("KITTY_CLI_TIMEOUT", "900"))
+_SLUG_PATTERN = re.compile(r"[A-Za-z0-9]+")
+
+
+def _slugify_component(text: Optional[str], fallback: str = "reference") -> str:
+    words = _SLUG_PATTERN.findall(text or "")
+    if not words:
+        words = [fallback]
+    head = words[0].lower()
+    tail = [word.capitalize() for word in words[1:]]
+    return head + "".join(tail)
+
+
+def _unique_slug(base: str, existing: Set[str]) -> str:
+    if base not in existing:
+        return base
+    counter = 2
+    while True:
+        candidate = f"{base}{counter}"
+        if candidate not in existing:
+            return candidate
+        counter += 1
+
+
+def _friendly_name(title: Optional[str], source: Optional[str], existing: Set[str]) -> str:
+    base = _slugify_component(title or source or "reference")
+    slug = _unique_slug(base, existing)
+    existing.add(slug)
+    return slug
 
 
 @dataclass
@@ -107,6 +138,39 @@ class SessionState:
 
 
 state = SessionState()
+state.stored_images = load_stored_images()
+
+
+def _persist_stored_images() -> None:
+    save_stored_images(state.stored_images)
+
+
+def _merge_persisted_images(items: List[Dict[str, Any]]) -> None:
+    if not items:
+        return
+    existing_urls = {
+        entry.get("download_url") or entry.get("storage_uri")
+        for entry in state.stored_images
+    }
+    existing_names: Set[str] = {
+        entry.get("friendlyName") or entry.get("friendly_name")
+        for entry in state.stored_images
+        if entry.get("friendlyName") or entry.get("friendly_name")
+    }
+    changed = False
+    for item in items:
+        friendly = item.get("friendlyName") or item.get("friendly_name")
+        if not friendly:
+            friendly = _friendly_name(item.get("title"), item.get("source"), existing_names)
+            item["friendlyName"] = friendly
+        download_key = item.get("download_url") or item.get("storage_uri")
+        if download_key in existing_urls:
+            continue
+        state.stored_images.append(item)
+        existing_urls.add(download_key)
+        changed = True
+    if changed:
+        _persist_stored_images()
 
 
 class CommandCompleter(Completer):
@@ -519,9 +583,15 @@ def _run_vision_flow(
         console.print("[dim]No selections made")
         return
 
+    existing_names = {
+        img.get("friendlyName") or img.get("friendly_name")
+        for img in state.stored_images
+        if (img.get("friendlyName") or img.get("friendly_name"))
+    }
     chosen_images: List[Dict[str, Any]] = []
     for idx in selections:
         entry = ranked[idx - 1]
+        friendly = _friendly_name(entry.get("title"), entry.get("source"), existing_names)
         chosen_images.append(
             {
                 "id": entry.get("id"),
@@ -529,6 +599,8 @@ def _run_vision_flow(
                 "title": entry.get("title"),
                 "source": entry.get("source"),
                 "caption": entry.get("description"),
+                "friendlyName": friendly,
+                "name": friendly,
             }
         )
 
@@ -551,11 +623,12 @@ def _run_vision_flow(
 
     console.print(f"[green]Stored {len(stored_items)} reference image(s):")
     for item in stored_items:
+        friendly = item.get("friendlyName") or item.get("friendly_name")
         console.print(
-            f" - {item.get('title') or 'untitled'} | source={item.get('source')} "
+            f" - {(friendly or item.get('title') or 'untitled')} | source={item.get('source')} "
             f"| url={item.get('download_url')}"
         )
-    state.stored_images.extend(stored_items)
+    _merge_persisted_images(stored_items)
 
 
 @app.command()
@@ -673,6 +746,7 @@ def cad(prompt: List[str] = typer.Argument(..., help="CAD generation prompt")) -
                     "title": item.get("title"),
                     "source": item.get("source"),
                     "caption": item.get("caption"),
+                    "friendlyName": item.get("friendlyName") or item.get("friendly_name"),
                 }
             )
         payload["imageRefs"] = refs
@@ -882,13 +956,24 @@ def shell(
                 continue
 
             if cmd == "images":
+                if args and args[0].lower() in {"clear", "reset"}:
+                    state.stored_images.clear()
+                    _persist_stored_images()
+                    console.print("[green]Cleared stored reference images.")
+                    continue
                 if not state.stored_images:
                     console.print("[yellow]No stored reference images.")
                 else:
                     console.print("[bold]Stored reference images:[/bold]")
                     for idx, item in enumerate(state.stored_images, 1):
+                        friendly = (
+                            item.get("friendlyName")
+                            or item.get("friendly_name")
+                            or item.get("title")
+                            or f"image{idx}"
+                        )
                         console.print(
-                            f" [cyan]{idx}[/] {item.get('title') or 'untitled'} "
+                            f" [cyan]{idx}[/] {friendly} "
                             f"| source={item.get('source','')} | url={item.get('download_url')}"
                         )
                 continue
