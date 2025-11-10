@@ -1136,6 +1136,7 @@ def shell(
     console.print("\n[bold]Commands:[/bold]")
     console.print("  [cyan]/verbosity <1-5>[/cyan]  - Set response detail level")
     console.print("  [cyan]/cad <prompt>[/cyan]     - Generate CAD models")
+    console.print("  [cyan]/generate <prompt>[/cyan] - Generate image with Stable Diffusion")
     console.print("  [cyan]/list[/cyan]             - Show cached artifacts")
     console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact to printer")
     console.print("  [cyan]/vision <query>[/cyan]   - Search & store reference images")
@@ -1184,6 +1185,7 @@ def shell(
                 console.print("\n[bold]Available Commands:[/bold]")
                 console.print("  [cyan]/verbosity <1-5>[/cyan]  - Set verbosity (1=terse, 5=exhaustive)")
                 console.print("  [cyan]/cad <prompt>[/cyan]     - Generate CAD model from description")
+                console.print("  [cyan]/generate <prompt>[/cyan] - Generate image with Stable Diffusion")
                 console.print("  [cyan]/list[/cyan]             - List cached CAD artifacts")
                 console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact #idx to printer")
                 console.print("  [cyan]/vision <query>[/cyan]   - Search/select reference images")
@@ -1256,6 +1258,28 @@ def shell(
                     console.print("[yellow]Usage: /vision <query>")
                 else:
                     _run_vision_flow(" ".join(args))
+                continue
+
+            if cmd == "generate":
+                if not args:
+                    console.print("[yellow]Usage: /generate <prompt>")
+                    console.print("[dim]Example: /generate studio photo of a water bottle[/dim]")
+                else:
+                    # Call the generate_image command with default parameters
+                    try:
+                        generate_image(
+                            prompt=args,
+                            width=1024,
+                            height=1024,
+                            steps=30,
+                            cfg=7.0,
+                            seed=None,
+                            model="sdxl_base",
+                            refiner=None,
+                            wait=True  # Wait for completion in interactive mode
+                        )
+                    except typer.Exit:
+                        pass  # Handle exit gracefully in shell
                 continue
 
             if cmd == "images":

@@ -28,6 +28,10 @@ cleanup() {
   fi
   # Use the stop script to cleanly shut down both servers
   "$SCRIPT_DIR/stop-llamacpp-dual.sh" || true
+  # Stop images service if it was started
+  if [[ -n "${IMAGES_SERVICE_STARTED:-}" ]]; then
+    "$SCRIPT_DIR/stop-images-service.sh" || true
+  fi
 }
 
 trap cleanup EXIT
@@ -44,6 +48,14 @@ echo "  F16 (Reasoning Engine) logging to $LLAMACPP_F16_LOG"
 
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build
 COMPOSE_UP=1
+
+# Optionally start images service (Stable Diffusion)
+if [[ "${IMAGES_SERVICE_ENABLED:-false}" == "true" ]]; then
+  echo "Starting images service (Stable Diffusion)..."
+  "$SCRIPT_DIR/start-images-service.sh" > "$REPO_ROOT/.logs/images-service-startup.log" 2>&1 &
+  IMAGES_SERVICE_STARTED=1
+  echo "Images service started (logs: .logs/images-service-startup.log)"
+fi
 
 echo "KITTY stack running. Press Ctrl+C to stop."
 wait $DUAL_PID
