@@ -107,13 +107,39 @@ class DeepReasonerState(TypedDict, total=False):
     tool_results: Dict[str, ToolResult]
     response: str
     confidence: float
+    tier_used: RoutingTier
+    total_tokens: int
+    cost_usd: float
+    latency_ms: int
+    nodes_executed: List[str]
 
     # Deep reasoning specific
     q4_attempt: str  # Previous Q4 response (if escalated)
     q4_confidence: float  # Q4's confidence score
-    reasoning_steps: List[str]  # Chain of thought steps
-    verification_checks: List[Dict[str, Any]]  # Self-verification results
-    final_confidence: float  # After verification
+    previous_tool_results: Dict[str, ToolResult]  # Tool results from Q4
+    synthesized_context: str  # Combined context from all sources
+
+    # Problem decomposition
+    sub_problems: List[str]  # Decomposed sub-questions
+    decomposition_text: str  # Raw decomposition output
+
+    # Chain-of-thought reasoning
+    reasoning_steps: List[Dict[str, Any]]  # Structured reasoning steps
+    reasoning_step_count: int  # Current step number
+    max_reasoning_steps: int  # Maximum allowed steps
+
+    # Tool refinement
+    refined_tool_results: Dict[str, ToolResult]  # Re-executed tool results
+
+    # Evidence synthesis
+    evidence: List[Dict[str, Any]]  # Collected evidence pieces
+
+    # Self-evaluation
+    self_evaluation_score: float  # 0.0-1.0 quality assessment
+
+    # Retry management
+    retry_count: int  # Number of reasoning retries
+    max_retries: int  # Maximum retry attempts
 
 
 class ComplexityScore(TypedDict):
