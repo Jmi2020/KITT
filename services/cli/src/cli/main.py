@@ -104,6 +104,7 @@ USER_UUID = _env(
 DEFAULT_VERBOSITY = int(_env("VERBOSITY", "3"))
 CLI_TIMEOUT = float(_env("KITTY_CLI_TIMEOUT", "900"))
 MAX_REFERENCE_CONTEXT = int(_env("KITTY_REFERENCE_CONTEXT", "6"))
+TRIPO_REFERENCE_LIMIT = int(_env("TRIPO_MAX_IMAGE_REFS", "2"))
 _SLUG_PATTERN = re.compile(r"[A-Za-z0-9]+")
 
 
@@ -234,6 +235,37 @@ def _image_payload(entry: Dict[str, Any]) -> Dict[str, Any]:
         "caption": entry.get("caption"),
         "friendlyName": entry.get("friendlyName") or entry.get("friendly_name"),
     }
+
+
+def _match_reference_keywords(prompt: str, limit: int) -> List[Dict[str, Any]]:
+    images = _stored_images_newest_first()
+    if not images:
+        return []
+    tokens = {token for token in re.split(r"[^A-Za-z0-9]+", prompt.lower()) if token}
+    if not tokens:
+        return images[:limit]
+
+    def _score(entry: Dict[str, Any]) -> int:
+        haystacks = [
+            _image_display_name(entry).lower(),
+            (entry.get("title") or "").lower(),
+            (entry.get("source") or "").lower(),
+            (entry.get("caption") or "").lower(),
+        ]
+        score = 0
+        for token in tokens:
+            for hay in haystacks:
+                if token and token in hay:
+                    score += 1
+                    break
+        return score
+
+    ranked = sorted(
+        images,
+        key=lambda item: (_score(item), item.get("storedAt") or ""),
+        reverse=True,
+    )
+    return ranked[:limit]
 
 
 def _resolve_cad_image_refs(selectors: Optional[List[str]]) -> List[Dict[str, Any]]:
@@ -911,15 +943,24 @@ def cad(
     elif parametric:
         chosen_mode = "parametric"
 
+    auto_selected: List[Dict[str, Any]] = []
     if state.stored_images:
-        selected_refs = _resolve_cad_image_refs(image_filters)
-        if image_filters and not selected_refs:
-            console.print("[red]No stored references matched the requested filters.[/red]")
-            raise typer.Exit(1)
+        if image_filters:
+            selected_refs = _resolve_cad_image_refs(image_filters)
+            if image_filters and not selected_refs:
+                console.print("[red]No stored references matched the requested filters.[/red]")
+                raise typer.Exit(1)
+        else:
+            selected_refs = _match_reference_keywords(text, TRIPO_REFERENCE_LIMIT)
+            auto_selected = selected_refs
+
         if selected_refs:
             payload["imageRefs"] = [_image_payload(entry) for entry in selected_refs]
             if chosen_mode is None:
                 chosen_mode = "organic"
+            if auto_selected:
+                friendly = ", ".join(_image_display_name(entry) for entry in auto_selected)
+                console.print(f"[dim]Auto-selected references: {friendly}[/dim]")
     elif image_filters:
         console.print("[yellow]No stored references available—ignoring --image filters.[/yellow]")
 

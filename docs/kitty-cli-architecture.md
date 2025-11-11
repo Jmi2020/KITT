@@ -109,6 +109,8 @@ kitty-cli say "What's the status of printer_01?"
 kitty-cli cad "design a wall mount"
 # Target specific stored references (friendly name, ID, or newest-first index)
 kitty-cli cad --image rocketshipLaunch --image 1 "convert this shuttle photo"
+# Natural language auto-selection (no flags): matches prompt keywords against stored titles/captions and forwards the best references
+kitty-cli cad "Use the rocket ship photo to make a 3D mesh"
 
 # List available models
 kitty-cli models

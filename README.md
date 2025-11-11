@@ -627,7 +627,7 @@ kitty-cli cad "Create a phone stand with 45° angle and cable management"
 - One-click queue to OctoPrint/Klipper
 - Vision references: `/vision` selections are sent as `imageRefs` (download URL + storage URI). The CAD service mounts the shared `references_storage` volume, streams the original bytes to Tripo's `/upload` endpoint, kicks off `/image-to-3d`, polls `/task/<id>`, then submits a Tripo `/convert` task to emit binary STL (face-limit + unit aware) before falling back to local `trimesh` conversion whenever the API is unavailable.
 - Reference ordering: the CLI persists selections newest-first and automatically shares the latest entries with KITTY inside an `<available_image_refs>` block whenever you chat or run `/cad`. Hermes/Gemini read this block and include the matching `imageRefs` when calling `generate_cad_model`, so you always know which photo is being used.
-- Targeted references: use `kitty-cli cad --image rocketshipLaunch --image 1 "Convert this shuttle photo"` (friendly names, IDs, or newest-first indexes) to send only specific references; omit `--image` to let KITTY pick the freshest two by default.
+- Targeted references: use `kitty-cli cad --image rocketshipLaunch --image 1 "Convert this shuttle photo"` (friendly names, IDs, or newest-first indexes) to send only specific references; omit `--image` and the CLI will keyword-match your prompt against stored titles/captions to auto-select the best references (defaults to Tripo’s 2-image limit).
 - Validation checklist: see `docs/tripo-stl-testing.md` for end-to-end test steps and timeout recommendations.
 
 ### 📂 **Accessing Generated Files from macOS Finder**
