@@ -6,7 +6,7 @@ Handles storing and querying discovered devices in PostgreSQL.
 import logging
 from datetime import datetime
 from typing import List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -98,6 +98,7 @@ class DeviceStore:
             else:
                 # Create new device record
                 record = DeviceRecord(
+                    id=str(uuid4()),
                     discovered_at=device.discovered_at,
                     last_seen=device.discovered_at,
                     discovery_method=device.discovery_method.value,
@@ -357,6 +358,7 @@ class DeviceStore:
         """
         async with self.async_session_maker() as session:
             record = ScanRecord(
+                id=str(uuid4()),
                 started_at=datetime.utcnow(),
                 status="running",
                 methods=methods,
