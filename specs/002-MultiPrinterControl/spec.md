@@ -418,6 +418,275 @@ class PrintJobSpec:
 7. **Cloud Print Submission**: Remote print via internet (security concern)
 8. **Webcam Streaming**: Live video from printer cameras
 
+## Training Data Collection (Phase 2/3)
+
+To enable KITTY to learn from operator workflows and improve automatic print preparation, the system shall capture training data from manual slicer interactions.
+
+### Approach 1: Screen Recording (Recommended)
+
+**Concept:**
+- Record slicer window when user interacts with it
+- Start recording on **first user interaction** (not when slicer opens)
+- Capture all user actions: orientation changes, support placement, slicer settings
+- Stop recording when user closes slicer or explicitly stops recording
+
+**Implementation (macOS):**
+
+```python
+# Using AVFoundation for window-specific recording
+class SlicerRecorder:
+    """Record slicer interactions for training data."""
+
+    def monitor_slicer(self, app_name: str, session_id: str):
+        """
+        Start monitoring slicer window for user interaction.
+
+        Workflow:
+        1. Launch slicer (Phase 1)
+        2. Monitor for window focus change to slicer
+        3. Detect first mouse click or keyboard input in slicer window
+        4. Start recording at that moment (not before)
+        5. Record until slicer closed or timeout (30 min)
+        """
+
+    def start_recording(self, window_id: int, output_path: Path):
+        """
+        Record specific window using AVFoundation.
+
+        Uses:
+        - CGWindowListCreateImage for window capture
+        - AVAssetWriter for video encoding
+        - H.264 codec at 30fps
+        """
+
+    def annotate_recording(self, video_path: Path, events: List[Event]):
+        """
+        Add metadata track with user actions and timestamps.
+
+        Events captured:
+        - Mouse clicks (with coordinates relative to slicer window)
+        - Keyboard shortcuts (e.g., Ctrl+R for rotate)
+        - Button clicks (identified via Accessibility API if available)
+        - Settings changes (detected via screen diff)
+        """
+```
+
+**Captured Data Structure:**
+
+```yaml
+session_id: "fab_20250111_143022"
+model_path: "/Users/Shared/KITT/artifacts/cad/bracket.stl"
+model_dimensions: {width: 150, depth: 100, height: 50}
+printer: "bamboo_h2d"
+slicer_app: "BambuStudio"
+recording_start: "2025-01-11T14:30:45Z"
+recording_duration: 342  # seconds
+
+user_actions:
+  - timestamp: "2025-01-11T14:30:47Z"
+    action: "rotate_model"
+    params: {axis: "z", degrees: 90}
+
+  - timestamp: "2025-01-11T14:31:12Z"
+    action: "enable_supports"
+    params: {type: "tree", density: "15%"}
+
+  - timestamp: "2025-01-11T14:32:05Z"
+    action: "change_infill"
+    params: {pattern: "gyroid", density: "20%"}
+
+  - timestamp: "2025-01-11T14:35:30Z"
+    action: "slice_model"
+    params: {layer_height: 0.2, print_time: "1h 45m"}
+
+outcome: "print_started"  # or "abandoned", "error"
+video_path: "/Users/Shared/KITT/training/recordings/fab_20250111_143022.mp4"
+annotations_path: "/Users/Shared/KITT/training/recordings/fab_20250111_143022.json"
+```
+
+**Privacy & Consent:**
+- Recording only starts when user interacts (not automatically)
+- Option to disable recording in settings: `ENABLE_SLICER_RECORDING=false`
+- Recordings stored locally, never uploaded without explicit consent
+- User can review and delete recordings before they're used for training
+- Only record slicer window, not full screen (no sensitive data capture)
+
+### Approach 2: Inter-Process Communication Monitoring (Advanced)
+
+**Concept:**
+- Monitor commands sent to slicer via IPC mechanisms
+- Capture structured data instead of video
+- More precise but requires reverse engineering each slicer
+
+**macOS IPC Monitoring Options:**
+
+1. **Apple Script** (if slicer supports it):
+```applescript
+tell application "BambuStudio"
+  get properties of document 1
+  -- Capture model orientation, support settings, etc.
+end tell
+```
+
+2. **Accessibility API** (NSAccessibility):
+```python
+from AppKit import NSAccessibility
+
+class SlicerAccessibilityMonitor:
+    """Monitor slicer UI elements via Accessibility API."""
+
+    def capture_ui_state(self, app_name: str):
+        """
+        Query UI elements to capture slicer state.
+
+        Requires: Accessibility permissions in System Preferences
+
+        Captures:
+        - Button clicks (e.g., "Add Supports" button)
+        - Slider changes (e.g., infill density slider)
+        - Text field edits (e.g., layer height input)
+        - Menu selections (e.g., "Orient for printing")
+        """
+```
+
+3. **System-Level Event Monitoring**:
+```python
+from Quartz import (
+    CGEventTapCreate,
+    kCGEventTapOptionDefault,
+    kCGEventLeftMouseDown,
+    kCGEventKeyDown,
+    kCGHIDEventTap
+)
+
+class SystemEventMonitor:
+    """Monitor system events when slicer is active window."""
+
+    def start_monitoring(self):
+        """
+        Capture mouse and keyboard events.
+
+        Requires: Input Monitoring permission
+
+        Filters events to only capture when slicer is active:
+        - Mouse clicks (position relative to slicer window)
+        - Keyboard shortcuts (Cmd+R, Cmd+S, etc.)
+        - Scroll events (zooming, panning)
+        """
+```
+
+**Structured Data Output:**
+
+```json
+{
+  "session_id": "fab_20250111_143022",
+  "slicer_commands": [
+    {
+      "timestamp": "2025-01-11T14:30:47Z",
+      "command": "rotate_model",
+      "method": "button_click",
+      "ui_element": "RotateZButton",
+      "parameters": {"degrees": 90}
+    },
+    {
+      "timestamp": "2025-01-11T14:31:12Z",
+      "command": "enable_supports",
+      "method": "menu_selection",
+      "ui_element": "SupportMenu > TreeSupports",
+      "parameters": {"enabled": true, "type": "tree"}
+    }
+  ]
+}
+```
+
+### Training Data Usage
+
+**Collected data will enable:**
+
+1. **Supervised Learning for Automatic Workflow (Phase 2)**:
+   - Train model to predict optimal orientation based on geometry + user corrections
+   - Learn which models typically need supports (features → support decision)
+   - Predict slicer settings based on model characteristics
+
+2. **Reinforcement Learning from Human Feedback (RLHF)**:
+   - Reward function: Did user change KITTY's suggested orientation? (negative reward)
+   - Reward function: Did print succeed without user intervention? (positive reward)
+   - Learn to minimize user corrections over time
+
+3. **Vision Model Training**:
+   - Annotated screen recordings → train computer vision to detect:
+     - Good vs bad orientation (visual features)
+     - Support attachment points (visual cues)
+     - Overhangs and problematic geometry
+
+4. **Intent Classification**:
+   - User says "print this" → What did they actually do in slicer?
+   - Build dataset: {model_features, user_prompt} → {final_slicer_settings}
+   - Improve natural language understanding for print requests
+
+### Storage & Infrastructure
+
+**Data Storage:**
+```
+/Users/Shared/KITT/training/
+├── recordings/
+│   ├── fab_20250111_143022.mp4       # Screen recording
+│   ├── fab_20250111_143022.json      # Annotations
+│   └── fab_20250111_143022_stl.json  # Model metadata
+├── ipc_logs/
+│   └── fab_20250111_143022.json      # IPC commands (if using Approach 2)
+└── training_dataset/
+    ├── orientation_corrections.jsonl  # Aggregated training data
+    ├── support_decisions.jsonl
+    └── slicer_settings.jsonl
+```
+
+**PostgreSQL Schema Addition:**
+```sql
+CREATE TABLE slicer_sessions (
+    session_id VARCHAR(50) PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL,
+    model_path TEXT NOT NULL,
+    model_dimensions JSONB NOT NULL,
+    printer_id VARCHAR(50) NOT NULL,
+    slicer_app VARCHAR(50) NOT NULL,
+    recording_path TEXT,
+    annotations_path TEXT,
+    started_at TIMESTAMP NOT NULL,
+    ended_at TIMESTAMP,
+    outcome VARCHAR(20),  -- 'print_started', 'abandoned', 'error'
+    user_actions JSONB,  -- Array of action events
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_slicer_sessions_model ON slicer_sessions(model_path);
+CREATE INDEX idx_slicer_sessions_printer ON slicer_sessions(printer_id);
+CREATE INDEX idx_slicer_sessions_outcome ON slicer_sessions(outcome);
+```
+
+### Implementation Priority
+
+**Phase 2 (After Manual Workflow Stable):**
+- [ ] Implement screen recording with user interaction detection
+- [ ] Add recording start/stop controls to UI
+- [ ] Store recordings with metadata in PostgreSQL
+- [ ] User consent and privacy controls
+
+**Phase 3 (Advanced Training Data):**
+- [ ] IPC monitoring for structured command capture
+- [ ] Accessibility API integration for UI state capture
+- [ ] Annotation tools for manual labeling of recordings
+- [ ] Export training datasets for model fine-tuning
+
+### Ethical Considerations
+
+1. **Transparency**: User must know when recording is active (indicator in UI)
+2. **Consent**: Opt-in only, disabled by default
+3. **Privacy**: Only record slicer window, no personal/sensitive data
+4. **Control**: User can review, delete, or opt-out of recordings at any time
+5. **Security**: Recordings stored locally, encrypted at rest
+6. **Anonymization**: Remove personally identifiable information before training
+
 ## Dependencies
 
 **Phase 1 (Manual Workflow):**
@@ -433,6 +702,14 @@ pyyaml==6.0.1          # Printer config parsing (already in use)
 ```txt
 scipy==1.11.3          # Center of mass calculations
 numpy-stl==3.0.1       # STL manipulation and rotation
+```
+
+**Phase 2/3 (Training Data Collection):**
+```txt
+pyobjc-framework-Quartz==10.1   # macOS screen recording, window capture
+pyobjc-framework-AVFoundation==10.1  # Video encoding, H.264 codec
+pyobjc-framework-AppKit==10.1   # Accessibility API for UI monitoring
+psutil==5.9.6          # Process monitoring, window detection
 ```
 
 **Slicer Applications (macOS):**
