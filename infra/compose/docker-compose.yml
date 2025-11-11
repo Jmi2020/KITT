@@ -25,6 +25,7 @@ services:
       CAD_SERVICE_URL: http://cad:8200
       BROKER_URL: http://broker:8777
       FABRICATION_BASE: http://fabrication:8300
+      DISCOVERY_BASE: http://discovery:8500
       HOME_ASSISTANT_URL: ${HOME_ASSISTANT_URL:-http://homeassistant:8123}
       HOME_ASSISTANT_TOKEN: ${HOME_ASSISTANT_TOKEN}
       SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://searxng:8080}
@@ -42,6 +43,7 @@ services:
       - cad
       - broker
       - fabrication
+      - discovery
       - homeassistant
     volumes:
       - ../../services/common:/app/services/common:ro
@@ -65,6 +67,7 @@ services:
       SERVICE_NAME: gateway
       UPSTREAM_BRAIN_URL: http://brain:8000
       FABRICATION_BASE: http://fabrication:8300
+      DISCOVERY_BASE: http://discovery:8500
       SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://searxng:8080}
       INTERNAL_SEARXNG_BASE_URL: http://searxng:8080
       IMAGE_SEARCH_PROVIDER: ${IMAGE_SEARCH_PROVIDER:-auto}
@@ -74,6 +77,7 @@ services:
     depends_on:
       - brain
       - fabrication
+      - discovery
     volumes:
       - ../../services/common:/app/services/common:ro
       - ../../services/gateway:/app/services/gateway:ro
@@ -191,6 +195,35 @@ services:
     networks:
       - kitty
 
+  discovery:
+    build:
+      context: ../..
+      dockerfile: services/discovery/Dockerfile
+    env_file:
+      - .env
+    environment:
+      <<: *service-env
+      SERVICE_NAME: discovery
+      DISCOVERY_PORT: ${DISCOVERY_PORT:-8500}
+      DISCOVERY_SCAN_INTERVAL_MINUTES: ${DISCOVERY_SCAN_INTERVAL_MINUTES:-15}
+      DISCOVERY_ENABLE_PERIODIC_SCANS: ${DISCOVERY_ENABLE_PERIODIC_SCANS:-true}
+    depends_on:
+      - postgres
+      - mosquitto
+    volumes:
+      - ../../services/common:/app/services/common:ro
+      - ../../services/discovery:/app/services/discovery:ro
+    ports:
+      - "8500:8500"
+    networks:
+      - kitty
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8500/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
   broker:
     build:
       context: ../..
@@ -205,8 +238,10 @@ services:
       BROKER_AUDIT_LOG: /var/log/kitty/broker-audit.jsonl
       BROKER_ENABLE_PRIVILEGE_DROP: "false"
       FABRICATION_BASE: http://fabrication:8300
+      DISCOVERY_BASE: http://discovery:8500
     depends_on:
       - fabrication
+      - discovery
     volumes:
       - ../../services/broker:/app/services/broker:ro
       - broker-logs:/var/log/kitty
