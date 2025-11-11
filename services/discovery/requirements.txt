@@ -15,7 +15,8 @@ mac-vendor-lookup==0.1.12
 
 # Database
 sqlalchemy==2.0.25
-psycopg2-binary==2.9.9
+asyncpg==0.29.0  # Async PostgreSQL driver for SQLAlchemy
+psycopg2-binary==2.9.9  # Sync driver for Alembic migrations
 alembic==1.13.1
 
 # HTTP client
