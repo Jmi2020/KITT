@@ -1,31 +1,361 @@
 # Multi-Printer Control Implementation Plan
 
 ## Overview
-Extend KITTY fabrication service to support three printer types with intelligent printer selection based on model characteristics:
-- **Bamboo Labs H2D** - Small to medium prints (FDM)
-- **Elegoo OrangeStorm Giga (Klipper)** - Large prints (FDM)
-- **Snapmaker Artisan Pro** - CNC machining and laser engraving
 
-## Architecture
+Implement two-phase printer integration:
+- **Phase 1 (Manual Workflow)**: STL analysis + printer selection + slicer app launching
+- **Phase 2 (Automatic Workflow)**: Add model scaling, orientation validation, and support detection
 
-### 1. Printer Driver Interface
+This is a pragmatic approach that gives users control while leveraging KITTY's intelligence for prep work.
 
-Create abstract base class for unified printer control:
+## Architecture Diagram
 
-**File: `services/fabrication/src/fabrication/drivers/base.py`**
+```
+User: "print this bracket"
+    ↓
+ReAct Agent: fabrication.open_in_slicer
+    ↓
+Gateway (:8080/api/fabrication/open_in_slicer)
+    ↓
+Fabrication Service (:8300)
+    ├─ STL Analyzer (trimesh)
+    ├─ Printer Status Checker (MQTT + HTTP)
+    ├─ Printer Selector (decision logic)
+    └─ Slicer Launcher (macOS open command)
+    ↓
+BambuStudio.app opens with bracket.stl
+    ↓
+User: slices, configures, and prints manually
+```
+
+## Phase 1: Manual Workflow (Default)
+
+### Step 1: STL Analysis Module
+
+**File: `services/fabrication/src/fabrication/analysis/stl_analyzer.py`**
 
 ```python
-from abc import ABC, abstractmethod
+"""STL file analysis using trimesh."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+import trimesh
+import numpy as np
+
+from common.logging import get_logger
+
+LOGGER = get_logger(__name__)
+
+
+@dataclass
+class ModelDimensions:
+    """STL model dimensions and metadata."""
+    width: float  # X dimension (mm)
+    depth: float  # Y dimension (mm)
+    height: float  # Z dimension (mm)
+    max_dimension: float  # Largest of width/depth/height
+    volume: float  # mm³
+    surface_area: float  # mm²
+    bounds: tuple  # [[min_x, min_y, min_z], [max_x, max_y, max_z]]
+
+
+class STLAnalyzer:
+    """Analyze STL files for printer selection."""
+
+    def analyze(self, stl_path: Path) -> ModelDimensions:
+        """
+        Load STL and extract dimensions.
+
+        Args:
+            stl_path: Path to STL file
+
+        Returns:
+            ModelDimensions with all calculated properties
+
+        Raises:
+            FileNotFoundError: STL file doesn't exist
+            ValueError: STL file is corrupted or invalid
+        """
+        if not stl_path.exists():
+            raise FileNotFoundError(f"STL file not found: {stl_path}")
+
+        try:
+            mesh = trimesh.load(stl_path)
+        except Exception as e:
+            raise ValueError(f"Failed to load STL: {e}")
+
+        # Validate mesh
+        if not mesh.is_valid:
+            LOGGER.warning("STL has invalid geometry", path=str(stl_path))
+
+        # Calculate bounding box
+        bounds = mesh.bounds  # [[min_x, min_y, min_z], [max_x, max_y, max_z]]
+        dimensions = bounds[1] - bounds[0]  # [width, depth, height]
+
+        width, depth, height = dimensions
+        max_dim = max(dimensions)
+
+        LOGGER.info(
+            "Analyzed STL",
+            path=stl_path.name,
+            dimensions={
+                "width": f"{width:.1f}mm",
+                "depth": f"{depth:.1f}mm",
+                "height": f"{height:.1f}mm",
+                "max": f"{max_dim:.1f}mm"
+            }
+        )
+
+        return ModelDimensions(
+            width=float(width),
+            depth=float(depth),
+            height=float(height),
+            max_dimension=float(max_dim),
+            volume=float(mesh.volume),
+            surface_area=float(mesh.area),
+            bounds=(bounds.tolist(),)
+        )
+
+    def scale_model(
+        self,
+        stl_path: Path,
+        target_height: float,
+        output_path: Path
+    ) -> ModelDimensions:
+        """
+        Scale STL to target height (Phase 2).
+
+        Args:
+            stl_path: Input STL file
+            target_height: Desired height in mm
+            output_path: Where to save scaled STL
+
+        Returns:
+            ModelDimensions of scaled model
+        """
+        mesh = trimesh.load(stl_path)
+
+        # Calculate current height
+        current_height = mesh.bounds[1][2] - mesh.bounds[0][2]
+        scale_factor = target_height / current_height
+
+        LOGGER.info(
+            "Scaling model",
+            from_height=f"{current_height:.1f}mm",
+            to_height=f"{target_height:.1f}mm",
+            scale_factor=f"{scale_factor:.2f}x"
+        )
+
+        # Apply uniform scaling
+        mesh.apply_scale(scale_factor)
+
+        # Export scaled mesh
+        mesh.export(output_path)
+
+        # Analyze scaled dimensions
+        return self.analyze(output_path)
+```
+
+### Step 2: Printer Status Checker
+
+**File: `services/fabrication/src/fabrication/status/printer_status.py`**
+
+```python
+"""Check printer availability via MQTT and HTTP."""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Dict, Optional
+import json
+
+import httpx
+import paho.mqtt.client as mqtt
+
+from common.config import Settings
+from common.logging import get_logger
+
+LOGGER = get_logger(__name__)
+
+
+@dataclass
+class PrinterStatus:
+    """Printer availability and state."""
+    printer_id: str
+    is_online: bool
+    is_printing: bool
+    status: str  # "idle", "printing", "paused", "offline"
+    current_job: Optional[str] = None
+    progress_percent: Optional[float] = None
+    bed_temp: Optional[float] = None
+    extruder_temp: Optional[float] = None
+    last_updated: Optional[datetime] = None
+
+
+class PrinterStatusChecker:
+    """Query printer status with caching."""
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self._cache: Dict[str, PrinterStatus] = {}
+        self._cache_ttl = timedelta(seconds=30)
+
+        # Bamboo MQTT client
+        self._bamboo_mqtt: Optional[mqtt.Client] = None
+        self._bamboo_status: Dict = {}
+
+    async def get_bamboo_status(self) -> PrinterStatus:
+        """
+        Check Bamboo H2D status via MQTT.
+
+        Returns cached status if fresh (<30s old).
+        """
+        printer_id = "bamboo_h2d"
+
+        # Check cache first
+        if printer_id in self._cache:
+            cached = self._cache[printer_id]
+            age = datetime.now() - (cached.last_updated or datetime.min)
+            if age < self._cache_ttl:
+                LOGGER.debug("Using cached Bamboo status", age_seconds=age.total_seconds())
+                return cached
+
+        # Initialize MQTT client if needed
+        if not self._bamboo_mqtt:
+            self._init_bamboo_mqtt()
+
+        # Wait up to 2 seconds for MQTT message
+        await asyncio.sleep(2)
+
+        # Parse status from last MQTT message
+        print_state = self._bamboo_status.get("print", {}).get("gcode_state", "IDLE")
+        is_printing = print_state in ["RUNNING", "PAUSE"]
+
+        status = PrinterStatus(
+            printer_id=printer_id,
+            is_online=bool(self._bamboo_status),
+            is_printing=is_printing,
+            status="printing" if print_state == "RUNNING" else "idle" if print_state == "IDLE" else "offline",
+            current_job=self._bamboo_status.get("print", {}).get("subtask_name"),
+            progress_percent=self._bamboo_status.get("print", {}).get("mc_percent"),
+            bed_temp=self._bamboo_status.get("temps", {}).get("bed_temp"),
+            extruder_temp=self._bamboo_status.get("temps", {}).get("nozzle_temp"),
+            last_updated=datetime.now()
+        )
+
+        self._cache[printer_id] = status
+        return status
+
+    def _init_bamboo_mqtt(self) -> None:
+        """Initialize MQTT client for Bamboo H2D."""
+        self._bamboo_mqtt = mqtt.Client(
+            client_id=f"kitty-status-{self.settings.BAMBOO_SERIAL}",
+            protocol=mqtt.MQTTv311
+        )
+        self._bamboo_mqtt.username_pw_set("bblp", self.settings.BAMBOO_ACCESS_CODE)
+        self._bamboo_mqtt.on_message = self._on_bamboo_message
+
+        try:
+            self._bamboo_mqtt.connect(self.settings.BAMBOO_IP, 1883, keepalive=60)
+            self._bamboo_mqtt.subscribe(f"device/{self.settings.BAMBOO_SERIAL}/report")
+            self._bamboo_mqtt.loop_start()
+            LOGGER.info("Connected to Bamboo MQTT", ip=self.settings.BAMBOO_IP)
+        except Exception as e:
+            LOGGER.error("Failed to connect to Bamboo MQTT", error=str(e))
+
+    def _on_bamboo_message(self, client, userdata, message):
+        """Parse Bamboo MQTT status update."""
+        try:
+            self._bamboo_status = json.loads(message.payload.decode("utf-8"))
+        except Exception as e:
+            LOGGER.error("Failed to parse Bamboo MQTT message", error=str(e))
+
+    async def get_elegoo_status(self) -> PrinterStatus:
+        """
+        Check Elegoo Giga status via Moonraker HTTP.
+
+        Returns cached status if fresh (<30s old).
+        """
+        printer_id = "elegoo_giga"
+
+        # Check cache
+        if printer_id in self._cache:
+            cached = self._cache[printer_id]
+            age = datetime.now() - (cached.last_updated or datetime.min)
+            if age < self._cache_ttl:
+                LOGGER.debug("Using cached Elegoo status", age_seconds=age.total_seconds())
+                return cached
+
+        # Query Moonraker
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                response = await client.get(
+                    f"http://{self.settings.ELEGOO_IP}:7125/printer/info"
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                state = data.get("result", {}).get("state", "offline")
+                is_printing = state == "printing"
+
+                status = PrinterStatus(
+                    printer_id=printer_id,
+                    is_online=True,
+                    is_printing=is_printing,
+                    status="printing" if is_printing else "idle",
+                    last_updated=datetime.now()
+                )
+
+        except Exception as e:
+            LOGGER.warning("Failed to get Elegoo status", error=str(e))
+            status = PrinterStatus(
+                printer_id=printer_id,
+                is_online=False,
+                is_printing=False,
+                status="offline",
+                last_updated=datetime.now()
+            )
+
+        self._cache[printer_id] = status
+        return status
+
+    async def get_all_statuses(self) -> Dict[str, PrinterStatus]:
+        """Get status of all printers concurrently."""
+        bamboo, elegoo = await asyncio.gather(
+            self.get_bamboo_status(),
+            self.get_elegoo_status(),
+            return_exceptions=True
+        )
+
+        return {
+            "bamboo_h2d": bamboo if not isinstance(bamboo, Exception) else PrinterStatus("bamboo_h2d", False, False, "offline"),
+            "elegoo_giga": elegoo if not isinstance(elegoo, Exception) else PrinterStatus("elegoo_giga", False, False, "offline")
+        }
+```
+
+### Step 3: Printer Selector
+
+**File: `services/fabrication/src/fabrication/selector/printer_selector.py`**
+
+```python
+"""Intelligent printer selection based on model size and printer availability."""
+
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Any, Optional
 
+from common.logging import get_logger
 
-class PrinterType(Enum):
-    BAMBOO_H2D = "bamboo_h2d"
-    ELEGOO_GIGA = "elegoo_giga"
-    SNAPMAKER_ARTISAN = "snapmaker_artisan"
+from ..analysis.stl_analyzer import STLAnalyzer, ModelDimensions
+from ..status.printer_status import PrinterStatusChecker, PrinterStatus
+
+LOGGER = get_logger(__name__)
 
 
 class PrintMode(Enum):
@@ -36,806 +366,424 @@ class PrintMode(Enum):
 
 @dataclass
 class PrinterCapabilities:
-    """Physical capabilities and specifications"""
-    printer_type: PrinterType
-    print_modes: list[PrintMode]
-    max_x: float  # mm
-    max_y: float  # mm
-    max_z: float  # mm
-    supported_materials: list[str]
+    """Printer specifications."""
+    printer_id: str
+    slicer_app: str  # "BambuStudio", "ElegySlicer", "Luban"
+    build_volume: tuple[float, float, float]  # (x, y, z) in mm
+    quality: str  # "excellent", "good", "medium"
+    speed: str  # "fast", "medium", "slow"
+    supported_modes: list[PrintMode]
 
 
 @dataclass
-class PrinterStatus:
-    """Real-time printer state"""
-    is_online: bool
-    is_printing: bool
-    current_job_id: Optional[str]
-    bed_temp: Optional[float]
-    extruder_temp: Optional[float]
-    progress_percent: Optional[float]
-    estimated_time_remaining: Optional[int]  # seconds
-
-
-@dataclass
-class PrintJobSpec:
-    """Print job specification"""
-    job_id: str
-    file_path: Path
-    print_mode: PrintMode
-    nozzle_temp: Optional[int] = None
-    bed_temp: Optional[int] = None
-    material: Optional[str] = None
-
-
-class PrinterDriver(ABC):
-    """Abstract interface for all printer drivers"""
-
-    def __init__(self, printer_id: str, config: Dict[str, Any]):
-        self.printer_id = printer_id
-        self.config = config
-
-    @property
-    @abstractmethod
-    def capabilities(self) -> PrinterCapabilities:
-        """Return printer capabilities"""
-        pass
-
-    @abstractmethod
-    async def connect(self) -> None:
-        """Establish connection to printer"""
-        pass
-
-    @abstractmethod
-    async def disconnect(self) -> None:
-        """Close connection to printer"""
-        pass
-
-    @abstractmethod
-    async def get_status(self) -> PrinterStatus:
-        """Get current printer status"""
-        pass
-
-    @abstractmethod
-    async def upload_file(self, file_path: Path) -> str:
-        """Upload G-code/CAM file to printer, return remote filename"""
-        pass
-
-    @abstractmethod
-    async def start_print(self, spec: PrintJobSpec) -> None:
-        """Start printing a job"""
-        pass
-
-    @abstractmethod
-    async def pause_print(self) -> None:
-        """Pause current print"""
-        pass
-
-    @abstractmethod
-    async def resume_print(self) -> None:
-        """Resume paused print"""
-        pass
-
-    @abstractmethod
-    async def cancel_print(self) -> None:
-        """Cancel current print"""
-        pass
-```
-
-### 2. Concrete Driver Implementations
-
-#### 2.1 Bamboo Labs H2D Driver
-
-**File: `services/fabrication/src/fabrication/drivers/bamboo.py`**
-
-Uses MQTT for control and FTPS for file uploads.
-
-```python
-import ftplib
-import json
-from pathlib import Path
-import paho.mqtt.client as mqtt
-from typing import Dict, Any
-
-from .base import (
-    PrinterDriver, PrinterCapabilities, PrinterStatus,
-    PrintJobSpec, PrinterType, PrintMode
-)
-
-
-class BambooLabsDriver(PrinterDriver):
-    """Bamboo Labs H2D driver using MQTT + FTPS"""
-
-    def __init__(self, printer_id: str, config: Dict[str, Any]):
-        super().__init__(printer_id, config)
-        self.ip = config["ip"]
-        self.serial = config["serial"]
-        self.access_code = config["access_code"]
-        self.mqtt_host = config.get("mqtt_host", self.ip)  # Local or cloud MQTT
-        self.mqtt_port = config.get("mqtt_port", 1883)
-        self.mqtt_client: Optional[mqtt.Client] = None
-        self._last_status: Dict[str, Any] = {}
-
-    @property
-    def capabilities(self) -> PrinterCapabilities:
-        return PrinterCapabilities(
-            printer_type=PrinterType.BAMBOO_H2D,
-            print_modes=[PrintMode.FDM_3D_PRINT],
-            max_x=250.0,
-            max_y=250.0,
-            max_z=250.0,
-            supported_materials=["PLA", "PETG", "ABS", "TPU"]
-        )
-
-    async def connect(self) -> None:
-        """Connect to Bamboo MQTT broker"""
-        self.mqtt_client = mqtt.Client(
-            client_id=f"kitty-{self.printer_id}",
-            protocol=mqtt.MQTTv311
-        )
-        self.mqtt_client.username_pw_set("bblp", self.access_code)
-        self.mqtt_client.on_message = self._on_mqtt_message
-        self.mqtt_client.connect(self.mqtt_host, self.mqtt_port, keepalive=60)
-        self.mqtt_client.subscribe(f"device/{self.serial}/report")
-        self.mqtt_client.loop_start()
-
-    async def disconnect(self) -> None:
-        if self.mqtt_client:
-            self.mqtt_client.loop_stop()
-            self.mqtt_client.disconnect()
-
-    def _on_mqtt_message(self, client, userdata, message):
-        """Parse printer status from MQTT"""
-        self._last_status = json.loads(message.payload.decode("utf-8"))
-
-    async def get_status(self) -> PrinterStatus:
-        """Parse cached MQTT status"""
-        return PrinterStatus(
-            is_online=bool(self._last_status),
-            is_printing=self._last_status.get("print", {}).get("state") == "printing",
-            current_job_id=self._last_status.get("print", {}).get("job_id"),
-            bed_temp=self._last_status.get("temps", {}).get("bed_temp"),
-            extruder_temp=self._last_status.get("temps", {}).get("nozzle_temp"),
-            progress_percent=self._last_status.get("print", {}).get("percent"),
-            estimated_time_remaining=self._last_status.get("print", {}).get("eta")
-        )
-
-    async def upload_file(self, file_path: Path) -> str:
-        """Upload G-code via FTPS"""
-        session = ftplib.FTP_TLS()
-        session.connect(self.ip, 990)
-        session.auth()
-        session.login("bblp", self.access_code)
-        session.prot_p()
-
-        with open(file_path, 'rb') as f:
-            session.storbinary(f'STOR {file_path.name}', f)
-
-        session.quit()
-        return file_path.name
-
-    async def start_print(self, spec: PrintJobSpec) -> None:
-        """Send MQTT print command"""
-        command = {
-            "print": {
-                "command": "start",
-                "param": str(spec.file_path.name)
-            }
-        }
-        self.mqtt_client.publish(
-            f"device/{self.serial}/request",
-            json.dumps(command)
-        )
-
-    async def pause_print(self) -> None:
-        command = {"print": {"command": "pause"}}
-        self.mqtt_client.publish(
-            f"device/{self.serial}/request",
-            json.dumps(command)
-        )
-
-    async def resume_print(self) -> None:
-        command = {"print": {"command": "resume"}}
-        self.mqtt_client.publish(
-            f"device/{self.serial}/request",
-            json.dumps(command)
-        )
-
-    async def cancel_print(self) -> None:
-        command = {"print": {"command": "stop"}}
-        self.mqtt_client.publish(
-            f"device/{self.serial}/request",
-            json.dumps(command)
-        )
-```
-
-#### 2.2 Klipper Driver (Elegoo Giga)
-
-**File: `services/fabrication/src/fabrication/drivers/klipper.py`**
-
-Extends existing MoonrakerClient with full driver interface.
-
-```python
-import httpx
-from pathlib import Path
-from typing import Dict, Any
-
-from .base import (
-    PrinterDriver, PrinterCapabilities, PrinterStatus,
-    PrintJobSpec, PrinterType, PrintMode
-)
-from ..klipper.moonraker_client import MoonrakerClient
-
-
-class KlipperDriver(PrinterDriver):
-    """Klipper/Moonraker driver for Elegoo OrangeStorm Giga"""
-
-    def __init__(self, printer_id: str, config: Dict[str, Any]):
-        super().__init__(printer_id, config)
-        self.ip = config["ip"]
-        self.port = config.get("port", 7125)
-        self.base_url = f"http://{self.ip}:{self.port}"
-        self.client = MoonrakerClient(self.base_url)
-
-    @property
-    def capabilities(self) -> PrinterCapabilities:
-        return PrinterCapabilities(
-            printer_type=PrinterType.ELEGOO_GIGA,
-            print_modes=[PrintMode.FDM_3D_PRINT],
-            max_x=800.0,  # Giga has 800x800x1000mm build volume
-            max_y=800.0,
-            max_z=1000.0,
-            supported_materials=["PLA", "PETG", "ABS", "TPU", "Nylon"]
-        )
-
-    async def connect(self) -> None:
-        """Moonraker is stateless HTTP, no connection needed"""
-        pass
-
-    async def disconnect(self) -> None:
-        """No persistent connection to close"""
-        pass
-
-    async def get_status(self) -> PrinterStatus:
-        """Query printer status via Moonraker"""
-        objects = {
-            "print_stats": ["state", "filename"],
-            "heater_bed": ["temperature", "target"],
-            "extruder": ["temperature", "target"],
-            "virtual_sdcard": ["progress"]
-        }
-        result = await self.client.query_objects(objects)
-        status_data = result.get("result", {}).get("status", {})
-
-        print_stats = status_data.get("print_stats", {})
-        heater = status_data.get("heater_bed", {})
-        extruder = status_data.get("extruder", {})
-        sdcard = status_data.get("virtual_sdcard", {})
-
-        return PrinterStatus(
-            is_online=True,  # If we got a response, it's online
-            is_printing=print_stats.get("state") == "printing",
-            current_job_id=print_stats.get("filename"),
-            bed_temp=heater.get("temperature"),
-            extruder_temp=extruder.get("temperature"),
-            progress_percent=sdcard.get("progress", 0) * 100,
-            estimated_time_remaining=None  # TODO: calculate from print stats
-        )
-
-    async def upload_file(self, file_path: Path) -> str:
-        """Upload G-code via HTTP POST"""
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            with open(file_path, 'rb') as f:
-                files = {'file': (file_path.name, f, 'application/octet-stream')}
-                response = await client.post(
-                    f"{self.base_url}/server/files/upload",
-                    files=files
-                )
-                response.raise_for_status()
-        return file_path.name
-
-    async def start_print(self, spec: PrintJobSpec) -> None:
-        """Start print via Moonraker JSON-RPC"""
-        payload = {
-            "jsonrpc": "2.0",
-            "method": "printer.print.start",
-            "params": {"filename": spec.file_path.name},
-            "id": 1
-        }
-        async with httpx.AsyncClient(base_url=self.base_url, timeout=30) as client:
-            response = await client.post("/printer/print/start", json=payload)
-            response.raise_for_status()
-
-    async def pause_print(self) -> None:
-        await self._send_gcode("PAUSE")
-
-    async def resume_print(self) -> None:
-        await self._send_gcode("RESUME")
-
-    async def cancel_print(self) -> None:
-        await self._send_gcode("CANCEL_PRINT")
-
-    async def _send_gcode(self, script: str) -> None:
-        """Send G-code command"""
-        payload = {
-            "jsonrpc": "2.0",
-            "method": "printer.gcode.script",
-            "params": {"script": script},
-            "id": 1
-        }
-        async with httpx.AsyncClient(base_url=self.base_url, timeout=30) as client:
-            await client.post("/printer/gcode/script", json=payload)
-```
-
-#### 2.3 Snapmaker Driver
-
-**File: `services/fabrication/src/fabrication/drivers/snapmaker.py`**
-
-Custom SACP protocol implementation.
-
-```python
-import asyncio
-import json
-import socket
-import struct
-from pathlib import Path
-from typing import Dict, Any, Optional
-
-from .base import (
-    PrinterDriver, PrinterCapabilities, PrinterStatus,
-    PrintJobSpec, PrinterType, PrintMode
-)
-
-
-class SnapmakerDriver(PrinterDriver):
-    """Snapmaker Artisan Pro driver using SACP protocol"""
-
-    def __init__(self, printer_id: str, config: Dict[str, Any]):
-        super().__init__(printer_id, config)
-        self.ip = config["ip"]
-        self.port = config.get("port", 8888)
-        self.socket: Optional[socket.socket] = None
-        self._reader: Optional[asyncio.StreamReader] = None
-        self._writer: Optional[asyncio.StreamWriter] = None
-
-    @property
-    def capabilities(self) -> PrinterCapabilities:
-        return PrinterCapabilities(
-            printer_type=PrinterType.SNAPMAKER_ARTISAN,
-            print_modes=[PrintMode.FDM_3D_PRINT, PrintMode.CNC_MILL, PrintMode.LASER_ENGRAVE],
-            max_x=400.0,
-            max_y=400.0,
-            max_z=400.0,
-            supported_materials=["PLA", "PETG", "ABS", "Wood", "Acrylic", "Metal"]
-        )
-
-    async def connect(self) -> None:
-        """Connect to SACP TCP server"""
-        self._reader, self._writer = await asyncio.open_connection(self.ip, self.port)
-
-        # Send authentication handshake
-        handshake = {
-            "command": "enclosure.auth",
-            "token": self.config.get("token", "")
-        }
-        await self._send_command(handshake)
-        await self._receive_response()  # Consume auth response
-
-    async def disconnect(self) -> None:
-        if self._writer:
-            self._writer.close()
-            await self._writer.wait_closed()
-
-    async def _send_command(self, command: Dict[str, Any]) -> None:
-        """Send SACP command (length-prefixed JSON)"""
-        json_str = json.dumps(command)
-        message = struct.pack('>I', len(json_str)) + json_str.encode('utf-8')
-        self._writer.write(message)
-        await self._writer.drain()
-
-    async def _receive_response(self) -> Dict[str, Any]:
-        """Receive SACP response"""
-        length_data = await self._reader.readexactly(4)
-        length = struct.unpack('>I', length_data)[0]
-        response_data = await self._reader.readexactly(length)
-        return json.loads(response_data.decode('utf-8'))
-
-    async def get_status(self) -> PrinterStatus:
-        """Query printer status via SACP"""
-        await self._send_command({"command": "system.status"})
-        response = await self._receive_response()
-
-        return PrinterStatus(
-            is_online=response.get("status") == "ok",
-            is_printing=response.get("print_status") == "printing",
-            current_job_id=response.get("current_file"),
-            bed_temp=response.get("bed_temperature"),
-            extruder_temp=response.get("nozzle_temperature"),
-            progress_percent=response.get("progress"),
-            estimated_time_remaining=response.get("remaining_time")
-        )
-
-    async def upload_file(self, file_path: Path) -> str:
-        """Upload file via SACP (chunked transfer)"""
-        # SACP file upload requires chunked binary transfer
-        # Implementation details from Snapmaker SDK
-        await self._send_command({
-            "command": "file.upload",
-            "filename": file_path.name,
-            "size": file_path.stat().st_size
-        })
-
-        # Upload file in chunks (implementation simplified)
-        with open(file_path, 'rb') as f:
-            while chunk := f.read(4096):
-                # Send chunk with SACP framing
-                pass  # TODO: Full chunked upload protocol
-
-        return file_path.name
-
-    async def start_print(self, spec: PrintJobSpec) -> None:
-        """Start print job via SACP"""
-        await self._send_command({
-            "command": "print.start",
-            "filename": spec.file_path.name,
-            "mode": spec.print_mode.value
-        })
-
-    async def pause_print(self) -> None:
-        await self._send_command({"command": "print.pause"})
-
-    async def resume_print(self) -> None:
-        await self._send_command({"command": "print.resume"})
-
-    async def cancel_print(self) -> None:
-        await self._send_command({"command": "print.stop"})
-```
-
-### 3. Printer Registry
-
-**File: `services/fabrication/src/fabrication/registry.py`**
-
-Centralized configuration for all printers.
-
-```python
-import os
-from pathlib import Path
-from typing import Dict, List
-import yaml
-
-from .drivers.base import PrinterDriver, PrinterType
-from .drivers.bamboo import BambooLabsDriver
-from .drivers.klipper import KlipperDriver
-from .drivers.snapmaker import SnapmakerDriver
-
-
-class PrinterRegistry:
-    """Manages available printers and their configurations"""
-
-    def __init__(self, config_path: Path | None = None):
-        if config_path is None:
-            config_path = Path(os.getenv("PRINTER_CONFIG", "config/printers.yaml"))
-
-        with open(config_path) as f:
-            self.config = yaml.safe_load(f)
-
-        self._drivers: Dict[str, PrinterDriver] = {}
-        self._init_drivers()
-
-    def _init_drivers(self) -> None:
-        """Initialize printer drivers from config"""
-        for printer_id, printer_config in self.config["printers"].items():
-            printer_type = PrinterType(printer_config["type"])
-
-            if printer_type == PrinterType.BAMBOO_H2D:
-                driver = BambooLabsDriver(printer_id, printer_config)
-            elif printer_type == PrinterType.ELEGOO_GIGA:
-                driver = KlipperDriver(printer_id, printer_config)
-            elif printer_type == PrinterType.SNAPMAKER_ARTISAN:
-                driver = SnapmakerDriver(printer_id, printer_config)
-            else:
-                raise ValueError(f"Unknown printer type: {printer_type}")
-
-            self._drivers[printer_id] = driver
-
-    def get_driver(self, printer_id: str) -> PrinterDriver:
-        """Get driver by printer ID"""
-        if printer_id not in self._drivers:
-            raise ValueError(f"Unknown printer: {printer_id}")
-        return self._drivers[printer_id]
-
-    def list_printers(self) -> List[str]:
-        """List all registered printer IDs"""
-        return list(self._drivers.keys())
-
-    async def get_all_statuses(self) -> Dict[str, Dict]:
-        """Get status of all printers"""
-        statuses = {}
-        for printer_id, driver in self._drivers.items():
-            try:
-                status = await driver.get_status()
-                statuses[printer_id] = {
-                    "online": status.is_online,
-                    "printing": status.is_printing,
-                    "capabilities": {
-                        "type": driver.capabilities.printer_type.value,
-                        "modes": [m.value for m in driver.capabilities.print_modes],
-                        "build_volume": {
-                            "x": driver.capabilities.max_x,
-                            "y": driver.capabilities.max_y,
-                            "z": driver.capabilities.max_z
-                        }
-                    }
-                }
-            except Exception as e:
-                statuses[printer_id] = {"online": False, "error": str(e)}
-
-        return statuses
-```
-
-**Configuration File: `config/printers.yaml`**
-
-```yaml
-printers:
-  bamboo_h2d:
-    type: bamboo_h2d
-    ip: 192.168.1.100
-    serial: "01P45165616"
-    access_code: "YOUR_ACCESS_CODE"
-    mqtt_host: 192.168.1.100  # Local MQTT (LAN-only mode)
-    mqtt_port: 1883
-
-  elegoo_giga:
-    type: elegoo_giga
-    ip: 192.168.1.200
-    port: 7125
-    note: "Klipper with Moonraker on default port"
-
-  snapmaker_artisan:
-    type: snapmaker_artisan
-    ip: 192.168.1.150
-    port: 8888
-    token: ""  # Optional SACP auth token
-```
-
-### 4. Printer Selection Engine
-
-**File: `services/fabrication/src/fabrication/selector.py`**
-
-Intelligent printer selection based on model characteristics.
-
-```python
-from pathlib import Path
-from typing import Optional
-import trimesh  # For STL bounding box analysis
-
-from .drivers.base import PrintMode, PrinterCapabilities
-from .registry import PrinterRegistry
+class SelectionResult:
+    """Printer selection decision."""
+    printer_id: str
+    slicer_app: str
+    reasoning: str
+    model_fits: bool
+    printer_available: bool
 
 
 class PrinterSelector:
-    """Select optimal printer for a given job"""
+    """Select optimal printer for a given model."""
 
-    def __init__(self, registry: PrinterRegistry):
-        self.registry = registry
+    # Printer capabilities registry
+    PRINTERS = {
+        "bamboo_h2d": PrinterCapabilities(
+            printer_id="bamboo_h2d",
+            slicer_app="BambuStudio",
+            build_volume=(250, 250, 250),
+            quality="excellent",
+            speed="medium",
+            supported_modes=[PrintMode.FDM_3D_PRINT]
+        ),
+        "elegoo_giga": PrinterCapabilities(
+            printer_id="elegoo_giga",
+            slicer_app="ElegySlicer",
+            build_volume=(800, 800, 1000),
+            quality="good",
+            speed="fast",
+            supported_modes=[PrintMode.FDM_3D_PRINT]
+        ),
+        "snapmaker_artisan": PrinterCapabilities(
+            printer_id="snapmaker_artisan",
+            slicer_app="Luban",
+            build_volume=(400, 400, 400),
+            quality="good",
+            speed="medium",
+            supported_modes=[PrintMode.FDM_3D_PRINT, PrintMode.CNC_MILL, PrintMode.LASER_ENGRAVE]
+        )
+    }
 
-    def select_printer(
+    def __init__(
+        self,
+        analyzer: STLAnalyzer,
+        status_checker: PrinterStatusChecker
+    ):
+        self.analyzer = analyzer
+        self.status_checker = status_checker
+
+    async def select_printer(
         self,
         stl_path: Path,
-        print_mode: PrintMode = PrintMode.FDM_3D_PRINT,
-        preferred_printer: Optional[str] = None
-    ) -> str:
+        mode: PrintMode = PrintMode.FDM_3D_PRINT
+    ) -> SelectionResult:
         """
-        Select printer based on model size and print mode.
+        Select optimal printer based on model and printer status.
 
-        Selection logic:
-        - CNC or laser → Snapmaker Artisan (only printer with these capabilities)
-        - 3D print, small-medium (≤200mm) → Bamboo H2D
-        - 3D print, large (>200mm) → Elegoo Giga
+        Priority hierarchy:
+        1. CNC or Laser → Snapmaker (only multi-mode printer)
+        2. 3D Print:
+           - Model ≤250mm AND Bamboo idle → Bamboo (best quality)
+           - Model ≤250mm AND Bamboo busy → Elegoo (fallback)
+           - Model >250mm AND ≤800mm → Elegoo (only option)
+           - Model >800mm → Error (too large)
+
+        Args:
+            stl_path: Path to STL file
+            mode: Print mode (3d_print, cnc, laser)
+
+        Returns:
+            SelectionResult with printer ID, app, and reasoning
         """
 
-        # If user specifies printer, use it
-        if preferred_printer:
-            return preferred_printer
+        # Step 1: Check for CNC/Laser mode
+        if mode in [PrintMode.CNC_MILL, PrintMode.LASER_ENGRAVE]:
+            return SelectionResult(
+                printer_id="snapmaker_artisan",
+                slicer_app="Luban",
+                reasoning=f"{mode.value} job requires Snapmaker Artisan (only multi-mode printer)",
+                model_fits=True,
+                printer_available=True  # Assume available (no status checking for Snapmaker yet)
+            )
 
-        # CNC and laser only supported by Snapmaker
-        if print_mode in [PrintMode.CNC_MILL, PrintMode.LASER_ENGRAVE]:
-            return "snapmaker_artisan"
+        # Step 2: Analyze model dimensions
+        dimensions = self.analyzer.analyze(stl_path)
 
-        # Analyze STL bounding box for 3D prints
-        mesh = trimesh.load(stl_path)
-        bounds = mesh.bounds  # [[min_x, min_y, min_z], [max_x, max_y, max_z]]
-        dimensions = bounds[1] - bounds[0]  # [width, depth, height]
-        max_dim = max(dimensions)
-
-        # Selection thresholds
-        SMALL_MEDIUM_THRESHOLD = 200.0  # mm
-
-        if max_dim <= SMALL_MEDIUM_THRESHOLD:
-            # Small-medium prints → Bamboo H2D (faster, quieter)
-            return "bamboo_h2d"
-        else:
-            # Large prints → Elegoo Giga (800x800x1000mm build volume)
-            return "elegoo_giga"
-
-    def validate_fit(self, stl_path: Path, printer_id: str) -> bool:
-        """Check if model fits on specified printer"""
-        driver = self.registry.get_driver(printer_id)
-        caps = driver.capabilities
-
-        mesh = trimesh.load(stl_path)
-        bounds = mesh.bounds
-        dimensions = bounds[1] - bounds[0]
-
-        return (
-            dimensions[0] <= caps.max_x and
-            dimensions[1] <= caps.max_y and
-            dimensions[2] <= caps.max_z
+        LOGGER.info(
+            "Model analysis complete",
+            max_dimension=f"{dimensions.max_dimension:.1f}mm",
+            volume=f"{dimensions.volume:.0f}mm³"
         )
+
+        # Step 3: Check if model too large for all printers
+        if dimensions.max_dimension > 800:
+            raise ValueError(
+                f"Model too large for all printers. "
+                f"Max dimension: {dimensions.max_dimension:.1f}mm, "
+                f"Largest printer (Elegoo Giga): 800mm"
+            )
+
+        # Step 4: Get printer statuses
+        statuses = await self.status_checker.get_all_statuses()
+        bamboo_status = statuses["bamboo_h2d"]
+        elegoo_status = statuses["elegoo_giga"]
+
+        # Step 5: Apply selection logic
+        if dimensions.max_dimension <= 250:
+            # Small-medium model, prefer Bamboo for quality
+            if bamboo_status.is_online and not bamboo_status.is_printing:
+                return SelectionResult(
+                    printer_id="bamboo_h2d",
+                    slicer_app="BambuStudio",
+                    reasoning=(
+                        f"Model fits Bamboo H2D ({dimensions.max_dimension:.1f}mm ≤ 250mm). "
+                        f"Bamboo is idle. Using Bamboo for excellent print quality."
+                    ),
+                    model_fits=True,
+                    printer_available=True
+                )
+            else:
+                # Bamboo busy or offline, fall back to Elegoo
+                return SelectionResult(
+                    printer_id="elegoo_giga",
+                    slicer_app="ElegySlicer",
+                    reasoning=(
+                        f"Model fits Bamboo ({dimensions.max_dimension:.1f}mm ≤ 250mm) "
+                        f"but Bamboo is {bamboo_status.status}. "
+                        f"Using Elegoo Giga as fallback (fast print speed)."
+                    ),
+                    model_fits=True,
+                    printer_available=elegoo_status.is_online
+                )
+        else:
+            # Large model, only Elegoo can handle
+            return SelectionResult(
+                printer_id="elegoo_giga",
+                slicer_app="ElegySlicer",
+                reasoning=(
+                    f"Large model ({dimensions.max_dimension:.1f}mm > 250mm) "
+                    f"requires Elegoo Giga (800x800x1000mm build volume)."
+                ),
+                model_fits=True,
+                printer_available=elegoo_status.is_online
+            )
 ```
 
-### 5. Enhanced Job Manager
+### Step 4: Slicer App Launcher
 
-**File: `services/fabrication/src/fabrication/jobs/manager.py`** (Updated)
+**File: `services/fabrication/src/fabrication/launcher/slicer_launcher.py`**
 
 ```python
+"""Launch macOS slicer applications."""
+
+from __future__ import annotations
+
+import subprocess
 from pathlib import Path
 from typing import Optional
 
 from common.logging import get_logger
 
-from ..drivers.base import PrintJobSpec, PrintMode
-from ..registry import PrinterRegistry
-from ..selector import PrinterSelector
-
 LOGGER = get_logger(__name__)
 
 
-class PrintJobManager:
-    """Manages print jobs across multiple printers"""
+class SlicerLauncher:
+    """Launch slicer applications on macOS."""
 
-    def __init__(self, registry: PrinterRegistry):
-        self.registry = registry
-        self.selector = PrinterSelector(registry)
+    # Application names and bundle identifiers
+    APPS = {
+        "BambuStudio": "com.bambulab.bambu-studio",
+        "ElegySlicer": "com.elegoo.elegyslicer",  # May vary
+        "Luban": "com.snapmaker.luban"
+    }
 
-    async def queue_print(
-        self,
-        job_id: str,
-        file_path: Path,
-        print_mode: PrintMode = PrintMode.FDM_3D_PRINT,
-        printer_id: Optional[str] = None,
-        nozzle_temp: Optional[int] = None,
-        bed_temp: Optional[int] = None
-    ) -> dict:
+    def launch(self, app_name: str, stl_path: Path) -> bool:
         """
-        Queue print job with automatic or manual printer selection.
+        Launch slicer app with STL file on macOS.
+
+        Args:
+            app_name: Application name (BambuStudio, ElegySlicer, Luban)
+            stl_path: Path to STL file to open
 
         Returns:
-            dict with printer_id, job_id, status
+            True if launched successfully
+
+        Raises:
+            FileNotFoundError: Slicer app not installed
+            RuntimeError: Failed to launch app
         """
 
-        # Auto-select printer if not specified
-        if printer_id is None:
-            printer_id = self.selector.select_printer(file_path, print_mode)
-            LOGGER.info(
-                "Auto-selected printer",
-                printer=printer_id,
-                job=job_id,
-                mode=print_mode.value
-            )
-        else:
-            # Validate manual selection
-            if not self.selector.validate_fit(file_path, printer_id):
-                raise ValueError(f"Model too large for {printer_id}")
+        if not stl_path.exists():
+            raise FileNotFoundError(f"STL file not found: {stl_path}")
 
-        # Get driver and submit job
-        driver = self.registry.get_driver(printer_id)
-        await driver.connect()
-
-        try:
-            # Upload file
-            LOGGER.info("Uploading file", job=job_id, printer=printer_id)
-            remote_filename = await driver.upload_file(file_path)
-
-            # Create job spec
-            spec = PrintJobSpec(
-                job_id=job_id,
-                file_path=Path(remote_filename),
-                print_mode=print_mode,
-                nozzle_temp=nozzle_temp,
-                bed_temp=bed_temp
+        # Check if app is installed
+        if not self._app_exists(app_name):
+            raise FileNotFoundError(
+                f"{app_name} not installed. "
+                f"Download from: {self._get_download_link(app_name)}"
             )
 
-            # Start print
-            LOGGER.info("Starting print", job=job_id, printer=printer_id)
-            await driver.start_print(spec)
-
-            return {
-                "printer_id": printer_id,
-                "job_id": job_id,
-                "status": "printing",
-                "selection_method": "auto" if printer_id else "manual"
-            }
-
-        finally:
-            await driver.disconnect()
-
-    async def pause_job(self, printer_id: str) -> None:
-        """Pause print on specific printer"""
-        driver = self.registry.get_driver(printer_id)
-        await driver.connect()
+        # Launch app with file
         try:
-            await driver.pause_print()
-        finally:
-            await driver.disconnect()
+            subprocess.run(
+                ["open", "-a", app_name, str(stl_path)],
+                check=True,
+                capture_output=True,
+                timeout=10
+            )
+            LOGGER.info("Launched slicer app", app=app_name, file=stl_path.name)
+            return True
 
-    async def resume_job(self, printer_id: str) -> None:
-        """Resume print on specific printer"""
-        driver = self.registry.get_driver(printer_id)
-        await driver.connect()
-        try:
-            await driver.resume_print()
-        finally:
-            await driver.disconnect()
+        except subprocess.CalledProcessError as e:
+            LOGGER.error(
+                "Failed to launch slicer",
+                app=app_name,
+                error=e.stderr.decode()
+            )
+            raise RuntimeError(f"Failed to launch {app_name}: {e.stderr.decode()}")
 
-    async def cancel_job(self, printer_id: str) -> None:
-        """Cancel print on specific printer"""
-        driver = self.registry.get_driver(printer_id)
-        await driver.connect()
+        except subprocess.TimeoutExpired:
+            LOGGER.error("Slicer launch timed out", app=app_name)
+            raise RuntimeError(f"Timeout launching {app_name}")
+
+    def _app_exists(self, app_name: str) -> bool:
+        """Check if macOS app is installed."""
         try:
-            await driver.cancel_print()
-        finally:
-            await driver.disconnect()
+            result = subprocess.run(
+                ["mdfind", f"kMDItemCFBundleIdentifier == '{self.APPS.get(app_name, app_name)}'"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            return bool(result.stdout.strip())
+        except Exception:
+            # Fallback: try launching and see if it fails
+            return True
+
+    def _get_download_link(self, app_name: str) -> str:
+        """Get download URL for slicer app."""
+        links = {
+            "BambuStudio": "https://bambulab.com/en/download",
+            "ElegySlicer": "https://www.elegoo.com/pages/3d-printing-user-support",
+            "Luban": "https://snapmaker.com/product/snapmaker-luban"
+        }
+        return links.get(app_name, "Check manufacturer website")
 ```
 
-### 6. Gateway Fabrication Routes
+### Step 5: Fabrication Service API
+
+**File: `services/fabrication/src/fabrication/app.py`** (Updated)
+
+```python
+"""Fabrication service with slicer integration."""
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from pathlib import Path
+from typing import Optional
+
+from common.config import Settings
+from common.logging import get_logger
+
+from .analysis.stl_analyzer import STLAnalyzer
+from .status.printer_status import PrinterStatusChecker
+from .selector.printer_selector import PrinterSelector, PrintMode
+from .launcher.slicer_launcher import SlicerLauncher
+
+LOGGER = get_logger(__name__)
+
+app = FastAPI(title="KITTY Fabrication Service")
+
+# Initialize components
+settings = Settings()
+analyzer = STLAnalyzer()
+status_checker = PrinterStatusChecker(settings)
+selector = PrinterSelector(analyzer, status_checker)
+launcher = SlicerLauncher()
+
+
+class OpenInSlicerRequest(BaseModel):
+    stl_path: str
+    mode: str = "3d_print"
+
+
+class OpenInSlicerResponse(BaseModel):
+    printer_id: str
+    slicer_app: str
+    message: str
+    model_dimensions: dict
+    printer_available: bool
+
+
+@app.post("/api/fabrication/open_in_slicer")
+async def open_in_slicer(request: OpenInSlicerRequest) -> OpenInSlicerResponse:
+    """
+    Manual workflow: Analyze model, select printer, open in slicer.
+
+    This is the default workflow. User completes slicing and printing manually.
+    """
+    stl_path = Path(request.stl_path)
+
+    if not stl_path.exists():
+        raise HTTPException(status_code=404, detail=f"STL file not found: {stl_path}")
+
+    try:
+        # Parse mode
+        mode = PrintMode(request.mode)
+
+        # Select printer
+        selection = await selector.select_printer(stl_path, mode)
+
+        # Get model dimensions for response
+        dimensions = analyzer.analyze(stl_path)
+
+        # Launch slicer app
+        launcher.launch(selection.slicer_app, stl_path)
+
+        return OpenInSlicerResponse(
+            printer_id=selection.printer_id,
+            slicer_app=selection.slicer_app,
+            message=f"Opening in {selection.slicer_app}. {selection.reasoning}",
+            model_dimensions={
+                "width": dimensions.width,
+                "depth": dimensions.depth,
+                "height": dimensions.height,
+                "max_dimension": dimensions.max_dimension,
+                "volume": dimensions.volume
+            },
+            printer_available=selection.printer_available
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        LOGGER.error("Failed to open in slicer", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
+
+
+@app.get("/api/fabrication/analyze_model")
+async def analyze_model(stl_path: str):
+    """Analyze STL dimensions and recommend printer without opening slicer."""
+    path = Path(stl_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="STL not found")
+
+    dimensions = analyzer.analyze(path)
+    selection = await selector.select_printer(path)
+
+    return {
+        "dimensions": {
+            "width": dimensions.width,
+            "depth": dimensions.depth,
+            "height": dimensions.height,
+            "max_dimension": dimensions.max_dimension
+        },
+        "volume": dimensions.volume,
+        "recommended_printer": selection.printer_id,
+        "slicer_app": selection.slicer_app,
+        "reasoning": selection.reasoning
+    }
+
+
+@app.get("/api/fabrication/printer_status")
+async def printer_status():
+    """Get status of all printers."""
+    statuses = await status_checker.get_all_statuses()
+    return {
+        pid: {
+            "is_online": status.is_online,
+            "is_printing": status.is_printing,
+            "status": status.status,
+            "current_job": status.current_job,
+            "progress_percent": status.progress_percent
+        }
+        for pid, status in statuses.items()
+    }
+```
+
+### Step 6: Gateway Integration
 
 **File: `services/gateway/src/gateway/routes/fabrication.py`** (New)
 
 ```python
-"""KITTY Gateway - Fabrication Service Proxy"""
-from __future__ import annotations
+"""Gateway fabrication routes - proxy to fabrication service."""
 
-import os
-from typing import Any, Optional
-
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import httpx
-
+import os
 
 router = APIRouter(prefix="/api/fabrication", tags=["fabrication"])
 
-FABRICATION_BASE = os.getenv("FABRICATION_BASE", "http://127.0.0.1:8300")
+FABRICATION_BASE = os.getenv("FABRICATION_BASE", "http://fabrication:8300")
 
 
-class QueuePrintRequest(BaseModel):
-    artifact_path: str
-    print_mode: str = "3d_print"
-    printer_id: Optional[str] = None
-    nozzle_temp: Optional[int] = None
-    bed_temp: Optional[int] = None
+class OpenInSlicerRequest(BaseModel):
+    stl_path: str
+    mode: str = "3d_print"
 
 
-@router.post("/queue")
-async def queue_print(request: QueuePrintRequest) -> dict[str, Any]:
-    """
-    Queue print job with automatic printer selection.
-
-    Print mode options:
-    - "3d_print" (default)
-    - "cnc"
-    - "laser"
-
-    If printer_id is not specified, KITTY will automatically select:
-    - Small-medium models (≤200mm) → bamboo_h2d
-    - Large models (>200mm) → elegoo_giga
-    - CNC/laser → snapmaker_artisan
-    """
+@router.post("/open_in_slicer")
+async def open_in_slicer(request: OpenInSlicerRequest):
+    """Proxy to fabrication service - open STL in slicer app."""
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"{FABRICATION_BASE}/api/fabrication/queue",
+                f"{FABRICATION_BASE}/api/fabrication/open_in_slicer",
                 json=request.dict()
             )
             response.raise_for_status()
@@ -844,414 +792,466 @@ async def queue_print(request: QueuePrintRequest) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
 
 
-@router.get("/printers")
-async def list_printers() -> dict[str, Any]:
-    """
-    List all available printers with status and capabilities.
-    """
+@router.get("/analyze_model")
+async def analyze_model(stl_path: str):
+    """Analyze STL without opening slicer."""
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(f"{FABRICATION_BASE}/api/fabrication/printers")
-            response.raise_for_status()
-            return response.json()
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
-
-
-@router.get("/printers/{printer_id}/status")
-async def printer_status(printer_id: str) -> dict[str, Any]:
-    """Get status of specific printer"""
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
-                f"{FABRICATION_BASE}/api/fabrication/printers/{printer_id}/status"
+                f"{FABRICATION_BASE}/api/fabrication/analyze_model",
+                params={"stl_path": stl_path}
             )
             response.raise_for_status()
             return response.json()
     except httpx.HTTPError as e:
-        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/printers/{printer_id}/pause")
-async def pause_print(printer_id: str) -> dict[str, str]:
-    """Pause print on specific printer"""
+@router.get("/printer_status")
+async def printer_status():
+    """Get status of all printers."""
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{FABRICATION_BASE}/api/fabrication/printers/{printer_id}/pause"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                f"{FABRICATION_BASE}/api/fabrication/printer_status"
             )
             response.raise_for_status()
-            return {"status": "paused"}
+            return response.json()
     except httpx.HTTPError as e:
-        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
-
-
-@router.post("/printers/{printer_id}/resume")
-async def resume_print(printer_id: str) -> dict[str, str]:
-    """Resume print on specific printer"""
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{FABRICATION_BASE}/api/fabrication/printers/{printer_id}/resume"
-            )
-            response.raise_for_status()
-            return {"status": "resumed"}
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
-
-
-@router.post("/printers/{printer_id}/cancel")
-async def cancel_print(printer_id: str) -> dict[str, str]:
-    """Cancel print on specific printer"""
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{FABRICATION_BASE}/api/fabrication/printers/{printer_id}/cancel"
-            )
-            response.raise_for_status()
-            return {"status": "cancelled"}
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 ```
 
-**Register in Gateway: `services/gateway/src/gateway/app.py`**
+**Register in `services/gateway/src/gateway/app.py`:**
 
 ```python
 from .routes.fabrication import router as fabrication_router
 app.include_router(fabrication_router)
 ```
 
-### 7. Tool Registry Updates
+---
 
-**File: `config/tool_registry.yaml`** (Update)
+## Phase 2: Automatic Workflow (Future)
 
-```yaml
-tools:
-  # ... existing tools ...
+### Step 7: Vision Server Integration (Phase 2)
 
-  # ==============================================================================
-  # Fabrication Tools (Updated for Multi-Printer Support)
-  # ==============================================================================
+**File: `services/fabrication/src/fabrication/vision/orientation_checker.py`**
 
-  fabrication.queue_print:
-    server: broker
-    description: "Queue 3D print/CNC/laser job with automatic printer selection"
-    hazard_class: medium
-    requires_confirmation: true
-    confirmation_phrase: "Confirm: proceed"
-    budget_tier: free
-    enabled: true
-    note: |
-      Automatically selects printer based on model size and mode:
-      - Small-medium 3D prints (≤200mm) → Bamboo H2D
-      - Large 3D prints (>200mm) → Elegoo Giga
-      - CNC/laser → Snapmaker Artisan
+```python
+"""Vision server integration for orientation and support detection."""
 
-      Parameters:
-      - artifact_path (required): Path to STL/GCODE file
-      - print_mode (optional): "3d_print" (default), "cnc", or "laser"
-      - printer_id (optional): Manual printer selection
-      - nozzle_temp (optional): Nozzle temperature override
-      - bed_temp (optional): Bed temperature override
+from __future__ import annotations
 
-  fabrication.list_printers:
-    server: broker
-    description: "List all available printers with status and capabilities"
-    hazard_class: none
-    requires_confirmation: false
-    budget_tier: free
-    enabled: true
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+import httpx
 
-  fabrication.cancel_print:
-    server: broker
-    description: "Cancel currently running print job on specified printer"
-    hazard_class: low
-    requires_confirmation: false
-    budget_tier: free
-    enabled: true
-    note: "Requires printer_id parameter"
+from common.config import Settings
+from common.logging import get_logger
 
-  fabrication.pause_print:
-    server: broker
-    description: "Pause currently running print job on specified printer"
-    hazard_class: low
-    requires_confirmation: false
-    budget_tier: free
-    enabled: true
-    note: "Requires printer_id parameter"
+LOGGER = get_logger(__name__)
 
-  fabrication.resume_print:
-    server: broker
-    description: "Resume paused print job on specified printer"
-    hazard_class: low
-    requires_confirmation: false
-    budget_tier: free
-    enabled: true
-    note: "Requires printer_id parameter"
 
-categories:
-  # ... existing categories ...
-  fabrication:
-    - fabrication.queue_print
-    - fabrication.list_printers
-    - fabrication.cancel_print
-    - fabrication.pause_print
-    - fabrication.resume_print
+@dataclass
+class OrientationAnalysis:
+    """Orientation analysis from vision server."""
+    score: float  # 0-100, higher is better
+    widest_dimension_on_buildplate: bool
+    suggested_rotation: Optional[tuple[float, float, float]]  # (x, y, z) degrees
+    reasoning: str
+
+
+@dataclass
+class SupportAnalysis:
+    """Support detection from vision server."""
+    supports_required: bool
+    severity: str  # "none", "low", "medium", "high"
+    overhang_percentage: float  # % of model with overhangs
+    overhang_areas: list  # Locations of overhangs
+    reasoning: str
+
+
+class VisionChecker:
+    """Interface to vision service for STL analysis."""
+
+    def __init__(self, settings: Settings):
+        self.vision_base = settings.VISION_BASE
+
+    async def analyze_orientation(self, stl_path: Path) -> OrientationAnalysis:
+        """
+        Call vision service to analyze STL orientation.
+
+        Vision service should:
+        - Calculate center of mass
+        - Identify widest cross-section
+        - Determine if widest area is on Z-axis (build plate)
+        - Suggest rotation if orientation is poor
+
+        Args:
+            stl_path: Path to STL file
+
+        Returns:
+            OrientationAnalysis with score and suggestions
+        """
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Send STL file to vision service
+            with open(stl_path, 'rb') as f:
+                files = {'stl': (stl_path.name, f, 'application/octet-stream')}
+                response = await client.post(
+                    f"{self.vision_base}/api/vision/analyze_orientation",
+                    files=files
+                )
+                response.raise_for_status()
+                data = response.json()
+
+        return OrientationAnalysis(
+            score=data['score'],
+            widest_dimension_on_buildplate=data['widest_on_buildplate'],
+            suggested_rotation=tuple(data['suggested_rotation']) if data.get('suggested_rotation') else None,
+            reasoning=data['reasoning']
+        )
+
+    async def analyze_supports(self, stl_path: Path) -> SupportAnalysis:
+        """
+        Call vision service to detect support requirements.
+
+        Vision service should:
+        - Iterate through triangles and calculate normals
+        - Detect faces with angle > 45° from vertical (overhangs)
+        - Calculate percentage of model requiring supports
+        - Identify attachment points for supports
+
+        Args:
+            stl_path: Path to STL file
+
+        Returns:
+            SupportAnalysis with requirements and severity
+        """
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            with open(stl_path, 'rb') as f:
+                files = {'stl': (stl_path.name, f, 'application/octet-stream')}
+                response = await client.post(
+                    f"{self.vision_base}/api/vision/analyze_supports",
+                    files=files
+                )
+                response.raise_for_status()
+                data = response.json()
+
+        return SupportAnalysis(
+            supports_required=data['supports_required'],
+            severity=data['severity'],
+            overhang_percentage=data['overhang_percentage'],
+            overhang_areas=data.get('overhang_areas', []),
+            reasoning=data['reasoning']
+        )
 ```
 
-## Implementation Checklist
+**Add to fabrication service (Phase 2):**
 
-### Phase 1: Driver Foundation
-- [ ] Create `services/fabrication/src/fabrication/drivers/base.py` with abstract interface
-- [ ] Implement `services/fabrication/src/fabrication/drivers/bamboo.py`
-- [ ] Enhance `services/fabrication/src/fabrication/drivers/klipper.py`
-- [ ] Implement `services/fabrication/src/fabrication/drivers/snapmaker.py`
-- [ ] Add Python dependencies:
-  ```bash
-  pip install paho-mqtt trimesh
-  ```
+```python
+@app.post("/api/fabrication/prepare_print")
+async def prepare_print(
+    stl_path: str,
+    target_height: Optional[float] = None,
+    auto_orient: bool = False,
+    mode: str = "3d_print"
+):
+    """
+    Automatic workflow: scale, orient, check supports, then open in slicer.
 
-### Phase 2: Registry & Selection
-- [ ] Create `services/fabrication/src/fabrication/registry.py`
-- [ ] Create `config/printers.yaml` configuration file
-- [ ] Implement `services/fabrication/src/fabrication/selector.py`
-- [ ] Add `.env` variables:
-  ```bash
-  PRINTER_CONFIG=config/printers.yaml
-  FABRICATION_BASE=http://fabrication:8300
-  ```
+    This is Phase 2 functionality requiring vision server integration.
+    """
+    path = Path(stl_path)
 
-### Phase 3: Job Manager Update
-- [ ] Refactor `services/fabrication/src/fabrication/jobs/manager.py` to use new registry
-- [ ] Update MQTT handlers to support printer_id parameter
-- [ ] Add fabrication service API endpoints (FastAPI)
+    # Step 1: Scale if target_height provided
+    if target_height:
+        scaled_path = path.parent / f"{path.stem}_scaled_{target_height}mm.stl"
+        dimensions = analyzer.scale_model(path, target_height, scaled_path)
+        path = scaled_path
 
-### Phase 4: Gateway Integration
-- [ ] Create `services/gateway/src/gateway/routes/fabrication.py`
-- [ ] Register fabrication router in `services/gateway/src/gateway/app.py`
-- [ ] Update `config/tool_registry.yaml` with new fabrication tools
+    # Step 2: Check orientation
+    vision_checker = VisionChecker(settings)
+    orientation = await vision_checker.analyze_orientation(path)
 
-### Phase 5: Testing & Validation
-- [ ] Test Bamboo H2D connection and file upload
-- [ ] Test Elegoo Giga via Moonraker
-- [ ] Test Snapmaker SACP protocol
-- [ ] Test automatic printer selection logic
-- [ ] Validate size-based routing with sample STL files
-- [ ] Integration test: Full CAD → Print workflow
+    if orientation.score < 70 and auto_orient and orientation.suggested_rotation:
+        # Apply rotation (implementation needed in STLAnalyzer)
+        pass
 
-### Phase 6: Documentation
-- [ ] Update `KITTY_OperationsManual.md` with multi-printer operations
-- [ ] Add printer configuration guide to `config/README.md`
-- [ ] Document troubleshooting for each printer type
+    # Step 3: Check support requirements
+    supports = await vision_checker.analyze_supports(path)
 
-## Environment Variables
+    # Step 4: Select printer and launch
+    selection = await selector.select_printer(path, PrintMode(mode))
+    launcher.launch(selection.slicer_app, path)
 
-Add to `.env`:
+    return {
+        "printer": selection.printer_id,
+        "slicer_app": selection.slicer_app,
+        "message": selection.reasoning,
+        "scaled": target_height is not None,
+        "orientation": {
+            "score": orientation.score,
+            "suggestion": orientation.reasoning
+        },
+        "supports": {
+            "required": supports.supports_required,
+            "severity": supports.severity,
+            "suggestion": supports.reasoning
+        }
+    }
+```
+
+---
+
+## Configuration
+
+### Environment Variables (`.env`)
 
 ```bash
 # Fabrication Service
 FABRICATION_BASE=http://fabrication:8300
-PRINTER_CONFIG=config/printers.yaml
+VISION_BASE=http://vision:8200
 
-# Printer Credentials (populated per your setup)
+# Bamboo Labs H2D
 BAMBOO_IP=192.168.1.100
 BAMBOO_SERIAL=01P45165616
-BAMBOO_ACCESS_CODE=YOUR_16_CHAR_CODE
+BAMBOO_ACCESS_CODE=your_16_char_code
 
+# Elegoo Giga
 ELEGOO_IP=192.168.1.200
 ELEGOO_MOONRAKER_PORT=7125
 
+# Snapmaker Artisan
 SNAPMAKER_IP=192.168.1.150
-SNAPMAKER_PORT=8888
 ```
 
-## Usage Examples
-
-### Example 1: Automatic Printer Selection
-
-```python
-# Via ReAct agent tool
-{
-  "tool": "fabrication.queue_print",
-  "args": {
-    "artifact_path": "/Users/Shared/KITTY/artifacts/cad/bracket.stl",
-    "print_mode": "3d_print"
-  }
-}
-# → Auto-selects bamboo_h2d (small model)
-```
-
-### Example 2: Manual Printer Selection
-
-```python
-{
-  "tool": "fabrication.queue_print",
-  "args": {
-    "artifact_path": "/Users/Shared/KITTY/artifacts/cad/large_enclosure.stl",
-    "print_mode": "3d_print",
-    "printer_id": "elegoo_giga"
-  }
-}
-# → Forces Elegoo Giga for large print
-```
-
-### Example 3: CNC Job
-
-```python
-{
-  "tool": "fabrication.queue_print",
-  "args": {
-    "artifact_path": "/Users/Shared/KITTY/artifacts/cam/aluminum_plate.nc",
-    "print_mode": "cnc"
-  }
-}
-# → Auto-selects snapmaker_artisan (only CNC-capable printer)
-```
-
-### Example 4: Check Printer Status
-
-```python
-{
-  "tool": "fabrication.list_printers",
-  "args": {}
-}
-# Returns:
-# {
-#   "bamboo_h2d": {"online": true, "printing": false, ...},
-#   "elegoo_giga": {"online": true, "printing": true, "progress": 45},
-#   "snapmaker_artisan": {"online": false, ...}
-# }
-```
-
-## Integration with CAD → Print Workflow
+### Printer Configuration (`config/printers.yaml`)
 
 ```yaml
-User: "Generate a 150mm water bottle holder and print it"
+version: 1
 
-Agent Turn 1:
-  type: action
-  tool: cad.generate_model
-  args:
-    prompt: "water bottle holder, 150mm diameter"
-    provider: zoo
+printers:
+  bamboo_h2d:
+    type: bamboo_h2d
+    slicer_app: BambuStudio
+    build_volume: [250, 250, 250]
+    quality: excellent
+    speed: medium
+    ip: ${BAMBOO_IP}
+    serial: ${BAMBOO_SERIAL}
+    access_code: ${BAMBOO_ACCESS_CODE}
 
-Observation: {"stl_path": "/Users/Shared/KITTY/artifacts/cad/bottle_holder.stl"}
+  elegoo_giga:
+    type: elegoo_giga
+    slicer_app: ElegySlicer
+    build_volume: [800, 800, 1000]
+    quality: good
+    speed: fast
+    ip: ${ELEGOO_IP}
+    port: 7125
 
-Safety Check: fabrication.queue_print requires confirmation
-
-Agent Turn 2:
-  type: ask_user
-  message: "CAD complete. Model is 150mm (small-medium). Ready to print on Bamboo H2D. Say 'Confirm: proceed' to start."
-
-User: "Confirm: proceed"
-
-Agent Turn 3:
-  type: action
-  tool: fabrication.queue_print
-  args:
-    artifact_path: "/Users/Shared/KITTY/artifacts/cad/bottle_holder.stl"
-    print_mode: "3d_print"
-    # No printer_id → auto-selects bamboo_h2d
-
-Observation: {"printer_id": "bamboo_h2d", "job_id": "job_12345", "status": "printing"}
-
-Agent Final:
-  type: final
-  message: "Printing on Bamboo H2D, ETA 1h 45m"
+  snapmaker_artisan:
+    type: snapmaker_artisan
+    slicer_app: Luban
+    build_volume: [400, 400, 400]
+    quality: good
+    speed: medium
+    modes: [3d_print, cnc, laser]
+    ip: ${SNAPMAKER_IP}
 ```
 
-## Size Selection Decision Tree
+---
 
-```
-┌─────────────────────────────────────┐
-│ Analyze STL bounding box            │
-│ Extract max dimension (X, Y, or Z)  │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-       ┌───────────────┐
-       │ Print Mode?   │
-       └───┬───────────┘
-           │
-    ┌──────┴──────────┬─────────────┐
-    │                 │             │
-    ▼                 ▼             ▼
-┌────────┐      ┌─────────┐   ┌──────────┐
-│ CNC    │      │ Laser   │   │ 3D Print │
-│        │      │         │   │          │
-└────┬───┘      └────┬────┘   └────┬─────┘
-     │               │             │
-     └───────────────┴─────────────┘
-                     │
-                     ▼
-         ┌────────────────────────┐
-         │ Snapmaker Artisan      │  (Only printer with CNC/Laser)
-         └────────────────────────┘
+## Implementation Checklist
 
-                     │
-                     ▼ (for 3D Print)
-         ┌────────────────────────┐
-         │ Max Dimension ≤ 200mm? │
-         └───┬────────────────┬───┘
-             │                │
-          Yes│                │No
-             │                │
-             ▼                ▼
-    ┌─────────────────┐  ┌─────────────────┐
-    │ Bamboo H2D      │  │ Elegoo Giga     │
-    │ (250x250x250mm) │  │ (800x800x1000mm)│
-    └─────────────────┘  └─────────────────┘
-```
+### Phase 1: Manual Workflow (Default)
 
-## Security & Safety Notes
+**Week 1:**
+- [x] Create spec.md with user stories and requirements
+- [x] Update tool_registry.yaml with new tools
+- [ ] Implement STLAnalyzer class
+- [ ] Implement PrinterStatusChecker class
+- [ ] Implement PrinterSelector class
 
-1. **Confirmation Required**: `fabrication.queue_print` is `hazard_class: medium` and requires confirmation phrase
-2. **Network Security**: All printers on local WiFi (192.168.1.x). No internet exposure.
-3. **Authentication**:
-   - Bamboo: Access code (16 chars)
-   - Klipper: No auth (local network only)
-   - Snapmaker: Optional token
-4. **Audit Logging**: All print jobs logged to PostgreSQL `telemetry_events` table
-5. **Safety Events**: Camera bookmarks created when fabrication starts (future feature)
+**Week 2:**
+- [ ] Implement SlicerLauncher class
+- [ ] Create fabrication service API endpoints
+- [ ] Create gateway routes
+- [ ] Update docker-compose.yml if needed
 
-## Future Enhancements
+**Week 3:**
+- [ ] Unit tests for STL analysis
+- [ ] Unit tests for printer selection logic
+- [ ] Integration tests with mock status checker
+- [ ] Manual testing with real STL files
 
-1. **Multi-Material Detection**: Analyze STL for multi-material requirements
-2. **Printer Health Monitoring**: Track failure rates, maintenance schedules
-3. **Queue Management**: Support job queuing when printer busy
-4. **Slicing Integration**: Auto-slice STL to G-code with Orca Slicer CLI
-5. **Cost Estimation**: Calculate material cost and time for each printer
-6. **Print Farm Scaling**: Support multiple instances of same printer type
-7. **Computer Vision Integration**: Link to existing CV monitor for failure detection
+**Week 4:**
+- [ ] Test with all three printers (Bamboo, Elegoo, Snapmaker)
+- [ ] Validate slicer app launching on macOS
+- [ ] Update documentation
+- [ ] Deploy to production
 
-## Dependencies
+### Phase 2: Automatic Workflow (Future)
 
-Add to `services/fabrication/requirements.txt`:
+**Week 5-6:**
+- [ ] Implement model scaling in STLAnalyzer
+- [ ] Implement vision server orientation endpoint
+- [ ] Implement vision server support detection endpoint
+- [ ] Integrate VisionChecker with fabrication service
 
-```txt
-paho-mqtt==1.6.1       # Bamboo Labs MQTT
-trimesh==4.0.10        # STL bounding box analysis
-httpx==0.25.2          # Already in use
-pyyaml==6.0.1          # Already in use
+**Week 7:**
+- [ ] Add `fabrication.prepare_print` endpoint
+- [ ] Enable Phase 2 tool in tool_registry.yaml
+- [ ] Testing with scaled models
+- [ ] Testing with orientation correction
+
+**Week 8:**
+- [ ] User acceptance testing
+- [ ] Documentation updates
+- [ ] Final deployment
+
+---
+
+## Testing Strategy
+
+### Unit Tests
+
+**test_stl_analyzer.py:**
+```python
+def test_analyze_small_model():
+    analyzer = STLAnalyzer()
+    dimensions = analyzer.analyze(Path("fixtures/bracket_150mm.stl"))
+    assert dimensions.max_dimension <= 200
+    assert dimensions.width > 0
+
+def test_analyze_large_model():
+    analyzer = STLAnalyzer()
+    dimensions = analyzer.analyze(Path("fixtures/enclosure_600mm.stl"))
+    assert dimensions.max_dimension > 250
+    assert dimensions.max_dimension <= 800
 ```
 
-## Estimated Implementation Time
+**test_printer_selector.py:**
+```python
+@pytest.mark.asyncio
+async def test_select_small_model_bamboo_idle():
+    selector = PrinterSelector(mock_analyzer, mock_status_checker)
+    # Mock: Bamboo idle, model 150mm
+    result = await selector.select_printer(Path("small.stl"))
+    assert result.printer_id == "bamboo_h2d"
+    assert "excellent" in result.reasoning.lower()
 
-- **Phase 1 (Drivers)**: 8 hours
-- **Phase 2 (Registry/Selection)**: 4 hours
-- **Phase 3 (Job Manager)**: 3 hours
-- **Phase 4 (Gateway)**: 2 hours
-- **Phase 5 (Testing)**: 6 hours
-- **Phase 6 (Documentation)**: 2 hours
+@pytest.mark.asyncio
+async def test_select_small_model_bamboo_busy():
+    # Mock: Bamboo printing, model 180mm
+    result = await selector.select_printer(Path("medium.stl"))
+    assert result.printer_id == "elegoo_giga"
+    assert "fallback" in result.reasoning.lower()
+```
 
-**Total**: ~25 hours of development time
+### Integration Tests
+
+```bash
+# Test full workflow with real STL
+curl -X POST http://localhost:8080/api/fabrication/open_in_slicer \
+  -H 'Content-Type: application/json' \
+  -d '{"stl_path": "/Users/Shared/KITTY/artifacts/cad/bracket.stl"}'
+
+# Expected response:
+{
+  "printer_id": "bamboo_h2d",
+  "slicer_app": "BambuStudio",
+  "message": "Opening in BambuStudio. Model fits Bamboo H2D...",
+  "model_dimensions": {"max_dimension": 150.5, ...},
+  "printer_available": true
+}
+
+# Verify BambuStudio launched with bracket.stl
+```
+
+---
+
+## Estimated Timeline
+
+| Phase | Task | Hours |
+|-------|------|-------|
+| **Phase 1** | STL Analyzer | 4h |
+| | Printer Status Checker | 6h |
+| | Printer Selector | 4h |
+| | Slicer Launcher | 3h |
+| | Fabrication Service API | 3h |
+| | Gateway Integration | 2h |
+| | Testing | 8h |
+| **Phase 1 Total** | | **30h (~1 week)** |
+| **Phase 2** | Model Scaling | 3h |
+| | Vision Server Endpoints | 12h |
+| | Vision Integration | 4h |
+| | Testing | 6h |
+| **Phase 2 Total** | | **25h (~1 week)** |
+
+**Total Estimated Time: 55 hours (~2 weeks full-time)**
+
+---
 
 ## Success Criteria
 
-1. ✅ All three printers accessible from KITTY
-2. ✅ Automatic printer selection based on model size
-3. ✅ Manual printer override capability
-4. ✅ Real-time printer status monitoring
-5. ✅ Full CAD → Print workflow without human intervention (after confirmation)
-6. ✅ Safety confirmation for all print jobs
-7. ✅ Comprehensive error handling and logging
+### Phase 1 (Manual Workflow)
+- ✅ All STL files analyzed correctly (dimensions extracted)
+- ✅ Printer selection logic 100% accurate for test cases
+- ✅ BambuStudio, ElegySlicer, Luban all launch successfully on macOS
+- ✅ Bamboo H2D status detected via MQTT within 2 seconds
+- ✅ Elegoo Giga status detected via Moonraker within 2 seconds
+- ✅ Total workflow <10 seconds from API call to slicer open
+- ✅ Clear, actionable error messages for all failure cases
+
+### Phase 2 (Automatic Workflow)
+- ✅ Model scaling accurate within 0.5mm of target
+- ✅ Orientation analysis >85% accuracy on test models
+- ✅ Support detection >80% accuracy on overhang models
+- ✅ Vision server response time <15 seconds per analysis
+- ✅ User satisfaction: "KITTY's recommendations were helpful"
+
+---
+
+## Deployment
+
+```bash
+# Phase 1 deployment
+cd services/fabrication
+pip install -r requirements.txt
+pytest tests/unit tests/integration
+docker-compose build fabrication
+docker-compose up -d fabrication
+
+# Verify
+curl http://localhost:8080/api/fabrication/printer_status
+
+# Phase 2 deployment (after vision server ready)
+# Enable Phase 2 tool in tool_registry.yaml
+# Restart services
+docker-compose restart fabrication gateway
+```
+
+---
+
+## Next Steps
+
+1. **Immediate (This Week)**:
+   - Implement STLAnalyzer (4h)
+   - Implement PrinterStatusChecker (6h)
+   - Implement PrinterSelector (4h)
+
+2. **Short Term (Next Week)**:
+   - Complete Phase 1 implementation
+   - Testing with real printers
+   - Documentation updates
+
+3. **Medium Term (2-4 Weeks)**:
+   - Vision server implementation
+   - Phase 2 automatic workflow
+   - User acceptance testing
+
+4. **Long Term (Future)**:
+   - Auto-slicing integration (Orca Slicer CLI)
+   - Direct printer control via APIs (return to original plan)
+   - Multi-printer job queue management

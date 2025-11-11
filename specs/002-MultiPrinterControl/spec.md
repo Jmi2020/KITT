@@ -2,199 +2,308 @@
 
 ## Feature Overview
 
-Enable KITTY to control three different 3D printers on the local network with intelligent printer selection based on model characteristics:
+Enable KITTY to intelligently prepare 3D models and route them to appropriate slicer applications with two distinct workflows:
 
-1. **Bamboo Labs H2D** - Optimal for small-medium FDM prints (≤200mm)
-2. **Elegoo OrangeStorm Giga** - Large format FDM printing with Klipper (800x800x1000mm)
-3. **Snapmaker Artisan Pro** - Multi-mode fabrication (3D print, CNC, laser engraving)
+### Supported Printers (Priority Order)
+
+1. **Bamboo Labs H2D** (BambuStudio.app) - **First choice** for superior print quality and accuracy
+2. **Elegoo OrangeStorm Giga** (ElegySlicer.app) - **Second choice** if Bamboo too small or busy, fast print speed
+3. **Snapmaker Artisan Pro** (Luban.app) - **CNC/Laser only**, multi-mode fabrication
 
 All printers are on the same local WiFi network as KITTY (192.168.1.x subnet).
+
+### Two Workflows
+
+**Manual Workflow (Default):**
+- KITTY analyzes model dimensions and printer availability
+- KITTY opens STL in the appropriate slicer application
+- User handles final orientation, supports, slicing, and print start
+- Most control, fastest to implement
+
+**Automatic Workflow (Future):**
+- KITTY asks user for desired model height
+- KITTY scales model appropriately
+- KITTY uses vision server to validate orientation (widest base down)
+- KITTY checks if supports are needed
+- KITTY opens model in slicer with pre-configured settings
+- User confirms and starts print
+- More autonomous, requires vision integration
 
 ## Business Value
 
 ### Current State
 - KITTY can generate CAD models but has no fabrication capability
-- Existing fabrication service only supports single OctoPrint instance
-- No intelligent routing based on model size or fabrication mode
-- Manual printer selection required
+- Users must manually determine which slicer to use
+- No intelligent routing based on model size, printer quality, or availability
+- No model scaling or orientation validation before slicing
 
 ### Desired State
-- Autonomous CAD-to-fabrication workflow with minimal human intervention
-- Smart printer selection based on:
-  - Model dimensions (STL bounding box analysis)
-  - Fabrication mode (3D print, CNC, laser)
-  - Printer availability
-- Unified control interface for all three printer types
-- Real-time status monitoring across printer farm
+
+**Phase 1 (Manual Workflow):**
+- KITTY analyzes model and suggests optimal printer
+- KITTY opens STL directly in correct slicer application
+- User retains full control over slicing and print settings
+- Fast time-to-value with minimal implementation complexity
+
+**Phase 2 (Automatic Workflow):**
+- KITTY asks user for target model size
+- KITTY scales model to fit printer and user requirements
+- KITTY uses computer vision to validate orientation and support needs
+- KITTY pre-configures slicer settings for optimal results
+- User reviews and approves before print starts
 
 ### Success Metrics
-- ≥90% of print jobs routed to optimal printer automatically
-- <5 minutes from CAD completion to print start (after user confirmation)
-- Zero printer selection errors (wrong printer for model size/mode)
-- Full observability: printer status, job progress, failure detection
+
+**Phase 1 (Manual):**
+- ≥95% of models routed to correct slicer app
+- <30 seconds from "print this" to slicer open
+- Zero incorrect printer selections (CNC to wrong app, etc.)
+- User satisfaction: "KITTY picked the right tool"
+
+**Phase 2 (Automatic):**
+- ≥90% of scaled models print successfully without size issues
+- ≥85% of orientation recommendations accepted by users
+- ≥80% of support generation recommendations accurate
+- <2 minutes from CAD to ready-to-slice with optimal settings
 
 ## User Stories
 
-### Story 1: Autonomous Small Part Fabrication
+### Story 1: Manual Workflow - Quick Slicer Launch (Phase 1)
 **As a** fabrication operator
-**I want** KITTY to automatically print small parts on the Bamboo H2D
-**So that** I don't have to manually select printers for routine jobs
+**I want** KITTY to open my STL in the correct slicer application
+**So that** I can quickly start preparing the print without figuring out which tool to use
 
 **Acceptance Criteria:**
 - Given a 150mm STL model
-- When I say "print this on the best printer"
-- Then KITTY selects Bamboo H2D
-- And uploads G-code via FTPS
-- And starts print via MQTT
-- And confirms "Printing on Bamboo H2D, ETA 1h 45m"
+- When I say "print this"
+- Then KITTY analyzes dimensions (150mm max)
+- And detects Bamboo H2D is available (not busy)
+- And opens BambuStudio.app with the STL loaded
+- And confirms "Opening in BambuStudio (Bamboo H2D) - 150mm model, excellent quality"
+- And I can then orient, support, slice, and print manually
 
-### Story 2: Large Format Automatic Routing
+### Story 2: Manual Workflow - Bamboo Busy Fallback (Phase 1)
 **As a** design engineer
-**I want** large models (>200mm) to automatically use the Elegoo Giga
-**So that** I can leverage the 800mm build volume without manual configuration
+**I want** KITTY to use Elegoo if Bamboo is busy
+**So that** I don't have to wait or figure out printer availability myself
 
 **Acceptance Criteria:**
-- Given a 650mm enclosure STL
-- When queuing the print job
-- Then KITTY detects max dimension > 200mm
-- And selects Elegoo Giga
-- And validates model fits in 800x800x1000mm build volume
-- And uploads via Moonraker HTTP
-- And starts print via JSON-RPC
+- Given a 180mm STL model
+- When Bamboo H2D is currently printing (busy)
+- Then KITTY detects Bamboo unavailable
+- And selects Elegoo Giga (model fits 800mm volume)
+- And opens ElegySlicer.app with the STL loaded
+- And confirms "Opening in ElegySlicer (Elegoo Giga) - Bamboo busy, Elegoo ready"
 
-### Story 3: CNC/Laser Mode Selection
+### Story 3: Manual Workflow - Large Model Routing (Phase 1)
 **As a** maker
-**I want** CNC and laser jobs to automatically route to Snapmaker
-**So that** I can use the correct tool head without printer selection
+**I want** large models to automatically route to Elegoo
+**So that** KITTY doesn't waste time trying to fit a 600mm model on a 250mm printer
 
 **Acceptance Criteria:**
-- Given a CAM file for CNC milling
-- When setting print_mode="cnc"
-- Then KITTY selects Snapmaker Artisan (only CNC-capable printer)
-- And uploads via SACP protocol
-- And switches to CNC tool head
-- And starts job
+- Given a 600mm enclosure STL
+- When I request to print
+- Then KITTY analyzes dimensions (600mm max)
+- And detects model exceeds Bamboo capacity (250mm)
+- And selects Elegoo Giga (800mm capacity)
+- And opens ElegySlicer.app
+- And confirms "Opening in ElegySlicer (Elegoo Giga) - Large model, 600mm requires Elegoo"
 
-### Story 4: Multi-Printer Status Dashboard
-**As a** facilities operator
-**I want** to see all printer statuses in one view
-**So that** I can monitor the fabrication farm at a glance
-
-**Acceptance Criteria:**
-- When calling fabrication.list_printers
-- Then I see:
-  - Online/offline status for all 3 printers
-  - Current job ID and progress %
-  - Bed/extruder temperatures
-  - Build volume capabilities
-  - Supported materials and modes
-
-### Story 5: Manual Override
-**As a** power user
-**I want** to manually specify a printer
-**So that** I can override automatic selection when needed
+### Story 4: Manual Workflow - CNC/Laser Mode (Phase 1)
+**As a** maker
+**I want** CNC and laser jobs to open in Luban
+**So that** I can use the Snapmaker's multi-mode capabilities
 
 **Acceptance Criteria:**
-- Given a 180mm model (would auto-select Bamboo)
-- When I specify printer_id="elegoo_giga"
-- Then KITTY uses Elegoo instead
-- And validates model still fits
-- And proceeds with print
+- Given a CAM file for CNC milling or DXF for laser engraving
+- When I say "mill this" or "engrave this"
+- Then KITTY detects mode="cnc" or mode="laser"
+- And selects Snapmaker Artisan (only multi-mode printer)
+- And opens Luban.app with the file loaded
+- And confirms "Opening in Luban (Snapmaker Artisan) - CNC milling mode"
+
+### Story 5: Automatic Workflow - Model Sizing (Phase 2)
+**As a** design engineer
+**I want** KITTY to ask me for target size and scale the model
+**So that** I get the right size without manual CAD adjustments
+
+**Acceptance Criteria:**
+- Given a generic STL (e.g., 50mm bracket)
+- When I say "print this at 200mm tall"
+- Then KITTY calculates scale factor (4x)
+- And scales STL from 50mm to 200mm using trimesh
+- And validates 200mm fits on Bamboo H2D (250mm capacity)
+- And saves scaled STL to artifacts directory
+- And opens BambuStudio with scaled model
+- And confirms "Scaled to 200mm, opening in BambuStudio"
+
+### Story 6: Automatic Workflow - Orientation Validation (Phase 2)
+**As a** fabrication operator
+**I want** KITTY to check if my model is oriented correctly
+**So that** I avoid failed prints due to poor orientation
+
+**Acceptance Criteria:**
+- Given an STL with narrow base (likely to tip)
+- When KITTY analyzes the model
+- Then vision server calculates bounding box and center of mass
+- And detects widest dimension is not on Z-axis (build plate)
+- And suggests rotation: "Model should be rotated 90° for stability"
+- And asks "Rotate automatically or open for manual adjustment?"
+- If auto-approved, KITTY rotates STL using trimesh
+- And opens slicer with corrected orientation
+
+### Story 7: Automatic Workflow - Support Detection (Phase 2)
+**As a** maker
+**I want** KITTY to warn me if supports are needed
+**So that** I don't waste time on failed prints with overhangs
+
+**Acceptance Criteria:**
+- Given an STL with 70° overhang (needs supports)
+- When KITTY analyzes the model with vision server
+- Then vision detects overhang angle > 45°
+- And calculates approximate support volume
+- And warns "This model has steep overhangs, supports recommended"
+- And notes "Enable tree supports in slicer settings"
+- And opens slicer with visual indication of problem areas
 
 ## Technical Requirements
 
-### Functional Requirements
+### Functional Requirements (Phase 1 - Manual Workflow)
 
-#### FR-1: Printer Discovery and Registration
-- System shall load printer configurations from `config/printers.yaml`
-- Each printer must have: type, IP address, authentication credentials
-- System shall validate connectivity on startup
-- System shall expose printer capabilities (build volume, supported modes)
+#### FR-1: STL Analysis and Dimensioning
+- System shall load STL files using trimesh library
+- System shall calculate bounding box [min_x, min_y, min_z], [max_x, max_y, max_z]
+- System shall extract max dimension from bounding box
+- System shall report model dimensions in mm
+- System shall validate STL file integrity before processing
 
-#### FR-2: Automatic Printer Selection
-- System shall analyze STL bounding box using trimesh library
-- Selection logic:
-  - `print_mode=cnc` or `laser` → Snapmaker Artisan
-  - `print_mode=3d_print` AND max_dimension ≤ 200mm → Bamboo H2D
-  - `print_mode=3d_print` AND max_dimension > 200mm → Elegoo Giga
-- System shall validate model fits on selected printer
-- System shall fail gracefully if no printer can accommodate model
+#### FR-2: Printer Capability Registry
+- System shall maintain printer capabilities in `config/printers.yaml`:
+  - Bamboo H2D: build_volume=(250, 250, 250), quality="excellent", speed="medium"
+  - Elegoo Giga: build_volume=(800, 800, 1000), quality="good", speed="fast"
+  - Snapmaker Artisan: build_volume=(400, 400, 400), modes=["3d_print", "cnc", "laser"]
+- System shall expose printer capabilities via API
 
-#### FR-3: Bamboo Labs H2D Driver
-- Connect to local MQTT broker (port 1883) or Bambu cloud (port 8883)
-- Authenticate with serial number + 16-character access code
-- Upload G-code via FTPS (port 990, implicit TLS)
-- Send print commands via MQTT publish to `device/{serial}/request`
-- Subscribe to status updates on `device/{serial}/report`
-- Parse JSON status for bed temp, nozzle temp, progress %, state
+#### FR-3: Printer Availability Detection
+- System shall check Bamboo H2D status via MQTT subscription to `device/{serial}/report`
+- System shall parse printer state: "idle", "printing", "paused", "offline"
+- System shall query Elegoo Giga status via Moonraker HTTP GET `/printer/info`
+- System shall cache printer status for 30 seconds to reduce network calls
+- If status check fails, assume printer offline
 
-#### FR-4: Klipper/Moonraker Driver (Elegoo Giga)
-- Connect to Moonraker HTTP API (port 7125)
-- Query printer status via JSON-RPC 2.0 (`printer.objects.query`)
-- Upload G-code via HTTP POST `/server/files/upload`
-- Start print via JSON-RPC `printer.print.start`
-- Control via G-code commands (PAUSE, RESUME, CANCEL_PRINT)
-- No authentication required (local network only)
+#### FR-4: Intelligent Printer Selection Logic
+**Priority hierarchy:**
+1. **CNC or Laser mode** → Always Snapmaker Artisan (only multi-mode printer)
+2. **3D Print mode:**
+   - IF max_dimension ≤ 250mm AND Bamboo status="idle" → Bamboo H2D (best quality)
+   - ELSE IF max_dimension ≤ 250mm AND Bamboo status="printing" → Elegoo Giga (fallback)
+   - ELSE IF max_dimension > 250mm AND max_dimension ≤ 800mm → Elegoo Giga (only option)
+   - ELSE → Error: "Model too large for all printers (max 800mm)"
 
-#### FR-5: Snapmaker SACP Driver
-- Connect to TCP socket on port 8888
-- Implement SACP protocol: length-prefixed JSON frames
-- Send authentication via `enclosure.auth` command
-- Upload files via chunked SACP transfer
-- Send print commands with mode selection (3d_print, cnc, laser)
-- Parse status responses for temperature, progress, job state
+#### FR-5: Slicer Application Launching (macOS)
+- System shall use `open` command to launch slicer apps:
+  - BambuStudio: `open -a BambuStudio {stl_path}`
+  - ElegySlicer: `open -a ElegySlicer {stl_path}`
+  - Luban: `open -a Luban {stl_path}`
+- System shall verify app exists before launching: `mdfind "kMDItemCFBundleIdentifier == 'app.id'"`
+- System shall handle app not found gracefully with installation instructions
+- System shall log app launch events to telemetry
 
-#### FR-6: Gateway API Endpoints
-- `POST /api/fabrication/queue` - Queue print with auto-selection
-- `GET /api/fabrication/printers` - List all printers with status
-- `GET /api/fabrication/printers/{id}/status` - Get specific printer status
-- `POST /api/fabrication/printers/{id}/pause` - Pause print
-- `POST /api/fabrication/printers/{id}/resume` - Resume print
-- `POST /api/fabrication/printers/{id}/cancel` - Cancel print
+#### FR-6: Gateway API Endpoints (Phase 1)
+- `POST /api/fabrication/open_in_slicer` - Manual workflow endpoint
+  - Parameters: `stl_path`, `mode` (optional: "3d_print", "cnc", "laser")
+  - Returns: `{"printer": "bamboo_h2d", "app": "BambuStudio", "message": "..."}`
+- `GET /api/fabrication/analyze_model` - STL analysis only
+  - Parameters: `stl_path`
+  - Returns: `{"dimensions": {...}, "volume": ..., "recommended_printer": "..."}`
+- `GET /api/fabrication/printer_status` - Get all printer statuses
+  - Returns: `{"bamboo_h2d": {"status": "idle", ...}, ...}`
 
-#### FR-7: Safety and Confirmation
-- All `fabrication.queue_print` actions require confirmation phrase
-- Hazard class: medium (physical device control)
-- Audit logging: Log all print starts to PostgreSQL telemetry_events
-- Validate printer online before queueing job
-- Prevent simultaneous jobs on same printer
+### Functional Requirements (Phase 2 - Automatic Workflow)
 
-#### FR-8: Error Handling
-- Handle printer offline gracefully (return status: "offline")
-- Handle MQTT/HTTP/SACP connection failures with retry logic
-- Validate file existence before upload
-- Return actionable error messages to user
-- Log all errors to structured logging
+#### FR-7: Model Scaling
+- System shall accept target_height parameter from user
+- System shall calculate scale_factor = target_height / current_max_dimension
+- System shall apply uniform scaling using `trimesh.Trimesh.apply_scale(scale_factor)`
+- System shall validate scaled model fits on selected printer
+- System shall save scaled STL to artifacts directory with suffix `_scaled_{height}mm.stl`
+- System shall preserve original STL file unchanged
+
+#### FR-8: Vision Server Integration - Orientation Analysis
+- System shall call vision service endpoint: `POST /api/vision/analyze_orientation`
+- System shall send STL mesh data or file path
+- Vision server shall:
+  - Calculate center of mass
+  - Identify widest cross-section (XY plane when properly oriented)
+  - Detect if widest dimension is on Z-axis (build plate)
+  - Suggest rotation matrix if orientation suboptimal
+- System shall receive orientation score (0-100) and rotation recommendation
+- If score < 70, system shall prompt user for automatic rotation
+
+#### FR-9: Vision Server Integration - Support Detection
+- System shall call vision service endpoint: `POST /api/vision/analyze_supports`
+- System shall send STL mesh data
+- Vision server shall:
+  - Iterate through triangles, calculate normal vectors
+  - Detect faces with angle > 45° from vertical (overhangs)
+  - Calculate percentage of model requiring supports
+  - Identify support attachment points
+- System shall receive support_required (boolean) and severity ("low", "medium", "high")
+- System shall present findings: "Supports needed: 15% of model has overhangs"
+
+#### FR-10: Safety and Confirmation
+- Manual workflow (open_in_slicer): No confirmation required (hazard_class: low)
+- Automatic workflow with modifications: Requires confirmation if:
+  - Scaling factor > 2x or < 0.5x
+  - Automatic rotation applied
+  - Supports recommended but not yet configured
+- All slicer launches logged to PostgreSQL telemetry_events
+
+#### FR-11: Error Handling
+- Handle STL file not found → Clear error message with path
+- Handle corrupted STL → Suggest re-export from CAD software
+- Handle slicer app not found → Provide download link
+- Handle model too large → Suggest scaling or splitting
+- Handle all printers offline → Notify user to check power/network
+- Log all errors to structured logging with correlation IDs
 
 ### Non-Functional Requirements
 
-#### NFR-1: Performance
-- Printer status query: <2 seconds per printer
-- File upload: Accept files up to 500MB
-- Total workflow (upload + start): <30 seconds for 50MB file
+#### NFR-1: Performance (Phase 1)
+- STL analysis (bounding box): <1 second for models up to 100MB
+- Printer status query: <2 seconds per printer (with 30s cache)
+- Slicer app launch: <3 seconds from command to app open
+- Total workflow: <10 seconds from "print this" to slicer open
 
-#### NFR-2: Reliability
-- Driver connection retry: 3 attempts with exponential backoff
-- Graceful degradation: If one printer offline, others remain functional
-- No data loss: Failed uploads don't corrupt printer storage
+#### NFR-2: Performance (Phase 2)
+- Model scaling: <5 seconds for models up to 100MB
+- Vision orientation analysis: <10 seconds for models up to 50MB
+- Vision support detection: <15 seconds for complex models
+- Total automatic workflow: <30 seconds from request to slicer open with prep
 
-#### NFR-3: Security
-- All communication over local network (192.168.1.x)
-- No internet exposure of printer APIs
-- Credentials stored in `.env`, never committed to git
-- FTPS for Bamboo uploads (TLS encrypted)
+#### NFR-3: Reliability
+- Graceful degradation: If printer status check fails, assume offline and continue
+- Cache printer status for 30 seconds to handle network hiccups
+- Retry slicer app launch once if initial attempt fails
+- Validate STL integrity before processing (catch corrupted files early)
 
-#### NFR-4: Observability
-- Structured logging with correlation IDs
-- Metrics: print job count, success rate, avg duration per printer
-- Status updates published to MQTT `kitty/devices/{printer}/state`
+#### NFR-4: Security
+- All printer communication over local network (192.168.1.x)
+- MQTT credentials stored in `.env`, never committed to git
+- No file uploads to printers (user handles in slicer)
+- Slicer apps sandboxed by macOS (no elevation required)
+
+#### NFR-5: Observability
+- Structured logging with correlation IDs for each print request
+- Metrics: slicer launches, printer selection accuracy, model dimensions
+- Log model path, selected printer, dimensions, and decision rationale
 - Integration with existing Prometheus/Grafana stack
 
-#### NFR-5: Maintainability
-- Abstract PrinterDriver interface for future printer types
-- Configuration-driven printer registry (no hardcoded IPs)
-- Comprehensive unit tests for selection logic
-- Integration tests with mock MQTT/HTTP servers
+#### NFR-6: Maintainability
+- Configuration-driven printer registry (`config/printers.yaml`)
+- Modular design: STL analyzer, printer selector, slicer launcher as separate classes
+- Comprehensive unit tests for selection logic with various model sizes
+- Mock vision server responses for Phase 2 testing
 
 ## Data Model
 
@@ -311,12 +420,25 @@ class PrintJobSpec:
 
 ## Dependencies
 
+**Phase 1 (Manual Workflow):**
 ```txt
-paho-mqtt==1.6.1       # Bamboo Labs MQTT client
-trimesh==4.0.10        # STL bounding box analysis
-httpx==0.25.2          # HTTP client (already in use)
-pyyaml==6.0.1          # YAML config parsing (already in use)
+trimesh==4.0.10        # STL loading, bounding box, scaling
+numpy==1.24.3          # Mesh calculations (trimesh dependency)
+paho-mqtt==1.6.1       # Bamboo H2D status checking via MQTT
+httpx==0.25.2          # Elegoo Giga status via Moonraker (already in use)
+pyyaml==6.0.1          # Printer config parsing (already in use)
 ```
+
+**Phase 2 (Automatic Workflow):**
+```txt
+scipy==1.11.3          # Center of mass calculations
+numpy-stl==3.0.1       # STL manipulation and rotation
+```
+
+**Slicer Applications (macOS):**
+- **BambuStudio**: [https://bambulab.com/en/download](https://bambulab.com/en/download)
+- **ElegySlicer** (OrcaSlicer fork): Check Elegoo website or use OrcaSlicer
+- **Luban**: [https://snapmaker.com/product/snapmaker-luban](https://snapmaker.com/product/snapmaker-luban)
 
 ## Risks and Mitigations
 

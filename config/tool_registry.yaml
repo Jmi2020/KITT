@@ -134,65 +134,80 @@ tools:
     enabled: true
 
   # ==============================================================================
-  # Fabrication Tools (medium hazard - physical devices)
+  # Fabrication Tools (low-medium hazard - slicer app launching)
   # ==============================================================================
 
-  fabrication.queue_print:
+  fabrication.open_in_slicer:
     server: broker
-    description: "Queue 3D print/CNC/laser job with automatic printer selection based on model size and mode"
+    description: "Open STL model in appropriate slicer app based on size and printer availability (MANUAL WORKFLOW - DEFAULT)"
+    hazard_class: low
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+    note: |
+      Priority hierarchy:
+      1. CNC/laser jobs → Luban (Snapmaker only multi-mode)
+      2. Models ≤250mm + Bamboo idle → BambuStudio (best quality)
+      3. Models ≤250mm + Bamboo busy → ElegySlicer (fallback)
+      4. Models >250mm (up to 800mm) → ElegySlicer (Elegoo Giga)
+
+      Parameters:
+      - stl_path (required): Path to STL/CAM file
+      - mode (optional): "3d_print" (default), "cnc", or "laser"
+
+      Returns printer selection, app name, and reasoning message.
+      User completes slicing and printing in the application.
+
+  fabrication.prepare_print:
+    server: broker
+    description: "Automatic workflow: scale model, check orientation, detect supports, then open in slicer (AUTOMATIC WORKFLOW - PHASE 2)"
     hazard_class: medium
     requires_confirmation: true
     confirmation_phrase: "Confirm: proceed"
     budget_tier: free
-    enabled: true
+    enabled: false
     note: |
-      Automatically selects printer based on model size and mode:
-      - Small-medium 3D prints (≤200mm) → Bamboo H2D
-      - Large 3D prints (>200mm) → Elegoo Giga
-      - CNC/laser → Snapmaker Artisan
+      Phase 2 feature requiring vision server integration.
+
+      Workflow:
+      1. Ask user for target model height
+      2. Scale STL to fit requirements and printer
+      3. Call vision server to analyze orientation
+      4. Call vision server to detect support needs
+      5. Save scaled/rotated STL
+      6. Open in slicer with recommendations
 
       Parameters:
-      - artifact_path (required): Path to STL/GCODE file
-      - print_mode (optional): "3d_print" (default), "cnc", or "laser"
-      - printer_id (optional): Manual printer selection override
-      - nozzle_temp (optional): Nozzle temperature override
-      - bed_temp (optional): Bed temperature override
+      - stl_path (required): Path to STL file
+      - target_height (optional): Desired model height in mm
+      - auto_orient (optional): Apply automatic orientation (default: ask user)
+      - mode (optional): "3d_print" (default), "cnc", or "laser"
 
-  fabrication.list_printers:
+  fabrication.analyze_model:
     server: broker
-    description: "List all available printers with status and capabilities"
+    description: "Analyze STL dimensions and recommend printer without opening slicer"
     hazard_class: none
     requires_confirmation: false
     budget_tier: free
     enabled: true
-    note: "Returns online status, current jobs, and build volume for all printers"
+    note: |
+      Returns model dimensions, volume, recommended printer, and reasoning.
+      Useful for batch analysis or decision preview before opening slicer.
 
-  fabrication.cancel_print:
+      Parameters:
+      - stl_path (required): Path to STL file
+
+  fabrication.printer_status:
     server: broker
-    description: "Cancel currently running print job on specified printer"
-    hazard_class: low
+    description: "Check status of all printers (idle, printing, offline)"
+    hazard_class: none
     requires_confirmation: false
     budget_tier: free
     enabled: true
-    note: "Requires printer_id parameter (bamboo_h2d, elegoo_giga, or snapmaker_artisan)"
-
-  fabrication.pause_print:
-    server: broker
-    description: "Pause currently running print job on specified printer"
-    hazard_class: low
-    requires_confirmation: false
-    budget_tier: free
-    enabled: true
-    note: "Requires printer_id parameter"
-
-  fabrication.resume_print:
-    server: broker
-    description: "Resume paused print job on specified printer"
-    hazard_class: low
-    requires_confirmation: false
-    budget_tier: free
-    enabled: true
-    note: "Requires printer_id parameter"
+    note: |
+      Queries printer status via MQTT (Bamboo) and HTTP (Elegoo).
+      Returns: {"bamboo_h2d": {"status": "idle", ...}, "elegoo_giga": {...}, ...}
+      Status cached for 30 seconds to reduce network calls.
 
   # ==============================================================================
   # Home Assistant Tools (medium-high hazard - physical control)
@@ -288,7 +303,7 @@ categories:
   vision: [image_search, image_filter, store_selection]
   memory: [remember, search_memories]
   cad: [cad.generate_model, cad.image_to_mesh, cad.local_generate]
-  fabrication: [fabrication.queue_print, fabrication.list_printers, fabrication.cancel_print, fabrication.pause_print, fabrication.resume_print]
+  fabrication: [fabrication.open_in_slicer, fabrication.prepare_print, fabrication.analyze_model, fabrication.printer_status]
   homeassistant: [homeassistant.turn_on, homeassistant.turn_off, homeassistant.activate_scene, homeassistant.unlock_door, homeassistant.lock_door, homeassistant.enable_power]
   broker: [broker.execute_command]
   reasoning: [reason_with_f16]
