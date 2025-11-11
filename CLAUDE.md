@@ -14,7 +14,8 @@ The stack runs as containerized microservices orchestrated via Docker Compose wi
 - **brain** (port 8000): Conversational router, context management, safety integration, routing logs. Main endpoint: `/api/query`
 - **gateway** (port 8080): Public ingress, OAuth2 token issuance, device command proxy. Handles `/token` and `/api/device/<id>/command`
 - **cad** (port 8200): Multi-provider CAD generation (Zoo/Tripo) with MinIO storage. Endpoint: `/api/cad/generate`
-- **fabrication** (port 8300): OctoPrint/Klipper orchestration, MQTT command handling, printer state updates via `kitty/devices/<printer>/cmd/state`
+- **fabrication** (port 8300): Multi-printer control with STL analysis, printer status checking, quality-first selection, and slicer app launching (BambuStudio/ElegySlicer/Luban). Endpoints: `/api/fabrication/open_in_slicer`, `/api/fabrication/analyze_model`, `/api/fabrication/printer_status`. See `specs/002-MultiPrinterControl/`
+- **discovery** (port 8500): Network device discovery for printers, Raspberry Pi, ESP32 via mDNS/SSDP/UDP protocols. Device registry with approval workflow. Endpoints: `/api/discovery/scan`, `/api/discovery/devices`. See `specs/003-NetworkDiscovery/`
 - **safety** (port 8400): Policy engine for hazardous actions, UniFi Access checks, signature validation, audit logging
 - **voice**: Speech transcript ingestion (`/api/voice/transcript`), parser/router integration, note logging
 - **ui** (port 4173): Web dashboard, Fabrication Console, wall terminal view with MQTT subscriptions

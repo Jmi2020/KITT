@@ -210,6 +210,77 @@ tools:
       Status cached for 30 seconds to reduce network calls.
 
   # ==============================================================================
+  # Network Discovery Tools (free, no hazards - device detection)
+  # ==============================================================================
+
+  discovery.scan_network:
+    server: broker
+    description: "Trigger network discovery scan to find IoT devices (printers, Raspberry Pi, ESP32)"
+    hazard_class: none
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+    note: |
+      Scans local network using multiple methods:
+      - mDNS/Bonjour: Discovers devices advertising services
+      - SSDP/UPnP: Finds smart home devices and network printers
+      - Bamboo Labs UDP: Direct printer discovery (port 2021)
+      - Snapmaker UDP: CNC/laser machine discovery (port 20054)
+
+      Parameters:
+      - methods (optional): Array of methods to use
+      - timeout_seconds (optional): Scan timeout (default: 30)
+
+      Returns scan_id for status tracking. Typical scan time: 12-30 seconds.
+
+  discovery.list_devices:
+    server: broker
+    description: "List all discovered devices with optional filtering by type or approval status"
+    hazard_class: none
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+    note: |
+      Lists devices from discovery registry with filters:
+      - device_type: printer_3d, raspberry_pi, esp32, etc.
+      - approved: true/false (user approval status)
+      - is_online: true/false (current connectivity)
+      - limit: Max results (default: 100)
+
+      Returns device list with IP addresses, hostnames, manufacturers, models.
+      Devices must be approved before integration.
+
+  discovery.find_printers:
+    server: broker
+    description: "Find all 3D printers, CNC mills, and laser engravers on the network"
+    hazard_class: none
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+    note: |
+      Specialized search for fabrication equipment.
+      Returns all devices categorized as printer_3d, printer_cnc, or printer_laser.
+      Includes approval status and online state.
+
+  discovery.approve_device:
+    server: broker
+    description: "Approve a discovered device for integration and control"
+    hazard_class: low
+    requires_confirmation: true
+    confirmation_phrase: "Confirm: approve"
+    budget_tier: free
+    enabled: true
+    note: |
+      User approval workflow for discovered devices.
+      Once approved, device can be used by fabrication and other services.
+
+      Parameters:
+      - device_id (required): Device UUID from discovery.list_devices
+      - notes (optional): User notes about device
+
+      Approval is required before KITTY can control the device.
+
+  # ==============================================================================
   # Home Assistant Tools (medium-high hazard - physical control)
   # ==============================================================================
 
@@ -304,6 +375,7 @@ categories:
   memory: [remember, search_memories]
   cad: [cad.generate_model, cad.image_to_mesh, cad.local_generate]
   fabrication: [fabrication.open_in_slicer, fabrication.prepare_print, fabrication.analyze_model, fabrication.printer_status]
+  discovery: [discovery.scan_network, discovery.list_devices, discovery.find_printers, discovery.approve_device]
   homeassistant: [homeassistant.turn_on, homeassistant.turn_off, homeassistant.activate_scene, homeassistant.unlock_door, homeassistant.lock_door, homeassistant.enable_power]
   broker: [broker.execute_command]
   reasoning: [reason_with_f16]

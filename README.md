@@ -521,37 +521,64 @@ All ReAct agent tools are defined in a central **tool registry** (`config/tool_r
 
 | Category | Tools | Safety Level |
 |----------|-------|--------------|
-| **CAD Generation** | `cad.generate_model` | Low (non-destructive) |
+| **CAD Generation** | `cad.generate_model`, `cad.image_to_mesh`, `cad.local_generate` | Low (non-destructive) |
 | **Image Generation** | `images.generate`, `images.get_latest`, `images.select` | Low (local, offline) |
-| **Fabrication** | `fabrication.queue_print` | Medium (requires confirmation) |
-| **Home Assistant** | `homeassistant.control_device` | Varies by entity |
+| **Fabrication** | `fabrication.open_in_slicer`, `fabrication.analyze_model`, `fabrication.printer_status` | Low (app launching) |
+| **Network Discovery** | `discovery.scan_network`, `discovery.list_devices`, `discovery.find_printers`, `discovery.approve_device` | None/Low |
+| **Home Assistant** | `homeassistant.turn_on`, `homeassistant.turn_off`, `homeassistant.activate_scene` | Varies by entity |
 | **Vision & Research** | `vision.search`, `vision.store`, `research.web_search` | None |
 | **Memory** | `memory.remember`, `memory.search` | None |
 
 **Example: Image → CAD → Print workflow**
 
 ```yaml
-User: "Generate an image of a water bottle, create a 3D model from it, and print it"
+User: "Generate an image of a water bottle, create a 3D model from it, and open it in the slicer"
 
 Agent executes:
   1. images.generate(prompt="studio photo matte black water bottle")
      → Returns: s3://kitty-artifacts/images/20250111_143022.png
-  
-  2. cad.generate_model(
-       prompt="water bottle from reference",
-       provider="tripo",
-       imageRefs=["s3://kitty-artifacts/images/20250111_143022.png"]
+
+  2. cad.image_to_mesh(
+       image_path="s3://kitty-artifacts/images/20250111_143022.png",
+       provider="tripo"
      )
      → Returns: /Users/Shared/KITTY/artifacts/cad/bottle.stl
-  
-  3. [Safety check] Requires confirmation phrase for print
-     User: "alpha-omega-protocol"
-  
-  4. fabrication.queue_print(
-       artifact_path="/Users/Shared/KITTY/artifacts/cad/bottle.stl",
-       printer_id="prusa-mk4"
+
+  3. fabrication.analyze_model(
+       stl_path="/Users/Shared/KITTY/artifacts/cad/bottle.stl"
      )
-     → Returns: Job queued, ETA 2h 15m
+     → Model: 150mm tall, recommends Bamboo Labs H2D (available, idle)
+
+  4. fabrication.open_in_slicer(
+       stl_path="/Users/Shared/KITTY/artifacts/cad/bottle.stl",
+       print_mode="3d_print"
+     )
+     → Opened in BambuStudio. Complete slicing and printing manually in app.
+```
+
+**Example: Network discovery workflow**
+
+```yaml
+User: "Scan the network and find all 3D printers"
+
+Agent executes:
+  1. discovery.scan_network(timeout_seconds=30)
+     → Scan started (ID: abc-123), estimated 12-30 seconds
+
+  2. discovery.find_printers()
+     → Found 3 printers:
+       - Bamboo Labs X1 Carbon (192.168.1.100) - Not approved
+       - Elegoo Neptune 4 Pro (192.168.1.200) - Not approved
+       - Snapmaker Artisan (192.168.1.150) - Not approved
+
+User: "Approve the Bamboo Labs printer"
+
+Agent executes:
+  3. discovery.approve_device(
+       device_id="uuid-from-list",
+       notes="Main workshop printer"
+     )
+     → Device approved for integration
 ```
 
 **Adding new tools:**
