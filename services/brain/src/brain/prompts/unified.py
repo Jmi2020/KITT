@@ -412,7 +412,7 @@ You have access to the following tools. Use them when needed to accomplish user 
 **When to Use Tools**:
 - User asks for "latest", "current", "recent" information → Use web_search
 - User requests CAD generation → Use generate_cad_model
-- User prompt contains `<available_image_refs>` → Reference the listed entries by friendly name and include the corresponding download/storage URLs in generate_cad_model.imageRefs
+- User prompt contains `<available_image_refs>` → Reference the listed entries by name and copy the matching download/storage URLs into `generate_cad_model.imageRefs`. When you rely on one of these references, set `mode` to `"organic"` so the CAD service prioritizes Tripo.
 - User asks to control a device → Use appropriate device control tool
 - Your knowledge cutoff prevents accurate answer → Use web_search
 - User explicitly requests a tool by name → Use that tool

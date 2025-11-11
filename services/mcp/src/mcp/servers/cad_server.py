@@ -74,6 +74,11 @@ class CADMCPServer(MCPServer):
                                 "additionalProperties": True,
                             },
                         },
+                        "mode": {
+                            "type": "string",
+                            "description": "Optional generation mode hint (auto, organic, parametric). Use 'organic' when relying on reference images for Tripo.",
+                            "enum": ["auto", "organic", "parametric"],
+                        },
                     },
                     "required": ["prompt"],
                 },
@@ -119,6 +124,7 @@ class CADMCPServer(MCPServer):
         prompt = arguments.get("prompt")
         references = arguments.get("references", {})
         image_refs = arguments.get("imageRefs") or arguments.get("image_refs")
+        mode = arguments.get("mode")
 
         if not prompt:
             return ToolResult(success=False, error="Missing required parameter: prompt")
@@ -135,6 +141,8 @@ class CADMCPServer(MCPServer):
             }
             if image_refs:
                 payload["imageRefs"] = image_refs
+            if mode:
+                payload["mode"] = mode
 
             async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
