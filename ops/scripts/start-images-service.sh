@@ -52,8 +52,15 @@ if [[ ! -f "${REPO_ROOT}/.env" ]]; then
     exit 1
 fi
 
-# Load environment
+# Load environment (export everything)
+set -a
 source "${REPO_ROOT}/.env"
+set +a
+
+# Apple Silicon: torch.mps crashes if a fork happens while Metal initializes.
+# RQ uses forked workhorses, so we need to disable Apple's fork safety guard.
+export OBJC_DISABLE_INITIALIZE_FORK_SAFETY="${OBJC_DISABLE_INITIALIZE_FORK_SAFETY:-YES}"
+log_info "OBJC_DISABLE_INITIALIZE_FORK_SAFETY=${OBJC_DISABLE_INITIALIZE_FORK_SAFETY}"
 
 # Check if service directory exists
 if [[ ! -d "${SERVICE_DIR}" ]]; then
