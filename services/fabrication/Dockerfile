@@ -9,6 +9,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    curl \
     ffmpeg \
     libsm6 \
     libxext6 \

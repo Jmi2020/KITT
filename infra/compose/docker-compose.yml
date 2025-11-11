@@ -24,6 +24,7 @@ services:
       MEM0_MCP_URL: http://mem0-mcp:8765
       CAD_SERVICE_URL: http://cad:8200
       BROKER_URL: http://broker:8777
+      FABRICATION_BASE: http://fabrication:8300
       HOME_ASSISTANT_URL: ${HOME_ASSISTANT_URL:-http://homeassistant:8123}
       HOME_ASSISTANT_TOKEN: ${HOME_ASSISTANT_TOKEN}
       SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://searxng:8080}
@@ -40,6 +41,7 @@ services:
       - mem0-mcp
       - cad
       - broker
+      - fabrication
       - homeassistant
     volumes:
       - ../../services/common:/app/services/common:ro
@@ -62,6 +64,7 @@ services:
       <<: *service-env
       SERVICE_NAME: gateway
       UPSTREAM_BRAIN_URL: http://brain:8000
+      FABRICATION_BASE: http://fabrication:8300
       SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://searxng:8080}
       INTERNAL_SEARXNG_BASE_URL: http://searxng:8080
       IMAGE_SEARCH_PROVIDER: ${IMAGE_SEARCH_PROVIDER:-auto}
@@ -70,6 +73,7 @@ services:
       BRAVE_SEARCH_ENDPOINT: ${BRAVE_SEARCH_ENDPOINT:-https://api.search.brave.com/res/v1/images/search}
     depends_on:
       - brain
+      - fabrication
     volumes:
       - ../../services/common:/app/services/common:ro
       - ../../services/gateway:/app/services/gateway:ro
@@ -139,16 +143,34 @@ services:
     environment:
       <<: *service-env
       SERVICE_NAME: fabrication
+      BAMBOO_IP: ${BAMBOO_IP:-192.168.1.100}
+      BAMBOO_SERIAL: ${BAMBOO_SERIAL:-01P45165616}
+      BAMBOO_ACCESS_CODE: ${BAMBOO_ACCESS_CODE:-}
+      BAMBOO_MQTT_HOST: ${BAMBOO_MQTT_HOST:-}
+      BAMBOO_MQTT_PORT: ${BAMBOO_MQTT_PORT:-1883}
+      ELEGOO_IP: ${ELEGOO_IP:-192.168.1.200}
+      ELEGOO_MOONRAKER_PORT: ${ELEGOO_MOONRAKER_PORT:-7125}
+      SNAPMAKER_IP: ${SNAPMAKER_IP:-192.168.1.150}
+      SNAPMAKER_PORT: ${SNAPMAKER_PORT:-8888}
+      SNAPMAKER_TOKEN: ${SNAPMAKER_TOKEN:-}
     depends_on:
       - mosquitto
       - redis
     volumes:
       - ../../services/common:/app/services/common:ro
       - ../../services/fabrication:/app/services/fabrication:ro
+      - ${KITTY_ARTIFACTS_DIR:-/Users/Shared/KITTY/artifacts}:/app/storage
+      - ${KITTY_ARTIFACTS_DIR:-/Users/Shared/KITTY/artifacts}:/app/artifacts
     ports:
       - "8300:8300"
     networks:
       - kitty
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8300/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   safety:
     build:
@@ -182,6 +204,9 @@ services:
       BROKER_ALLOW_LIST: /etc/kitty/commands.yaml
       BROKER_AUDIT_LOG: /var/log/kitty/broker-audit.jsonl
       BROKER_ENABLE_PRIVILEGE_DROP: "false"
+      FABRICATION_BASE: http://fabrication:8300
+    depends_on:
+      - fabrication
     volumes:
       - ../../services/broker:/app/services/broker:ro
       - broker-logs:/var/log/kitty
