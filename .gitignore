@@ -13,6 +13,7 @@ venv/
 *.env
 .logs/
 docs/admin/
+.env.claudeweb
 
 # Editor
 .vscode/
