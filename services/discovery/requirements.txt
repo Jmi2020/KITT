@@ -9,6 +9,7 @@ zeroconf==0.132.2  # mDNS/Bonjour discovery
 ssdpy==0.4.1  # SSDP/UPnP discovery
 python-nmap==0.7.1  # Network scanning (requires nmap binary)
 scapy==2.5.0  # Low-level packet manipulation (optional, for ARP)
+icmplib==3.0.4  # ICMP ping sweep (requires NET_RAW capability)
 
 # MAC address vendor lookup
 mac-vendor-lookup==0.1.12

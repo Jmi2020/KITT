@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     discovery_enable_bamboo_udp: bool = True
     discovery_enable_snapmaker_udp: bool = True
     discovery_enable_network_scan: bool = False
+    discovery_subnets: List[str] = ["192.168.1.0/24"]  # Comma-separated CIDRs to scan
+    discovery_ping_sweep_interval_minutes: int = 60  # How often to run full ping sweep
 
     # Bamboo Labs H2D
     bamboo_ip: str = "192.168.1.100"

@@ -73,10 +73,29 @@ async def lifespan(app: FastAPI):
     device_store = DeviceStore(postgres_url)
     logger.info("Device store initialized")
 
+    # Build list of enabled scanners from settings
+    enabled_scanners = []
+    if settings.discovery_enable_mdns:
+        enabled_scanners.append("mdns")
+    if settings.discovery_enable_ssdp:
+        enabled_scanners.append("ssdp")
+    if settings.discovery_enable_bamboo_udp:
+        enabled_scanners.append("bamboo_udp")
+    if settings.discovery_enable_snapmaker_udp:
+        enabled_scanners.append("snapmaker_udp")
+    if settings.discovery_enable_network_scan:
+        enabled_scanners.append("network_scan")
+
+    logger.info(f"Enabled scanners: {enabled_scanners}")
+    logger.info(f"Ping sweep subnets: {settings.discovery_subnets}")
+
     # Initialize scan scheduler
     scan_scheduler = ScanScheduler(
         device_store=device_store,
-        interval_minutes=settings.discovery_scan_interval_minutes
+        interval_minutes=settings.discovery_scan_interval_minutes,
+        ping_sweep_interval_minutes=settings.discovery_ping_sweep_interval_minutes,
+        enabled_scanners=enabled_scanners,
+        subnets=settings.discovery_subnets
     )
 
     # Start periodic scans if enabled
