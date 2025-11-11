@@ -36,6 +36,7 @@ class DiscoveryMethod(str, Enum):
     SNAPMAKER_UDP = "snapmaker_udp"
     NMAP = "nmap"
     ARP = "arp"
+    NETWORK_SCAN = "network_scan"
 
 
 @dataclass

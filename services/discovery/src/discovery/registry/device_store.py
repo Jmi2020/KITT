@@ -87,9 +87,8 @@ class DeviceStore:
 
                 # Increase confidence if rediscovered via same method
                 if existing.discovery_method == device.discovery_method.value:
-                    existing.confidence_score = min(
-                        1.0, existing.confidence_score + 0.05
-                    )
+                    current_score = float(existing.confidence_score or 0)
+                    existing.confidence_score = min(1.0, current_score + 0.05)
 
                 await session.commit()
                 await session.refresh(existing)
