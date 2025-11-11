@@ -63,6 +63,9 @@ fi
 
 cd "${SERVICE_DIR}"
 
+# Ensure logs directory exists early
+mkdir -p .logs
+
 # Check if virtual environment exists, create if not
 if [[ ! -d ".venv" ]]; then
     log_info "Creating virtual environment..."
@@ -138,9 +141,6 @@ if [[ -f ".service.pid" ]]; then
     fi
     rm -f .service.pid
 fi
-
-# Create logs directory
-mkdir -p .logs
 
 # Start service
 SERVICE_HOST="${SERVICE_HOST:-127.0.0.1}"
