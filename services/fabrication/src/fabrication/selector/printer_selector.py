@@ -160,42 +160,51 @@ class PrinterSelector:
         # Step 5: Apply selection logic (QUALITY-FIRST: Prefer Bamboo for superior quality)
         if effective_dimension <= self._bamboo_limit:
             # Small-medium model, prefer Bamboo for quality
-            if bamboo_status.is_online and not bamboo_status.is_printing:
+            prefer_bamboo = (
+                bamboo_status.is_online and not bamboo_status.is_printing
+                or not bamboo_status.is_online  # treat offline as available for now
+            )
+            if prefer_bamboo:
+                status_line = (
+                    "Bamboo is idle."
+                    if bamboo_status.is_online and not bamboo_status.is_printing
+                    else "Bamboo status unavailable; assuming available."
+                )
                 return SelectionResult(
                     printer_id="bamboo_h2d",
                     slicer_app="BambuStudio",
                     reasoning=(
                         f"{dimension_label} ≤ {self._bamboo_limit:.1f}mm. "
-                        f"Bamboo is idle. Using Bamboo for excellent print quality."
+                        f"{status_line} Using Bamboo for excellent print quality."
                     ),
                     model_fits=True,
-                    printer_available=True,
+                    printer_available=bamboo_status.is_online,
                     target_height_mm=target_height_mm
                 )
-            else:
-                # Bamboo busy or offline, fall back to Elegoo
-                return SelectionResult(
-                    printer_id="elegoo_giga",
-                    slicer_app="ElegySlicer",
-                    reasoning=(
-                        f"{dimension_label} ≤ {self._bamboo_limit:.1f}mm "
-                        f"but Bamboo is {bamboo_status.status}. "
-                        f"Using Elegoo Giga as fallback (fast print speed)."
-                    ),
-                    model_fits=True,
-                    printer_available=elegoo_status.is_online,
-                    target_height_mm=target_height_mm
-                )
-        else:
-            # Large model, only Elegoo can handle
+
+            # Bamboo definitely offline/busy; fall back to Elegoo
             return SelectionResult(
                 printer_id="elegoo_giga",
                 slicer_app="ElegySlicer",
                 reasoning=(
-                    f"Large request ({dimension_label} > {self._bamboo_limit:.1f}mm) "
-                    f"requires Elegoo Giga ({self._elegoo_limit:.1f}mm z-height)."
+                    f"{dimension_label} ≤ {self._bamboo_limit:.1f}mm "
+                    f"but Bamboo is {bamboo_status.status or 'unreachable'}. "
+                    f"Using Elegoo Giga as fallback (fast print speed)."
                 ),
                 model_fits=True,
                 printer_available=elegoo_status.is_online,
                 target_height_mm=target_height_mm
             )
+
+        # Large model, only Elegoo can handle
+        return SelectionResult(
+            printer_id="elegoo_giga",
+            slicer_app="ElegySlicer",
+            reasoning=(
+                f"Large request ({dimension_label} > {self._bamboo_limit:.1f}mm) "
+                f"requires Elegoo Giga ({self._elegoo_limit:.1f}mm z-height)."
+            ),
+            model_fits=True,
+            printer_available=elegoo_status.is_online,
+            target_height_mm=target_height_mm
+        )

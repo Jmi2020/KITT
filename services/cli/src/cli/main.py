@@ -58,6 +58,9 @@ def _first_valid_url(candidates: Iterable[str], default: str) -> str:
         host = parsed.hostname
         if not host:
             continue
+        if host == "host.docker.internal" and not RUNNING_IN_CONTAINER:
+            # Host alias is only reachable from inside containers; skip when on host
+            continue
         if host in {"localhost", "127.0.0.1", "0.0.0.0"} or "." in host:
             return candidate
         if RUNNING_IN_CONTAINER:

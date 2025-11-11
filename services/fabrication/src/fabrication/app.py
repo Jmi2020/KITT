@@ -228,10 +228,6 @@ async def open_in_slicer(request: OpenInSlicerRequest) -> OpenInSlicerResponse:
         target_height_mm = _parse_height_to_mm(request.target_height)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    try:
-        target_height_mm = _parse_height_to_mm(request.target_height)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Validate STL file exists
     if not stl_path.exists():
@@ -336,6 +332,10 @@ async def analyze_model(request: AnalyzeModelRequest) -> AnalyzeModelResponse:
         raise HTTPException(status_code=500, detail="Service not initialized")
 
     stl_path = Path(request.stl_path)
+    try:
+        target_height_mm = _parse_height_to_mm(request.target_height)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if not stl_path.exists():
         raise HTTPException(

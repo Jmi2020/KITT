@@ -49,9 +49,10 @@ class STLAnalyzer:
         except Exception as e:
             raise ValueError(f"Failed to load STL: {e}")
 
-        # Validate mesh
-        if not mesh.is_valid:
-            LOGGER.warning("STL has invalid geometry", path=str(stl_path))
+        # Validate mesh (best-effort; not all Trimesh versions expose validation helpers)
+        is_watertight = getattr(mesh, "is_watertight", None)
+        if is_watertight is False:
+            LOGGER.warning("STL mesh is not watertight", path=str(stl_path))
 
         # Calculate bounding box
         bounds = mesh.bounds  # [[min_x, min_y, min_z], [max_x, max_y, max_z]]
