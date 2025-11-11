@@ -134,6 +134,49 @@ tools:
     enabled: true
 
   # ==============================================================================
+  # Coding Tools (free, low hazard - code generation)
+  # ==============================================================================
+
+  coding.generate:
+    server: broker
+    description: "Generate Python code using LLM with Plan-Code-Test-Run-Refine-Summarize workflow"
+    hazard_class: low
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+    note: |
+      Automated code generation with test-driven refinement.
+
+      Workflow:
+      1. Plan: Generate implementation plan from natural language request
+      2. Code: Generate Python module based on plan
+      3. Test: Generate pytest tests for the code
+      4. Run: Execute tests in sandboxed environment
+      5. Refine: Fix code if tests fail (max 2 iterations)
+      6. Summarize: Create markdown summary with usage examples
+
+      Parameters:
+      - request (required): Natural language coding request (10-5000 chars)
+      - max_refinements (optional): Maximum refinement iterations (default: 2, max: 5)
+      - timeout_seconds (optional): Sandbox execution timeout (default: 20s, max: 120s)
+      - allow_network (optional): Allow network access in sandbox (default: false)
+
+      Returns:
+      - code: Generated Python module
+      - test_code: Generated pytest tests
+      - tests_passed: Whether final tests passed
+      - refinement_count: Number of refinement iterations
+      - summary: Markdown summary with usage examples
+      - plan: Implementation plan
+      - test_output: Test execution output
+
+      Safety:
+      - Sandboxed execution with no network access by default
+      - Bounded timeouts (max 120s)
+      - No file I/O outside temp directory
+      - Uses local llama.cpp servers (Q4/F16/Coder)
+
+  # ==============================================================================
   # Fabrication Tools (low-medium hazard - slicer app launching)
   # ==============================================================================
 
@@ -375,6 +418,7 @@ categories:
   vision: [image_search, image_filter, store_selection]
   memory: [remember, search_memories]
   cad: [cad.generate_model, cad.image_to_mesh, cad.local_generate]
+  coding: [coding.generate]
   fabrication: [fabrication.open_in_slicer, fabrication.prepare_print, fabrication.analyze_model, fabrication.printer_status]
   discovery: [discovery.scan_network, discovery.list_devices, discovery.find_printers, discovery.approve_device]
   homeassistant: [homeassistant.turn_on, homeassistant.turn_off, homeassistant.activate_scene, homeassistant.unlock_door, homeassistant.lock_door, homeassistant.enable_power]

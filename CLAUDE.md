@@ -16,6 +16,7 @@ The stack runs as containerized microservices orchestrated via Docker Compose wi
 - **cad** (port 8200): Multi-provider CAD generation (Zoo/Tripo) with MinIO storage. Endpoint: `/api/cad/generate`
 - **fabrication** (port 8300): Multi-printer control with STL analysis, printer status checking, quality-first selection, and slicer app launching (BambuStudio/ElegySlicer/Luban). Endpoints: `/api/fabrication/open_in_slicer`, `/api/fabrication/analyze_model`, `/api/fabrication/printer_status`. See `specs/002-MultiPrinterControl/`
 - **discovery** (port 8500): Network device discovery for printers, Raspberry Pi, ESP32 via mDNS/SSDP/UDP protocols. Device registry with approval workflow. Endpoints: `/api/discovery/scan`, `/api/discovery/devices`. See `specs/003-NetworkDiscovery/`
+- **coder-agent** (port 8092): LLM-powered code generation with Plan-Code-Test-Run-Refine-Summarize workflow using LangGraph. Sandboxed execution with pytest integration. Endpoint: `/api/coding/generate`. Uses local llama.cpp Q4/F16 servers for offline code generation.
 - **safety** (port 8400): Policy engine for hazardous actions, UniFi Access checks, signature validation, audit logging
 - **voice**: Speech transcript ingestion (`/api/voice/transcript`), parser/router integration, note logging
 - **ui** (port 4173): Web dashboard, Fabrication Console, wall terminal view with MQTT subscriptions
@@ -242,6 +243,40 @@ Multi-tier fallback pipeline in `services/cad/src/cad/cycler.py`:
 3. Local CadQuery/FreeCAD (offline fallback)
 
 Artifacts stored in MinIO with metadata in Redis cache.
+
+### Coder Agent (LangGraph Workflow)
+Automated code generation service using LangGraph state machine in `services/coder-agent/`:
+
+**Workflow (Plan-Code-Test-Run-Refine-Summarize):**
+1. **Plan**: Generate implementation plan from natural language request (Q4 model)
+2. **Code**: Generate Python module based on plan (F16/Coder model)
+3. **Test**: Generate pytest tests for the code (Q4 model)
+4. **Run**: Execute tests in sandboxed subprocess
+5. **Refine**: Fix code if tests fail, max 2 iterations (F16/Coder model)
+6. **Summarize**: Create markdown summary with usage examples (Q4 model)
+
+**Key Components:**
+- `graph.py`: LangGraph state machine with conditional edges for refinement loop
+- `llm_client.py`: Dual-endpoint llama.cpp client (OpenAI-compatible `/v1/chat/completions` with fallback to native `/completion`)
+- `sandbox.py`: Safe subprocess execution with pytest, no network, bounded timeouts
+- `prompts.py`: System prompts and templates for each workflow stage
+- `app.py`: FastAPI service with `/api/coding/generate` endpoint
+
+**Safety Features:**
+- Sandboxed execution with no network access by default
+- Timeout enforcement (default 20s, max 120s)
+- No file I/O outside temporary directory
+- Syntax validation before execution
+- Max code length: 8000 characters
+
+**Model Routing:**
+- Q4 server (8083): Fast operations (planning, test generation, summaries)
+- F16 server (8082): Precise operations (code generation, refinement)
+- Optional dedicated coder model: Set `LLAMACPP_CODER_BASE` for specialized models like DeepSeek-Coder
+
+**Access via Gateway:** `POST /api/coding/generate` (proxied from `coder-agent:8092`)
+
+See `Research/KITTY_LangGraph_Coding_Agent_Integration_Guide.md` for full architecture details.
 
 ## File Organization Conventions
 

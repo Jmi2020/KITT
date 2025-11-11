@@ -14,6 +14,7 @@ from .routes.remote import router as remote_router
 from .routes.vision import router as vision_router
 from .routes.images import router as images_router
 from .routes.fabrication import router as fabrication_router
+from .routes.coding import router as coding_router
 
 app = FastAPI(title="KITTY Gateway")
 app.add_middleware(RemoteModeMiddleware)
@@ -24,6 +25,7 @@ app.include_router(remote_router)
 app.include_router(vision_router)
 app.include_router(images_router)
 app.include_router(fabrication_router)
+app.include_router(coding_router)
 
 storage_root = Path(os.getenv("KITTY_STORAGE_ROOT", "storage"))
 storage_root.mkdir(parents=True, exist_ok=True)
