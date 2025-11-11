@@ -1,0 +1,284 @@
+# KITTY ReAct Agent Tool Registry
+# Defines all available tools for the conversation framework
+# Each tool maps to an MCP endpoint with JSON schema validation
+
+version: 1
+
+tools:
+  # ==============================================================================
+  # CAD Generation Tools
+  # ==============================================================================
+  cad.generate_model:
+    method: POST
+    url: http://gateway:8080/api/cad/generate
+    schema:
+      type: object
+      properties:
+        prompt:
+          type: string
+          description: "Natural language description of the CAD model to generate"
+        provider:
+          type: string
+          enum: [auto, zoo, tripo, cadquery, freecad]
+          default: auto
+          description: "CAD provider (auto fallback: zoo → tripo → local)"
+        imageRefs:
+          type: array
+          items:
+            type: string
+          description: "Array of image URLs/S3 keys for image-to-CAD generation"
+        conversationId:
+          type: string
+          description: "Conversation ID for artifact tracking"
+      required: [prompt]
+    safety:
+      hazard_class: "low"
+      confirmation_required: false
+      notes: "CAD generation is non-destructive; always review before printing"
+
+  # ==============================================================================
+  # Image Generation Tools (Stable Diffusion)
+  # ==============================================================================
+  images.generate:
+    method: POST
+    url: http://gateway:8080/api/images/generate
+    schema:
+      type: object
+      properties:
+        prompt:
+          type: string
+          description: "Text description for image generation"
+        model:
+          type: string
+          enum: [sdxl_base, sd_1_5]
+          default: sdxl_base
+          description: "Stable Diffusion model (sdxl_base for 1024x1024, sd_1_5 for 512x512)"
+        width:
+          type: integer
+          default: 1024
+          minimum: 512
+          maximum: 1024
+          description: "Image width in pixels"
+        height:
+          type: integer
+          default: 1024
+          minimum: 512
+          maximum: 1024
+          description: "Image height in pixels"
+        steps:
+          type: integer
+          default: 30
+          minimum: 10
+          maximum: 50
+          description: "Number of diffusion steps (more = better quality, slower)"
+        cfg:
+          type: number
+          default: 7.0
+          minimum: 1.0
+          maximum: 15.0
+          description: "Classifier-free guidance scale (how closely to follow prompt)"
+        seed:
+          type: integer
+          description: "Random seed for reproducibility (optional)"
+        refiner:
+          type: string
+          description: "SDXL refiner model path for quality boost (optional)"
+      required: [prompt]
+    safety:
+      hazard_class: "low"
+      confirmation_required: false
+      notes: "Image generation is local and offline; no content filtering"
+
+  images.get_latest:
+    method: GET
+    url: http://gateway:8080/api/images/latest
+    schema:
+      type: object
+      properties:
+        limit:
+          type: integer
+          default: 10
+          minimum: 1
+          maximum: 50
+          description: "Number of recent images to retrieve"
+    safety:
+      hazard_class: "none"
+      confirmation_required: false
+
+  images.select:
+    method: POST
+    url: http://gateway:8080/api/images/select
+    schema:
+      type: object
+      properties:
+        image_key:
+          type: string
+          description: "S3 key of the image to select"
+      required: [image_key]
+    safety:
+      hazard_class: "none"
+      confirmation_required: false
+      notes: "Returns imageRef compatible with CAD imageRefs array"
+
+  # ==============================================================================
+  # Fabrication Tools
+  # ==============================================================================
+  fabrication.queue_print:
+    method: POST
+    url: http://gateway:8080/api/fabrication/queue
+    schema:
+      type: object
+      properties:
+        artifact_path:
+          type: string
+          description: "Path or S3 key to STL/GCODE artifact"
+        printer_id:
+          type: string
+          description: "Target printer device ID"
+        material:
+          type: string
+          description: "Print material (PLA, PETG, ABS, etc.)"
+        profile:
+          type: string
+          description: "Slicer profile name"
+      required: [artifact_path, printer_id]
+    safety:
+      hazard_class: "medium"
+      confirmation_required: true
+      notes: "Physical fabrication; verify design before printing"
+
+  # ==============================================================================
+  # Home Assistant Device Control
+  # ==============================================================================
+  homeassistant.control_device:
+    method: POST
+    url_template: "http://gateway:8080/api/device/{entity_id}/command"
+    schema:
+      type: object
+      properties:
+        entity_id:
+          type: string
+          description: "Home Assistant entity ID (e.g., light.bench_lights)"
+        command:
+          type: string
+          enum: [turn_on, turn_off, toggle]
+          description: "Command to execute"
+      required: [entity_id, command]
+    safety:
+      hazard_class: "varies"
+      confirmation_required: false
+      notes: "Safe for lights/switches; hazardous for doors/power requires confirmation"
+
+  # ==============================================================================
+  # Vision & Research Tools
+  # ==============================================================================
+  vision.search:
+    method: POST
+    url: http://gateway:8080/api/vision/search
+    schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Search query for visual references"
+        max_results:
+          type: integer
+          default: 12
+          description: "Maximum number of results"
+      required: [query]
+    safety:
+      hazard_class: "none"
+      confirmation_required: false
+
+  vision.store:
+    method: POST
+    url: http://gateway:8080/api/vision/store
+    schema:
+      type: object
+      properties:
+        session_id:
+          type: string
+          description: "Session ID for grouping stored images"
+        images:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: string}
+              image_url: {type: string}
+              title: {type: string}
+              source: {type: string}
+              caption: {type: string}
+      required: [session_id, images]
+    safety:
+      hazard_class: "none"
+      confirmation_required: false
+
+  research.web_search:
+    method: POST
+    url: http://gateway:8080/api/research/web_search
+    schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Web search query"
+      required: [query]
+    safety:
+      hazard_class: "none"
+      confirmation_required: false
+
+  research.fetch_webpage:
+    method: POST
+    url: http://gateway:8080/api/research/fetch_webpage
+    schema:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+          description: "URL to fetch and extract content from"
+      required: [url]
+    safety:
+      hazard_class: "none"
+      confirmation_required: false
+
+  # ==============================================================================
+  # Memory Tools (Qdrant)
+  # ==============================================================================
+  memory.remember:
+    method: POST
+    url: http://gateway:8080/api/memory/remember
+    schema:
+      type: object
+      properties:
+        text:
+          type: string
+          description: "Content to remember (user preference, context, note)"
+        tags:
+          type: array
+          items:
+            type: string
+          description: "Categorical tags for organization"
+      required: [text]
+    safety:
+      hazard_class: "none"
+      confirmation_required: false
+
+  memory.search:
+    method: POST
+    url: http://gateway:8080/api/memory/search
+    schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Semantic search query"
+        top_k:
+          type: integer
+          default: 5
+          description: "Number of results to return"
+      required: [query]
+    safety:
+      hazard_class: "none"
+      confirmation_required: false

@@ -513,6 +513,64 @@ Step 4: [Thought] Have enough data, create comparison
         [Citations] Markdown-formatted sources with access dates
 ```
 
+#### 🧩 **Tool Registry & MCP Integration**
+
+All ReAct agent tools are defined in a central **tool registry** (`config/tool_registry.yaml`) with JSON schema validation and safety metadata. This makes it easy to add new capabilities without modifying agent code.
+
+**Available tool categories:**
+
+| Category | Tools | Safety Level |
+|----------|-------|--------------|
+| **CAD Generation** | `cad.generate_model` | Low (non-destructive) |
+| **Image Generation** | `images.generate`, `images.get_latest`, `images.select` | Low (local, offline) |
+| **Fabrication** | `fabrication.queue_print` | Medium (requires confirmation) |
+| **Home Assistant** | `homeassistant.control_device` | Varies by entity |
+| **Vision & Research** | `vision.search`, `vision.store`, `research.web_search` | None |
+| **Memory** | `memory.remember`, `memory.search` | None |
+
+**Example: Image → CAD → Print workflow**
+
+```yaml
+User: "Generate an image of a water bottle, create a 3D model from it, and print it"
+
+Agent executes:
+  1. images.generate(prompt="studio photo matte black water bottle")
+     → Returns: s3://kitty-artifacts/images/20250111_143022.png
+  
+  2. cad.generate_model(
+       prompt="water bottle from reference",
+       provider="tripo",
+       imageRefs=["s3://kitty-artifacts/images/20250111_143022.png"]
+     )
+     → Returns: /Users/Shared/KITTY/artifacts/cad/bottle.stl
+  
+  3. [Safety check] Requires confirmation phrase for print
+     User: "alpha-omega-protocol"
+  
+  4. fabrication.queue_print(
+       artifact_path="/Users/Shared/KITTY/artifacts/cad/bottle.stl",
+       printer_id="prusa-mk4"
+     )
+     → Returns: Job queued, ETA 2h 15m
+```
+
+**Adding new tools:**
+
+1. Add to `config/tool_registry.yaml`:
+   ```yaml
+   myservice.action:
+     method: POST
+     url: http://gateway:8080/api/myservice/action
+     schema: {...}
+     safety: {hazard_class: "low", confirmation_required: false}
+   ```
+
+2. Gateway automatically proxies to backend service
+3. Agent picks up new tool on restart (no code changes needed!)
+
+**Documentation:** See `config/README.md` for complete tool registry reference and examples.
+
+
 ### 🔐 **Safety-First Design**
 
 - **Hazard workflows**: Two-step confirmation for dangerous operations (e.g., unlocking doors)
