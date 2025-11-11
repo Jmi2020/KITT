@@ -20,7 +20,9 @@ dependencies = [
   "httpx>=0.27",
   "numpy>=1.26",
   "opencv-python-headless>=4.10",
+  "paho-mqtt>=2.1.0",
   "pydantic>=2.7",
+  "trimesh>=4.5.0",
   "uvicorn[standard]>=0.30",
 ]
 

@@ -1,0 +1,42 @@
+# KITTY Multi-Printer Configuration
+#
+# This file defines the three printers available to KITTY for fabrication tasks.
+# Copy this file to printers.yaml and update with your printer network details.
+#
+# Usage:
+#   cp config/printers.yaml.example config/printers.yaml
+#   nano config/printers.yaml  # Update IPs and credentials
+#
+# See specs/002-MultiPrinterControl/README.md for setup instructions.
+
+printers:
+  # Bamboo Labs H2D - High quality FDM printer
+  # Build volume: 250×250×250mm
+  # Best for: Small-medium parts requiring excellent quality
+  # Protocol: MQTT + FTPS (local network)
+  bamboo_h2d:
+    type: bamboo_h2d
+    ip: 192.168.1.100            # Printer IP address
+    serial: "01P45165616"        # Printer serial number (from display)
+    access_code: "YOUR_16_CHAR_CODE"  # LAN access code (Settings → Network)
+    mqtt_host: 192.168.1.100     # Local MQTT broker (usually same as printer IP)
+    mqtt_port: 1883              # MQTT port (default: 1883)
+
+  # Elegoo OrangeStorm Giga - Large format FDM printer (Klipper)
+  # Build volume: 800×800×1000mm
+  # Best for: Large prints, fast printing speed
+  # Protocol: Moonraker REST API
+  elegoo_giga:
+    type: elegoo_giga
+    ip: 192.168.1.200            # Printer IP address
+    port: 7125                   # Moonraker API port (default: 7125)
+
+  # Snapmaker Artisan Pro - 3-in-1 fabrication platform
+  # Build volume: 400×400×400mm
+  # Modes: 3D printing, CNC milling, laser engraving
+  # Protocol: SACP (Snapmaker Application Communication Protocol)
+  snapmaker_artisan:
+    type: snapmaker_artisan
+    ip: 192.168.1.150            # Printer IP address
+    port: 8888                   # SACP port (default: 8888)
+    token: ""                    # Optional authentication token (usually not required)

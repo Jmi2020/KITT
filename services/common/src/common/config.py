@@ -50,6 +50,25 @@ class Settings(BaseSettings):
     home_assistant_auto_discover: bool = False
     home_assistant_discovery_timeout: float = 5.0
 
+    # Fabrication / Multi-Printer Control
+    printer_config: str = "config/printers.yaml"
+
+    # Bamboo Labs H2D
+    bamboo_ip: str = "192.168.1.100"
+    bamboo_serial: str = "01P45165616"
+    bamboo_access_code: str = ""
+    bamboo_mqtt_host: Optional[str] = None
+    bamboo_mqtt_port: int = 1883
+
+    # Elegoo Giga (Klipper)
+    elegoo_ip: str = "192.168.1.200"
+    elegoo_moonraker_port: int = 7125
+
+    # Snapmaker Artisan
+    snapmaker_ip: str = "192.168.1.150"
+    snapmaker_port: int = 8888
+    snapmaker_token: Optional[str] = None
+
     # Security / OAuth
     secret_key: str = "super-secret"
     access_token_expire_minutes: int = 30
