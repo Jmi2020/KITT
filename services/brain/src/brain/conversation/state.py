@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from brain.agents.react_agent import AgentStep
+from brain.agents.types import AgentStep
 
 
 @dataclass

@@ -6,7 +6,6 @@ from __future__ import annotations
 import logging
 import os
 import re
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from brain.routing.llama_cpp_client import LlamaCppClient
@@ -19,38 +18,9 @@ from brain.conversation.safety import SafetyChecker
 from ..utils.tokens import count_tokens
 
 from .prompt_templates import get_tool_call_examples
+from .types import AgentResult, AgentStep
 
 logger = logging.getLogger("brain.agent")
-
-
-@dataclass
-class AgentStep:
-    """A single step in the ReAct loop."""
-
-    thought: str
-    action: Optional[str] = None
-    action_input: Optional[Dict[str, Any]] = None
-    observation: Optional[str] = None
-    data: Optional[Dict[str, Any]] = None
-    is_final: bool = False
-
-
-@dataclass
-class AgentResult:
-    """Final result from agent execution."""
-
-    answer: str
-    steps: List[AgentStep]
-    success: bool
-    error: Optional[str] = None
-    iterations: int = 0
-    truncated: bool = False
-    stop_reason: Optional[str] = None
-    requires_confirmation: bool = False
-    confirmation_phrase: Optional[str] = None
-    pending_tool: Optional[str] = None
-    pending_tool_args: Optional[Dict[str, Any]] = None
-    hazard_class: Optional[str] = None
 
 
 class ReActAgent:
