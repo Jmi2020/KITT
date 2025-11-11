@@ -349,6 +349,9 @@ class ReActAgent:
                 action = tool_call.name
                 action_input = tool_call.arguments
 
+                # Initialize result to None (will be set on successful execution)
+                result = None
+
                 # Validate tool call before execution
                 validator = ToolCallValidator(tools)
                 validation = validator.validate_tool_call(action, action_input)
@@ -408,6 +411,7 @@ class ReActAgent:
                         except Exception as e:
                             logger.error(f"Tool execution failed: {e}")
                             observation = self._truncate_observation(f"Tool execution failed: {str(e)}")
+                            result = None  # Ensure result is None on error
 
                 # Log agent step with action
                 log_agent_step(
