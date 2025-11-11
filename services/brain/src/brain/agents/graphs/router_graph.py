@@ -20,6 +20,7 @@ from common.db.models import RoutingTier
 
 from ..complexity.analyzer import ComplexityAnalyzer
 from .states import Memory, RouterState, ToolResult
+from .deep_reasoner_graph import DeepReasonerGraph
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ class RouterGraph:
         memory_client: MemoryClient,
         mcp_client: MCPClient,
         max_refinements: int = 2,
+        enable_deep_reasoner: bool = True,
     ) -> None:
         """
         Initialize router graph.
@@ -54,14 +56,27 @@ class RouterGraph:
             memory_client: Memory search client
             mcp_client: MCP client for tool execution
             max_refinements: Maximum refinement iterations
+            enable_deep_reasoner: Enable F16 deep reasoner for complex queries
         """
         self.llm = llm_client
         self.memory = memory_client
         self.mcp = mcp_client
         self.max_refinements = max_refinements
+        self.enable_deep_reasoner = enable_deep_reasoner
 
         # Initialize complexity analyzer
         self.complexity_analyzer = ComplexityAnalyzer()
+
+        # Initialize deep reasoner if enabled
+        self.deep_reasoner = None
+        if enable_deep_reasoner:
+            self.deep_reasoner = DeepReasonerGraph(
+                llm_client=llm_client,
+                memory_client=memory_client,
+                mcp_client=mcp_client,
+                max_reasoning_steps=5,
+            )
+            logger.info("Deep reasoner enabled for F16 escalation")
 
         # Build graph
         self.graph = self._build_graph()
@@ -80,6 +95,10 @@ class RouterGraph:
         workflow.add_node("tool_execution", self._tool_execution_node)
         workflow.add_node("validation", self._validation_node)
         workflow.add_node("response_generation", self._response_generation_node)
+
+        # Add escalation node if deep reasoner is enabled
+        if self.deep_reasoner:
+            workflow.add_node("f16_escalation", self._f16_escalation_node)
 
         # Entry point
         workflow.set_entry_point("intake")
@@ -112,8 +131,21 @@ class RouterGraph:
             },
         )
 
-        # End after response
-        workflow.add_edge("response_generation", END)
+        # Conditional: response_generation → F16 escalation or END
+        if self.deep_reasoner:
+            workflow.add_conditional_edges(
+                "response_generation",
+                self._should_escalate_to_f16,
+                {
+                    "f16_escalation": "f16_escalation",
+                    END: END,
+                },
+            )
+            # F16 escalation leads to END
+            workflow.add_edge("f16_escalation", END)
+        else:
+            # End after response if no deep reasoner
+            workflow.add_edge("response_generation", END)
 
         return workflow.compile()
 
@@ -474,6 +506,74 @@ class RouterGraph:
                 "nodes_executed": state.get("nodes_executed", []) + ["response_generation"],
             }
 
+    async def _f16_escalation_node(self, state: RouterState) -> Dict:
+        """
+        F16 escalation node: Delegate to deep reasoner for complex queries.
+
+        Args:
+            state: Current state
+
+        Returns:
+            State updates with F16 deep reasoner response
+        """
+        logger.info("Escalating to F16 deep reasoner")
+
+        if not self.deep_reasoner:
+            logger.error("Deep reasoner not available for escalation")
+            return {
+                "escalated_to_f16": False,
+                "escalation_reason": "Deep reasoner not configured",
+            }
+
+        try:
+            # Run deep reasoner with Q4's attempt and context
+            deep_reasoner_result = await self.deep_reasoner.run(
+                query=state["query"],
+                user_id=state["user_id"],
+                conversation_id=state["conversation_id"],
+                request_id=state["request_id"],
+                q4_attempt=state.get("response", ""),
+                q4_confidence=state.get("confidence", 0.0),
+                memories=state.get("memories", []),
+                tool_results=state.get("tool_results", {}),
+                complexity_score=state.get("complexity_score", 0.0),
+            )
+
+            # Extract response from deep reasoner
+            f16_response = deep_reasoner_result.get("response", "Unable to generate F16 response")
+            f16_confidence = deep_reasoner_result.get("confidence", 0.5)
+
+            logger.info(
+                f"F16 escalation complete: confidence={f16_confidence:.2f}, "
+                f"reasoning_steps={len(deep_reasoner_result.get('reasoning_steps', []))}"
+            )
+
+            return {
+                "response": f16_response,  # Override Q4 response with F16 response
+                "confidence": f16_confidence,
+                "tier_used": RoutingTier.FRONTIER,  # F16 is FRONTIER tier
+                "escalated_to_f16": True,
+                "escalation_reason": f"Low Q4 confidence ({state.get('confidence', 0):.2f}) or high complexity ({state.get('complexity_score', 0):.2f})",
+                "nodes_executed": state.get("nodes_executed", []) + ["f16_escalation"],
+                # Add F16 metadata
+                "metadata": {
+                    **state.get("metadata", {}),
+                    "f16_reasoning_steps": len(deep_reasoner_result.get("reasoning_steps", [])),
+                    "f16_sub_problems": len(deep_reasoner_result.get("sub_problems", [])),
+                    "f16_evidence_count": len(deep_reasoner_result.get("evidence", [])),
+                    "f16_self_eval_score": deep_reasoner_result.get("self_evaluation_score", 0.0),
+                },
+            }
+
+        except Exception as exc:
+            logger.error(f"F16 escalation failed: {exc}", exc_info=True)
+            return {
+                "escalated_to_f16": False,
+                "escalation_reason": f"F16 escalation error: {exc}",
+                # Keep Q4 response as fallback
+                "nodes_executed": state.get("nodes_executed", []) + ["f16_escalation"],
+            }
+
     def _should_use_tools(self, state: RouterState) -> Literal["tool_selection", "response_generation"]:
         """
         Decision function: Should we use tools?
@@ -514,12 +614,52 @@ class RouterGraph:
         logger.debug("Proceeding to response generation")
         return "response_generation"
 
+    def _should_escalate_to_f16(self, state: RouterState) -> Literal["f16_escalation", END]:
+        """
+        Decision function: Should we escalate to F16 deep reasoner?
+
+        Args:
+            state: Current state
+
+        Returns:
+            Next node name or END
+        """
+        # Don't escalate if deep reasoner not available
+        if not self.deep_reasoner:
+            return END
+
+        confidence = state.get("confidence", 1.0)
+        complexity = state.get("complexity_score", 0.0)
+        requires_deep_reasoning = state.get("requires_deep_reasoning", False)
+
+        # Escalate if:
+        # 1. Confidence is low (< 0.75)
+        # 2. Complexity is high (> 0.7)
+        # 3. Explicitly requires deep reasoning
+        should_escalate = (
+            confidence < 0.75
+            or complexity > 0.7
+            or requires_deep_reasoning
+        )
+
+        if should_escalate:
+            logger.info(
+                f"Escalating to F16: confidence={confidence:.2f}, "
+                f"complexity={complexity:.2f}, "
+                f"requires_deep_reasoning={requires_deep_reasoning}"
+            )
+            return "f16_escalation"
+
+        logger.debug("Q4 response sufficient, no F16 escalation needed")
+        return END
+
 
 async def create_router_graph(
     llm_client: MultiServerLlamaCppClient,
     memory_client: MemoryClient,
     mcp_client: MCPClient,
     max_refinements: int = 2,
+    enable_deep_reasoner: bool = True,
 ) -> RouterGraph:
     """
     Factory function to create configured router graph.
@@ -529,13 +669,15 @@ async def create_router_graph(
         memory_client: Memory search client
         mcp_client: MCP tool client
         max_refinements: Maximum refinement iterations
+        enable_deep_reasoner: Enable F16 deep reasoner for escalation
 
     Returns:
-        Initialized RouterGraph
+        Initialized RouterGraph with optional deep reasoner
     """
     return RouterGraph(
         llm_client=llm_client,
         memory_client=memory_client,
         mcp_client=mcp_client,
         max_refinements=max_refinements,
+        enable_deep_reasoner=enable_deep_reasoner,
     )
