@@ -19,6 +19,8 @@ from .routing.vision_policy import analyze_prompt
 from .routing.freshness import is_time_sensitive_query
 from .skills.home_assistant import HomeAssistantSkill
 from .state.mqtt_context_store import MQTTContextStore
+from .conversation.state import ConversationStateManager
+from .conversation.safety import SafetyChecker
 
 
 logger = logging.getLogger("brain.orchestrator")
@@ -45,6 +47,14 @@ class BrainOrchestrator:
         self._router = router
         self._safety = safety_workflow
         self._memory = memory_client or MemoryClient()
+
+        # Initialize conversation state manager for multi-turn workflows
+        self._state_manager = ConversationStateManager()
+
+        # Initialize safety checker for confirmation phrase verification
+        self._safety_checker = SafetyChecker()
+
+        logger.info("BrainOrchestrator initialized with conversation state and safety management")
 
     async def handle_device_intent(
         self,
@@ -90,6 +100,66 @@ class BrainOrchestrator:
         use_agent: bool = False,
         tool_mode: str = "auto",
     ) -> RoutingResult:
+        # Get or create conversation state
+        conv_state = self._state_manager.get_or_create(conversation_id, user_id or "unknown")
+
+        # Check for expired confirmations
+        if conv_state.is_confirmation_expired():
+            logger.warning(f"Pending confirmation expired for conversation {conversation_id}")
+            conv_state.clear_pending_confirmation()
+
+        # Check if there's a pending confirmation
+        if conv_state.has_pending_confirmation():
+            pending = conv_state.pending_confirmation
+            required_phrase = pending["confirmation_phrase"]
+
+            # Check if user provided confirmation
+            if self._safety_checker.verify_confirmation(prompt, required_phrase):
+                logger.info(f"Confirmation verified for {pending['tool_name']}")
+
+                # Clear pending confirmation and execute the tool
+                conv_state.clear_pending_confirmation()
+
+                # Re-route with the confirmed tool execution
+                # Set a flag to indicate confirmation was provided
+                cleaned_prompt = f"Execute confirmed action: {pending['tool_name']}"
+                allow_paid = True  # Confirmation implies approval
+
+            elif prompt.strip().lower() in {"cancel", "abort", "no", "stop"}:
+                # User cancelled the action
+                logger.info(f"User cancelled pending confirmation for {pending['tool_name']}")
+                conv_state.clear_pending_confirmation()
+
+                return RoutingResult(
+                    output=f"Action cancelled: {pending['tool_name']} was not executed.",
+                    confidence=1.0,
+                    tier=RoutingTier.LOCAL,
+                    request_id=request_id,
+                    conversation_id=conversation_id,
+                    cost_usd=0.0,
+                    latency_ms=0,
+                )
+
+            else:
+                # User said something else while confirmation is pending
+                # Re-display the confirmation message
+                confirmation_msg = self._safety_checker.get_confirmation_message(
+                    pending["tool_name"],
+                    pending["tool_args"],
+                    required_phrase,
+                    pending["reason"],
+                )
+
+                return RoutingResult(
+                    output=f"{confirmation_msg}\n\n(Or say 'cancel' to abort)",
+                    confidence=1.0,
+                    tier=RoutingTier.LOCAL,
+                    request_id=request_id,
+                    conversation_id=conversation_id,
+                    cost_usd=0.0,
+                    latency_ms=0,
+                )
+
         override_token = os.getenv("API_OVERRIDE_PASSWORD", "omega") or ""
         allow_paid = False
         cleaned_prompt = prompt
@@ -172,6 +242,59 @@ class BrainOrchestrator:
             pass
 
         return result
+
+    def set_pending_confirmation(
+        self,
+        conversation_id: str,
+        user_id: str,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        confirmation_phrase: str,
+        hazard_class: str,
+        reason: str,
+    ) -> None:
+        """Set a pending confirmation for a conversation.
+
+        Args:
+            conversation_id: Conversation identifier
+            user_id: User identifier
+            tool_name: Tool requiring confirmation
+            tool_args: Tool arguments
+            confirmation_phrase: Required confirmation phrase
+            hazard_class: Hazard classification
+            reason: Reason for confirmation requirement
+        """
+        conv_state = self._state_manager.get_or_create(conversation_id, user_id)
+        conv_state.set_pending_confirmation(
+            tool_name=tool_name,
+            tool_args=tool_args,
+            confirmation_phrase=confirmation_phrase,
+            hazard_class=hazard_class,
+            reason=reason,
+        )
+        logger.info(
+            f"Set pending confirmation for {tool_name} in conversation {conversation_id}"
+        )
+
+    def get_conversation_state(self, conversation_id: str):
+        """Get conversation state for a conversation ID."""
+        return self._state_manager.get(conversation_id)
+
+    def clear_pending_confirmation(self, conversation_id: str) -> bool:
+        """Clear any pending confirmation for a conversation.
+
+        Args:
+            conversation_id: Conversation identifier
+
+        Returns:
+            True if a confirmation was cleared, False otherwise
+        """
+        conv_state = self._state_manager.get(conversation_id)
+        if conv_state and conv_state.has_pending_confirmation():
+            conv_state.clear_pending_confirmation()
+            logger.info(f"Cleared pending confirmation for conversation {conversation_id}")
+            return True
+        return False
 
 
 __all__ = ["BrainOrchestrator"]
