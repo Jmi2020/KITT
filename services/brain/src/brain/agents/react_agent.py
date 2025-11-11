@@ -62,7 +62,6 @@ class ReActAgent:
         mcp_client: MCPClient,
         max_iterations: int = 10,
         model_alias: Optional[str] = None,
-        override_provided: bool = False,
     ) -> None:
         """Initialize ReAct agent.
 
@@ -71,7 +70,6 @@ class ReActAgent:
             mcp_client: MCP client for tool execution
             max_iterations: Maximum reasoning iterations
             model_alias: Optional model identifier for format detection (e.g., "kitty-coder")
-            override_provided: Whether API_OVERRIDE_PASSWORD was provided (for paid tools)
         """
         self._llm = llm_client
         self._mcp = mcp_client
@@ -80,7 +78,6 @@ class ReActAgent:
         self._max_iterations = max_iterations
         self._history_window = max(int(os.getenv("AGENT_HISTORY_STEPS", "4")), 0)
         self._observation_limit = max(int(os.getenv("AGENT_OBSERVATION_CHARS", "2000")), 256)
-        self._override_provided = override_provided
 
         # Detect model format for tool calling (default to Qwen if not specified)
         self._model_format = detect_model_format(model_alias or "qwen2.5")
@@ -394,7 +391,7 @@ class ReActAgent:
                 else:
                     # Validation passed - check safety before execution
                     safety_result = self._safety_checker.check_tool_execution(
-                        action, action_input, self._override_provided
+                        action, action_input, allow_paid
                     )
 
                     if not safety_result.approved:
@@ -556,7 +553,7 @@ class ReActAgent:
         )
 
     async def run_single_action(
-        self, query: str, tool_name: str, tool_args: Dict[str, Any]
+        self, query: str, tool_name: str, tool_args: Dict[str, Any], allow_paid: bool = False
     ) -> AgentResult:
         """Execute a single tool action without ReAct loop.
 
@@ -564,13 +561,14 @@ class ReActAgent:
             query: User query
             tool_name: Tool to execute
             tool_args: Tool arguments
+            allow_paid: Whether paid tools are authorized
 
         Returns:
             Agent result
         """
         # Check safety before execution
         safety_result = self._safety_checker.check_tool_execution(
-            tool_name, tool_args, self._override_provided
+            tool_name, tool_args, allow_paid
         )
 
         if not safety_result.approved:
