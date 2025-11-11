@@ -143,16 +143,17 @@ class BrainRouter:
                 )
                 return result
 
+        # Check for agentic routing first - agent can decide to use vision or CAD tools
+        if request.use_agent:
+            result = await self._invoke_agent(request)
+            return await self._finalize_result(request, result, cache_key=cache_key)
+
+        # If not using agent, run vision pipeline for simple reference gathering
         if request.vision_targets:
             logger.info("Routing vision targets: %s", ", ".join(request.vision_targets))
             pipeline_result = await self._run_vision_pipeline(request)
             if pipeline_result:
                 return await self._finalize_result(request, pipeline_result, cache_key=None)
-
-        # Check for agentic routing
-        if request.use_agent:
-            result = await self._invoke_agent(request)
-            return await self._finalize_result(request, result, cache_key=cache_key)
 
         result = await self._invoke_local(request)
         if request.force_tier == RoutingTier.local:

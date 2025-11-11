@@ -50,6 +50,7 @@ services:
       - ../../services/brain:/app/services/brain:ro
       - ../../services/mcp:/app/services/mcp:ro
       - ../../services/research:/app/services/research:ro
+      - ../../config:/app/config:ro
       - ${KITTY_ARTIFACTS_DIR:-/Users/Shared/KITTY/artifacts}:/app/storage
     ports:
       - "8000:8000"
