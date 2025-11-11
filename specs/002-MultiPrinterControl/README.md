@@ -8,96 +8,129 @@
 
 ## Overview
 
-This feature adds support for controlling three different 3D printers on KITTY's local network with intelligent printer selection based on model size and fabrication mode.
+This feature provides intelligent multi-printer control through TWO WORKFLOWS:
 
-### Supported Printers
+### Phase 1: Manual Workflow (✅ IMPLEMENTED - DEFAULT)
+KITTY analyzes model dimensions, checks printer availability, opens appropriate slicer app. **User completes slicing and printing manually.**
 
-| Printer | Type | Build Volume | Best For | Protocol |
-|---------|------|--------------|----------|----------|
-| **Bamboo Labs H2D** | FDM | 250×250×250mm | Small-medium parts | MQTT + FTPS |
-| **Elegoo OrangeStorm Giga** | FDM (Klipper) | 800×800×1000mm | Large prints | Moonraker REST |
-| **Snapmaker Artisan Pro** | 3-in-1 | 400×400×400mm | CNC/laser/3D | SACP (TCP) |
+### Phase 2: Automatic Workflow (📋 PLANNED)
+KITTY asks for target height, scales model, validates orientation/supports via vision, then opens slicer with recommendations.
 
-## Automatic Printer Selection
+## Supported Printers
+
+| Printer | Type | Build Volume | Best For | Protocol | Status Check |
+|---------|------|--------------|----------|----------|--------------|
+| **Bamboo Labs H2D** | FDM | 250×250×250mm | Excellent quality | MQTT (local) | ✅ MQTT subscription |
+| **Elegoo OrangeStorm Giga** | FDM (Klipper) | 800×800×1000mm | Large/fast prints | Moonraker HTTP | ✅ HTTP polling |
+| **Snapmaker Artisan Pro** | 3-in-1 | 400×400×400mm | CNC/laser/3D | SACP (TCP) | ⏳ Phase 2 |
+
+## Quality-First Printer Selection
+
+**Priority hierarchy** (prefers Bamboo for superior print quality):
 
 ```
-Model Size ≤ 200mm  →  Bamboo H2D
-Model Size > 200mm  →  Elegoo Giga
-Mode = CNC or Laser →  Snapmaker Artisan
+CNC or Laser job           →  Snapmaker Artisan (only multi-mode printer)
+
+3D Print ≤250mm + Bamboo idle  →  Bamboo H2D (BEST QUALITY)
+3D Print ≤250mm + Bamboo busy  →  Elegoo Giga (fallback)
+3D Print >250mm and ≤800mm     →  Elegoo Giga (only option)
+3D Print >800mm                →  Error: too large
 ```
 
-## Usage Examples
+## Usage Examples (Phase 1 - Manual Workflow)
 
-### 1. Automatic Selection (Recommended)
+### 1. Open STL in Slicer (Automatic Printer Selection)
 
 ```python
-# ReAct agent automatically selects printer based on model size
+# ReAct agent automatically selects printer based on model size and availability
 {
-  "tool": "fabrication.queue_print",
+  "tool": "fabrication.open_in_slicer",
   "args": {
-    "artifact_path": "/Users/Shared/KITTY/artifacts/cad/bracket.stl",
+    "stl_path": "/Users/Shared/KITTY/artifacts/cad/bracket.stl",
     "print_mode": "3d_print"
   }
 }
-# → Auto-selects Bamboo H2D (bracket is 150mm)
+
+# Response:
+✓ Opened /Users/Shared/KITTY/artifacts/cad/bracket.stl in BambuStudio
+
+Printer: bamboo_h2d
+Model size: 150.0mm (max dimension)
+Reasoning: Model fits Bamboo H2D (150mm ≤ 250mm). Bamboo is idle. Using Bamboo for excellent print quality.
+
+Please complete slicing and printing in the BambuStudio application.
 ```
 
-### 2. Manual Override
+### 2. Force Specific Printer
 
 ```python
 {
-  "tool": "fabrication.queue_print",
+  "tool": "fabrication.open_in_slicer",
   "args": {
-    "artifact_path": "/Users/Shared/KITTY/artifacts/cad/large_enclosure.stl",
-    "printer_id": "elegoo_giga"  # Force specific printer
+    "stl_path": "/Users/Shared/KITTY/artifacts/cad/large_enclosure.stl",
+    "force_printer": "elegoo_giga"  # Override automatic selection
   }
 }
+
+# Opens ElegySlicer with the large enclosure STL
 ```
 
 ### 3. CNC Job
 
 ```python
 {
-  "tool": "fabrication.queue_print",
+  "tool": "fabrication.open_in_slicer",
   "args": {
-    "artifact_path": "/Users/Shared/KITTY/artifacts/cam/aluminum_plate.nc",
+    "stl_path": "/Users/Shared/KITTY/artifacts/cam/aluminum_plate.stl",
     "print_mode": "cnc"
   }
 }
-# → Auto-selects Snapmaker Artisan (only CNC-capable printer)
+
+# Opens Luban (Snapmaker) with CNC mode
 ```
 
-### 4. Check Printer Status
+### 4. Analyze Model Before Opening
+
+```python
+# Preview dimensions and printer recommendation without launching slicer
+{
+  "tool": "fabrication.analyze_model",
+  "args": {
+    "stl_path": "/Users/Shared/KITTY/artifacts/cad/test.stl"
+  }
+}
+
+# Response:
+Model Analysis: /Users/Shared/KITTY/artifacts/cad/test.stl
+
+Dimensions:
+  Width:  150.0mm
+  Depth:  80.0mm
+  Height: 45.0mm
+  Max:    150.0mm
+  Volume: 540000mm³
+
+Recommended Printer: bamboo_h2d (BambuStudio)
+Status: ✓ Available
+Reasoning: Model fits Bamboo H2D (150mm ≤ 250mm). Bamboo is idle...
+```
+
+### 5. Check Printer Status
 
 ```python
 {
-  "tool": "fabrication.list_printers",
+  "tool": "fabrication.printer_status",
   "args": {}
 }
 
-# Returns:
-{
-  "bamboo_h2d": {
-    "online": true,
-    "printing": false,
-    "capabilities": {
-      "type": "bamboo_h2d",
-      "modes": ["3d_print"],
-      "build_volume": {"x": 250, "y": 250, "z": 250}
-    }
-  },
-  "elegoo_giga": {
-    "online": true,
-    "printing": true,
-    "progress": 45,
-    "bed_temp": 60,
-    "extruder_temp": 215
-  },
-  "snapmaker_artisan": {
-    "online": false,
-    "error": "Connection timeout"
-  }
-}
+# Response:
+Printer Status:
+
+  ✓ bamboo_h2d: idle 💤
+  ✓ elegoo_giga: printing 🔨
+      Job: calibration_cube.gcode
+      Progress: 45%
+  ✓ snapmaker_artisan: idle 💤
 ```
 
 ## Configuration
@@ -189,61 +222,53 @@ curl http://localhost:8080/api/fabrication/printers/bamboo_h2d/status
 
 ## Architecture
 
+### Phase 1: Manual Workflow (Current)
+
 ```
 User Intent
     ↓
 Brain Service (ReAct Agent)
     ↓
-Gateway (:8080)
+Broker MCP Server (fabrication.open_in_slicer tool)
+    ↓
+Gateway (:8080) → /api/fabrication/open_in_slicer
     ↓
 Fabrication Service (:8300)
-    ↓
-┌────────────┬────────────┬──────────────┐
-│  Bamboo    │  Klipper   │  Snapmaker   │
-│  Driver    │  Driver    │  Driver      │
-│  (MQTT)    │  (HTTP)    │  (SACP)      │
-└────────────┴────────────┴──────────────┘
-       ↓            ↓              ↓
-   Bamboo H2D  Elegoo Giga  Snapmaker Artisan
+    ├→ STL Analyzer (trimesh) → Extract dimensions
+    ├→ Status Checker → Query printer availability
+    │   ├→ Bamboo H2D (MQTT subscription, 30s cache)
+    │   └→ Elegoo Giga (HTTP polling, 30s cache)
+    ├→ Printer Selector → Quality-first selection logic
+    └→ Slicer Launcher → macOS 'open -a' command
+            ↓
+    ┌─────────────┬──────────────┬────────────┐
+    │ BambuStudio│ ElegySlicer  │   Luban    │
+    └─────────────┴──────────────┴────────────┘
+         (User completes slicing and printing)
 ```
 
-## Files Added/Modified
+## Files Added/Modified (Phase 1)
 
-### New Files
-- `services/fabrication/src/fabrication/drivers/base.py` - Abstract driver interface
-- `services/fabrication/src/fabrication/drivers/bamboo.py` - Bamboo Labs driver
-- `services/fabrication/src/fabrication/drivers/klipper.py` - Klipper/Moonraker driver
-- `services/fabrication/src/fabrication/drivers/snapmaker.py` - Snapmaker SACP driver
-- `services/fabrication/src/fabrication/registry.py` - Printer registry
-- `services/fabrication/src/fabrication/selector.py` - Printer selection logic
-- `services/gateway/src/gateway/routes/fabrication.py` - Gateway fabrication routes
-- `config/printers.yaml` - Printer configuration
+### New Files (Core Components)
+- `services/fabrication/src/fabrication/analysis/stl_analyzer.py` - STL dimension analysis with trimesh
+- `services/fabrication/src/fabrication/status/printer_status.py` - Printer availability checking (MQTT + HTTP)
+- `services/fabrication/src/fabrication/selector/printer_selector.py` - Quality-first printer selection
+- `services/fabrication/src/fabrication/launcher/slicer_launcher.py` - macOS slicer app launching
+
+### New Files (API Layer)
+- `services/fabrication/src/fabrication/app.py` - FastAPI application with 3 endpoints
+- `services/gateway/src/gateway/routes/fabrication.py` - Gateway proxy routes
+
+### New Files (Configuration)
+- `config/printers.yaml.example` - Printer network configuration template
 
 ### Modified Files
-- `services/fabrication/src/fabrication/jobs/manager.py` - Multi-printer support
-- `services/gateway/src/gateway/app.py` - Register fabrication router
-- `config/tool_registry.yaml` - Updated fabrication tools
-
-## Implementation Status
-
-### ✅ Completed
-- [x] Specification document
-- [x] Implementation plan
-- [x] Tool registry updates
-- [x] Architecture design
-
-### 🚧 In Progress
-- [ ] Driver implementations
-- [ ] Printer registry
-- [ ] Selection engine
-- [ ] Gateway routes
-- [ ] Testing
-
-### 📋 Planned
-- [ ] Documentation updates
-- [ ] Operations manual
-- [ ] Troubleshooting guide
-- [ ] Deployment
+- `.env.example` - Added fabrication service environment variables
+- `services/common/src/common/config.py` - Added printer configuration settings
+- `services/fabrication/pyproject.toml` - Added trimesh, paho-mqtt dependencies
+- `services/gateway/src/gateway/app.py` - Registered fabrication router
+- `services/mcp/src/mcp/servers/broker_server.py` - Added fabrication tools
+- `config/tool_registry.yaml` - Fabrication tools already defined
 
 ## Testing Strategy
 
@@ -349,7 +374,45 @@ curl -X POST http://localhost:8080/api/fabrication/printers/bamboo_h2d/pause
 - Confirmation phrase required for all print jobs (hazard_class: medium)
 - Audit logging to PostgreSQL for compliance
 
-## Future Enhancements
+## Implementation Status
+
+### Phase 1: Manual Workflow ✅ COMPLETE (January 2025)
+
+**Core Components:**
+- ✅ STL analysis with trimesh (`services/fabrication/src/fabrication/analysis/stl_analyzer.py`)
+- ✅ Printer status checking with caching (`services/fabrication/src/fabrication/status/printer_status.py`)
+  - ✅ Bamboo H2D: MQTT subscription to status reports (30s cache)
+  - ✅ Elegoo Giga: HTTP GET to Moonraker /printer/info (30s cache)
+  - ⏳ Snapmaker Artisan: No status check (assumed available)
+- ✅ Quality-first printer selection (`services/fabrication/src/fabrication/selector/printer_selector.py`)
+- ✅ macOS slicer app launching (`services/fabrication/src/fabrication/launcher/slicer_launcher.py`)
+
+**API Endpoints:**
+- ✅ `POST /api/fabrication/open_in_slicer` - Launch slicer with STL
+- ✅ `POST /api/fabrication/analyze_model` - Preview dimensions and selection
+- ✅ `GET /api/fabrication/printer_status` - Query all printer statuses
+
+**ReAct Agent Integration:**
+- ✅ `fabrication.open_in_slicer` tool (broker MCP server)
+- ✅ `fabrication.analyze_model` tool (broker MCP server)
+- ✅ `fabrication.printer_status` tool (broker MCP server)
+
+**Configuration:**
+- ✅ Printer configuration template (`config/printers.yaml.example`)
+- ✅ Environment variables in `.env.example`
+- ✅ Tool registry definitions (`config/tool_registry.yaml`)
+
+### Phase 2: Automatic Workflow 📋 PLANNED
+
+**Additional Features:**
+- [ ] Model scaling to target height
+- [ ] Vision server orientation checking
+- [ ] Support detection via vision API
+- [ ] Training data collection (screen recording + IPC monitoring)
+- [ ] `fabrication.prepare_print` tool implementation
+- [ ] Snapmaker Artisan status checking
+
+### Phase 3: Advanced Features 💡 FUTURE
 
 1. **Automatic Slicing**: Integrate Orca Slicer CLI for STL → G-code
 2. **Queue Management**: Support job queuing when all printers busy
