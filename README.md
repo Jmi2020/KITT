@@ -567,8 +567,8 @@ Agent executes:
 
   2. discovery.find_printers()
      → Found 3 printers:
-       - Bamboo Labs X1 Carbon (192.168.1.100) - Not approved
-       - Elegoo Neptune 4 Pro (192.168.1.200) - Not approved
+      - Bamboo Labs H2D (192.168.0.144) - Not approved
+      - Elegoo OrangeStorm Giga (Klipper, 192.168.0.63) - Not approved
        - Snapmaker Artisan (192.168.1.150) - Not approved
 
 User: "Approve the Bamboo Labs printer"
