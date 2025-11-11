@@ -217,6 +217,10 @@ services:
       - "8500:8500"
     networks:
       - kitty
+    # Grant network capabilities for mDNS/SSDP/UDP scanning
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8500/healthz"]
       interval: 30s
