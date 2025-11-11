@@ -425,3 +425,4 @@ This serves as a reference for voice interaction patterns and OpenAI API integra
 - Voice-to-print workflows: `Research/VoiceToPrint.md`
 - Reference implementations: `Reference/JarvisV3/` (Streamlit voice assistant with OpenAI realtime API)
 - Docker Brain current build time: 15 m 14 s, Model loading time: 5 m
+- remember to add memories to the memory MCP server as we build so that KITTY can refer back to her construction in the future and self reinforce. always follow best practices when creating memories, and make them consiquential
