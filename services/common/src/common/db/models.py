@@ -137,6 +137,35 @@ class TaskPriority(enum.Enum):
     critical = "critical"
 
 
+class DiscoveryMethod(enum.Enum):
+    """Discovery method for network devices."""
+    mdns = "mdns"
+    ssdp = "ssdp"
+    bamboo_udp = "bamboo_udp"
+    snapmaker_udp = "snapmaker_udp"
+    network_scan = "network_scan"
+    manual = "manual"
+
+
+class DiscoveredDeviceType(enum.Enum):
+    """Types of discovered network devices."""
+    printer_3d = "printer_3d"
+    printer_cnc = "printer_cnc"
+    printer_laser = "printer_laser"
+    raspberry_pi = "raspberry_pi"
+    esp32 = "esp32"
+    esp8266 = "esp8266"
+    smart_home = "smart_home"
+    unknown = "unknown"
+
+
+class ScanStatus(enum.Enum):
+    """Discovery scan status."""
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -454,6 +483,60 @@ class Task(Base):
     assignee: Mapped[Optional[User]] = relationship()
 
 
+class DiscoveredDevice(Base):
+    """Network-discovered IoT devices (printers, Raspberry Pi, ESP32, etc.)."""
+
+    __tablename__ = "discovered_devices"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+
+    # Discovery metadata
+    discovered_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    discovery_method: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    # Network information
+    ip_address: Mapped[str] = mapped_column(String(45), nullable=False)
+    mac_address: Mapped[Optional[str]] = mapped_column(String(17))
+    hostname: Mapped[Optional[str]] = mapped_column(String(255))
+
+    # Device identification
+    device_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    manufacturer: Mapped[Optional[str]] = mapped_column(String(120))
+    model: Mapped[Optional[str]] = mapped_column(String(120))
+    serial_number: Mapped[Optional[str]] = mapped_column(String(255))
+    firmware_version: Mapped[Optional[str]] = mapped_column(String(120))
+
+    # Service information
+    services: Mapped[list] = mapped_column(JSONB, default=list)
+    capabilities: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+    # User approval
+    approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    approved_by: Mapped[Optional[str]] = mapped_column(String(255))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Status
+    is_online: Mapped[bool] = mapped_column(Boolean, default=True)
+    confidence_score: Mapped[float] = mapped_column(Numeric(3, 2), default=0.5)
+
+
+class DiscoveryScan(Base):
+    """History of network discovery scans."""
+
+    __tablename__ = "discovery_scans"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    status: Mapped[str] = mapped_column(String(32), default="running")
+    methods: Mapped[list] = mapped_column(JSONB, default=list)
+    devices_found: Mapped[int] = mapped_column(Integer, default=0)
+    errors: Mapped[list] = mapped_column(JSONB, default=list)
+    triggered_by: Mapped[Optional[str]] = mapped_column(String(255))
+
+
 __all__ = [
     "Base",
     # Enums
@@ -474,6 +557,9 @@ __all__ = [
     "ProjectStatus",
     "TaskStatus",
     "TaskPriority",
+    "DiscoveryMethod",
+    "DiscoveredDeviceType",
+    "ScanStatus",
     # Models
     "User",
     "Zone",
@@ -494,4 +580,6 @@ __all__ = [
     "Goal",
     "Project",
     "Task",
+    "DiscoveredDevice",
+    "DiscoveryScan",
 ]

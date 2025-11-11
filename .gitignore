@@ -20,9 +20,6 @@ docs/admin/
 # Reference repos
 Reference/JarvisV3/
 
-# Alembic
-services/common/alembic/versions/
-
 # Build artifacts
 *.egg-info/
 **/*.egg-info/
