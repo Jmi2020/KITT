@@ -116,6 +116,10 @@ class BrokerMCPServer(MCPServer):
                             "description": "Override printer selection (bamboo_h2d, elegoo_giga, snapmaker_artisan)",
                             "enum": ["bamboo_h2d", "elegoo_giga", "snapmaker_artisan"],
                         },
+                        "target_height": {
+                            "type": "string",
+                            "description": "Desired printed height (e.g., '6 in', '150 mm')",
+                        },
                     },
                     "required": ["stl_path"],
                 },
@@ -138,6 +142,10 @@ class BrokerMCPServer(MCPServer):
                             "description": "Print mode for printer selection preview",
                             "enum": ["3d_print", "cnc", "laser"],
                             "default": "3d_print",
+                        },
+                        "target_height": {
+                            "type": "string",
+                            "description": "Desired printed height without opening the slicer (optional)",
                         },
                     },
                     "required": ["stl_path"],
@@ -514,6 +522,7 @@ class BrokerMCPServer(MCPServer):
         stl_path = arguments.get("stl_path")
         print_mode = arguments.get("print_mode", "3d_print")
         force_printer = arguments.get("force_printer")
+        target_height = arguments.get("target_height")
 
         if not stl_path:
             return ToolResult(
@@ -530,6 +539,8 @@ class BrokerMCPServer(MCPServer):
                 }
                 if force_printer:
                     payload["force_printer"] = force_printer
+                if target_height:
+                    payload["target_height"] = target_height
 
                 response = await client.post(
                     f"{self._fabrication_url}/api/fabrication/open_in_slicer",
@@ -544,11 +555,18 @@ class BrokerMCPServer(MCPServer):
                 reasoning = data.get("reasoning", "")
                 dimensions = data.get("model_dimensions", {})
                 max_dim = dimensions.get("max_dimension", 0)
+                target_height_mm = data.get("target_height_mm")
 
+                height_line = (
+                    f"Requested height: {target_height_mm:.1f}mm\n"
+                    if target_height_mm
+                    else ""
+                )
                 output = (
                     f"✓ Opened {stl_path} in {slicer_app}\n\n"
                     f"Printer: {printer_id}\n"
                     f"Model size: {max_dim:.1f}mm (max dimension)\n"
+                    f"{height_line}"
                     f"Reasoning: {reasoning}\n\n"
                     f"Please complete slicing and printing in the {slicer_app} application."
                 )

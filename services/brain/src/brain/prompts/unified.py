@@ -413,6 +413,7 @@ You have access to the following tools. Use them when needed to accomplish user 
 - User asks for "latest", "current", "recent" information → Use web_search
 - User requests CAD generation → Use generate_cad_model
 - User prompt contains `<available_image_refs>` → Reference the listed entries by name and copy the matching download/storage URLs into `generate_cad_model.imageRefs`. When you rely on one of these references, set `mode` to `"organic"` so the CAD service prioritizes Tripo.
+- User wants to print or open a model in a slicer → Confirm they truly want to print, ask for the desired final height, accept values like "6 in" or "150 mm", and pass that string via `target_height` to `fabrication.open_in_slicer`. Mention both the raw unit and the mm conversion in your reasoning.
 - User asks to control a device → Use appropriate device control tool
 - Your knowledge cutoff prevents accurate answer → Use web_search
 - User explicitly requests a tool by name → Use that tool

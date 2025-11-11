@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Optional
 
+from common.config import settings
 from common.logging import get_logger
 
 from ..analysis.stl_analyzer import STLAnalyzer, ModelDimensions
@@ -39,6 +41,7 @@ class SelectionResult:
     reasoning: str
     model_fits: bool
     printer_available: bool
+    target_height_mm: Optional[float] = None
 
 
 class PrinterSelector:
@@ -49,7 +52,11 @@ class PrinterSelector:
         "bamboo_h2d": PrinterCapabilities(
             printer_id="bamboo_h2d",
             slicer_app="BambuStudio",
-            build_volume=(250, 250, 250),
+            build_volume=(
+                float(settings.h2d_build_width or 250),
+                float(settings.h2d_build_depth or 250),
+                float(settings.h2d_build_height or 250),
+            ),
             quality="excellent",
             speed="medium",
             supported_modes=[PrintMode.FDM_3D_PRINT]
@@ -57,7 +64,11 @@ class PrinterSelector:
         "elegoo_giga": PrinterCapabilities(
             printer_id="elegoo_giga",
             slicer_app="ElegySlicer",
-            build_volume=(800, 800, 1000),
+            build_volume=(
+                float(settings.orangestorm_giga_build_width or 800),
+                float(settings.orangestorm_giga_build_depth or 800),
+                float(settings.orangestorm_giga_build_height or 1000),
+            ),
             quality="good",
             speed="fast",
             supported_modes=[PrintMode.FDM_3D_PRINT]
@@ -79,11 +90,14 @@ class PrinterSelector:
     ):
         self.analyzer = analyzer
         self.status_checker = status_checker
+        self._bamboo_limit = min(self.PRINTERS["bamboo_h2d"].build_volume)
+        self._elegoo_limit = min(self.PRINTERS["elegoo_giga"].build_volume)
 
     async def select_printer(
         self,
         stl_path: Path,
-        mode: PrintMode = PrintMode.FDM_3D_PRINT
+        mode: PrintMode = PrintMode.FDM_3D_PRINT,
+        target_height_mm: Optional[float] = None,
     ) -> SelectionResult:
         """
         Select optimal printer based on model and printer status.
@@ -111,11 +125,18 @@ class PrinterSelector:
                 slicer_app="Luban",
                 reasoning=f"{mode.value} job requires Snapmaker Artisan (only multi-mode printer)",
                 model_fits=True,
-                printer_available=True  # Assume available (no status checking for Snapmaker yet)
+                printer_available=True,  # Assume available (no status checking for Snapmaker yet)
+                target_height_mm=target_height_mm
             )
 
         # Step 2: Analyze model dimensions
         dimensions = self.analyzer.analyze(stl_path)
+        effective_dimension = target_height_mm if target_height_mm else dimensions.max_dimension
+        dimension_label = (
+            f"User target height {effective_dimension:.1f}mm"
+            if target_height_mm
+            else f"Model max dimension {dimensions.max_dimension:.1f}mm"
+        )
 
         LOGGER.info(
             "Model analysis complete",
@@ -124,11 +145,11 @@ class PrinterSelector:
         )
 
         # Step 3: Check if model too large for all printers
-        if dimensions.max_dimension > 800:
+        if effective_dimension > self._elegoo_limit:
             raise ValueError(
                 f"Model too large for all printers. "
-                f"Max dimension: {dimensions.max_dimension:.1f}mm, "
-                f"Largest printer (Elegoo Giga): 800mm"
+                f"Requested dimension: {effective_dimension:.1f}mm, "
+                f"Largest printer (Elegoo Giga): {self._elegoo_limit:.1f}mm"
             )
 
         # Step 4: Get printer statuses
@@ -137,18 +158,19 @@ class PrinterSelector:
         elegoo_status = statuses["elegoo_giga"]
 
         # Step 5: Apply selection logic (QUALITY-FIRST: Prefer Bamboo for superior quality)
-        if dimensions.max_dimension <= 250:
+        if effective_dimension <= self._bamboo_limit:
             # Small-medium model, prefer Bamboo for quality
             if bamboo_status.is_online and not bamboo_status.is_printing:
                 return SelectionResult(
                     printer_id="bamboo_h2d",
                     slicer_app="BambuStudio",
                     reasoning=(
-                        f"Model fits Bamboo H2D ({dimensions.max_dimension:.1f}mm ≤ 250mm). "
+                        f"{dimension_label} ≤ {self._bamboo_limit:.1f}mm. "
                         f"Bamboo is idle. Using Bamboo for excellent print quality."
                     ),
                     model_fits=True,
-                    printer_available=True
+                    printer_available=True,
+                    target_height_mm=target_height_mm
                 )
             else:
                 # Bamboo busy or offline, fall back to Elegoo
@@ -156,12 +178,13 @@ class PrinterSelector:
                     printer_id="elegoo_giga",
                     slicer_app="ElegySlicer",
                     reasoning=(
-                        f"Model fits Bamboo ({dimensions.max_dimension:.1f}mm ≤ 250mm) "
+                        f"{dimension_label} ≤ {self._bamboo_limit:.1f}mm "
                         f"but Bamboo is {bamboo_status.status}. "
                         f"Using Elegoo Giga as fallback (fast print speed)."
                     ),
                     model_fits=True,
-                    printer_available=elegoo_status.is_online
+                    printer_available=elegoo_status.is_online,
+                    target_height_mm=target_height_mm
                 )
         else:
             # Large model, only Elegoo can handle
@@ -169,9 +192,10 @@ class PrinterSelector:
                 printer_id="elegoo_giga",
                 slicer_app="ElegySlicer",
                 reasoning=(
-                    f"Large model ({dimensions.max_dimension:.1f}mm > 250mm) "
-                    f"requires Elegoo Giga (800x800x1000mm build volume)."
+                    f"Large request ({dimension_label} > {self._bamboo_limit:.1f}mm) "
+                    f"requires Elegoo Giga ({self._elegoo_limit:.1f}mm z-height)."
                 ),
                 model_fits=True,
-                printer_available=elegoo_status.is_online
+                printer_available=elegoo_status.is_online,
+                target_height_mm=target_height_mm
             )

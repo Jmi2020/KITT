@@ -154,6 +154,7 @@ tools:
       Parameters:
       - stl_path (required): Path to STL/CAM file
       - mode (optional): "3d_print" (default), "cnc", or "laser"
+      - target_height (optional): Desired printed height (accepts units like "6 in" or "150 mm")
 
       Returns printer selection, app name, and reasoning message.
       User completes slicing and printing in the application.

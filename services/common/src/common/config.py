@@ -71,10 +71,16 @@ class Settings(BaseSettings):
     bamboo_access_code: str = ""
     bamboo_mqtt_host: Optional[str] = None
     bamboo_mqtt_port: int = 1883
+    h2d_build_width: int = 250
+    h2d_build_depth: int = 250
+    h2d_build_height: int = 250
 
     # Elegoo Giga (Klipper)
     elegoo_ip: str = "192.168.1.200"
     elegoo_moonraker_port: int = 7125
+    orangestorm_giga_build_width: int = 800
+    orangestorm_giga_build_depth: int = 800
+    orangestorm_giga_build_height: int = 1000
 
     # Snapmaker Artisan
     snapmaker_ip: str = "192.168.1.150"

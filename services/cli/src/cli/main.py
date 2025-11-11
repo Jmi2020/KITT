@@ -96,6 +96,17 @@ VISION_API_BASE = _first_valid_url(
     ),
     API_BASE,
 )
+FABRICATION_API_BASE = _first_valid_url(
+    (
+        os.getenv("KITTY_FAB_API"),
+        os.getenv("FABRICATION_API"),
+        os.getenv("GATEWAY_API"),
+        os.getenv("GATEWAY_PUBLIC_URL"),
+        "http://gateway:8080",
+        "http://localhost:8080",
+    ),
+    "http://localhost:8080",
+)
 USER_NAME = _env("USER_NAME", "ssh-operator")
 USER_UUID = _env(
     "KITTY_USER_ID",
@@ -466,6 +477,67 @@ def _print_artifacts(artifacts: List[Dict[str, Any]]) -> None:
             f"type={artifact.get('artifactType')} "
             f"url={artifact.get('location')}"
         )
+
+
+def _maybe_offer_slicer(artifacts: List[Dict[str, Any]]) -> None:
+    """Interactive helper to open a generated STL in the appropriate slicer."""
+
+    if not artifacts:
+        return
+
+    try:
+        wants_print = typer.confirm(
+            "Open a slicer with one of these models now?", default=False
+        )
+    except typer.Abort:
+        return
+
+    if not wants_print:
+        return
+
+    total = len(artifacts)
+    selected = artifacts[0]
+    if total > 1:
+        while True:
+            choice = typer.prompt(f"Select artifact index (1-{total})", default="1")
+            try:
+                idx = int(choice)
+            except ValueError:
+                console.print(f"[red]Please enter a number between 1 and {total}.")
+                continue
+            if 1 <= idx <= total:
+                selected = artifacts[idx - 1]
+                break
+            console.print(f"[red]Please enter a number between 1 and {total}.")
+
+    location = selected.get("location")
+    if not location:
+        console.print("[red]Selected artifact does not include a local path.")
+        return
+
+    height_input = typer.prompt(
+        "Desired printed height (e.g., 6 in, 150 mm)", default=""
+    ).strip()
+
+    payload = {"stl_path": location}
+    if height_input:
+        payload["target_height"] = height_input
+
+    try:
+        data = _post_json_with_spinner(
+            f"{FABRICATION_API_BASE}/api/fabrication/open_in_slicer",
+            payload,
+            "Opening slicer",
+        )
+        app_name = data.get("slicer_app") or "slicer"
+        console.print(
+            f"[green]Launched {app_name} for {os.path.basename(location)}[/green]"
+        )
+        reasoning = data.get("reasoning")
+        if reasoning:
+            console.print(f"[dim]{reasoning}[/dim]")
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to open slicer: {exc}")
 
 
 def _start_new_session() -> None:
@@ -990,6 +1062,7 @@ def cad(
         console.print(f"\n[green]Generated {len(artifacts)} artifact(s)")
         _print_artifacts(artifacts)
         console.print("\n[dim]Use '/list' to view or '/queue <index> <printer>' to print[/dim]")
+        _maybe_offer_slicer(artifacts)
     else:
         console.print("[yellow]No artifacts generated")
 

@@ -628,6 +628,7 @@ kitty-cli cad "Create a phone stand with 45° angle and cable management"
 - Vision references: `/vision` selections are sent as `imageRefs` (download URL + storage URI). The CAD service mounts the shared `references_storage` volume, streams the original bytes to Tripo's `/upload` endpoint, kicks off `/image-to-3d`, polls `/task/<id>`, then submits a Tripo `/convert` task to emit binary STL (face-limit + unit aware) before falling back to local `trimesh` conversion whenever the API is unavailable.
 - Reference ordering: the CLI persists selections newest-first and automatically shares the latest entries with KITTY inside an `<available_image_refs>` block whenever you chat or run `/cad`. Hermes/Gemini read this block and include the matching `imageRefs` when calling `generate_cad_model`, so you always know which photo is being used.
 - Targeted references: use `kitty-cli cad --image rocketshipLaunch --image 1 "Convert this shuttle photo"` (friendly names, IDs, or newest-first indexes) to send only specific references; omit `--image` and the CLI will keyword-match your prompt against stored titles/captions to auto-select the best references (defaults to Tripo’s 2-image limit).
+- Print intent workflow: When you tell KITTY to open a model in the slicer, it confirms you truly want to print, asks for the desired finished height (inches or millimeters), converts to mm automatically, and uses that value plus the configured build envelopes to choose between Bamboo H2D and Elegoo OrangeStorm Giga before launching the appropriate slicer (BambuStudio or ElegySlicer).
 - Validation checklist: see `docs/tripo-stl-testing.md` for end-to-end test steps and timeout recommendations.
 
 ### 📂 **Accessing Generated Files from macOS Finder**
@@ -1421,3 +1422,18 @@ KITTY is built on these principles:
 <p align="center">
   <sub>KITTY: Because your workshop deserves an AI assistant that actually understands "turn that thing on over there"</sub>
 </p>
+# Printer Build Envelopes
+
+Set these env vars in `.env` to reflect your actual machines (defaults shown):
+
+```env
+H2D_BUILD_WIDTH=325
+H2D_BUILD_DEPTH=320
+H2D_BUILD_HEIGHT=325
+
+ORANGESTORM_GIGA_BUILD_WIDTH=800
+ORANGESTORM_GIGA_BUILD_DEPTH=800
+ORANGESTORM_GIGA_BUILD_HEIGHT=1000
+```
+
+KITTY takes the smallest axis from each printer’s build volume as the safe “max dimension” during printer selection. Update these whenever you change firmware limits, nozzle setups, or swap printers.

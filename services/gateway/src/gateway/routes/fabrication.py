@@ -28,8 +28,8 @@ async def open_in_slicer(request: Request) -> dict[str, Any]:
     4. User completes slicing and printing manually
 
     Printer Selection Hierarchy (Quality-First):
-    - Bamboo H2D: First choice for ≤250mm models (excellent quality)
-    - Elegoo Giga: Fallback if Bamboo busy OR large models >250mm (fast speed)
+    - Bamboo H2D: First choice for models up to the H2D build envelope (override via H2D_BUILD_* env vars)
+    - Elegoo Giga: Fallback if Bamboo busy OR large models above H2D limits (uses ORANGESTORM_GIGA_BUILD_* env vars)
     - Snapmaker Artisan: CNC or laser jobs only
 
     Request body:

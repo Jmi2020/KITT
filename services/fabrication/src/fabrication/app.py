@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -20,6 +21,60 @@ from .launcher.slicer_launcher import SlicerLauncher
 # Configure logging
 configure_logging()
 LOGGER = get_logger(__name__)
+
+UNIT_FACTORS = {
+    "mm": 1.0,
+    "millimeter": 1.0,
+    "millimeters": 1.0,
+    "cm": 10.0,
+    "centimeter": 10.0,
+    "centimeters": 10.0,
+    "m": 1000.0,
+    "meter": 1000.0,
+    "meters": 1000.0,
+    "in": 25.4,
+    "inch": 25.4,
+    "inches": 25.4,
+    "\"": 25.4,
+    "ft": 304.8,
+    "foot": 304.8,
+    "feet": 304.8,
+}
+
+
+def _parse_height_to_mm(raw_value: Optional[str]) -> Optional[float]:
+    """Parse a human-friendly height string (e.g., '6 in', '150mm') to millimeters."""
+    if not raw_value:
+        return None
+
+    normalized = (
+        raw_value.strip()
+        .lower()
+        .replace("″", "\"")
+        .replace("”", "\"")
+        .replace("′", "'")
+        .replace("’", "'")
+    )
+    pattern = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*([a-z\"']*)\s*$")
+    match = pattern.match(normalized)
+    if not match:
+        raise ValueError(
+            f"Unable to parse height value '{raw_value}'. Use formats like '150 mm' or '6 in'."
+        )
+
+    value = float(match.group(1))
+    unit = match.group(2) or "mm"
+    unit = unit.strip()
+    if unit in {"", None}:
+        unit = "mm"
+
+    if unit not in UNIT_FACTORS:
+        raise ValueError(
+            f"Unsupported unit '{unit}' in height '{raw_value}'. "
+            "Use mm, cm, m, in, or ft."
+        )
+
+    return round(value * UNIT_FACTORS[unit], 3)
 
 
 # Global service components
@@ -81,6 +136,11 @@ class OpenInSlicerRequest(BaseModel):
         description="Override printer selection (bamboo_h2d, elegoo_giga, snapmaker_artisan)",
         examples=["bamboo_h2d"]
     )
+    target_height: Optional[str] = Field(
+        default=None,
+        description="Desired printed height (e.g., '6 in', '150 mm')",
+        examples=["6 in", "150 mm"]
+    )
 
 
 class OpenInSlicerResponse(BaseModel):
@@ -93,6 +153,7 @@ class OpenInSlicerResponse(BaseModel):
     reasoning: str
     model_dimensions: ModelDimensions
     printer_available: bool
+    target_height_mm: Optional[float] = None
 
 
 class AnalyzeModelRequest(BaseModel):
@@ -108,6 +169,11 @@ class AnalyzeModelRequest(BaseModel):
         description="Print mode for printer selection preview",
         examples=["3d_print"]
     )
+    target_height: Optional[str] = Field(
+        default=None,
+        description="Desired printed height (optional; e.g., '5 in', '200 mm')",
+        examples=["5 in", "200 mm"]
+    )
 
 
 class AnalyzeModelResponse(BaseModel):
@@ -119,6 +185,7 @@ class AnalyzeModelResponse(BaseModel):
     reasoning: str
     printer_available: bool
     model_fits: bool
+    target_height_mm: Optional[float] = None
 
 
 class PrinterStatusResponse(BaseModel):
@@ -149,14 +216,22 @@ async def open_in_slicer(request: OpenInSlicerRequest) -> OpenInSlicerResponse:
     4. User completes slicing and printing manually
 
     Printer Selection Hierarchy (Quality-First):
-    - Bamboo H2D: First choice for ≤250mm models (excellent quality)
-    - Elegoo Giga: Fallback if Bamboo busy OR large models >250mm (fast speed)
+    - Bamboo H2D: First choice for models that fit the H2D build envelope (defaults 250mm; override with H2D_BUILD_* env vars)
+    - Elegoo Giga: Fallback if Bamboo busy OR large models beyond H2D limits (fast speed, min axis from ORANGESTORM_GIGA_BUILD_* vars)
     - Snapmaker Artisan: CNC or laser jobs only
     """
     if not analyzer or not selector or not launcher:
         raise HTTPException(status_code=500, detail="Service not initialized")
 
     stl_path = Path(request.stl_path)
+    try:
+        target_height_mm = _parse_height_to_mm(request.target_height)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        target_height_mm = _parse_height_to_mm(request.target_height)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Validate STL file exists
     if not stl_path.exists():
@@ -199,12 +274,17 @@ async def open_in_slicer(request: OpenInSlicerRequest) -> OpenInSlicerResponse:
                 slicer_app=printer_map[request.force_printer],
                 reasoning=f"Manual override: {request.force_printer}",
                 model_fits=True,
-                printer_available=True
+                printer_available=True,
+                target_height_mm=target_height_mm
             )
         else:
             # Automatic selection
             LOGGER.info("Selecting printer", mode=mode.value)
-            selection = await selector.select_printer(stl_path, mode)
+            selection = await selector.select_printer(
+                stl_path,
+                mode,
+                target_height_mm=target_height_mm
+            )
 
         # Launch slicer app
         LOGGER.info(
@@ -223,7 +303,8 @@ async def open_in_slicer(request: OpenInSlicerRequest) -> OpenInSlicerResponse:
             stl_path=request.stl_path,
             reasoning=selection.reasoning,
             model_dimensions=dimensions,
-            printer_available=selection.printer_available
+            printer_available=selection.printer_available,
+            target_height_mm=selection.target_height_mm
         )
 
     except FileNotFoundError as e:
@@ -277,7 +358,11 @@ async def analyze_model(request: AnalyzeModelRequest) -> AnalyzeModelResponse:
         dimensions = analyzer.analyze(stl_path)
 
         # Get printer recommendation
-        selection = await selector.select_printer(stl_path, mode)
+        selection = await selector.select_printer(
+            stl_path,
+            mode,
+            target_height_mm=target_height_mm
+        )
 
         return AnalyzeModelResponse(
             dimensions=dimensions,
@@ -285,7 +370,8 @@ async def analyze_model(request: AnalyzeModelRequest) -> AnalyzeModelResponse:
             slicer_app=selection.slicer_app,
             reasoning=selection.reasoning,
             printer_available=selection.printer_available,
-            model_fits=selection.model_fits
+            model_fits=selection.model_fits,
+            target_height_mm=selection.target_height_mm
         )
 
     except ValueError as e:
