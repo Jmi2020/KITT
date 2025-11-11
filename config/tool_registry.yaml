@@ -1,284 +1,291 @@
-# KITTY ReAct Agent Tool Registry
-# Defines all available tools for the conversation framework
-# Each tool maps to an MCP endpoint with JSON schema validation
+# ==============================================================================
+# KITTY Tool Registry
+# ==============================================================================
+# Central registry for all MCP tools with metadata, safety levels, and permissions
+#
+# Tool Definition Structure:
+#   tool_name:
+#     server: MCP server name (research, cad, homeassistant, memory, vision, broker)
+#     description: Human-readable description
+#     hazard_class: none | low | medium | high
+#     requires_confirmation: true | false
+#     budget_tier: free | paid | premium
+#     enabled: true | false (optional, defaults to true)
+#
+# Hazard Classes:
+#   - none: No safety concerns (web search, reading data)
+#   - low: Minimal impact (CAD generation, memory storage)
+#   - medium: Reversible actions (device control, print queue)
+#   - high: Irreversible/dangerous (unlock doors, enable power)
+#
+# Budget Tiers:
+#   - free: Local/free external APIs
+#   - paid: Cloud LLM routing (Perplexity, GPT)
+#   - premium: Expensive external services (Zoo CAD, Tripo)
 
 version: 1
 
 tools:
   # ==============================================================================
-  # CAD Generation Tools
+  # Research Tools (free, no hazards)
   # ==============================================================================
+
+  web_search:
+    server: research
+    description: "Search the web for current information using SearXNG, Brave, or DuckDuckGo"
+    hazard_class: none
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+
+  fetch_webpage:
+    server: research
+    description: "Fetch and parse webpage content with Jina Reader or BeautifulSoup"
+    hazard_class: none
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+
+  research_deep:
+    server: research
+    description: "Deep research using Perplexity Sonar for comprehensive answers (paid API)"
+    hazard_class: none
+    requires_confirmation: false
+    budget_tier: paid
+    enabled: true
+    requires_override: true  # Requires API_OVERRIDE_PASSWORD
+
+  # ==============================================================================
+  # Vision Tools (free, no hazards)
+  # ==============================================================================
+
+  image_search:
+    server: vision
+    description: "Search for images using DuckDuckGo or Google Images API"
+    hazard_class: none
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+
+  image_filter:
+    server: vision
+    description: "Filter and rank images using CLIP embeddings for relevance"
+    hazard_class: none
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+
+  store_selection:
+    server: vision
+    description: "Store selected images to MinIO for CAD reference or documentation"
+    hazard_class: low
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+
+  # ==============================================================================
+  # Memory Tools (free, low hazard)
+  # ==============================================================================
+
+  remember:
+    server: memory
+    description: "Store information in long-term memory (Qdrant vector database)"
+    hazard_class: low
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+
+  search_memories:
+    server: memory
+    description: "Search long-term memory for relevant past conversations or facts"
+    hazard_class: none
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+
+  # ==============================================================================
+  # CAD Tools (paid/premium, low-medium hazard)
+  # ==============================================================================
+
   cad.generate_model:
-    method: POST
-    url: http://gateway:8080/api/cad/generate
-    schema:
-      type: object
-      properties:
-        prompt:
-          type: string
-          description: "Natural language description of the CAD model to generate"
-        provider:
-          type: string
-          enum: [auto, zoo, tripo, cadquery, freecad]
-          default: auto
-          description: "CAD provider (auto fallback: zoo → tripo → local)"
-        imageRefs:
-          type: array
-          items:
-            type: string
-          description: "Array of image URLs/S3 keys for image-to-CAD generation"
-        conversationId:
-          type: string
-          description: "Conversation ID for artifact tracking"
-      required: [prompt]
-    safety:
-      hazard_class: "low"
-      confirmation_required: false
-      notes: "CAD generation is non-destructive; always review before printing"
+    server: cad
+    description: "Generate CAD model using Zoo.dev KittyCAD API (parametric)"
+    hazard_class: low
+    requires_confirmation: false
+    budget_tier: premium
+    enabled: true
+    requires_override: true  # Requires API_OVERRIDE_PASSWORD for paid service
+
+  cad.image_to_mesh:
+    server: cad
+    description: "Convert image to 3D mesh using Tripo AI (paid API)"
+    hazard_class: low
+    requires_confirmation: false
+    budget_tier: premium
+    enabled: true
+    requires_override: true
+
+  cad.local_generate:
+    server: cad
+    description: "Generate CAD locally using CadQuery or FreeCAD scripts"
+    hazard_class: low
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
 
   # ==============================================================================
-  # Image Generation Tools (Stable Diffusion)
+  # Fabrication Tools (medium hazard - physical devices)
   # ==============================================================================
-  images.generate:
-    method: POST
-    url: http://gateway:8080/api/images/generate
-    schema:
-      type: object
-      properties:
-        prompt:
-          type: string
-          description: "Text description for image generation"
-        model:
-          type: string
-          enum: [sdxl_base, sd_1_5]
-          default: sdxl_base
-          description: "Stable Diffusion model (sdxl_base for 1024x1024, sd_1_5 for 512x512)"
-        width:
-          type: integer
-          default: 1024
-          minimum: 512
-          maximum: 1024
-          description: "Image width in pixels"
-        height:
-          type: integer
-          default: 1024
-          minimum: 512
-          maximum: 1024
-          description: "Image height in pixels"
-        steps:
-          type: integer
-          default: 30
-          minimum: 10
-          maximum: 50
-          description: "Number of diffusion steps (more = better quality, slower)"
-        cfg:
-          type: number
-          default: 7.0
-          minimum: 1.0
-          maximum: 15.0
-          description: "Classifier-free guidance scale (how closely to follow prompt)"
-        seed:
-          type: integer
-          description: "Random seed for reproducibility (optional)"
-        refiner:
-          type: string
-          description: "SDXL refiner model path for quality boost (optional)"
-      required: [prompt]
-    safety:
-      hazard_class: "low"
-      confirmation_required: false
-      notes: "Image generation is local and offline; no content filtering"
 
-  images.get_latest:
-    method: GET
-    url: http://gateway:8080/api/images/latest
-    schema:
-      type: object
-      properties:
-        limit:
-          type: integer
-          default: 10
-          minimum: 1
-          maximum: 50
-          description: "Number of recent images to retrieve"
-    safety:
-      hazard_class: "none"
-      confirmation_required: false
-
-  images.select:
-    method: POST
-    url: http://gateway:8080/api/images/select
-    schema:
-      type: object
-      properties:
-        image_key:
-          type: string
-          description: "S3 key of the image to select"
-      required: [image_key]
-    safety:
-      hazard_class: "none"
-      confirmation_required: false
-      notes: "Returns imageRef compatible with CAD imageRefs array"
-
-  # ==============================================================================
-  # Fabrication Tools
-  # ==============================================================================
   fabrication.queue_print:
-    method: POST
-    url: http://gateway:8080/api/fabrication/queue
-    schema:
-      type: object
-      properties:
-        artifact_path:
-          type: string
-          description: "Path or S3 key to STL/GCODE artifact"
-        printer_id:
-          type: string
-          description: "Target printer device ID"
-        material:
-          type: string
-          description: "Print material (PLA, PETG, ABS, etc.)"
-        profile:
-          type: string
-          description: "Slicer profile name"
-      required: [artifact_path, printer_id]
-    safety:
-      hazard_class: "medium"
-      confirmation_required: true
-      notes: "Physical fabrication; verify design before printing"
+    server: broker
+    description: "Queue 3D print job to OctoPrint or Klipper printer"
+    hazard_class: medium
+    requires_confirmation: true
+    confirmation_phrase: "Confirm: proceed"
+    budget_tier: free
+    enabled: true
+    note: "Requires artifact path and printer ID. Starts physical fabrication process."
+
+  fabrication.cancel_print:
+    server: broker
+    description: "Cancel currently running print job"
+    hazard_class: low
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+
+  fabrication.pause_print:
+    server: broker
+    description: "Pause currently running print job"
+    hazard_class: low
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+
+  fabrication.resume_print:
+    server: broker
+    description: "Resume paused print job"
+    hazard_class: low
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
 
   # ==============================================================================
-  # Home Assistant Device Control
+  # Home Assistant Tools (medium-high hazard - physical control)
   # ==============================================================================
-  homeassistant.control_device:
-    method: POST
-    url_template: "http://gateway:8080/api/device/{entity_id}/command"
-    schema:
-      type: object
-      properties:
-        entity_id:
-          type: string
-          description: "Home Assistant entity ID (e.g., light.bench_lights)"
-        command:
-          type: string
-          enum: [turn_on, turn_off, toggle]
-          description: "Command to execute"
-      required: [entity_id, command]
-    safety:
-      hazard_class: "varies"
-      confirmation_required: false
-      notes: "Safe for lights/switches; hazardous for doors/power requires confirmation"
 
-  # ==============================================================================
-  # Vision & Research Tools
-  # ==============================================================================
-  vision.search:
-    method: POST
-    url: http://gateway:8080/api/vision/search
-    schema:
-      type: object
-      properties:
-        query:
-          type: string
-          description: "Search query for visual references"
-        max_results:
-          type: integer
-          default: 12
-          description: "Maximum number of results"
-      required: [query]
-    safety:
-      hazard_class: "none"
-      confirmation_required: false
+  homeassistant.turn_on:
+    server: homeassistant
+    description: "Turn on a Home Assistant entity (light, switch, etc.)"
+    hazard_class: low
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
 
-  vision.store:
-    method: POST
-    url: http://gateway:8080/api/vision/store
-    schema:
-      type: object
-      properties:
-        session_id:
-          type: string
-          description: "Session ID for grouping stored images"
-        images:
-          type: array
-          items:
-            type: object
-            properties:
-              id: {type: string}
-              image_url: {type: string}
-              title: {type: string}
-              source: {type: string}
-              caption: {type: string}
-      required: [session_id, images]
-    safety:
-      hazard_class: "none"
-      confirmation_required: false
+  homeassistant.turn_off:
+    server: homeassistant
+    description: "Turn off a Home Assistant entity (light, switch, etc.)"
+    hazard_class: low
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
 
-  research.web_search:
-    method: POST
-    url: http://gateway:8080/api/research/web_search
-    schema:
-      type: object
-      properties:
-        query:
-          type: string
-          description: "Web search query"
-      required: [query]
-    safety:
-      hazard_class: "none"
-      confirmation_required: false
+  homeassistant.activate_scene:
+    server: homeassistant
+    description: "Activate a Home Assistant scene (lighting preset)"
+    hazard_class: low
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
 
-  research.fetch_webpage:
-    method: POST
-    url: http://gateway:8080/api/research/fetch_webpage
-    schema:
-      type: object
-      properties:
-        url:
-          type: string
-          format: uri
-          description: "URL to fetch and extract content from"
-      required: [url]
-    safety:
-      hazard_class: "none"
-      confirmation_required: false
+  homeassistant.unlock_door:
+    server: homeassistant
+    description: "Unlock smart lock via Home Assistant"
+    hazard_class: high
+    requires_confirmation: true
+    confirmation_phrase: "Confirm: proceed"
+    requires_signature: true
+    budget_tier: free
+    enabled: true
+    note: "HIGH RISK: Unlocking doors has security implications. Requires signature verification."
+
+  homeassistant.lock_door:
+    server: homeassistant
+    description: "Lock smart lock via Home Assistant"
+    hazard_class: medium
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+
+  homeassistant.enable_power:
+    server: homeassistant
+    description: "Enable high-power equipment (laser cutter, welder, etc.)"
+    hazard_class: high
+    requires_confirmation: true
+    confirmation_phrase: "Confirm: proceed"
+    requires_signature: true
+    budget_tier: free
+    enabled: true
+    note: "HIGH RISK: Enabling dangerous equipment. Requires signature verification and zone presence check."
 
   # ==============================================================================
-  # Memory Tools (Qdrant)
+  # Command Broker Tools (system-level, medium hazard)
   # ==============================================================================
-  memory.remember:
-    method: POST
-    url: http://gateway:8080/api/memory/remember
-    schema:
-      type: object
-      properties:
-        text:
-          type: string
-          description: "Content to remember (user preference, context, note)"
-        tags:
-          type: array
-          items:
-            type: string
-          description: "Categorical tags for organization"
-      required: [text]
-    safety:
-      hazard_class: "none"
-      confirmation_required: false
 
-  memory.search:
-    method: POST
-    url: http://gateway:8080/api/memory/search
-    schema:
-      type: object
-      properties:
-        query:
-          type: string
-          description: "Semantic search query"
-        top_k:
-          type: integer
-          default: 5
-          description: "Number of results to return"
-      required: [query]
-    safety:
-      hazard_class: "none"
-      confirmation_required: false
+  broker.execute_command:
+    server: broker
+    description: "Execute system command via command broker with audit logging"
+    hazard_class: medium
+    requires_confirmation: true
+    confirmation_phrase: "Confirm: proceed"
+    budget_tier: free
+    enabled: false  # Disabled by default for safety
+    note: "System-level command execution. Enable only in controlled environments."
+
+  # ==============================================================================
+  # Reasoning Delegation (for dual-model architecture)
+  # ==============================================================================
+
+  reason_with_f16:
+    server: reasoning
+    description: "Delegate complex reasoning to F16 high-precision model (Llama 3.3 70B)"
+    hazard_class: none
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+    note: "Used by Q4 agent to request deep analysis from F16 reasoning engine."
+
+# ==============================================================================
+# Tool Categories (for UI/CLI filtering)
+# ==============================================================================
+
+categories:
+  research: [web_search, fetch_webpage, research_deep]
+  vision: [image_search, image_filter, store_selection]
+  memory: [remember, search_memories]
+  cad: [cad.generate_model, cad.image_to_mesh, cad.local_generate]
+  fabrication: [fabrication.queue_print, fabrication.cancel_print, fabrication.pause_print, fabrication.resume_print]
+  homeassistant: [homeassistant.turn_on, homeassistant.turn_off, homeassistant.activate_scene, homeassistant.unlock_door, homeassistant.lock_door, homeassistant.enable_power]
+  broker: [broker.execute_command]
+  reasoning: [reason_with_f16]
+
+# ==============================================================================
+# Safety Policies (global overrides)
+# ==============================================================================
+
+safety:
+  # Require confirmation phrase for all hazard_class: high tools
+  enforce_high_hazard_confirmation: true
+
+  # Require API_OVERRIDE_PASSWORD for all budget_tier: paid/premium tools
+  enforce_paid_override: true
+
+  # Require signature verification for tools with requires_signature: true
+  enforce_signature_verification: true
+
+  # Default confirmation phrase (can be overridden per-tool)
+  default_confirmation_phrase: "Confirm: proceed"
+
+  # Enable audit logging for all tool executions
+  audit_enabled: true

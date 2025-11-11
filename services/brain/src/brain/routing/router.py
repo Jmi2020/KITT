@@ -554,6 +554,18 @@ Based on the tool results above, provide a comprehensive answer to the original 
         if agent_result.steps:
             metadata["agent_steps"] = [asdict(step) for step in agent_result.steps]
 
+        # Add confirmation information if present
+        if agent_result.requires_confirmation:
+            metadata["requires_confirmation"] = True
+            metadata["confirmation_phrase"] = agent_result.confirmation_phrase
+            metadata["pending_tool"] = agent_result.pending_tool
+            metadata["pending_tool_args"] = agent_result.pending_tool_args
+            metadata["hazard_class"] = agent_result.hazard_class
+            metadata["confirmation_reason"] = "Tool requires user confirmation before execution"
+            logger.warning(
+                f"Agent requires confirmation for {agent_result.pending_tool}: {agent_result.hazard_class}"
+            )
+
         # High confidence if agent succeeded
         confidence = 0.9 if agent_result.success else 0.5
 

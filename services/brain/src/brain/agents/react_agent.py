@@ -15,6 +15,7 @@ from brain.tools.mcp_client import MCPClient
 from brain.tools.model_config import detect_model_format
 from brain.logging_config import log_agent_step
 from brain.prompts.unified import KittySystemPrompt
+from brain.conversation.safety import SafetyChecker
 from ..utils.tokens import count_tokens
 
 from .prompt_templates import get_tool_call_examples
@@ -45,6 +46,11 @@ class AgentResult:
     iterations: int = 0
     truncated: bool = False
     stop_reason: Optional[str] = None
+    requires_confirmation: bool = False
+    confirmation_phrase: Optional[str] = None
+    pending_tool: Optional[str] = None
+    pending_tool_args: Optional[Dict[str, Any]] = None
+    hazard_class: Optional[str] = None
 
 
 class ReActAgent:
@@ -80,6 +86,10 @@ class ReActAgent:
         # Initialize unified prompt builder
         self._prompt_builder = KittySystemPrompt()
         self._history_token_budget = int(os.getenv("AGENT_HISTORY_TOKEN_BUDGET", "8000"))
+
+        # Initialize safety checker
+        self._safety_checker = SafetyChecker()
+        logger.info("Safety checker initialized with tool registry")
 
     def _build_react_prompt(
         self,
@@ -379,15 +389,55 @@ class ReActAgent:
                     logger.warning(f"Invalid tool call: {action}({action_input}) - {validation.error_message}")
 
                 else:
-                    # Validation passed - execute tool
-                    logger.info(f"Executing tool: {action}({action_input})")
+                    # Validation passed - check safety before execution
+                    safety_result = self._safety_checker.check_tool_execution(
+                        action, action_input, allow_paid
+                    )
 
-                    try:
-                        result = await self._mcp.execute_tool(action, action_input)
-                        observation = self._summarize_tool_observation(action, result)
-                    except Exception as e:
-                        logger.error(f"Tool execution failed: {e}")
-                        observation = self._truncate_observation(f"Tool execution failed: {str(e)}")
+                    if not safety_result.approved:
+                        # Safety check failed
+                        if safety_result.requires_confirmation:
+                            # Tool requires user confirmation
+                            logger.warning(
+                                f"Tool {action} requires confirmation: {safety_result.reason}"
+                            )
+                            confirmation_msg = self._safety_checker.get_confirmation_message(
+                                action, action_input, safety_result.confirmation_phrase, safety_result.reason
+                            )
+
+                            # Return result requesting confirmation
+                            return AgentResult(
+                                answer=confirmation_msg,
+                                steps=history,
+                                success=False,
+                                requires_confirmation=True,
+                                confirmation_phrase=safety_result.confirmation_phrase,
+                                pending_tool=action,
+                                pending_tool_args=action_input,
+                                hazard_class=safety_result.hazard_class,
+                                iterations=iteration + 1,
+                            )
+
+                        elif safety_result.requires_override:
+                            # Tool requires API override (paid/premium)
+                            observation = f"Tool {action} requires API_OVERRIDE_PASSWORD: {safety_result.reason}"
+                            logger.warning(observation)
+
+                        else:
+                            # Tool is disabled or blocked for other reasons
+                            observation = f"Tool {action} blocked: {safety_result.reason}"
+                            logger.warning(observation)
+
+                    else:
+                        # Safety check passed - execute tool
+                        logger.info(f"Executing tool: {action}({action_input})")
+
+                        try:
+                            result = await self._mcp.execute_tool(action, action_input)
+                            observation = self._summarize_tool_observation(action, result)
+                        except Exception as e:
+                            logger.error(f"Tool execution failed: {e}")
+                            observation = self._truncate_observation(f"Tool execution failed: {str(e)}")
 
                 # Log agent step with action
                 log_agent_step(
@@ -503,7 +553,7 @@ class ReActAgent:
         )
 
     async def run_single_action(
-        self, query: str, tool_name: str, tool_args: Dict[str, Any]
+        self, query: str, tool_name: str, tool_args: Dict[str, Any], allow_paid: bool = False
     ) -> AgentResult:
         """Execute a single tool action without ReAct loop.
 
@@ -511,10 +561,63 @@ class ReActAgent:
             query: User query
             tool_name: Tool to execute
             tool_args: Tool arguments
+            allow_paid: Whether paid tools are authorized
 
         Returns:
             Agent result
         """
+        # Check safety before execution
+        safety_result = self._safety_checker.check_tool_execution(
+            tool_name, tool_args, allow_paid
+        )
+
+        if not safety_result.approved:
+            # Safety check failed
+            if safety_result.requires_confirmation:
+                # Tool requires user confirmation
+                logger.warning(f"Tool {tool_name} requires confirmation: {safety_result.reason}")
+                confirmation_msg = self._safety_checker.get_confirmation_message(
+                    tool_name, tool_args, safety_result.confirmation_phrase, safety_result.reason
+                )
+
+                # Return result requesting confirmation
+                return AgentResult(
+                    answer=confirmation_msg,
+                    steps=[],
+                    success=False,
+                    requires_confirmation=True,
+                    confirmation_phrase=safety_result.confirmation_phrase,
+                    pending_tool=tool_name,
+                    pending_tool_args=tool_args,
+                    hazard_class=safety_result.hazard_class,
+                    iterations=1,
+                )
+
+            elif safety_result.requires_override:
+                # Tool requires API override (paid/premium)
+                error_msg = f"Tool {tool_name} requires API_OVERRIDE_PASSWORD: {safety_result.reason}"
+                logger.warning(error_msg)
+                return AgentResult(
+                    answer=error_msg,
+                    steps=[],
+                    success=False,
+                    error=error_msg,
+                    iterations=1,
+                )
+
+            else:
+                # Tool is disabled or blocked for other reasons
+                error_msg = f"Tool {tool_name} blocked: {safety_result.reason}"
+                logger.warning(error_msg)
+                return AgentResult(
+                    answer=error_msg,
+                    steps=[],
+                    success=False,
+                    error=error_msg,
+                    iterations=1,
+                )
+
+        # Safety check passed - execute tool
         try:
             result = await self._tool_mcp.execute_tool(tool_name, tool_args)
 

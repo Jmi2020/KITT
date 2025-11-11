@@ -42,6 +42,10 @@ class QueryResponse(BaseModel):
     intent: str
     result: Dict[str, Any]
     routing: Optional[Dict[str, Any]] = None
+    requires_confirmation: bool = Field(False, alias="requiresConfirmation")
+    confirmation_phrase: Optional[str] = Field(None, alias="confirmationPhrase")
+    pending_tool: Optional[str] = Field(None, alias="pendingTool")
+    hazard_class: Optional[str] = Field(None, alias="hazardClass")
 
 
 @router.post("/query", response_model=QueryResponse)
@@ -102,9 +106,38 @@ async def post_query(
     if verbosity_level >= VerbosityLevel.COMPREHENSIVE:
         result_payload["verbosityLevel"] = int(verbosity_level)
 
+    # Check if routing result metadata contains confirmation requirements
+    requires_confirmation = False
+    confirmation_phrase = None
+    pending_tool = None
+    hazard_class = None
+
+    if routing_result.metadata:
+        requires_confirmation = routing_result.metadata.get("requires_confirmation", False)
+        confirmation_phrase = routing_result.metadata.get("confirmation_phrase")
+        pending_tool = routing_result.metadata.get("pending_tool")
+        pending_tool_args = routing_result.metadata.get("pending_tool_args")
+        hazard_class = routing_result.metadata.get("hazard_class")
+
+        # If confirmation is required, set it in the orchestrator state
+        if requires_confirmation and pending_tool and confirmation_phrase:
+            orchestrator.set_pending_confirmation(
+                conversation_id=body.conversation_id,
+                user_id=body.user_id,
+                tool_name=pending_tool,
+                tool_args=pending_tool_args or {},
+                confirmation_phrase=confirmation_phrase,
+                hazard_class=hazard_class or "medium",
+                reason=routing_result.metadata.get("confirmation_reason", "Tool requires confirmation"),
+            )
+
     return QueryResponse(
         conversation_id=body.conversation_id,
         intent=body.intent,
         result=result_payload,
         routing=routing_details,
+        requires_confirmation=requires_confirmation,
+        confirmation_phrase=confirmation_phrase,
+        pending_tool=pending_tool,
+        hazard_class=hazard_class,
     )
