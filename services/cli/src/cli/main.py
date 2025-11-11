@@ -103,6 +103,7 @@ USER_UUID = _env(
 )
 DEFAULT_VERBOSITY = int(_env("VERBOSITY", "3"))
 CLI_TIMEOUT = float(_env("KITTY_CLI_TIMEOUT", "900"))
+MAX_REFERENCE_CONTEXT = int(_env("KITTY_REFERENCE_CONTEXT", "6"))
 _SLUG_PATTERN = re.compile(r"[A-Za-z0-9]+")
 
 
@@ -173,6 +174,7 @@ def _merge_persisted_images(items: List[Dict[str, Any]]) -> None:
         if not friendly:
             friendly = _friendly_name(item.get("title"), item.get("source"), existing_names)
             item["friendlyName"] = friendly
+        item.setdefault("storedAt", datetime.utcnow().isoformat() + "Z")
         download_key = item.get("download_url") or item.get("storage_uri")
         if download_key in existing_urls:
             continue
@@ -181,6 +183,95 @@ def _merge_persisted_images(items: List[Dict[str, Any]]) -> None:
         changed = True
     if changed:
         _persist_stored_images()
+
+
+def _stored_images_newest_first() -> List[Dict[str, Any]]:
+    if not state.stored_images:
+        return []
+    if any("storedAt" in entry for entry in state.stored_images):
+        return sorted(
+            state.stored_images,
+            key=lambda item: item.get("storedAt") or "",
+            reverse=True,
+        )
+    return list(reversed(state.stored_images))
+
+
+def _image_display_name(entry: Dict[str, Any]) -> str:
+    return (
+        entry.get("friendlyName")
+        or entry.get("friendly_name")
+        or entry.get("title")
+        or entry.get("id")
+        or "reference"
+    )
+
+
+def _format_reference_block(limit: int = MAX_REFERENCE_CONTEXT) -> str:
+    images = _stored_images_newest_first()
+    if not images:
+        return ""
+    lines = []
+    for idx, entry in enumerate(images[:limit], start=1):
+        name = _image_display_name(entry)
+        source = entry.get("source") or "unknown"
+        download = entry.get("download_url") or "n/a"
+        storage = entry.get("storage_uri") or "n/a"
+        lines.append(
+            f"{idx}. {name} | source={source} | download={download} | storage={storage}"
+        )
+    return "<available_image_refs>\n" + "\n".join(lines) + "\n</available_image_refs>"
+
+
+def _image_payload(entry: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": entry.get("id"),
+        "downloadUrl": entry.get("download_url"),
+        "storageUri": entry.get("storage_uri"),
+        "sourceUrl": entry.get("image_url"),
+        "title": entry.get("title"),
+        "source": entry.get("source"),
+        "caption": entry.get("caption"),
+        "friendlyName": entry.get("friendlyName") or entry.get("friendly_name"),
+    }
+
+
+def _resolve_cad_image_refs(selectors: Optional[List[str]]) -> List[Dict[str, Any]]:
+    images = _stored_images_newest_first()
+    if not images:
+        return []
+    if not selectors:
+        return images
+    selected: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    indexed = list(enumerate(images, start=1))
+    name_map: Dict[str, Dict[str, Any]] = {}
+    for entry in images:
+        display = _image_display_name(entry)
+        if display:
+            name_map.setdefault(display.lower(), entry)
+    id_map = {str(entry.get("id")).lower(): entry for entry in images if entry.get("id")}
+
+    for raw in selectors:
+        token = (raw or "").strip()
+        if not token:
+            continue
+        entry = None
+        if token.isdigit():
+            idx = int(token)
+            entry = indexed[idx - 1][1] if 1 <= idx <= len(indexed) else None
+        if entry is None:
+            entry = name_map.get(token.lower()) or id_map.get(token.lower())
+        if entry is None:
+            console.print(f"[yellow]No stored reference matches '{token}'.[/yellow]")
+            continue
+        key = entry.get("download_url") or entry.get("storage_uri") or entry.get("id")
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        selected.append(entry)
+    return selected
 
 
 class CommandCompleter(Completer):
@@ -393,8 +484,10 @@ def _search_memories(query: str, limit: int = 5) -> None:
 
 
 def _format_prompt(user_prompt: str) -> str:
-    # No longer needed - ReAct agent handles reasoning internally
-    return user_prompt
+    reference_block = _format_reference_block()
+    if not reference_block:
+        return user_prompt
+    return f"{user_prompt}\n\n{reference_block}"
 
 
 def _fetch_usage_metrics() -> Dict[str, Dict[str, Any]]:
@@ -794,6 +887,12 @@ def cad(
         help="Force Zoo parametric workflow",
         is_flag=True,
     ),
+    image_filters: Optional[List[str]] = typer.Option(
+        None,
+        "--image",
+        "-i",
+        help="Limit CAD input to specific stored references (friendly name, ID, or newest-first index). Repeat to include multiple.",
+    ),
 ) -> None:
     """Generate CAD artifacts using Zoo/Tripo/local providers."""
     if organic and parametric:
@@ -813,23 +912,16 @@ def cad(
         chosen_mode = "parametric"
 
     if state.stored_images:
-        refs: List[Dict[str, Any]] = []
-        for item in state.stored_images:
-            refs.append(
-                {
-                    "id": item.get("id"),
-                    "downloadUrl": item.get("download_url"),
-                    "storageUri": item.get("storage_uri"),
-                    "sourceUrl": item.get("image_url"),
-                    "title": item.get("title"),
-                    "source": item.get("source"),
-                    "caption": item.get("caption"),
-                    "friendlyName": item.get("friendlyName") or item.get("friendly_name"),
-                }
-            )
-        payload["imageRefs"] = refs
-        if chosen_mode is None:
-            chosen_mode = "organic"
+        selected_refs = _resolve_cad_image_refs(image_filters)
+        if image_filters and not selected_refs:
+            console.print("[red]No stored references matched the requested filters.[/red]")
+            raise typer.Exit(1)
+        if selected_refs:
+            payload["imageRefs"] = [_image_payload(entry) for entry in selected_refs]
+            if chosen_mode is None:
+                chosen_mode = "organic"
+    elif image_filters:
+        console.print("[yellow]No stored references available—ignoring --image filters.[/yellow]")
 
     if chosen_mode is None:
         inferred = _infer_cad_mode(text, bool(state.stored_images))
@@ -1291,8 +1383,8 @@ def shell(
                 if not state.stored_images:
                     console.print("[yellow]No stored reference images.")
                 else:
-                    console.print("[bold]Stored reference images:[/bold]")
-                    for idx, item in enumerate(state.stored_images, 1):
+                    console.print("[bold]Stored reference images (newest first):[/bold]")
+                    for idx, item in enumerate(_stored_images_newest_first(), 1):
                         friendly = (
                             item.get("friendlyName")
                             or item.get("friendly_name")

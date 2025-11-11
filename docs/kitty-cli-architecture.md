@@ -107,6 +107,8 @@ kitty-cli say "What's the status of printer_01?"
 
 # Generate CAD
 kitty-cli cad "design a wall mount"
+# Target specific stored references (friendly name, ID, or newest-first index)
+kitty-cli cad --image rocketshipLaunch --image 1 "convert this shuttle photo"
 
 # List available models
 kitty-cli models
@@ -151,6 +153,8 @@ BRAIN_API_BASE=http://localhost:8000       # Brain direct
 5. **Tool Execution**: Brain can use MCP servers (CAD generation, Home Assistant control, memory storage)
 
 6. **Observability**: All conversations logged with routing decisions, costs, and latency
+
+> **Reference context:** every `say` or `/cad` invocation automatically appends an `<available_image_refs>` block listing the newest stored vision selections (friendly name + download/storage URLs). Hermes/Gemini read that block when you say “use rocketshipLaunch” and copy only the matching entries into the `generate_cad_model.imageRefs` tool call, so the CAD service always receives the images you intended.
 
 ### When to Use Direct llama.cpp Access
 

@@ -57,6 +57,23 @@ class CADMCPServer(MCPServer):
                             },
                             "additionalProperties": True,
                         },
+                        "imageRefs": {
+                            "type": "array",
+                            "description": "Optional list of stored image references (downloadUrl + storageUri) to forward directly to the CAD service.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "downloadUrl": {"type": "string"},
+                                    "storageUri": {"type": "string"},
+                                    "sourceUrl": {"type": "string"},
+                                    "title": {"type": "string"},
+                                    "source": {"type": "string"},
+                                    "caption": {"type": "string"},
+                                    "friendlyName": {"type": "string"},
+                                },
+                                "additionalProperties": True,
+                            },
+                        },
                     },
                     "required": ["prompt"],
                 },
@@ -101,6 +118,7 @@ class CADMCPServer(MCPServer):
         """
         prompt = arguments.get("prompt")
         references = arguments.get("references", {})
+        image_refs = arguments.get("imageRefs") or arguments.get("image_refs")
 
         if not prompt:
             return ToolResult(success=False, error="Missing required parameter: prompt")
@@ -110,14 +128,18 @@ class CADMCPServer(MCPServer):
             conversation_id = str(uuid4())
 
             # Call CAD service API
+            payload = {
+                "conversationId": conversation_id,
+                "prompt": prompt,
+                "references": references,
+            }
+            if image_refs:
+                payload["imageRefs"] = image_refs
+
             async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
                     f"{self._cad_url}/api/cad/generate",
-                    json={
-                        "conversationId": conversation_id,
-                        "prompt": prompt,
-                        "references": references,
-                    },
+                    json=payload,
                 )
                 response.raise_for_status()
                 data = response.json()
