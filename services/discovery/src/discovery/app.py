@@ -63,8 +63,14 @@ async def lifespan(app: FastAPI):
     # Initialize settings
     settings = Settings()
 
+    # Build PostgreSQL URL from settings
+    postgres_url = (
+        f"postgresql+asyncpg://{settings.postgres_user}:{settings.postgres_password}"
+        f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}"
+    )
+
     # Initialize device store
-    device_store = DeviceStore(settings.postgres_url)
+    device_store = DeviceStore(postgres_url)
     logger.info("Device store initialized")
 
     # Initialize scan scheduler

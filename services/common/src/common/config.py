@@ -53,6 +53,16 @@ class Settings(BaseSettings):
     # Fabrication / Multi-Printer Control
     printer_config: str = "config/printers.yaml"
 
+    # Network Discovery
+    discovery_port: int = 8500
+    discovery_scan_interval_minutes: int = 15
+    discovery_enable_periodic_scans: bool = True
+    discovery_enable_mdns: bool = True
+    discovery_enable_ssdp: bool = True
+    discovery_enable_bamboo_udp: bool = True
+    discovery_enable_snapmaker_udp: bool = True
+    discovery_enable_network_scan: bool = False
+
     # Bamboo Labs H2D
     bamboo_ip: str = "192.168.1.100"
     bamboo_serial: str = "01P45165616"
