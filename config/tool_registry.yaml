@@ -139,37 +139,60 @@ tools:
 
   fabrication.queue_print:
     server: broker
-    description: "Queue 3D print job to OctoPrint or Klipper printer"
+    description: "Queue 3D print/CNC/laser job with automatic printer selection based on model size and mode"
     hazard_class: medium
     requires_confirmation: true
     confirmation_phrase: "Confirm: proceed"
     budget_tier: free
     enabled: true
-    note: "Requires artifact path and printer ID. Starts physical fabrication process."
+    note: |
+      Automatically selects printer based on model size and mode:
+      - Small-medium 3D prints (≤200mm) → Bamboo H2D
+      - Large 3D prints (>200mm) → Elegoo Giga
+      - CNC/laser → Snapmaker Artisan
+
+      Parameters:
+      - artifact_path (required): Path to STL/GCODE file
+      - print_mode (optional): "3d_print" (default), "cnc", or "laser"
+      - printer_id (optional): Manual printer selection override
+      - nozzle_temp (optional): Nozzle temperature override
+      - bed_temp (optional): Bed temperature override
+
+  fabrication.list_printers:
+    server: broker
+    description: "List all available printers with status and capabilities"
+    hazard_class: none
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+    note: "Returns online status, current jobs, and build volume for all printers"
 
   fabrication.cancel_print:
     server: broker
-    description: "Cancel currently running print job"
+    description: "Cancel currently running print job on specified printer"
     hazard_class: low
     requires_confirmation: false
     budget_tier: free
     enabled: true
+    note: "Requires printer_id parameter (bamboo_h2d, elegoo_giga, or snapmaker_artisan)"
 
   fabrication.pause_print:
     server: broker
-    description: "Pause currently running print job"
+    description: "Pause currently running print job on specified printer"
     hazard_class: low
     requires_confirmation: false
     budget_tier: free
     enabled: true
+    note: "Requires printer_id parameter"
 
   fabrication.resume_print:
     server: broker
-    description: "Resume paused print job"
+    description: "Resume paused print job on specified printer"
     hazard_class: low
     requires_confirmation: false
     budget_tier: free
     enabled: true
+    note: "Requires printer_id parameter"
 
   # ==============================================================================
   # Home Assistant Tools (medium-high hazard - physical control)
@@ -265,7 +288,7 @@ categories:
   vision: [image_search, image_filter, store_selection]
   memory: [remember, search_memories]
   cad: [cad.generate_model, cad.image_to_mesh, cad.local_generate]
-  fabrication: [fabrication.queue_print, fabrication.cancel_print, fabrication.pause_print, fabrication.resume_print]
+  fabrication: [fabrication.queue_print, fabrication.list_printers, fabrication.cancel_print, fabrication.pause_print, fabrication.resume_print]
   homeassistant: [homeassistant.turn_on, homeassistant.turn_off, homeassistant.activate_scene, homeassistant.unlock_door, homeassistant.lock_door, homeassistant.enable_power]
   broker: [broker.execute_command]
   reasoning: [reason_with_f16]
