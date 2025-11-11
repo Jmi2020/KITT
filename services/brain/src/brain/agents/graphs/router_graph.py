@@ -14,8 +14,7 @@ from typing import Any, Dict, List, Literal
 from langgraph.graph import END, StateGraph
 
 from brain.memory import MemoryClient
-from brain.routing.llama_cpp_client import LlamaCppClient
-from brain.routing.tool_registry import ToolRegistry
+from brain.routing.multi_server_client import MultiServerLlamaCppClient
 from brain.tools.mcp_client import MCPClient
 from common.db.models import RoutingTier
 
@@ -42,26 +41,23 @@ class RouterGraph:
 
     def __init__(
         self,
-        llm_client: LlamaCppClient,
+        llm_client: MultiServerLlamaCppClient,
         memory_client: MemoryClient,
         mcp_client: MCPClient,
-        tool_registry: ToolRegistry,
         max_refinements: int = 2,
     ) -> None:
         """
         Initialize router graph.
 
         Args:
-            llm_client: Q4 LLM client for fast routing
+            llm_client: Multi-server llama.cpp client (Q4/F16 routing)
             memory_client: Memory search client
             mcp_client: MCP client for tool execution
-            tool_registry: Tool registry for available tools
             max_refinements: Maximum refinement iterations
         """
         self.llm = llm_client
         self.memory = memory_client
         self.mcp = mcp_client
-        self.tool_registry = tool_registry
         self.max_refinements = max_refinements
 
         # Initialize complexity analyzer
@@ -520,20 +516,18 @@ class RouterGraph:
 
 
 async def create_router_graph(
-    llm_client: LlamaCppClient,
+    llm_client: MultiServerLlamaCppClient,
     memory_client: MemoryClient,
     mcp_client: MCPClient,
-    tool_registry: ToolRegistry,
     max_refinements: int = 2,
 ) -> RouterGraph:
     """
     Factory function to create configured router graph.
 
     Args:
-        llm_client: Q4 LLM client
+        llm_client: Multi-server llama.cpp client (Q4/F16)
         memory_client: Memory search client
         mcp_client: MCP tool client
-        tool_registry: Tool registry
         max_refinements: Maximum refinement iterations
 
     Returns:
@@ -543,6 +537,5 @@ async def create_router_graph(
         llm_client=llm_client,
         memory_client=memory_client,
         mcp_client=mcp_client,
-        tool_registry=tool_registry,
         max_refinements=max_refinements,
     )

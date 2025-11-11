@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from typing import Optional
 
@@ -18,6 +19,10 @@ from .routing.cost_tracker import CostTracker
 from .routing.router import BrainRouter
 from .metrics.slo import SLOCalculator
 from .state.mqtt_context_store import MQTTContextStore
+from .agents.graphs.integration import LangGraphRoutingIntegration
+from .memory import MemoryClient
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -68,17 +73,54 @@ def get_hazard_workflow() -> Optional[object]:
 
 
 @lru_cache(maxsize=1)
+def get_langgraph_integration() -> Optional[LangGraphRoutingIntegration]:
+    """Get LangGraph integration if enabled.
+
+    Returns:
+        LangGraphRoutingIntegration if feature flag is enabled, None otherwise
+    """
+    import os
+
+    if os.getenv("BRAIN_USE_LANGGRAPH", "false").lower() != "true":
+        logger.info("LangGraph integration disabled (BRAIN_USE_LANGGRAPH=false)")
+        return None
+
+    logger.info("Initializing LangGraph integration")
+
+    # Create a router to get access to its clients
+    router = BrainRouter(
+        audit_store=RoutingAuditStore(),
+        cost_tracker=get_cost_tracker(),
+        slo_calculator=get_slo_calculator(),
+    )
+
+    # Create integration with router's clients
+    integration = LangGraphRoutingIntegration(
+        llm_client=router._llama,
+        memory_client=MemoryClient(),
+        mcp_client=router._tool_mcp,
+    )
+
+    return integration
+
+
+@lru_cache(maxsize=1)
 def get_orchestrator() -> BrainOrchestrator:
     router = BrainRouter(
         audit_store=RoutingAuditStore(),
         cost_tracker=get_cost_tracker(),
         slo_calculator=get_slo_calculator(),
     )
+
+    # Get LangGraph integration if enabled
+    langgraph = get_langgraph_integration()
+
     return BrainOrchestrator(
         get_context_store(),
         get_home_assistant_credentials(),
         router,
         safety_workflow=get_hazard_workflow(),
+        langgraph_integration=langgraph,
     )
 
 

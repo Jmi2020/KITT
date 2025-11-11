@@ -17,12 +17,18 @@
 - [x] Added conditional edges for tool routing and refinement loops
 - [x] Created comprehensive documentation (README.md, proposals)
 
-### 🔄 In Progress
-- [ ] Integration with BrainOrchestrator (create feature flag and hook)
+### ✅ Completed Phase 1 (Integration with BrainOrchestrator)
+- [x] Integration with BrainOrchestrator (feature-flagged routing)
+- [x] Feature flags: `BRAIN_USE_LANGGRAPH=true`, `BRAIN_LANGGRAPH_ROLLOUT_PERCENT=0-100`
+- [x] A/B testing framework (hash-based on conversation_id)
+- [x] Updated router_graph to use Brain's existing LLM clients (MultiServerLlamaCppClient)
+- [x] Removed non-existent ToolRegistry dependency
+- [x] Graceful fallback to traditional router on LangGraph errors
+
+### 🔄 In Progress (Phase 1 Testing)
 - [ ] Unit tests for complexity analyzer
 - [ ] Integration tests for router graph
-- [ ] Feature flag: `BRAIN_USE_LANGGRAPH=true`
-- [ ] A/B testing framework
+- [ ] End-to-end testing with real queries
 
 ### 📋 Planned (Phase 2+)
 - [ ] F16 deep reasoner graph (deep_reasoner_graph.py)

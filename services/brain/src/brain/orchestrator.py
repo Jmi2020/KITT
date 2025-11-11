@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from common.credentials import HomeAssistantCredentials
 from common.db.models import RoutingTier
@@ -21,6 +21,7 @@ from .skills.home_assistant import HomeAssistantSkill
 from .state.mqtt_context_store import MQTTContextStore
 from .conversation.state import ConversationStateManager
 from .conversation.safety import SafetyChecker
+from .agents.graphs.integration import LangGraphRoutingIntegration
 
 
 logger = logging.getLogger("brain.orchestrator")
@@ -41,12 +42,14 @@ class BrainOrchestrator:
         router: BrainRouter,
         safety_workflow: Any | None = None,
         memory_client: MemoryClient | None = None,
+        langgraph_integration: Optional[LangGraphRoutingIntegration] = None,
     ) -> None:
         self._context_store = context_store
         self._ha_skill = HomeAssistantSkill(ha_credentials)
         self._router = router
         self._safety = safety_workflow
         self._memory = memory_client or MemoryClient()
+        self._langgraph = langgraph_integration
 
         # Initialize conversation state manager for multi-turn workflows
         self._state_manager = ConversationStateManager()
@@ -54,7 +57,13 @@ class BrainOrchestrator:
         # Initialize safety checker for confirmation phrase verification
         self._safety_checker = SafetyChecker()
 
-        logger.info("BrainOrchestrator initialized with conversation state and safety management")
+        if self._langgraph and self._langgraph.enabled:
+            logger.info(
+                f"BrainOrchestrator initialized with LangGraph routing "
+                f"(rollout: {self._langgraph.rollout_percent}%)"
+            )
+        else:
+            logger.info("BrainOrchestrator initialized with traditional routing")
 
     async def handle_device_intent(
         self,
@@ -222,7 +231,17 @@ class BrainOrchestrator:
             allow_paid=allow_paid,
             vision_targets=vision_plan.targets if vision_plan.should_suggest else None,
         )
-        result = await self._router.route(routing_request)
+
+        # Check if LangGraph routing should be used
+        if self._langgraph and await self._langgraph.should_use_langgraph(routing_request):
+            logger.info("Using LangGraph routing for this request")
+            try:
+                result = await self._langgraph.route_with_langgraph(routing_request)
+            except Exception as exc:
+                logger.error(f"LangGraph routing failed, falling back to traditional: {exc}")
+                result = await self._router.route(routing_request)
+        else:
+            result = await self._router.route(routing_request)
 
         # Store the interaction as a new memory
         try:
