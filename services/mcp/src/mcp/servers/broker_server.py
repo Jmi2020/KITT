@@ -27,6 +27,7 @@ class BrokerMCPServer(MCPServer):
 
         self._broker_url = broker_url or os.getenv("BROKER_URL", "http://broker:8777")
         self._fabrication_url = os.getenv("FABRICATION_BASE", "http://fabrication:8300")
+        self._discovery_url = os.getenv("DISCOVERY_BASE", "http://discovery:8500")
 
         # Register execute_command tool
         self.register_tool(
@@ -152,6 +153,92 @@ class BrokerMCPServer(MCPServer):
             )
         )
 
+        # Register discovery tools
+        self.register_tool(
+            ToolDefinition(
+                name="discovery.scan_network",
+                description="Trigger network discovery scan to find IoT devices (printers, Raspberry Pi, ESP32)",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "methods": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": ["mdns", "ssdp", "bamboo_udp", "snapmaker_udp", "nmap"],
+                            },
+                            "description": "Discovery methods to use (optional, default: all fast scanners)",
+                        },
+                        "timeout_seconds": {
+                            "type": "integer",
+                            "description": "Timeout for scan in seconds (default: 30)",
+                            "minimum": 5,
+                            "maximum": 300,
+                        },
+                    },
+                },
+            )
+        )
+
+        self.register_tool(
+            ToolDefinition(
+                name="discovery.list_devices",
+                description="List all discovered devices with optional filtering by type or approval status",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "device_type": {
+                            "type": "string",
+                            "description": "Filter by device type (printer_3d, raspberry_pi, esp32, etc.)",
+                        },
+                        "approved": {
+                            "type": "boolean",
+                            "description": "Filter by approval status",
+                        },
+                        "is_online": {
+                            "type": "boolean",
+                            "description": "Filter by online status",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results (default: 100)",
+                            "minimum": 1,
+                            "maximum": 500,
+                        },
+                    },
+                },
+            )
+        )
+
+        self.register_tool(
+            ToolDefinition(
+                name="discovery.find_printers",
+                description="Find all 3D printers, CNC mills, and laser engravers on the network",
+                parameters={"type": "object", "properties": {}},
+            )
+        )
+
+        self.register_tool(
+            ToolDefinition(
+                name="discovery.approve_device",
+                description="Approve a discovered device for integration and control",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "device_id": {
+                            "type": "string",
+                            "description": "Device UUID to approve",
+                        },
+                        "notes": {
+                            "type": "string",
+                            "description": "Optional approval notes",
+                        },
+                    },
+                    "required": ["device_id"],
+                },
+            )
+        )
+
         # Register broker://commands resource
         self.register_resource(
             ResourceDefinition(
@@ -186,6 +273,14 @@ class BrokerMCPServer(MCPServer):
             return await self._analyze_model(arguments)
         elif tool_name == "fabrication.printer_status":
             return await self._printer_status()
+        elif tool_name == "discovery.scan_network":
+            return await self._scan_network(arguments)
+        elif tool_name == "discovery.list_devices":
+            return await self._list_devices(arguments)
+        elif tool_name == "discovery.find_printers":
+            return await self._find_printers()
+        elif tool_name == "discovery.approve_device":
+            return await self._approve_device(arguments)
         else:
             return ToolResult(
                 success=False,
@@ -606,6 +701,262 @@ class BrokerMCPServer(MCPServer):
                 success=False,
                 output="",
                 error=f"Failed to get printer status: {e}",
+            )
+
+    async def _scan_network(self, arguments: Dict[str, Any]) -> ToolResult:
+        """Trigger network discovery scan.
+
+        Args:
+            arguments: Tool arguments with methods, timeout_seconds
+
+        Returns:
+            ToolResult with scan ID and status
+        """
+        methods = arguments.get("methods")
+        timeout_seconds = arguments.get("timeout_seconds", 30)
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                payload = {"timeout_seconds": timeout_seconds}
+                if methods:
+                    payload["methods"] = methods
+
+                response = await client.post(
+                    f"{self._discovery_url}/api/discovery/scan",
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                scan_id = data.get("scan_id", "unknown")
+                status = data.get("status", "unknown")
+                methods_used = data.get("methods", [])
+
+                output = (
+                    f"Network discovery scan started\n\n"
+                    f"Scan ID: {scan_id}\n"
+                    f"Status: {status}\n"
+                    f"Methods: {', '.join(methods_used)}\n\n"
+                    f"Use discovery.list_devices to view results when scan completes."
+                )
+
+                return ToolResult(
+                    success=True,
+                    output=output,
+                    metadata=data,
+                )
+
+        except httpx.HTTPStatusError as e:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Discovery service error ({e.response.status_code}): {e.response.text}",
+            )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Failed to trigger scan: {e}",
+            )
+
+    async def _list_devices(self, arguments: Dict[str, Any]) -> ToolResult:
+        """List discovered devices with filters.
+
+        Args:
+            arguments: Tool arguments with filters
+
+        Returns:
+            ToolResult with device list
+        """
+        device_type = arguments.get("device_type")
+        approved = arguments.get("approved")
+        is_online = arguments.get("is_online")
+        limit = arguments.get("limit", 100)
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                params = {"limit": limit}
+                if device_type:
+                    params["device_type"] = device_type
+                if approved is not None:
+                    params["approved"] = approved
+                if is_online is not None:
+                    params["is_online"] = is_online
+
+                response = await client.get(
+                    f"{self._discovery_url}/api/discovery/devices",
+                    params=params,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                devices = data.get("devices", [])
+                total = data.get("total", 0)
+
+                # Format output
+                output_lines = [f"Discovered Devices ({total} total):\n"]
+
+                for device in devices:
+                    device_id = device.get("id", "unknown")
+                    ip = device.get("ip_address", "unknown")
+                    hostname = device.get("hostname", "")
+                    dtype = device.get("device_type", "unknown")
+                    manufacturer = device.get("manufacturer", "")
+                    model = device.get("model", "")
+                    approved_status = "✓ Approved" if device.get("approved") else "✗ Not approved"
+                    online_status = "🟢 Online" if device.get("is_online") else "🔴 Offline"
+
+                    name = hostname or ip
+                    details = f"{manufacturer} {model}".strip() if manufacturer or model else dtype
+
+                    output_lines.append(
+                        f"  • {name} ({ip})\n"
+                        f"    Type: {details}\n"
+                        f"    Status: {online_status} | {approved_status}\n"
+                        f"    ID: {device_id}\n"
+                    )
+
+                return ToolResult(
+                    success=True,
+                    output="\n".join(output_lines),
+                    metadata=data,
+                )
+
+        except httpx.HTTPStatusError as e:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Discovery service error ({e.response.status_code}): {e.response.text}",
+            )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Failed to list devices: {e}",
+            )
+
+    async def _find_printers(self) -> ToolResult:
+        """Find all printers on the network.
+
+        Returns:
+            ToolResult with printer list
+        """
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{self._discovery_url}/api/discovery/printers"
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                printers = data.get("devices", [])
+                total = data.get("total", 0)
+
+                # Format output
+                output_lines = [f"Found {total} Printers:\n"]
+
+                for printer in printers:
+                    ip = printer.get("ip_address", "unknown")
+                    hostname = printer.get("hostname", "")
+                    dtype = printer.get("device_type", "unknown")
+                    manufacturer = printer.get("manufacturer", "")
+                    model = printer.get("model", "")
+                    approved_status = "✓" if printer.get("approved") else "✗"
+
+                    name = hostname or ip
+                    details = f"{manufacturer} {model}".strip() if manufacturer or model else dtype
+
+                    output_lines.append(f"  {approved_status} {name} ({ip}) - {details}")
+
+                if total == 0:
+                    output_lines.append("\nNo printers found. Try running discovery.scan_network first.")
+
+                return ToolResult(
+                    success=True,
+                    output="\n".join(output_lines),
+                    metadata=data,
+                )
+
+        except httpx.HTTPStatusError as e:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Discovery service error ({e.response.status_code}): {e.response.text}",
+            )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Failed to find printers: {e}",
+            )
+
+    async def _approve_device(self, arguments: Dict[str, Any]) -> ToolResult:
+        """Approve a discovered device.
+
+        Args:
+            arguments: Tool arguments with device_id, notes
+
+        Returns:
+            ToolResult with approval confirmation
+        """
+        device_id = arguments.get("device_id")
+        notes = arguments.get("notes")
+
+        if not device_id:
+            return ToolResult(
+                success=False,
+                output="",
+                error="Missing required argument: device_id",
+            )
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                payload = {}
+                if notes:
+                    payload["notes"] = notes
+
+                response = await client.post(
+                    f"{self._discovery_url}/api/discovery/devices/{device_id}/approve",
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                approved_at = data.get("approved_at", "")
+                approved_by = data.get("approved_by", "")
+
+                output = (
+                    f"✓ Device approved\n\n"
+                    f"Device ID: {device_id}\n"
+                    f"Approved by: {approved_by}\n"
+                    f"Approved at: {approved_at}\n"
+                )
+                if notes:
+                    output += f"Notes: {notes}\n"
+
+                return ToolResult(
+                    success=True,
+                    output=output,
+                    metadata=data,
+                )
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Device not found: {device_id}",
+                )
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Discovery service error ({e.response.status_code}): {e.response.text}",
+            )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Failed to approve device: {e}",
             )
 
 
