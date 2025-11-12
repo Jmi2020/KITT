@@ -13,6 +13,12 @@ from common.config import settings
 from common.logging import configure_logging
 
 from .autonomous.scheduler import get_scheduler
+from .autonomous.jobs import (
+    daily_health_check,
+    weekly_research_cycle,
+    knowledge_base_update,
+    printer_fleet_health_check,
+)
 from .logging_config import setup_reasoning_logging
 from .metrics import router as metrics_router
 from .routes.autonomy import router as autonomy_router
@@ -58,19 +64,42 @@ async def lifespan(app: FastAPI):
         scheduler = get_scheduler()
         scheduler.start()
 
-        # Register test job (will be replaced with actual autonomous workflows later)
-        def monday_test_job():
-            logger.info("🤖 Weekly autonomous cycle starting (test job)")
+        # Register autonomous jobs (4am-6am PST = 12pm-2pm UTC)
 
+        # Daily health check at 4:00 PST (12:00 UTC)
         scheduler.add_cron_job(
-            func=monday_test_job,
-            day_of_week="mon",
-            hour=9,
+            func=daily_health_check,
+            hour=12,
             minute=0,
-            job_id="weekly_autonomous_cycle_test",
+            job_id="daily_health_check",
         )
 
-        logger.info("Autonomous scheduler started and jobs registered")
+        # Weekly research cycle - Monday at 5:00 PST (13:00 UTC)
+        scheduler.add_cron_job(
+            func=weekly_research_cycle,
+            day_of_week="mon",
+            hour=13,
+            minute=0,
+            job_id="weekly_research_cycle",
+        )
+
+        # Knowledge base update - Monday at 6:00 PST (14:00 UTC)
+        scheduler.add_cron_job(
+            func=knowledge_base_update,
+            day_of_week="mon",
+            hour=14,
+            minute=0,
+            job_id="knowledge_base_update",
+        )
+
+        # Printer fleet health check - Every 4 hours
+        scheduler.add_interval_job(
+            func=printer_fleet_health_check,
+            hours=4,
+            job_id="printer_fleet_health_check",
+        )
+
+        logger.info("Autonomous scheduler started with 4 jobs registered (4am-6am PST / 12pm-2pm UTC)")
     else:
         logger.info("Autonomous mode disabled (AUTONOMOUS_ENABLED=false)")
 
