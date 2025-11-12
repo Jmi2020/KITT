@@ -38,6 +38,9 @@ def n_propose_council(s: CollectiveState) -> CollectiveState:
 
     Confidentiality: Proposers receive filtered context (excludes meta/dev/collective)
     to maintain independence and prevent groupthink.
+
+    Diversity: First specialist uses Q4B (diversity seat - different model family)
+    to reduce correlated failures and introduce varied perspectives.
     """
     k = int(s.get("k", 3))
     # Fetch filtered context for proposers (excludes meta/dev tags)
@@ -46,13 +49,24 @@ def n_propose_council(s: CollectiveState) -> CollectiveState:
     props = []
     for i in range(k):
         role = f"specialist_{i+1}"
+
+        # Use Q4B (diversity seat) for first specialist, Q4 for others
+        # This introduces model family diversity to reduce correlated failures
+        which_model = "Q4B" if i == 0 else "Q4"
+
+        # Vary temperature slightly across specialists (0.7-0.9)
+        temperature = 0.7 + (i * 0.1)
+
+        # Vary max_tokens slightly (400-600)
+        max_tokens = 400 + (i * 100)
+
         system_prompt = f"You are {role}. {HINT_PROPOSER}"
         user_prompt = f"Task:\n{s['task']}\n\nRelevant context:\n{context}\n\nProvide a concise proposal with justification."
 
         props.append(chat([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
-        ], which="Q4"))
+        ], which=which_model, temperature=temperature, max_tokens=max_tokens))
     return {**s, "proposals": props}
 
 def n_propose_debate(s: CollectiveState) -> CollectiveState:

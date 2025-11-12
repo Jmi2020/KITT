@@ -43,6 +43,9 @@ async def n_propose_council(s: CollectiveState) -> CollectiveState:
 
     Confidentiality: Proposers receive filtered context (excludes meta/dev/collective)
     to maintain independence and prevent groupthink.
+
+    Diversity: First specialist uses Q4B (diversity seat - different model family)
+    to reduce correlated failures and introduce varied perspectives.
     """
     import asyncio
 
@@ -51,16 +54,28 @@ async def n_propose_council(s: CollectiveState) -> CollectiveState:
     # Fetch filtered context for proposers (excludes meta/dev tags)
     context = fetch_domain_context(s["task"], limit=6, for_proposer=True)
 
-    # Generate all proposals concurrently
+    # Generate all proposals concurrently with model diversity
     async def generate_proposal(i: int) -> str:
         role = f"specialist_{i+1}"
+
+        # Use Q4B (diversity seat) for first specialist, Q4 for others
+        # This introduces model family diversity to reduce correlated failures
+        which_model = "Q4B" if i == 0 else "Q4"
+
+        # Vary temperature slightly across specialists (0.7-0.9)
+        # Higher temperature = more creative/diverse responses
+        temperature = 0.7 + (i * 0.1)
+
+        # Vary max_tokens slightly (400-600) for different levels of detail
+        max_tokens = 400 + (i * 100)
+
         system_prompt = f"You are {role}. {HINT_PROPOSER}"
         user_prompt = f"Task:\n{s['task']}\n\nRelevant context:\n{context}\n\nProvide a concise proposal with justification."
 
         return await chat_async([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
-        ], which="Q4")
+        ], which=which_model, temperature=temperature, max_tokens=max_tokens)
 
     # Run all proposals in parallel
     props = await asyncio.gather(*[generate_proposal(i) for i in range(k)])

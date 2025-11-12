@@ -53,8 +53,10 @@ def _messages_to_prompt(messages: List[Dict[str, str]]) -> str:
 
 async def chat_async(
     messages: List[Dict[str, str]],
-    which: Literal["Q4", "F16", "CODER"] = "Q4",
-    tools: List[Dict[str, Any]] | None = None
+    which: Literal["Q4", "F16", "CODER", "Q4B"] = "Q4",
+    tools: List[Dict[str, Any]] | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None
 ) -> str:
     """Async chat interface for collective meta-agent.
 
@@ -63,8 +65,14 @@ async def chat_async(
 
     Args:
         messages: OpenAI-style message list [{"role": "user", "content": "..."}]
-        which: Which model tier to use ("Q4" for fast tool orchestrator, "F16" for deep reasoner, "CODER" for code generation)
+        which: Which model tier to use:
+            - "Q4" for fast tool orchestrator (Qwen-based)
+            - "F16" for deep reasoner (Llama-based)
+            - "CODER" for code generation (Qwen-Coder)
+            - "Q4B" for diversity seat (Mistral-based, falls back to Q4 if unavailable)
         tools: Optional tool definitions (JSON Schema format)
+        temperature: Override default temperature (0.0-2.0)
+        max_tokens: Override default max_tokens
 
     Returns:
         The assistant's text response
@@ -76,10 +84,12 @@ async def chat_async(
         ... ], which="Q4")
     """
     # Map which parameter to model alias
+    # Q4B (diversity seat) falls back to Q4 if not configured
     model_map = {
         "Q4": "kitty-q4",
         "F16": "kitty-f16",
         "CODER": "kitty-coder",
+        "Q4B": "kitty-q4b",  # Diversity seat (Mistral-7B or other model family)
     }
     model_alias = model_map.get(which, "kitty-q4")
 
@@ -103,8 +113,10 @@ async def chat_async(
 
 def chat(
     messages: List[Dict[str, str]],
-    which: Literal["Q4", "F16", "CODER"] = "Q4",
-    tools: List[Dict[str, Any]] | None = None
+    which: Literal["Q4", "F16", "CODER", "Q4B"] = "Q4",
+    tools: List[Dict[str, Any]] | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None
 ) -> str:
     """Synchronous chat interface for collective meta-agent.
 
@@ -116,8 +128,14 @@ def chat(
 
     Args:
         messages: OpenAI-style message list [{"role": "user", "content": "..."}]
-        which: Which model tier to use ("Q4" for fast tool orchestrator, "F16" for deep reasoner, "CODER" for code generation)
+        which: Which model tier to use:
+            - "Q4" for fast tool orchestrator (Qwen-based)
+            - "F16" for deep reasoner (Llama-based)
+            - "CODER" for code generation (Qwen-Coder)
+            - "Q4B" for diversity seat (Mistral-based, falls back to Q4 if unavailable)
         tools: Optional tool definitions (JSON Schema format)
+        temperature: Override default temperature (0.0-2.0)
+        max_tokens: Override default max_tokens
 
     Returns:
         The assistant's text response
@@ -129,10 +147,12 @@ def chat(
         ... ], which="Q4")
     """
     # Map which parameter to model alias
+    # Q4B (diversity seat) falls back to Q4 if not configured
     model_map = {
         "Q4": "kitty-q4",
         "F16": "kitty-f16",
         "CODER": "kitty-coder",
+        "Q4B": "kitty-q4b",  # Diversity seat (Mistral-7B or other model family)
     }
     model_alias = model_map.get(which, "kitty-q4")
 
