@@ -1,0 +1,16 @@
+{
+  "conversationId": "test-discovery-001",
+  "intent": "conversational",
+  "result": {
+    "output": "The network scan has been completed successfully. Here are the devices that were discovered:\n\n- **3D Printers**:\n  - Bamboo H2D (Online, Approved)\n  - Elegoo Giga (Online, Approved)"
+  },
+  "routing": {
+    "tier": "local",
+    "confidence": 0.9,
+    "latencyMs": 0
+  },
+  "requiresConfirmation": false,
+  "confirmationPhrase": null,
+  "pendingTool": null,
+  "hazardClass": null
+}

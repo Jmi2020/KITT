@@ -1,0 +1,16 @@
+{
+  "conversationId": "test-simple-002",
+  "intent": "conversational",
+  "result": {
+    "output": "The capital of France is Paris. This information is based on general knowledge and does not require any external verification. Offline (local model) was used for this response."
+  },
+  "routing": {
+    "tier": "local",
+    "confidence": 0.9,
+    "latencyMs": 0
+  },
+  "requiresConfirmation": false,
+  "confirmationPhrase": null,
+  "pendingTool": null,
+  "hazardClass": null
+}

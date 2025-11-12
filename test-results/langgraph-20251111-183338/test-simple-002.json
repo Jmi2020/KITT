@@ -1,0 +1,33 @@
+{
+  "conversationId": "test-simple-002",
+  "intent": "conversational",
+  "result": {
+    "output": "The capital of France is Paris. This information is based on general knowledge and does not require any external verification. Offline (local model) was used for this response."
+  },
+  "routing": {
+    "tier": "local",
+    "confidence": 0.9,
+    "latencyMs": 22979,
+    "metadata": {
+      "provider": "react_agent",
+      "iterations": "1",
+      "tools_used": "0",
+      "success": "True",
+      "stop_reason": "eos",
+      "agent_steps": [
+        {
+          "thought": "Thought: The query \"What is the capital of France?\" is a straightforward question that can be answered using general knowledge without requiring any external tools or real-time information. This falls under the local tier, where I can confidently provide an answer based on my training data.\n\nThe capital of France is Paris. This is a well-known fact and does not require any additional verification or tool calls to confirm. The question does not involve any freshness requirements or complex analysis that would necessitate using online tools or higher-tier models.\n\nTherefore, I can directly answer the user's query without needing to perform any further actions or tool calls.\nFinal Answer: The capital of France is Paris. This information is based on general knowledge and does not require any external verification. Offline (local model) was used for this response. Thought: I now know the final answer\nFinal Answer: The capital of France is Paris. This information is based on general knowledge and does not require any external verification. Offline (local model) was used for this response.",
+          "action": null,
+          "action_input": null,
+          "observation": null,
+          "data": null,
+          "is_final": true
+        }
+      ]
+    }
+  },
+  "requiresConfirmation": false,
+  "confirmationPhrase": null,
+  "pendingTool": null,
+  "hazardClass": null
+}

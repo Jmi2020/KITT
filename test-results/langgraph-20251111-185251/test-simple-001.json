@@ -1,0 +1,33 @@
+{
+  "conversationId": "test-simple-001",
+  "intent": "conversational",
+  "result": {
+    "output": "2 + 2 equals 4. This basic mathematical fact can be confidently provided without the need for external tools or further information gathering.\n```"
+  },
+  "routing": {
+    "tier": "local",
+    "confidence": 0.9,
+    "latencyMs": 16083,
+    "metadata": {
+      "provider": "react_agent",
+      "iterations": "1",
+      "tools_used": "0",
+      "success": "True",
+      "stop_reason": "eos",
+      "agent_steps": [
+        {
+          "thought": "Thought: The query \"What is 2 + 2?\" has already been answered in a previous interaction, as indicated by the memory provided. The answer given was that 2 + 2 equals 4, which is correct based on fundamental arithmetic principles. Since this information is straightforward and does not require any additional computation or tool usage, there's no need to perform further actions or searches.\n\nFinal Answer: 2 + 2 equals 4. This basic mathematical fact can be confidently provided without the need for external tools or further information gathering.\n```",
+          "action": null,
+          "action_input": null,
+          "observation": null,
+          "data": null,
+          "is_final": true
+        }
+      ]
+    }
+  },
+  "requiresConfirmation": false,
+  "confirmationPhrase": null,
+  "pendingTool": null,
+  "hazardClass": null
+}

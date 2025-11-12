@@ -24,6 +24,22 @@ NC='\033[0m' # No Color
 
 pass_count=0
 fail_count=0
+SELECTED_TESTS="${LANGGRAPH_TESTS:-}"
+
+should_run_test() {
+    local identifier="$1"
+    if [ -z "$SELECTED_TESTS" ]; then
+        return 0
+    fi
+
+    for test_id in $SELECTED_TESTS; do
+        if [ "$test_id" = "$identifier" ]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
 
 test_query() {
     local test_name="$1"
@@ -99,60 +115,88 @@ test_query() {
 }
 
 # Test 1: Simple General Reasoning (Q4 expected)
-test_query \
-    "Simple Math Query" \
-    "What is 2 + 2?" \
-    "test-simple-001" \
-    "q4" \
-    "false"
+if should_run_test "test-simple-001"; then
+    test_query \
+        "Simple Math Query" \
+        "What is 2 + 2?" \
+        "test-simple-001" \
+        "q4" \
+        "false"
+else
+    echo "Skipping test-simple-001 (filtered)"
+fi
 
 # Test 2: General Knowledge (Q4 expected)
-test_query \
-    "General Knowledge" \
-    "What is the capital of France?" \
-    "test-simple-002" \
-    "q4" \
-    "false"
+if should_run_test "test-simple-002"; then
+    test_query \
+        "General Knowledge" \
+        "What is the capital of France?" \
+        "test-simple-002" \
+        "q4" \
+        "false"
+else
+    echo "Skipping test-simple-002 (filtered)"
+fi
 
 # Test 3: Complex Multi-Step Query (F16 expected)
-test_query \
-    "Complex Reasoning" \
-    "Explain the differences between supervised and unsupervised machine learning, including when to use each approach, and provide examples of algorithms for both categories." \
-    "test-complex-001" \
-    "f16" \
-    "false"
+if should_run_test "test-complex-001"; then
+    test_query \
+        "Complex Reasoning" \
+        "Explain the differences between supervised and unsupervised machine learning, including when to use each approach, and provide examples of algorithms for both categories." \
+        "test-complex-001" \
+        "f16" \
+        "false"
+else
+    echo "Skipping test-complex-001 (filtered)"
+fi
 
 # Test 4: CAD Generation Query (F16 + Tools expected)
-test_query \
-    "CAD Design Request" \
-    "Design a parametric mounting bracket for a Raspberry Pi 4 with adjustable height between 10-30mm and M3 mounting holes" \
-    "test-cad-001" \
-    "f16" \
-    "true"
+if should_run_test "test-cad-001"; then
+    test_query \
+        "CAD Design Request" \
+        "Design a parametric mounting bracket for a Raspberry Pi 4 with adjustable height between 10-30mm and M3 mounting holes" \
+        "test-cad-001" \
+        "f16" \
+        "true"
+else
+    echo "Skipping test-cad-001 (filtered)"
+fi
 
 # Test 5: Fabrication Status Query (Tools expected)
-test_query \
-    "Printer Status Check" \
-    "What 3D printers are currently online and available?" \
-    "test-fab-001" \
-    "any" \
-    "true"
+if should_run_test "test-fab-001"; then
+    test_query \
+        "Printer Status Check" \
+        "What 3D printers are currently online and available?" \
+        "test-fab-001" \
+        "any" \
+        "true"
+else
+    echo "Skipping test-fab-001 (filtered)"
+fi
 
 # Test 6: Device Discovery Query (Tools expected)
-test_query \
-    "Device Discovery" \
-    "Scan for network devices and show me what you find" \
-    "test-discovery-001" \
-    "any" \
-    "true"
+if should_run_test "test-discovery-001"; then
+    test_query \
+        "Device Discovery" \
+        "Scan for network devices and show me what you find" \
+        "test-discovery-001" \
+        "any" \
+        "true"
+else
+    echo "Skipping test-discovery-001 (filtered)"
+fi
 
 # Test 7: Multi-Step Fabrication Workflow (F16 + Tools expected)
-test_query \
-    "Complex Fabrication Workflow" \
-    "Design a simple phone stand, convert it to STL, analyze the model for printability, and queue it to the best available printer" \
-    "test-workflow-001" \
-    "f16" \
-    "true"
+if should_run_test "test-workflow-001"; then
+    test_query \
+        "Complex Fabrication Workflow" \
+        "Design a simple phone stand, convert it to STL, analyze the model for printability, and queue it to the best available printer" \
+        "test-workflow-001" \
+        "f16" \
+        "true"
+else
+    echo "Skipping test-workflow-001 (filtered)"
+fi
 
 echo "========================================"
 echo "Metrics Validation"

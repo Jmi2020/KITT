@@ -1,0 +1,36 @@
+{
+  "conversationId": "test-complex-001",
+  "intent": "conversational",
+  "result": {
+    "output": "Supervised and unsupervised machine learning are two primary categories of machine learning algorithms, each suited for different types of problems and data scenarios.\n\n### Supervised Learning\n**Definition**: Supervised learning involves training a model on a labeled dataset, where the input data is paired with corresponding output labels. The goal is to learn a mapping from inputs to outputs so that the model can predict the correct output for new, unseen data.\n\n**When to Use**:\n- When you have labeled data available.\n- For tasks like classification (e.g., spam detection) and regression (e.g., predicting house prices).\n\n**Examples of Algorithms**:\n- Linear Regression\n- Logistic Regression\n- Decision Trees\n- Random Forests\n- Support Vector Machines (SVM)\n- Neural Networks\n\n### Unsupervised Learning\n**Definition**: Unsupervised learning involves training a model on an unlabeled dataset, where the input data does not have corresponding output labels. The goal is to discover hidden patterns or intrinsic structures in the data.\n\n**When to Use**:\n- When you do not have labeled data.\n- For tasks like clustering (e.g., customer segmentation), dimensionality reduction (e.g., PCA for visualization), and anomaly detection (e.g., fraud detection).\n\n**Examples of Algorithms**:\n- K-Means Clustering\n- Hierarchical Clustering\n- Principal Component Analysis (PCA)\n- t-Distributed Stochastic Neighbor Embedding (t-SNE)\n- Autoencoders\n- Gaussian Mixture Models\n\n### Key Differences\n1. **Data Requirements**: Supervised learning requires labeled data, while unsupervised learning does not.\n2. **Objective**: Supervised learning aims to predict outputs based on inputs, whereas unsupervised learning aims to understand the structure and distribution of the data.\n3. **Complexity**: Supervised learning can be more straightforward as it has a clear objective (minimizing prediction error), while unsupervised learning can be more complex due to the lack of explicit targets.\n\n### Summary\n- Use supervised learning when you have labeled data and need to predict specific outputs.\n- Use unsupervised learning when you want to explore patterns or structure in unlabeled data.\n\nThis explanation covers the fundamental differences, use cases, and examples for both supervised and unsupervised machine learning, providing a comprehensive understanding of these two approaches. \n\nOffline (local model)\n```"
+  },
+  "routing": {
+    "tier": "local",
+    "confidence": 0.9,
+    "latencyMs": 49924,
+    "metadata": {
+      "provider": "react_agent",
+      "iterations": "1",
+      "tools_used": "0",
+      "success": "True",
+      "vision_targets": [
+        "cat"
+      ],
+      "stop_reason": "eos",
+      "agent_steps": [
+        {
+          "thought": "Thought: The query about supervised and unsupervised machine learning does not require visual references or image searches. It is a theoretical question that can be answered using my existing knowledge without needing external tools or images. Therefore, I will proceed with providing a detailed explanation directly.\n\nFinal Answer: Supervised and unsupervised machine learning are two primary categories of machine learning algorithms, each suited for different types of problems and data scenarios.\n\n### Supervised Learning\n**Definition**: Supervised learning involves training a model on a labeled dataset, where the input data is paired with corresponding output labels. The goal is to learn a mapping from inputs to outputs so that the model can predict the correct output for new, unseen data.\n\n**When to Use**:\n- When you have labeled data available.\n- For tasks like classification (e.g., spam detection) and regression (e.g., predicting house prices).\n\n**Examples of Algorithms**:\n- Linear Regression\n- Logistic Regression\n- Decision Trees\n- Random Forests\n- Support Vector Machines (SVM)\n- Neural Networks\n\n### Unsupervised Learning\n**Definition**: Unsupervised learning involves training a model on an unlabeled dataset, where the input data does not have corresponding output labels. The goal is to discover hidden patterns or intrinsic structures in the data.\n\n**When to Use**:\n- When you do not have labeled data.\n- For tasks like clustering (e.g., customer segmentation), dimensionality reduction (e.g., PCA for visualization), and anomaly detection (e.g., fraud detection).\n\n**Examples of Algorithms**:\n- K-Means Clustering\n- Hierarchical Clustering\n- Principal Component Analysis (PCA)\n- t-Distributed Stochastic Neighbor Embedding (t-SNE)\n- Autoencoders\n- Gaussian Mixture Models\n\n### Key Differences\n1. **Data Requirements**: Supervised learning requires labeled data, while unsupervised learning does not.\n2. **Objective**: Supervised learning aims to predict outputs based on inputs, whereas unsupervised learning aims to understand the structure and distribution of the data.\n3. **Complexity**: Supervised learning can be more straightforward as it has a clear objective (minimizing prediction error), while unsupervised learning can be more complex due to the lack of explicit targets.\n\n### Summary\n- Use supervised learning when you have labeled data and need to predict specific outputs.\n- Use unsupervised learning when you want to explore patterns or structure in unlabeled data.\n\nThis explanation covers the fundamental differences, use cases, and examples for both supervised and unsupervised machine learning, providing a comprehensive understanding of these two approaches. \n\nOffline (local model)\n```",
+          "action": null,
+          "action_input": null,
+          "observation": null,
+          "data": null,
+          "is_final": true
+        }
+      ]
+    }
+  },
+  "requiresConfirmation": false,
+  "confirmationPhrase": null,
+  "pendingTool": null,
+  "hazardClass": null
+}
