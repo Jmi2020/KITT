@@ -51,12 +51,64 @@ def _messages_to_prompt(messages: List[Dict[str, str]]) -> str:
     return "\n\n".join(parts)
 
 
+async def chat_async(
+    messages: List[Dict[str, str]],
+    which: Literal["Q4", "F16"] = "Q4",
+    tools: List[Dict[str, Any]] | None = None
+) -> str:
+    """Async chat interface for collective meta-agent.
+
+    This is the preferred interface for use with async graph nodes.
+    Provides clean async/await semantics without ThreadPoolExecutor workarounds.
+
+    Args:
+        messages: OpenAI-style message list [{"role": "user", "content": "..."}]
+        which: Which model tier to use ("Q4" for fast tool orchestrator, "F16" for deep reasoner)
+        tools: Optional tool definitions (JSON Schema format)
+
+    Returns:
+        The assistant's text response
+
+    Example:
+        >>> response = await chat_async([
+        ...     {"role": "system", "content": "You are a helpful assistant."},
+        ...     {"role": "user", "content": "What is 2+2?"}
+        ... ], which="Q4")
+    """
+    # Map which parameter to model alias
+    model_map = {
+        "Q4": "kitty-q4",
+        "F16": "kitty-f16",
+    }
+    model_alias = model_map.get(which, "kitty-q4")
+
+    # Convert messages to prompt
+    prompt = _messages_to_prompt(messages)
+
+    # Get client and await async generation
+    client = _get_client()
+    result = await client.generate(prompt, model=model_alias, tools=tools)
+
+    # Extract response text
+    response_text = result.get("response", "")
+
+    # Log tool calls if any
+    tool_calls = result.get("tool_calls", [])
+    if tool_calls:
+        logger.info(f"Collective {which} generated {len(tool_calls)} tool calls: {[tc.name for tc in tool_calls]}")
+
+    return response_text
+
+
 def chat(
     messages: List[Dict[str, str]],
     which: Literal["Q4", "F16"] = "Q4",
     tools: List[Dict[str, Any]] | None = None
 ) -> str:
     """Synchronous chat interface for collective meta-agent.
+
+    DEPRECATED: Use chat_async() instead for better performance.
+    This sync wrapper uses ThreadPoolExecutor which adds overhead.
 
     This is a simplified wrapper around KITTY's async MultiServerLlamaCppClient
     that provides the interface expected by the collective module.
@@ -117,4 +169,4 @@ def chat(
     return response_text
 
 
-__all__ = ["chat"]
+__all__ = ["chat", "chat_async"]

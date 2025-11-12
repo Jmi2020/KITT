@@ -1404,6 +1404,9 @@ def shell(
                 )
                 console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace view")
                 console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode")
+                console.print("  [cyan]/collective <pattern> <task>[/cyan] - Multi-agent collaboration")
+                console.print("      [dim]Patterns: council [k=3], debate, pipeline[/dim]")
+                console.print("      [dim]Example: /collective council k=3 Compare PETG vs ABS[/dim]")
                 console.print("  [cyan]/remember <note>[/cyan]  - Store a long-term memory note")
                 console.print("  [cyan]/memories [query][/cyan] - Search saved memories")
                 console.print("  [cyan]/reset[/cyan]            - Start a new conversation session")
@@ -1570,6 +1573,74 @@ def shell(
                         console.print("[green]Agent mode disabled")
                     else:
                         console.print("[red]Usage: /agent on|off")
+                continue
+
+            if cmd == "collective":
+                if not args:
+                    console.print("[yellow]Usage: /collective <pattern> [k=N] <task>")
+                    console.print("[dim]Patterns: council, debate, pipeline")
+                    console.print("[dim]Example: /collective council k=3 Compare PETG vs ABS for outdoor use")
+                    console.print("[dim]Example: /collective debate Should I use tree supports?")
+                    continue
+
+                # Parse pattern and optional k=N parameter
+                pattern = args[0].lower()
+                if pattern not in {"council", "debate", "pipeline"}:
+                    console.print(f"[red]Invalid pattern '{pattern}'. Use: council, debate, or pipeline")
+                    continue
+
+                # Check for k=N parameter
+                k = 3  # default
+                task_start_idx = 1
+                if len(args) > 1 and args[1].startswith("k="):
+                    try:
+                        k = int(args[1][2:])
+                        if k < 2 or k > 7:
+                            console.print("[red]k must be between 2 and 7")
+                            continue
+                        task_start_idx = 2
+                    except ValueError:
+                        console.print(f"[red]Invalid k value: {args[1]}")
+                        continue
+
+                # Reconstruct task from remaining args
+                if len(args) <= task_start_idx:
+                    console.print("[red]Please provide a task description")
+                    continue
+
+                task = " ".join(args[task_start_idx:])
+
+                # Call collective API
+                console.print(f"\n[bold]Running {pattern} pattern (k={k})...[/]")
+                console.print(f"[dim]Task: {task}[/]")
+
+                with console.status("[bold green]Generating proposals..."):
+                    try:
+                        response = httpx.post(
+                            f"{API_BASE}/api/collective/run",
+                            json={"task": task, "pattern": pattern, "k": k},
+                            timeout=180.0  # 3 minutes for Quality-First mode
+                        )
+                        response.raise_for_status()
+                        data = response.json()
+                    except httpx.HTTPError as exc:
+                        console.print(f"[red]Error: {exc}")
+                        continue
+
+                # Display proposals
+                console.print(f"\n[bold cyan]Proposals ({len(data['proposals'])}):[/]")
+                for i, prop in enumerate(data["proposals"], 1):
+                    role = prop["role"]
+                    text = prop["text"]
+                    # Truncate long proposals
+                    display_text = text if len(text) <= 200 else text[:197] + "..."
+                    console.print(f"\n[bold]{i}. [{role}][/]")
+                    console.print(f"   {display_text}")
+
+                # Display verdict
+                console.print(f"\n[bold green]Judge Verdict:[/]")
+                console.print(data["verdict"])
+                console.print()  # blank line
                 continue
 
             if cmd == "queue":
