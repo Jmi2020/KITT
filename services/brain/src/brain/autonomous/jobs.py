@@ -245,9 +245,59 @@ async def printer_fleet_health_check() -> None:
         struct_logger.error("printer_fleet_check_failed", error=str(exc))
 
 
+async def project_generation_cycle() -> None:
+    """Generate projects from approved goals (every 4 hours).
+
+    Performs:
+    - Query for approved goals without projects
+    - Create Project records with task breakdowns
+    - Set task dependencies and priorities
+    - Log project creation for user visibility
+
+    Scheduled: Every 4 hours
+
+    Projects are created with status=proposed and require no additional approval.
+    Tasks inherit the goal's budget allocation and are ready for execution.
+    """
+    try:
+        struct_logger.info("project_generation_cycle_started", timestamp=datetime.utcnow().isoformat())
+
+        # Import project generator
+        from .project_generator import ProjectGenerator
+
+        # Initialize generator
+        project_gen = ProjectGenerator(created_by="system-autonomous")
+
+        # Generate projects from approved goals
+        logger.info("📋 Checking for approved goals...")
+        projects = project_gen.generate_projects_from_approved_goals(limit=10)
+
+        if not projects:
+            logger.info("No approved goals pending project generation")
+            struct_logger.info("project_generation_no_goals")
+            return
+
+        logger.info(
+            f"✅ Project generation completed: "
+            f"{len(projects)} projects created"
+        )
+
+        struct_logger.info(
+            "project_generation_completed",
+            projects_created=len(projects),
+            project_titles=[p.title[:60] for p in projects],
+            project_ids=[p.id for p in projects],
+        )
+
+    except Exception as exc:
+        logger.error(f"❌ Project generation cycle failed: {exc}", exc_info=True)
+        struct_logger.error("project_generation_cycle_failed", error=str(exc))
+
+
 __all__ = [
     "daily_health_check",
     "weekly_research_cycle",
     "knowledge_base_update",
     "printer_fleet_health_check",
+    "project_generation_cycle",
 ]

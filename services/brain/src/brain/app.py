@@ -18,6 +18,7 @@ from .autonomous.jobs import (
     weekly_research_cycle,
     knowledge_base_update,
     printer_fleet_health_check,
+    project_generation_cycle,
 )
 from .logging_config import setup_reasoning_logging
 from .metrics import router as metrics_router
@@ -99,7 +100,14 @@ async def lifespan(app: FastAPI):
             job_id="printer_fleet_health_check",
         )
 
-        logger.info("Autonomous scheduler started with 4 jobs registered (4am-6am PST / 12pm-2pm UTC)")
+        # Project generation - Every 4 hours (checks for approved goals)
+        scheduler.add_interval_job(
+            func=project_generation_cycle,
+            hours=4,
+            job_id="project_generation_cycle",
+        )
+
+        logger.info("Autonomous scheduler started with 5 jobs registered (4am-6am PST / 12pm-2pm UTC)")
     else:
         logger.info("Autonomous mode disabled (AUTONOMOUS_ENABLED=false)")
 
