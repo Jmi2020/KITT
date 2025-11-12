@@ -1,0 +1,15 @@
+
+collective.run:
+  method: POST
+  url: http://gateway:8080/api/collective/run
+  schema:
+    type: object
+    properties:
+      task:    { type: string, description: "Natural language goal" }
+      pattern: { type: string, enum: [pipeline,council,debate], default: pipeline }
+      k:       { type: integer, default: 3, minimum: 2, maximum: 7 }
+      max_steps: { type: integer, default: 8 }
+    required: [task]
+  safety:
+    hazard_class: "low"
+    confirmation_required: false
