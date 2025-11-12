@@ -79,12 +79,13 @@ async def weekly_research_cycle() -> None:
 
     Performs:
     - Opportunity detection from print failures and knowledge gaps
-    - Goal generation with impact scoring
-    - Research task creation (pending approval)
+    - Goal generation with impact scoring (OpportunityScore 0-100)
+    - Goal persistence to database (status=identified, awaiting approval)
 
     Scheduled: Monday at 5:00 PST (13:00 UTC)
 
-    Note: This is a placeholder until Goal Generator is implemented in Sprint 2.1
+    Generated goals are saved with status=identified and require user approval
+    before KITTY proceeds with research or fabrication projects.
     """
     try:
         struct_logger.info("weekly_research_cycle_started", timestamp=datetime.utcnow().isoformat())
@@ -104,20 +105,46 @@ async def weekly_research_cycle() -> None:
 
         logger.info("🔍 Weekly research cycle starting")
 
-        # TODO: Sprint 2.1 - Implement Goal Generator
-        # 1. Scan FabricationJob failures for patterns
-        # 2. Identify knowledge gaps in materials/techniques
-        # 3. Generate goals with impact scores
-        # 4. Create research tasks in database (status=pending_approval)
+        # Import goal generator
+        from .goal_generator import GoalGenerator
 
-        logger.info("📋 Goal generation placeholder (Sprint 2.1)")
-        struct_logger.info(
-            "weekly_research_cycle_placeholder",
-            message="Goal Generator not yet implemented, awaiting Sprint 2.1",
-            budget_available=float(status.budget_available)
+        # Initialize goal generator
+        goal_gen = GoalGenerator(
+            lookback_days=30,
+            min_failure_count=3,
+            min_impact_score=50.0,
         )
 
-        logger.info("✅ Weekly research cycle completed (placeholder)")
+        # Generate high-impact goals
+        logger.info("🎯 Analyzing opportunities and generating goals...")
+        goals = goal_gen.generate_goals(max_goals=5)
+
+        if not goals:
+            logger.info("📋 No high-impact goals identified this cycle")
+            struct_logger.info(
+                "weekly_research_cycle_no_goals",
+                message="No opportunities meeting minimum impact threshold",
+                budget_available=float(status.budget_available)
+            )
+            return
+
+        # Persist goals to database
+        saved_count = goal_gen.persist_goals(goals)
+
+        logger.info(
+            f"✅ Weekly research cycle completed: "
+            f"{saved_count} goals created, "
+            f"awaiting approval"
+        )
+
+        struct_logger.info(
+            "weekly_research_cycle_completed",
+            goals_generated=len(goals),
+            goals_persisted=saved_count,
+            goal_types=[g.goal_type.value for g in goals],
+            top_descriptions=[g.description[:80] for g in goals[:3]],
+            budget_available=float(status.budget_available)
+        )
 
     except Exception as exc:
         logger.error(f"❌ Weekly research cycle failed: {exc}", exc_info=True)
