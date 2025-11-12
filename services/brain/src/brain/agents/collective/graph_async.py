@@ -58,9 +58,9 @@ async def n_propose_council(s: CollectiveState) -> CollectiveState:
     async def generate_proposal(i: int) -> str:
         role = f"specialist_{i+1}"
 
-        # Use Q4B (diversity seat) for first specialist, Q4 for others
-        # This introduces model family diversity to reduce correlated failures
-        which_model = "Q4B" if i == 0 else "Q4"
+        # Use Q4 for all specialists
+        # Q4B diversity seat disabled to conserve RAM on this workstation
+        which_model = "Q4"
 
         # Vary temperature slightly across specialists (0.7-0.9)
         # Higher temperature = more creative/diverse responses
