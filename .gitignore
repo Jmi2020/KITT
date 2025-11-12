@@ -30,3 +30,6 @@ __pycache__/
 *.log
 .docs/
 .scratch/
+# Environment backups
+.env.backup.*
+*.zip
