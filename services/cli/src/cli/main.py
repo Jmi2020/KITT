@@ -1415,6 +1415,176 @@ def select_image(
 
 
 @app.command()
+def autonomy(
+    action: str = typer.Argument(..., help="Action: list, approve, reject, status"),
+    goal_id: Optional[str] = typer.Argument(None, help="Goal ID for approve/reject actions"),
+    notes: Optional[str] = typer.Option(None, "--notes", "-n", help="Approval/rejection notes"),
+    user_id: Optional[str] = typer.Option("cli-user", "--user", "-u", help="User ID for approval"),
+):
+    """Manage autonomous goals and view system status.
+
+    Actions:
+        list      - List pending autonomous goals
+        approve   - Approve a goal by ID
+        reject    - Reject a goal by ID
+        status    - Show autonomy system status
+
+    Examples:
+        kitty-cli autonomy list
+        kitty-cli autonomy approve <goal-id>
+        kitty-cli autonomy reject <goal-id> --notes "Not a priority"
+        kitty-cli autonomy status
+    """
+    if action == "list":
+        # List pending goals
+        try:
+            response = httpx.get(
+                f"{API_BASE}/api/autonomy/goals",
+                timeout=30.0
+            )
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPError as exc:
+            console.print(f"[red]Error fetching goals: {exc}")
+            raise typer.Exit(1)
+
+        goals = data.get("goals", [])
+        pending_count = data.get("pending_count", 0)
+
+        if not goals:
+            console.print("\n[yellow]No pending autonomous goals[/yellow]")
+            console.print("[dim]KITTY will identify new goals during the next weekly cycle (Monday 5am PST)[/dim]\n")
+            return
+
+        console.print(f"\n[bold cyan]Pending Autonomous Goals ({pending_count})[/bold cyan]\n")
+
+        for i, goal in enumerate(goals, 1):
+            goal_type = goal["goal_type"]
+            description = goal["description"]
+            rationale = goal["rationale"]
+            budget = goal["estimated_budget"]
+            hours = goal.get("estimated_duration_hours")
+            goal_id = goal["id"]
+            metadata = goal.get("goal_metadata", {})
+            source = metadata.get("source", "unknown")
+
+            # Color by goal type
+            type_colors = {
+                "research": "blue",
+                "fabrication": "green",
+                "improvement": "yellow",
+                "optimization": "magenta",
+            }
+            color = type_colors.get(goal_type, "white")
+
+            console.print(f"[bold {color}]{i}. [{goal_type.upper()}] {description}[/bold {color}]")
+            console.print(f"   [dim]ID: {goal_id[:16]}...[/dim]")
+            console.print(f"   Rationale: {rationale}")
+            console.print(f"   Estimated: ${budget:.2f}, {hours}h")
+            console.print(f"   Source: {source}")
+            console.print()
+
+        console.print("[dim]Use 'kitty-cli autonomy approve <goal-id>' to approve a goal[/dim]")
+        console.print("[dim]Use 'kitty-cli autonomy reject <goal-id>' to reject a goal[/dim]\n")
+
+    elif action == "approve":
+        if not goal_id:
+            console.print("[red]Error: goal_id required for approve action[/red]")
+            console.print("[dim]Usage: kitty-cli autonomy approve <goal-id>[/dim]")
+            raise typer.Exit(1)
+
+        # Approve goal
+        try:
+            response = httpx.post(
+                f"{API_BASE}/api/autonomy/goals/{goal_id}/approve",
+                json={"user_id": user_id, "notes": notes},
+                timeout=30.0
+            )
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPError as exc:
+            console.print(f"[red]Error approving goal: {exc}")
+            raise typer.Exit(1)
+
+        console.print(f"\n[green]✓ Goal Approved[/green]")
+        console.print(f"   {data['message']}")
+        console.print(f"   Approved by: {data['approved_by']}")
+        console.print(f"   Status: {data['status']}\n")
+
+    elif action == "reject":
+        if not goal_id:
+            console.print("[red]Error: goal_id required for reject action[/red]")
+            console.print("[dim]Usage: kitty-cli autonomy reject <goal-id>[/dim]")
+            raise typer.Exit(1)
+
+        # Reject goal
+        try:
+            response = httpx.post(
+                f"{API_BASE}/api/autonomy/goals/{goal_id}/reject",
+                json={"user_id": user_id, "notes": notes},
+                timeout=30.0
+            )
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPError as exc:
+            console.print(f"[red]Error rejecting goal: {exc}")
+            raise typer.Exit(1)
+
+        console.print(f"\n[yellow]✗ Goal Rejected[/yellow]")
+        console.print(f"   {data['message']}")
+        console.print(f"   Rejected by: {data['approved_by']}")
+        console.print(f"   Status: {data['status']}\n")
+
+    elif action == "status":
+        # Show autonomy system status
+        try:
+            response = httpx.get(
+                f"{API_BASE}/api/autonomy/status",
+                timeout=30.0
+            )
+            response.raise_for_status()
+            status_data = response.json()
+
+            budget_response = httpx.get(
+                f"{API_BASE}/api/autonomy/budget?days=7",
+                timeout=30.0
+            )
+            budget_response.raise_for_status()
+            budget_data = budget_response.json()
+        except httpx.HTTPError as exc:
+            console.print(f"[red]Error fetching status: {exc}")
+            raise typer.Exit(1)
+
+        # Display status
+        console.print("\n[bold cyan]Autonomous System Status[/bold cyan]\n")
+
+        can_run = status_data["can_run_autonomous"]
+        reason = status_data["reason"]
+        status_icon = "✓" if can_run else "✗"
+        status_color = "green" if can_run else "yellow"
+
+        console.print(f"[{status_color}]{status_icon} Ready: {can_run}[/{status_color}]")
+        console.print(f"   {reason}\n")
+
+        console.print("[bold]Resource Status:[/bold]")
+        console.print(f"   Budget Available: ${status_data['budget_available']:.2f} / ${budget_data['budget_limit_per_day']:.2f} per day")
+        console.print(f"   Budget Used Today: ${status_data['budget_used_today']:.2f}")
+        console.print(f"   System Idle: {status_data['is_idle']}")
+        console.print(f"   CPU Usage: {status_data['cpu_usage_percent']:.1f}%")
+        console.print(f"   Memory Usage: {status_data['memory_usage_percent']:.1f}%\n")
+
+        console.print(f"[bold]7-Day Budget Summary:[/bold]")
+        console.print(f"   Total Cost: ${budget_data['total_cost_usd']:.2f}")
+        console.print(f"   Total Requests: {budget_data['total_requests']}")
+        console.print(f"   Average/Day: ${budget_data['average_cost_per_day']:.2f}\n")
+
+    else:
+        console.print(f"[red]Unknown action: {action}[/red]")
+        console.print("[dim]Valid actions: list, approve, reject, status[/dim]")
+        raise typer.Exit(1)
+
+
+@app.command()
 def shell(
     conversation: Optional[str] = typer.Option(
         None, "--conversation", "-c", help="Conversation ID override"
