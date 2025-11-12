@@ -10,7 +10,12 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+COMPOSE_DIR="$PROJECT_ROOT/infra/compose"
 cd "$PROJECT_ROOT"
+
+compose_cmd() {
+    (cd "$COMPOSE_DIR" && docker compose "$@")
+}
 
 # Color codes
 RED='\033[0;31m'
@@ -31,24 +36,39 @@ error() {
     echo -e "${RED}✗${NC} $1"
 }
 
+warn() {
+    echo -e "${YELLOW}⚠${NC} $1"
+}
+
 # ========================================
-# Phase 1: Stop Docker Services
+# Phase 1: Stop Images Service
 # ========================================
 
-log "Phase 1: Stopping Docker Compose services"
+log "Phase 1: Stopping images service"
+if "$SCRIPT_DIR/stop-images-service.sh" >/dev/null 2>&1; then
+    success "Images service stopped"
+else
+    warn "Images service stop script reported an issue (check logs)"
+fi
 
-if docker compose ps > /dev/null 2>&1; then
-    docker compose down
+# ========================================
+# Phase 2: Stop Docker Services
+# ========================================
+
+log "Phase 2: Stopping Docker Compose services"
+
+if compose_cmd ps > /dev/null 2>&1; then
+    compose_cmd down
     success "Docker services stopped"
 else
     log "No Docker services running"
 fi
 
 # ========================================
-# Phase 2: Stop llama.cpp Servers
+# Phase 3: Stop llama.cpp Servers
 # ========================================
 
-log "Phase 2: Stopping llama.cpp servers"
+log "Phase 3: Stopping llama.cpp servers"
 
 if ! "$SCRIPT_DIR/llama/stop.sh"; then
     error "Failed to stop llama.cpp servers gracefully"

@@ -10,6 +10,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
+from pathlib import Path
 
 import torch
 from PIL import Image
@@ -49,6 +50,11 @@ class S3Store:
         )
         self.bucket = os.getenv("S3_BUCKET")
         self.prefix = os.getenv("S3_PREFIX", "images/")
+        # Local mirroring (optional)
+        self.local_root = os.getenv("IMAGE_ARTIFACTS_DIR") or os.getenv("KITTY_ARTIFACTS_DIR")
+        if self.local_root:
+            self.local_root = Path(self.local_root).expanduser()
+            self.local_root.mkdir(parents=True, exist_ok=True)
 
     def save_png_and_meta(self, im: Image.Image, meta: Dict[str, Any]) -> Dict[str, str]:
         """Save PNG image and JSON metadata to S3, return keys"""
@@ -61,21 +67,32 @@ class S3Store:
         # Upload PNG
         buf = io.BytesIO()
         im.save(buf, format="PNG")
-        buf.seek(0)
+        png_bytes = buf.getvalue()
         self.client.put_object(
             Bucket=self.bucket,
             Key=png_key,
-            Body=buf.getvalue(),
+            Body=png_bytes,
             ContentType="image/png"
         )
 
-        # Upload metadata
+        meta_bytes = json.dumps(meta, indent=2).encode("utf-8")
         self.client.put_object(
             Bucket=self.bucket,
             Key=meta_key,
-            Body=json.dumps(meta, indent=2).encode("utf-8"),
+            Body=meta_bytes,
             ContentType="application/json"
         )
+
+        # Optional local mirroring for operator visibility / backups
+        if self.local_root:
+            local_png = (self.local_root / png_key).resolve()
+            local_meta = (self.local_root / meta_key).resolve()
+            local_png.parent.mkdir(parents=True, exist_ok=True)
+            local_meta.parent.mkdir(parents=True, exist_ok=True)
+            with open(local_png, "wb") as f:
+                f.write(png_bytes)
+            with open(local_meta, "wb") as f:
+                f.write(meta_bytes)
 
         return {"png_key": png_key, "meta_key": meta_key}
 

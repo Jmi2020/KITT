@@ -12,6 +12,8 @@ __pycache__/
 venv/
 *.env
 .logs/
+services/images_service/.service.pid
+services/images_service/.rq_worker.pid
 docs/admin/
 .env.claudeweb
 

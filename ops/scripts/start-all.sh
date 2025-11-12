@@ -10,7 +10,57 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+COMPOSE_DIR="$PROJECT_ROOT/infra/compose"
+IMAGE_SERVICE_URL="${IMAGE_SERVICE_URL:-http://127.0.0.1:8089}"
+IMAGE_SERVICE_HEALTH_ENDPOINT="$IMAGE_SERVICE_URL"
 cd "$PROJECT_ROOT"
+
+# Docker compose helper (always run from infra/compose)
+compose_cmd() {
+    (cd "$COMPOSE_DIR" && docker compose "$@")
+}
+
+is_images_service_running() {
+    curl -sf "$IMAGE_SERVICE_HEALTH_ENDPOINT" >/dev/null 2>&1
+}
+
+start_images_service() {
+    if is_images_service_running; then
+        success "Images service already running"
+        return 0
+    fi
+
+    log "Starting images service"
+
+    # Ensure log exists
+    : > "$IMAGE_SERVICE_LOG"
+
+    nohup "$SCRIPT_DIR/start-images-service.sh" >> "$IMAGE_SERVICE_LOG" 2>&1 &
+    IMAGE_BOOT_PID=$!
+
+    # Wait for health endpoint
+    MAX_WAIT=120
+    ELAPSED=0
+    while [ $ELAPSED -lt $MAX_WAIT ]; do
+        if ! kill -0 "$IMAGE_BOOT_PID" >/dev/null 2>&1; then
+            error "Images service launcher exited unexpectedly"
+            tail -n 50 "$IMAGE_SERVICE_LOG"
+            return 1
+        fi
+
+        if is_images_service_running; then
+            success "Images service running"
+            return 0
+        fi
+
+        sleep 5
+        ELAPSED=$((ELAPSED + 5))
+        log "Waiting for images service... (${ELAPSED}s)"
+    done
+
+    error "Images service failed to become healthy (check $IMAGE_SERVICE_LOG)"
+    return 1
+}
 
 # Color codes
 RED='\033[0;31m'
@@ -23,6 +73,7 @@ NC='\033[0m'
 LOG_DIR="$PROJECT_ROOT/.logs"
 mkdir -p "$LOG_DIR"
 STARTUP_LOG="$LOG_DIR/startup-$(date +%Y%m%d-%H%M%S).log"
+IMAGE_SERVICE_LOG="$LOG_DIR/images-service.log"
 
 # Helper functions
 log() {
@@ -120,17 +171,10 @@ fi
 log "Phase 3: Starting Docker Compose services"
 
 # Change to infra/compose directory for docker compose
-cd "$PROJECT_ROOT/infra/compose" || exit 1
-
-docker compose up -d --build 2>&1 | tee -a "$STARTUP_LOG"
-
-if [ ${PIPESTATUS[0]} -ne 0 ]; then
+if ! compose_cmd up -d --build 2>&1 | tee -a "$STARTUP_LOG"; then
     error "Docker Compose startup failed"
     exit 1
 fi
-
-# Return to project root
-cd "$PROJECT_ROOT" || exit 1
 
 success "Docker services started"
 
@@ -153,18 +197,18 @@ if docker ps | grep -q compose-brain-1; then
     fi
 else
     error "Brain service not running"
-    docker compose ps
+    compose_cmd ps
     exit 1
 fi
 
 # Check critical services
 CRITICAL_SERVICES=("brain" "gateway" "postgres" "redis")
 for service in "${CRITICAL_SERVICES[@]}"; do
-    if docker compose ps | grep -q "$service.*Up"; then
+    if compose_cmd ps | grep -q "$service.*Up"; then
         success "$service service healthy"
     else
         error "$service service not healthy"
-        docker compose ps
+        compose_cmd ps
         exit 1
     fi
 done
@@ -189,6 +233,17 @@ if curl -s http://localhost:8000/metrics | grep -q "brain_"; then
     success "Prometheus metrics available"
 else
     warn "Prometheus metrics not yet available"
+fi
+
+# ========================================
+# Phase 6: Images Service
+# ========================================
+
+log "Phase 6: Ensuring images service is running"
+
+if ! start_images_service; then
+    error "Failed to start images service"
+    exit 1
 fi
 
 # ========================================
