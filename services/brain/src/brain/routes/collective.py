@@ -4,6 +4,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Literal, Optional, List, Dict, Any
 import os
+import time
+from prometheus_client import Counter, Histogram
 
 # Use async graph for better performance (concurrent proposals)
 # Fall back to sync graph if async disabled via env var
@@ -27,6 +29,34 @@ else:
 _HAS_CODING = False
 
 router = APIRouter(prefix="/api/collective", tags=["collective"])
+
+# Prometheus metrics
+collective_requests = Counter(
+    "collective_requests_total",
+    "Total collective meta-agent requests",
+    ["pattern", "status"]
+)
+
+collective_latency = Histogram(
+    "collective_latency_seconds",
+    "Collective execution latency by pattern",
+    ["pattern"],
+    buckets=[1, 5, 10, 30, 60, 120, 180, 300, 600]
+)
+
+proposal_count = Histogram(
+    "collective_proposals_count",
+    "Number of proposals generated",
+    ["pattern"],
+    buckets=[1, 2, 3, 4, 5, 6, 7, 10]
+)
+
+verdict_length = Histogram(
+    "collective_verdict_length_chars",
+    "Length of judge verdict in characters",
+    ["pattern"],
+    buckets=[50, 100, 200, 500, 1000, 2000, 5000]
+)
 
 class RunReq(BaseModel):
     task: str = Field(..., description="Natural language task")
@@ -73,52 +103,68 @@ async def run_collective(req: RunReq):
         - verdict: Final synthesized decision from F16 judge
         - logs: Execution logs
     """
-    proposals: List[Proposal] = []
-    logs: List[str] = []
+    start_time = time.time()
+    status = "success"
 
-    # If pipeline and coding graph exists, run it and collect as single proposal
-    if req.pattern == "pipeline" and _HAS_CODING:
-        # Future implementation when coder-agent service is ready
-        # cgraph = build_coding_graph()
-        # st = {"user_request": req.task}
-        # out = await cgraph.ainvoke(st)  # Use async invoke
-        # final_md = out.get("final_answer") or out.get("result") or ""
-        # proposals.append(Proposal(role="pipeline", text=final_md))
-        # logs.append("[pipeline] executed coding graph")
-        # state = {"task": req.task, "pattern": "pipeline", "proposals": [final_md]}
-        # result = await _graph.ainvoke(state)  # Use async invoke
-        # return RunRes(
-        #     pattern="pipeline",
-        #     proposals=proposals,
-        #     verdict=result.get("verdict",""),
-        #     logs="\n".join(logs),
-        #     aux={
-        #         "passed": out.get("passed"),
-        #         "stdout": out.get("run_stdout"),
-        #         "stderr": out.get("run_stderr"),
-        #     }
-        # )
-        pass
+    try:
+        proposals: List[Proposal] = []
+        logs: List[str] = []
 
-    # Use council/debate (or pipeline fallback without coding graph)
-    state = {"task": req.task, "pattern": req.pattern, "k": req.k}
+        # If pipeline and coding graph exists, run it and collect as single proposal
+        if req.pattern == "pipeline" and _HAS_CODING:
+            # Future implementation when coder-agent service is ready
+            # cgraph = build_coding_graph()
+            # st = {"user_request": req.task}
+            # out = await cgraph.ainvoke(st)  # Use async invoke
+            # final_md = out.get("final_answer") or out.get("result") or ""
+            # proposals.append(Proposal(role="pipeline", text=final_md))
+            # logs.append("[pipeline] executed coding graph")
+            # state = {"task": req.task, "pattern": "pipeline", "proposals": [final_md]}
+            # result = await _graph.ainvoke(state)  # Use async invoke
+            # return RunRes(
+            #     pattern="pipeline",
+            #     proposals=proposals,
+            #     verdict=result.get("verdict",""),
+            #     logs="\n".join(logs),
+            #     aux={
+            #         "passed": out.get("passed"),
+            #         "stdout": out.get("run_stdout"),
+            #         "stderr": out.get("run_stderr"),
+            #     }
+            # )
+            pass
 
-    # Use async invoke if async graph enabled, otherwise sync
-    if USE_ASYNC_GRAPH:
-        result = await _graph.ainvoke(state)
-    else:
-        result = _graph.invoke(state)
+        # Use council/debate (or pipeline fallback without coding graph)
+        state = {"task": req.task, "pattern": req.pattern, "k": req.k}
 
-    props = result.get("proposals", [])
+        # Use async invoke if async graph enabled, otherwise sync
+        if USE_ASYNC_GRAPH:
+            result = await _graph.ainvoke(state)
+        else:
+            result = _graph.invoke(state)
 
-    for i, p in enumerate(props):
-        role = "pro" if (req.pattern=="debate" and i==0) else ("con" if (req.pattern=="debate" and i==1) else f"specialist_{i+1}")
-        proposals.append(Proposal(role=role, text=p))
+        props = result.get("proposals", [])
 
-    return RunRes(
-        pattern=req.pattern,
-        proposals=proposals,
-        verdict=result.get("verdict",""),
-        logs=result.get("logs",""),
-        aux={}
-    )
+        for i, p in enumerate(props):
+            role = "pro" if (req.pattern=="debate" and i==0) else ("con" if (req.pattern=="debate" and i==1) else f"specialist_{i+1}")
+            proposals.append(Proposal(role=role, text=p))
+
+        # Record metrics before returning
+        latency = time.time() - start_time
+        collective_requests.labels(pattern=req.pattern, status=status).inc()
+        collective_latency.labels(pattern=req.pattern).observe(latency)
+        proposal_count.labels(pattern=req.pattern).observe(len(proposals))
+        verdict_length.labels(pattern=req.pattern).observe(len(result.get("verdict", "")))
+
+        return RunRes(
+            pattern=req.pattern,
+            proposals=proposals,
+            verdict=result.get("verdict",""),
+            logs=result.get("logs",""),
+            aux={}
+        )
+
+    except Exception as exc:
+        status = "error"
+        collective_requests.labels(pattern=req.pattern, status=status).inc()
+        raise
