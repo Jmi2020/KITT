@@ -16,6 +16,7 @@ from .autonomous.scheduler import get_scheduler
 from .logging_config import setup_reasoning_logging
 from .metrics import router as metrics_router
 from .routes.autonomy import router as autonomy_router
+from .routes.collective import router as collective_router
 from .routes.models import router as models_router
 from .routes.projects import router as projects_router
 from .routes.query import router as query_router
@@ -90,6 +91,7 @@ app.include_router(query_router)
 app.include_router(projects_router)
 app.include_router(models_router)
 app.include_router(autonomy_router)
+app.include_router(collective_router)
 app.include_router(memory_router)
 app.include_router(usage_router)
 app.include_router(metrics_router)

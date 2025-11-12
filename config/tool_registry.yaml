@@ -409,6 +409,44 @@ tools:
     enabled: true
     note: "Used by Q4 agent to request deep analysis from F16 reasoning engine."
 
+  # ==============================================================================
+  # Collective Meta-Agent (multi-agent collaboration patterns)
+  # ==============================================================================
+
+  collective.run:
+    server: brain
+    description: "Execute collective meta-agent pattern for multi-perspective analysis (council, debate, pipeline)"
+    hazard_class: low
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+    note: |
+      Multi-agent collaboration patterns for complex decision-making.
+
+      Patterns:
+      - council: K independent specialists (Q4) propose solutions, F16 judge synthesizes verdict
+      - debate: PRO vs CON agents (Q4) argue positions, F16 judge evaluates and decides
+      - pipeline: Sequential workflow (requires coding graph - not yet implemented)
+
+      Parameters:
+      - task (required): Natural language goal or question
+      - pattern (optional): "council" (default), "debate", or "pipeline"
+      - k (optional): Number of council members (2-7, default: 3)
+      - max_steps (optional): Maximum workflow steps (1-20, default: 8)
+
+      Returns:
+      - proposals: List of agent proposals with roles
+      - verdict: Final synthesized decision from F16 judge
+      - logs: Execution logs showing reasoning process
+
+      Use Cases:
+      - Material selection (PETG vs ABS vs TPU for specific application)
+      - Design trade-offs (strength vs weight vs print time)
+      - Troubleshooting (multi-perspective diagnosis)
+      - Process optimization (compare approaches)
+
+      All inference is local (llama.cpp Q4/F16 servers) - no cloud calls.
+
 # ==============================================================================
 # Tool Categories (for UI/CLI filtering)
 # ==============================================================================
@@ -424,6 +462,7 @@ categories:
   homeassistant: [homeassistant.turn_on, homeassistant.turn_off, homeassistant.activate_scene, homeassistant.unlock_door, homeassistant.lock_door, homeassistant.enable_power]
   broker: [broker.execute_command]
   reasoning: [reason_with_f16]
+  collective: [collective.run]
 
 # ==============================================================================
 # Safety Policies (global overrides)
