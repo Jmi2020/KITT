@@ -235,18 +235,18 @@ class ComplexityAnalyzer:
         """
         # Check for explicit search requirements
         if context.get("requires_search"):
-            return RoutingTier.MCP
+            return RoutingTier.mcp
 
         # Simple queries → Q4
         if overall_score < 0.3:
-            return RoutingTier.LOCAL
+            return RoutingTier.local
 
         # Complex queries → F16
         if overall_score > 0.7:
-            return RoutingTier.LOCAL  # F16 via LOCAL tier
+            return RoutingTier.local  # F16 via LOCAL tier
 
         # Medium queries → Q4 with F16 fallback
-        return RoutingTier.LOCAL
+        return RoutingTier.local
 
     def _generate_reasoning(
         self,

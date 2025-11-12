@@ -35,6 +35,9 @@ dependencies = [
   "duckduckgo-search>=6.0",
   "sentence-transformers>=3.0",
   "minio>=7.2",
+  # LangGraph multi-agent dependencies
+  "langgraph>=0.0.50",
+  "langchain-core>=0.2.0",
 ]
 
 [tool.setuptools.package-dir]

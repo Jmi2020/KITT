@@ -185,20 +185,20 @@ class TestRoutingRecommendations:
     def test_simple_query_local_tier(self, analyzer):
         """Simple queries should recommend LOCAL tier (Q4)."""
         result = analyzer.analyze("Hello KITTY")
-        assert result["recommended_tier"] == RoutingTier.LOCAL
+        assert result["recommended_tier"] == RoutingTier.local
 
     def test_medium_complexity_local_tier(self, analyzer):
         """Medium complexity should recommend LOCAL with potential F16 fallback."""
         query = "Design a simple bracket for a 10mm bolt"
         result = analyzer.analyze(query)
         # Medium complexity can still be LOCAL or MCP depending on factors
-        assert result["recommended_tier"] in [RoutingTier.LOCAL, RoutingTier.MCP]
+        assert result["recommended_tier"] in [RoutingTier.local, RoutingTier.mcp]
 
     def test_search_query_mcp_tier(self, analyzer):
         """Queries requiring search should recommend MCP tier."""
         query = "Search for the latest 3D printing materials and technologies"
         result = analyzer.analyze(query, context={"requires_search": True})
-        assert result["recommended_tier"] == RoutingTier.MCP
+        assert result["recommended_tier"] == RoutingTier.mcp
 
     def test_very_complex_query_frontier_tier(self, analyzer):
         """Very complex queries should recommend FRONTIER tier (F16 equivalent)."""
@@ -213,7 +213,7 @@ class TestRoutingRecommendations:
         result = analyzer.analyze(query)
         # Very high complexity (>0.7) should recommend FRONTIER
         if result["overall"] > 0.7:
-            assert result["recommended_tier"] == RoutingTier.FRONTIER
+            assert result["recommended_tier"] == RoutingTier.frontier
 
 
 class TestEdgeCases:
@@ -224,7 +224,7 @@ class TestEdgeCases:
         result = analyzer.analyze("")
         assert result["overall"] == 0.0
         assert result["factors"]["token_count"] == 0.0
-        assert result["recommended_tier"] == RoutingTier.LOCAL
+        assert result["recommended_tier"] == RoutingTier.local
 
     def test_whitespace_only_query(self, analyzer):
         """Whitespace-only queries should be handled like empty queries."""
@@ -260,13 +260,13 @@ class TestContextInfluence:
         query = "What's the latest?"
         context = {"requires_search": True}
         result = analyzer.analyze(query, context=context)
-        assert result["recommended_tier"] == RoutingTier.MCP
+        assert result["recommended_tier"] == RoutingTier.mcp
 
     def test_no_context(self, analyzer):
         """Queries without context should work normally."""
         result = analyzer.analyze("Design a bracket")
         assert isinstance(result["overall"], float)
-        assert result["recommended_tier"] in [RoutingTier.LOCAL, RoutingTier.MCP, RoutingTier.FRONTIER]
+        assert result["recommended_tier"] in [RoutingTier.local, RoutingTier.mcp, RoutingTier.frontier]
 
 
 class TestReasoningOutput:
