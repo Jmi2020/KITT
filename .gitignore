@@ -21,6 +21,7 @@ docs/admin/
 # Reference repos
 Reference/JarvisV3/
 Reference/hexstrike-ai/
+Reference/any-llm/
 
 # Build artifacts
 *.egg-info/
