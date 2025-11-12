@@ -379,6 +379,100 @@ def _post_json_with_spinner(
             return response.json()
 
 
+def _typewriter_print(text: str, speed: float = 0.01, panel_title: str = "KITTY", border_style: str = "green") -> None:
+    """Print text with typewriter effect, line by line for smooth performance."""
+    import time
+    from rich.live import Live
+    from rich.panel import Panel
+    from rich.text import Text as RichText
+
+    lines = text.split('\n')
+    displayed_lines = []
+
+    # Create initial empty panel
+    display_text = RichText()
+    panel = Panel(display_text, title=f"[bold {border_style}]{panel_title}", border_style=border_style)
+
+    with Live(panel, console=console, refresh_per_second=20) as live:
+        for line in lines:
+            # Add full line at once (line-by-line is smoother than char-by-char)
+            displayed_lines.append(line)
+            display_text = RichText('\n'.join(displayed_lines))
+            panel = Panel(display_text, title=f"[bold {border_style}]{panel_title}", border_style=border_style)
+            live.update(panel)
+            time.sleep(speed)  # Small delay per line
+
+    # Final static display
+    console.print(Panel(text, title=f"[bold {border_style}]{panel_title}", border_style=border_style))
+
+
+def _request_with_continuation(
+    url: str,
+    payload: Dict[str, Any],
+    status_text: str = "KITTY is thinking",
+    max_continuations: int = 5
+) -> tuple[str, Dict[str, Any]]:
+    """Make API call with automatic continuation support for truncated responses.
+
+    Returns:
+        Tuple of (full_output, final_metadata)
+    """
+    full_output = ""
+    final_metadata = {}
+    continuation_count = 0
+
+    # Show thinking spinner for initial request
+    spinner = Spinner("dots", text=Text(status_text, style="cyan"))
+
+    with Live(spinner, console=console, transient=True):
+        with _client() as client:
+            response = client.post(url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+
+    output = data.get("result", {}).get("output", "")
+    full_output = output
+    routing = data.get("routing", {})
+    metadata = routing.get("metadata", {})
+    final_metadata = routing
+
+    # Display first chunk with typewriter effect
+    if output:
+        _typewriter_print(output)
+
+    # Check for truncation and auto-continue
+    while metadata.get("truncated") and continuation_count < max_continuations:
+        continuation_count += 1
+        console.print(f"\n[dim]← Response truncated, requesting continuation {continuation_count}/{max_continuations}...[/dim]\n")
+
+        # Create continuation payload
+        continuation_payload = payload.copy()
+        continuation_payload["prompt"] = "[Continue from where you left off. Do not repeat what you already said, just continue.]"
+
+        # Request continuation with spinner
+        spinner = Spinner("dots", text=Text(f"Continuing ({continuation_count}/{max_continuations})...", style="yellow"))
+        with Live(spinner, console=console, transient=True):
+            with _client() as client:
+                response = client.post(url, json=continuation_payload)
+                response.raise_for_status()
+                data = response.json()
+
+        output = data.get("result", {}).get("output", "")
+        if output:
+            full_output += "\n" + output
+            _typewriter_print(output, panel_title="KITTY (continued)", border_style="yellow")
+
+        routing = data.get("routing", {})
+        metadata = routing.get("metadata", {})
+        final_metadata = routing
+
+    if continuation_count >= max_continuations and metadata.get("truncated"):
+        console.print(f"\n[yellow]⚠️  Reached maximum continuations ({max_continuations}). Response may still be incomplete.[/yellow]")
+        console.print("[dim]Tip: Increase LLAMACPP_N_PREDICT in .env for longer responses in a single generation.[/dim]\n")
+
+    return full_output, final_metadata
+
+
 def _post_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Make API call without spinner (for internal use)."""
     with _client() as client:
@@ -403,7 +497,9 @@ def _vision_post(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _print_agent_trace(metadata: Dict[str, Any]) -> None:
-    """Pretty-print agent reasoning steps if present."""
+    """Pretty-print agent reasoning steps if present with typewriter effect."""
+    import time
+
     steps = metadata.get("agent_steps")
     if not steps:
         return
@@ -424,13 +520,16 @@ def _print_agent_trace(metadata: Dict[str, Any]) -> None:
             lines.append(f"[cyan]Observation:[/] {observation}")
         if not lines:
             continue
-        console.print(
-            Panel(
-                "\n".join(lines),
-                title=f"Step {idx}",
-                border_style="magenta",
-            )
+
+        # Use typewriter effect for agent steps
+        step_content = "\n".join(lines)
+        _typewriter_print(
+            step_content,
+            speed=0.005,  # Faster for agent steps
+            panel_title=f"Step {idx}",
+            border_style="magenta"
         )
+        time.sleep(0.1)  # Brief pause between steps
 
 
 def _print_routing(routing: Optional[Dict[str, Any]], *, show_trace: bool = False) -> None:
@@ -919,7 +1018,12 @@ def say(
         payload["verbosity"] = effective_verbosity
 
     try:
-        data = _post_json_with_spinner(f"{API_BASE}/api/query", payload, "KITTY is thinking")
+        full_output, routing_metadata = _request_with_continuation(
+            f"{API_BASE}/api/query",
+            payload,
+            "KITTY is thinking",
+            max_continuations=5
+        )
     except httpx.TimeoutException:
         console.print("[red]Request timed out - check if KITTY services are running")
         raise typer.Exit(1)
@@ -930,15 +1034,12 @@ def say(
         console.print(f"[red]Request failed: {exc}")
         raise typer.Exit(1) from exc
 
-    output = data.get("result", {}).get("output", "")
-    if output:
-        console.print(Panel(output, title="[bold green]KITTY", border_style="green"))
-    else:
+    if not full_output:
         console.print("[yellow]No response received")
 
     # Show routing info / traces when requested
     if state.verbosity >= 4 or trace_enabled:
-        _print_routing(data.get("routing"), show_trace=trace_enabled)
+        _print_routing(routing_metadata, show_trace=trace_enabled)
 
 
 def _infer_cad_mode(prompt: str, has_images: bool) -> str:
@@ -1635,19 +1736,27 @@ def shell(
                         console.print(f"[red]Error: {exc}")
                         continue
 
-                # Display proposals
+                # Display proposals with typewriter effect
                 console.print(f"\n[bold cyan]Proposals ({len(data['proposals'])}):[/]")
                 for i, prop in enumerate(data["proposals"], 1):
                     role = prop["role"]
                     text = prop["text"]
-                    # Truncate long proposals
-                    display_text = text if len(text) <= 200 else text[:197] + "..."
-                    console.print(f"\n[bold]{i}. [{role}][/]")
-                    console.print(f"   {display_text}")
+                    # Show full proposal with typewriter effect
+                    _typewriter_print(
+                        text,
+                        speed=0.008,
+                        panel_title=f"{i}. {role}",
+                        border_style="cyan"
+                    )
 
-                # Display verdict
-                console.print(f"\n[bold green]Judge Verdict:[/]")
-                console.print(data["verdict"])
+                # Display verdict with typewriter effect
+                console.print(f"\n[bold green]⚖️  Judge Verdict:[/]")
+                _typewriter_print(
+                    data["verdict"],
+                    speed=0.01,
+                    panel_title="Final Verdict",
+                    border_style="green"
+                )
                 console.print()  # blank line
                 continue
 
