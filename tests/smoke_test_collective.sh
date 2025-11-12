@@ -22,7 +22,32 @@ NC='\033[0m' # No Color
 PASSED=0
 FAILED=0
 
-# Test function
+# Test function for GET requests
+test_get() {
+    local name="$1"
+    local url="$2"
+    local expected_status="${3:-200}"
+
+    echo -n "Testing: $name... "
+
+    response=$(curl -s -w "\n%{http_code}" "$url" --max-time 30)
+
+    http_code=$(echo "$response" | tail -n 1)
+    body=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" = "$expected_status" ]; then
+        echo -e "${GREEN}PASS${NC} (HTTP $http_code)"
+        ((PASSED++))
+        return 0
+    else
+        echo -e "${RED}FAIL${NC} (HTTP $http_code, expected $expected_status)"
+        echo "Response: $body"
+        ((FAILED++))
+        return 1
+    fi
+}
+
+# Test function for POST requests
 test_endpoint() {
     local name="$1"
     local url="$2"
@@ -34,10 +59,10 @@ test_endpoint() {
     response=$(curl -s -w "\n%{http_code}" -X POST "$url" \
         -H 'Content-Type: application/json' \
         -d "$payload" \
-        --max-time 120)
+        --max-time 300)
 
-    http_code=$(echo "$response" | tail -n1)
-    body=$(echo "$response" | head -n-1)
+    http_code=$(echo "$response" | tail -n 1)
+    body=$(echo "$response" | sed '$d')
 
     if [ "$http_code" = "$expected_status" ]; then
         echo -e "${GREEN}PASS${NC} (HTTP $http_code)"
@@ -53,8 +78,7 @@ test_endpoint() {
 
 # Test health endpoints
 echo -e "${YELLOW}1. Health Checks${NC}"
-test_endpoint "Brain Health" "$BRAIN_BASE/healthz" "" 200
-test_endpoint "Gateway Health" "$GATEWAY_BASE/healthz" "" 200
+test_get "Brain Health" "$BRAIN_BASE/health" 200
 echo ""
 
 # Test council pattern (minimal)

@@ -126,4 +126,4 @@ def build_collective_graph_async() -> StateGraph:
     g.add_edge("propose_debate","judge")
     g.add_edge("judge", END)
 
-    return g
+    return g.compile()

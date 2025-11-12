@@ -26,7 +26,7 @@ async def proxy_run(req: RunReq):
     This allows external clients to access the collective functionality
     through the gateway's public interface.
     """
-    async with httpx.AsyncClient(timeout=90) as client:
+    async with httpx.AsyncClient(timeout=180) as client:
         r = await client.post(f"{BASE}/run", json=req.dict())
     if r.status_code != 200:
         raise HTTPException(status_code=r.status_code, detail=r.text)
