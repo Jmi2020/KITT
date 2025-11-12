@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import Dashboard from './pages/Dashboard';
 import FabricationConsole from './pages/FabricationConsole';
 import Projects from './pages/Projects';
+import Shell from './pages/Shell';
 import WallTerminal from './pages/WallTerminal';
 import VisionGallery from './pages/VisionGallery';
 import ImageGenerator from './pages/ImageGenerator';
@@ -9,7 +10,7 @@ import useRemoteMode from './hooks/useRemoteMode';
 import { useTheme } from './contexts/ThemeContext';
 
 const App = () => {
-  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'wall' | 'vision' | 'images'>('dashboard');
+  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'shell' | 'wall' | 'vision' | 'images'>('shell');
   const remoteMode = useRemoteMode();
   const { theme, toggleTheme } = useTheme();
 
@@ -19,6 +20,8 @@ const App = () => {
         return <Projects />;
       case 'console':
         return <FabricationConsole />;
+      case 'shell':
+        return <Shell />;
       case 'wall':
         return <WallTerminal remoteMode={remoteMode} />;
       case 'vision':
@@ -37,6 +40,8 @@ const App = () => {
       setActiveView('vision');
     } else if (viewParam === 'images') {
       setActiveView('images');
+    } else if (viewParam === 'shell') {
+      setActiveView('shell');
     }
   }, []);
 
@@ -45,6 +50,7 @@ const App = () => {
       <header>
         <h1>KITTY Control Console</h1>
         <nav>
+          <button onClick={() => setActiveView('shell')}>💬 Shell</button>
           <button onClick={() => setActiveView('dashboard')}>Dashboard</button>
           <button onClick={() => setActiveView('projects')}>Projects</button>
           <button onClick={() => setActiveView('console')}>Fabrication Console</button>
