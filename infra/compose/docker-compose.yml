@@ -69,7 +69,7 @@ services:
       UPSTREAM_BRAIN_URL: http://brain:8000
       FABRICATION_BASE: http://fabrication:8300
       DISCOVERY_BASE: http://discovery:8500
-      CODER_AGENT_BASE: http://coder-agent:8092
+      # CODER_AGENT_BASE: http://coder-agent:8092  # Service disabled - not yet implemented
       SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://searxng:8080}
       INTERNAL_SEARXNG_BASE_URL: http://searxng:8080
       IMAGE_SEARCH_PROVIDER: ${IMAGE_SEARCH_PROVIDER:-auto}
@@ -80,7 +80,6 @@ services:
       - brain
       - fabrication
       - discovery
-      - coder-agent
     volumes:
       - ../../services/common:/app/services/common:ro
       - ../../services/gateway:/app/services/gateway:ro
@@ -232,6 +231,8 @@ services:
       start_period: 10s
 
   coder-agent:
+    profiles:
+      - disabled  # Service not yet implemented
     build:
       context: ../..
       dockerfile: services/coder-agent/Dockerfile

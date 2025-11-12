@@ -119,12 +119,18 @@ fi
 
 log "Phase 3: Starting Docker Compose services"
 
+# Change to infra/compose directory for docker compose
+cd "$PROJECT_ROOT/infra/compose" || exit 1
+
 docker compose up -d --build 2>&1 | tee -a "$STARTUP_LOG"
 
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     error "Docker Compose startup failed"
     exit 1
 fi
+
+# Return to project root
+cd "$PROJECT_ROOT" || exit 1
 
 success "Docker services started"
 

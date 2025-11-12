@@ -99,7 +99,7 @@ else
         --port $Q4_PORT \
         --n-gpu-layers 999 \
         --ctx-size $Q4_CTX_SIZE \
-        --n-parallel $Q4_N_PARALLEL \
+        -np $Q4_N_PARALLEL \
         --batch-size 512 \
         --threads 8 \
         --alias "$Q4_ALIAS" \
@@ -121,7 +121,7 @@ else
         --port $F16_PORT \
         --n-gpu-layers 999 \
         --ctx-size $F16_CTX_SIZE \
-        --n-parallel $F16_N_PARALLEL \
+        -np $F16_N_PARALLEL \
         --batch-size 512 \
         --threads 12 \
         --alias "$F16_ALIAS" \
@@ -143,7 +143,7 @@ else
         --port $SUMMARY_PORT \
         --n-gpu-layers 999 \
         --ctx-size 4096 \
-        --n-parallel 4 \
+        -np 4 \
         --batch-size 512 \
         --threads 4 \
         --alias "$SUMMARY_ALIAS" \
@@ -166,7 +166,7 @@ else
         --port $VISION_PORT \
         --n-gpu-layers 999 \
         --ctx-size 4096 \
-        --n-parallel 2 \
+        -np 2 \
         --batch-size 256 \
         --threads 6 \
         --alias "$VISION_ALIAS" \
