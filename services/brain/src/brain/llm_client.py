@@ -53,7 +53,7 @@ def _messages_to_prompt(messages: List[Dict[str, str]]) -> str:
 
 async def chat_async(
     messages: List[Dict[str, str]],
-    which: Literal["Q4", "F16"] = "Q4",
+    which: Literal["Q4", "F16", "CODER"] = "Q4",
     tools: List[Dict[str, Any]] | None = None
 ) -> str:
     """Async chat interface for collective meta-agent.
@@ -63,7 +63,7 @@ async def chat_async(
 
     Args:
         messages: OpenAI-style message list [{"role": "user", "content": "..."}]
-        which: Which model tier to use ("Q4" for fast tool orchestrator, "F16" for deep reasoner)
+        which: Which model tier to use ("Q4" for fast tool orchestrator, "F16" for deep reasoner, "CODER" for code generation)
         tools: Optional tool definitions (JSON Schema format)
 
     Returns:
@@ -79,6 +79,7 @@ async def chat_async(
     model_map = {
         "Q4": "kitty-q4",
         "F16": "kitty-f16",
+        "CODER": "kitty-coder",
     }
     model_alias = model_map.get(which, "kitty-q4")
 
@@ -102,7 +103,7 @@ async def chat_async(
 
 def chat(
     messages: List[Dict[str, str]],
-    which: Literal["Q4", "F16"] = "Q4",
+    which: Literal["Q4", "F16", "CODER"] = "Q4",
     tools: List[Dict[str, Any]] | None = None
 ) -> str:
     """Synchronous chat interface for collective meta-agent.
@@ -115,7 +116,7 @@ def chat(
 
     Args:
         messages: OpenAI-style message list [{"role": "user", "content": "..."}]
-        which: Which model tier to use ("Q4" for fast tool orchestrator, "F16" for deep reasoner)
+        which: Which model tier to use ("Q4" for fast tool orchestrator, "F16" for deep reasoner, "CODER" for code generation)
         tools: Optional tool definitions (JSON Schema format)
 
     Returns:
@@ -131,6 +132,7 @@ def chat(
     model_map = {
         "Q4": "kitty-q4",
         "F16": "kitty-f16",
+        "CODER": "kitty-coder",
     }
     model_alias = model_map.get(which, "kitty-q4")
 

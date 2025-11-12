@@ -272,7 +272,31 @@ Automated code generation service using LangGraph state machine in `services/cod
 **Model Routing:**
 - Q4 server (8083): Fast operations (planning, test generation, summaries)
 - F16 server (8082): Precise operations (code generation, refinement)
-- Optional dedicated coder model: Set `LLAMACPP_CODER_BASE` for specialized models like DeepSeek-Coder
+- Optional dedicated coder model: Set `LLAMACPP_CODER_BASE` for specialized models like DeepSeek-Coder or Qwen2.5-Coder
+
+**CODER Model Support in Collective Meta-Agent:**
+
+The brain service's `llm_client.py` now supports a `CODER` routing option for code-specialized tasks in collective patterns:
+
+```python
+# In collective graph or custom agents
+response = await chat_async([
+    {"role": "system", "content": "You are an expert Python programmer."},
+    {"role": "user", "content": "Write a function to calculate factorial"}
+], which="CODER")  # Routes to kitty-coder model
+```
+
+**Configuration:**
+- Model path: `LLAMACPP_CODER_MODEL` in `.env` (e.g., `Qwen2.5-Coder-32B-Instruct-GGUF/qwen2.5-coder-32b-instruct-q8_0.gguf`)
+- Model alias: `LLAMACPP_CODER_ALIAS=kitty-coder`
+- Falls back to F16 if coder server unavailable
+
+**Use Cases:**
+- Council patterns with code generation tasks
+- Debate patterns comparing algorithmic approaches
+- Specialist agents focused on implementation details
+
+**Testing:** Run `tests/integration/test_coder_integration.sh` to verify CODER routing
 
 **Access via Gateway:** `POST /api/coding/generate` (proxied from `coder-agent:8092`)
 
