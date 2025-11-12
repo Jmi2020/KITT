@@ -1,0 +1,291 @@
+groups:
+  - name: langgraph_routing_slos
+    interval: 30s
+    rules:
+      # =================================================================
+      # SLO: Q4 Latency (P95 < 2s)
+      # =================================================================
+      - alert: Q4LatencyDegradation
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(brain_graph_node_duration_seconds_bucket{graph="router_graph"}[5m]))
+          ) > 2
+        for: 3m
+        labels:
+          severity: warning
+          component: langgraph
+          slo: q4_latency
+        annotations:
+          summary: "Q4 routing latency degraded (P95 > 2s)"
+          description: "Q4 router graph P95 latency is {{ $value | humanizeDuration }}, exceeding 2s SLO for 3+ minutes"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#q4-latency-degradation"
+
+      - alert: Q4LatencyCritical
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(brain_graph_node_duration_seconds_bucket{graph="router_graph"}[5m]))
+          ) > 5
+        for: 2m
+        labels:
+          severity: critical
+          component: langgraph
+          slo: q4_latency
+        annotations:
+          summary: "Q4 routing latency critical (P95 > 5s)"
+          description: "Q4 router graph P95 latency is {{ $value | humanizeDuration }}, severely degraded for 2+ minutes"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#q4-latency-critical"
+
+      # =================================================================
+      # SLO: F16 Latency (P95 < 10s)
+      # =================================================================
+      - alert: F16LatencyDegradation
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(brain_graph_node_duration_seconds_bucket{graph="deep_reasoner_graph"}[5m]))
+          ) > 10
+        for: 3m
+        labels:
+          severity: warning
+          component: langgraph
+          slo: f16_latency
+        annotations:
+          summary: "F16 deep reasoner latency degraded (P95 > 10s)"
+          description: "F16 deep reasoner P95 latency is {{ $value | humanizeDuration }}, exceeding 10s SLO for 3+ minutes"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#f16-latency-degradation"
+
+      - alert: F16LatencyCritical
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(brain_graph_node_duration_seconds_bucket{graph="deep_reasoner_graph"}[5m]))
+          ) > 20
+        for: 2m
+        labels:
+          severity: critical
+          component: langgraph
+          slo: f16_latency
+        annotations:
+          summary: "F16 deep reasoner latency critical (P95 > 20s)"
+          description: "F16 deep reasoner P95 latency is {{ $value | humanizeDuration }}, severely degraded for 2+ minutes"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#f16-latency-critical"
+
+      # =================================================================
+      # SLO: Escalation Success Rate (> 90%)
+      # =================================================================
+      - alert: HighEscalationFailureRate
+        expr: |
+          100 * (
+            sum(rate(brain_escalation_status_total{status="fallback"}[5m]))
+            /
+            (sum(rate(brain_escalation_status_total{status="success"}[5m])) + sum(rate(brain_escalation_status_total{status="fallback"}[5m])))
+          ) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: langgraph
+          slo: escalation_success
+        annotations:
+          summary: "High F16 escalation failure rate (> 10%)"
+          description: "{{ $value | printf \"%.1f\" }}% of F16 escalations are falling back to Q4 for 5+ minutes"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#high-escalation-failure-rate"
+
+      - alert: CriticalEscalationFailureRate
+        expr: |
+          100 * (
+            sum(rate(brain_escalation_status_total{status="fallback"}[5m]))
+            /
+            (sum(rate(brain_escalation_status_total{status="success"}[5m])) + sum(rate(brain_escalation_status_total{status="fallback"}[5m])))
+          ) > 25
+        for: 3m
+        labels:
+          severity: critical
+          component: langgraph
+          slo: escalation_success
+        annotations:
+          summary: "Critical F16 escalation failure rate (> 25%)"
+          description: "{{ $value | printf \"%.1f\" }}% of F16 escalations are falling back to Q4 for 3+ minutes"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#critical-escalation-failure-rate"
+
+      # =================================================================
+      # SLO: Tool Success Rate (> 80%)
+      # =================================================================
+      - alert: HighToolFailureRate
+        expr: |
+          100 * (
+            sum(rate(brain_tool_execution_total{status=~"failed|blocked"}[5m]))
+            /
+            sum(rate(brain_tool_execution_total[5m]))
+          ) > 20
+        for: 5m
+        labels:
+          severity: warning
+          component: langgraph
+          slo: tool_success
+        annotations:
+          summary: "High tool failure rate (> 20%)"
+          description: "{{ $value | printf \"%.1f\" }}% of tool executions are failing or blocked for 5+ minutes"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#high-tool-failure-rate"
+
+      - alert: CriticalToolFailureRate
+        expr: |
+          100 * (
+            sum(rate(brain_tool_execution_total{status=~"failed|blocked"}[5m]))
+            /
+            sum(rate(brain_tool_execution_total[5m]))
+          ) > 40
+        for: 3m
+        labels:
+          severity: critical
+          component: langgraph
+          slo: tool_success
+        annotations:
+          summary: "Critical tool failure rate (> 40%)"
+          description: "{{ $value | printf \"%.1f\" }}% of tool executions are failing or blocked for 3+ minutes"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#critical-tool-failure-rate"
+
+      # =================================================================
+      # SLO: Response Confidence (> 70% queries with confidence ≥ 0.6)
+      # =================================================================
+      - alert: LowConfidenceRate
+        expr: |
+          100 * (
+            sum(rate(brain_confidence_distribution_bucket{le="0.6"}[5m]))
+            /
+            sum(rate(brain_confidence_distribution_count[5m]))
+          ) > 30
+        for: 10m
+        labels:
+          severity: warning
+          component: langgraph
+          slo: confidence
+        annotations:
+          summary: "High rate of low-confidence responses (> 30%)"
+          description: "{{ $value | printf \"%.1f\" }}% of responses have confidence ≤ 0.6 for 10+ minutes"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#low-confidence-rate"
+
+      # =================================================================
+      # SLO: Memory Retrieval Latency (P95 < 1s)
+      # =================================================================
+      - alert: MemoryRetrievalSlow
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(brain_memory_retrieval_duration_seconds_bucket[5m]))
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: langgraph
+          slo: memory_latency
+        annotations:
+          summary: "Memory retrieval latency degraded (P95 > 1s)"
+          description: "Memory retrieval P95 latency is {{ $value | humanizeDuration }}, exceeding 1s SLO for 5+ minutes"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#memory-retrieval-slow"
+
+      # =================================================================
+      # SLO: Graph Execution Success Rate (> 95%)
+      # =================================================================
+      - alert: GraphExecutionFailures
+        expr: |
+          100 * (
+            sum(rate(brain_graph_execution_total{status="failed"}[5m]))
+            /
+            sum(rate(brain_graph_execution_total[5m]))
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: langgraph
+          slo: graph_success
+        annotations:
+          summary: "High graph execution failure rate (> 5%)"
+          description: "{{ $value | printf \"%.1f\" }}% of graph executions are failing for 5+ minutes"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#graph-execution-failures"
+
+      # =================================================================
+      # Specific Tool Alerts
+      # =================================================================
+      - alert: CriticalToolDown
+        expr: |
+          sum by (tool) (rate(brain_tool_execution_total{status="failed"}[5m]))
+          /
+          sum by (tool) (rate(brain_tool_execution_total[5m]))
+          > 0.8
+        for: 3m
+        labels:
+          severity: critical
+          component: langgraph
+        annotations:
+          summary: "Critical tool {{ $labels.tool }} failing (> 80%)"
+          description: "Tool {{ $labels.tool }} has {{ $value | humanizePercentage }} failure rate for 3+ minutes"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#critical-tool-down"
+
+      # =================================================================
+      # Deep Reasoning Quality Alerts
+      # =================================================================
+      - alert: LowSelfEvaluationScores
+        expr: |
+          histogram_quantile(0.50,
+            sum by (le) (rate(brain_self_evaluation_score_bucket[5m]))
+          ) < 0.5
+        for: 10m
+        labels:
+          severity: warning
+          component: langgraph
+        annotations:
+          summary: "F16 self-evaluation scores degraded (P50 < 0.5)"
+          description: "Median F16 self-evaluation score is {{ $value | printf \"%.2f\" }}, indicating poor reasoning quality"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#low-self-evaluation-scores"
+
+      # =================================================================
+      # Memory Sufficiency Alerts
+      # =================================================================
+      - alert: LowMemorySufficiency
+        expr: |
+          histogram_quantile(0.50,
+            sum by (le) (rate(brain_memory_sufficiency_score_bucket[5m]))
+          ) < 0.5
+        for: 15m
+        labels:
+          severity: warning
+          component: langgraph
+        annotations:
+          summary: "Low memory sufficiency (P50 < 0.5)"
+          description: "Median memory sufficiency score is {{ $value | printf \"%.2f\" }}, indicating insufficient context"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#low-memory-sufficiency"
+
+      # =================================================================
+      # Excessive Deep Search Rate
+      # =================================================================
+      - alert: ExcessiveDeepSearchRate
+        expr: |
+          100 * (
+            sum(rate(brain_memory_hit_total{search_type="deep"}[5m]))
+            /
+            sum(rate(brain_memory_hit_total[5m]))
+          ) > 50
+        for: 15m
+        labels:
+          severity: info
+          component: langgraph
+        annotations:
+          summary: "High deep search rate (> 50%)"
+          description: "{{ $value | printf \"%.1f\" }}% of memory searches require deep search, may indicate poor initial retrieval"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#excessive-deep-search-rate"
+
+      # =================================================================
+      # LangGraph Rollout Monitoring
+      # =================================================================
+      - alert: LangGraphRolloutStalled
+        expr: |
+          changes(brain_langgraph_rollout_percent[1h]) == 0
+          and
+          brain_langgraph_rollout_percent > 0
+          and
+          brain_langgraph_rollout_percent < 100
+        for: 2h
+        labels:
+          severity: info
+          component: langgraph
+        annotations:
+          summary: "LangGraph rollout percentage unchanged for 2h"
+          description: "Rollout stuck at {{ $value }}% for 2+ hours during gradual rollout"
+          runbook_url: "https://github.com/Jmi2020/KITT/blob/main/ops/runbooks/langgraph-troubleshooting.md#langgraph-rollout-stalled"
