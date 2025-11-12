@@ -33,7 +33,7 @@ class LlamaCppClient:
     async def generate(
         self, prompt: str, model: Optional[str] = None, tools: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
-        """Invoke the completion endpoint and normalise the response.
+        """Invoke the OpenAI-compatible /v1/chat/completions endpoint.
 
         Args:
             prompt: The input prompt text
@@ -56,52 +56,58 @@ class LlamaCppClient:
                 )
             temperature = 0
 
+        # Build OpenAI-compatible payload
+        selected_model = model or self._config.model_alias or "default"
+
         payload: Dict[str, Any] = {
-            "prompt": prompt,
-            "n_predict": self._config.n_predict,
+            "model": selected_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": self._config.n_predict,
             "temperature": temperature,
             "top_p": self._config.top_p,
-            "repeat_penalty": self._config.repeat_penalty,
             "stream": self._config.stream,
         }
+
         if self._config.stop_tokens:
             payload["stop"] = self._config.stop_tokens
 
-        selected_model = model or self._config.model_alias
-        if selected_model:
-            payload["model"] = selected_model
-
-        # Include tools if provided (requires llama-server with --jinja -fa flags)
+        # Include tools if provided (OpenAI-compatible format)
         if tools:
             payload["tools"] = tools
             logger.info(f"Passing {len(tools)} tools to llama.cpp: {[t['function']['name'] for t in tools]}")
 
-        # Log payload for debugging (truncate prompt if too long)
+        # Log payload for debugging (truncate messages if too long)
         log_payload = payload.copy()
-        if "prompt" in log_payload and len(log_payload["prompt"]) > 200:
-            log_payload["prompt"] = log_payload["prompt"][:200] + f"... ({len(payload['prompt'])} chars total)"
-        logger.debug(f"llama.cpp request payload: {log_payload}")
+        if "messages" in log_payload and len(str(log_payload["messages"])) > 200:
+            log_payload["messages"] = f"[{len(payload['messages'])} messages, {len(str(payload['messages']))} chars total]"
+        logger.debug(f"llama.cpp OpenAI-compatible request: {log_payload}")
+
+        # Use OpenAI-compatible endpoint
+        endpoint = "/v1/chat/completions"
 
         async with httpx.AsyncClient(
             base_url=self._base_url, timeout=self._config.timeout_seconds
         ) as client:
             try:
-                response = await client.post(self._config.api_path, json=payload)
+                response = await client.post(endpoint, json=payload)
                 response.raise_for_status()
                 data: Dict[str, Any] = response.json()
             except httpx.HTTPStatusError as e:
-                logger.error(f"llama.cpp returned {e.response.status_code}: {e.response.text[:500]}")
+                logger.error(
+                    f"llama.cpp returned {e.response.status_code} from {endpoint}: {e.response.text[:500]}"
+                )
                 raise
 
-        completion = data.get("response") or data.get("content") or data.get("completion")
-        if completion is None and "choices" in data:
-            # OpenAI-compatible shape
-            choices = data["choices"]
-            if choices:
-                completion = choices[0].get("message", {}).get("content")
-        if completion is None and isinstance(data, dict):
-            # fall back to joining chunks if present
-            completion = data.get("generated_text") or ""
+        # Parse OpenAI-compatible response
+        completion = None
+        if "choices" in data and data["choices"]:
+            choice = data["choices"][0]
+            message = choice.get("message", {})
+            completion = message.get("content", "")
+
+        if completion is None:
+            logger.warning(f"Unexpected response format from llama.cpp: {data}")
+            completion = ""
 
         # Parse tool calls from response using detected model format
         tool_calls: List[ToolCall] = []
@@ -113,14 +119,19 @@ class LlamaCppClient:
             else:
                 logger.warning("No tool calls found in model response despite tools being provided")
 
-        stop_type = data.get("stop_type")
-        truncated = bool(data.get("truncated") or (stop_type == "limit"))
+        # Extract metadata from OpenAI-compatible response
+        stop_reason = None
+        truncated = False
+        if "choices" in data and data["choices"]:
+            finish_reason = data["choices"][0].get("finish_reason")
+            stop_reason = finish_reason
+            truncated = (finish_reason == "length")
 
         return {
             "response": cleaned_text,
             "tool_calls": tool_calls,
             "raw": data,
-            "stop_type": stop_type,
+            "stop_type": stop_reason,
             "truncated": truncated,
         }
 
