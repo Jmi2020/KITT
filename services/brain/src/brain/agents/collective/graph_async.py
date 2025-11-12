@@ -1,10 +1,18 @@
 
 from __future__ import annotations
 from typing import TypedDict, List
+import os
 from langgraph.graph import StateGraph, END
 
 # Import async chat interface
 from brain.llm_client import chat_async
+from .context_policy import fetch_domain_context
+
+# Prompts from environment
+HINT_PROPOSER = os.getenv("COLLECTIVE_HINT_PROPOSER",
+                          "Solve independently; do not reference other agents or a group.")
+HINT_JUDGE = os.getenv("COLLECTIVE_HINT_JUDGE",
+                       "You are the judge; prefer safety, clarity, testability.")
 
 class CollectiveState(TypedDict, total=False):
     task: str
@@ -32,17 +40,26 @@ async def n_propose_council(s: CollectiveState) -> CollectiveState:
 
     Performance: With async, all K proposals can be generated concurrently
     for ~K speedup vs sequential execution.
+
+    Confidentiality: Proposers receive filtered context (excludes meta/dev/collective)
+    to maintain independence and prevent groupthink.
     """
     import asyncio
 
     k = int(s.get("k", 3))
 
+    # Fetch filtered context for proposers (excludes meta/dev tags)
+    context = fetch_domain_context(s["task"], limit=6, for_proposer=True)
+
     # Generate all proposals concurrently
     async def generate_proposal(i: int) -> str:
         role = f"specialist_{i+1}"
+        system_prompt = f"You are {role}. {HINT_PROPOSER}"
+        user_prompt = f"Task:\n{s['task']}\n\nRelevant context:\n{context}\n\nProvide a concise proposal with justification."
+
         return await chat_async([
-            {"role":"system","content":f"You are {role}. Provide an independent, concise proposal with justification."},
-            {"role":"user","content":s["task"]}
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
         ], which="Q4")
 
     # Run all proposals in parallel
@@ -54,18 +71,24 @@ async def n_propose_debate(s: CollectiveState) -> CollectiveState:
     """Debate node - generates PRO and CON arguments using Q4.
 
     Performance: Both PRO and CON generated concurrently for 2x speedup.
+
+    Confidentiality: Both debaters receive filtered context (excludes meta/dev/collective)
+    to maintain independence and prevent anchoring.
     """
     import asyncio
 
+    # Fetch filtered context for debaters (excludes meta/dev tags)
+    context = fetch_domain_context(s["task"], limit=6, for_proposer=True)
+
     # Generate PRO and CON concurrently
     pro_task = chat_async([
-        {"role":"system","content":"You are PRO. Argue FOR the proposal in 6 concise bullet points."},
-        {"role":"user","content":s["task"]}
+        {"role": "system", "content": f"You are PRO. {HINT_PROPOSER} Argue FOR the proposal in 6 concise bullet points."},
+        {"role": "user", "content": f"Task:\n{s['task']}\n\nRelevant context:\n{context}\n\nProvide PRO arguments."}
     ], which="Q4")
 
     con_task = chat_async([
-        {"role":"system","content":"You are CON. Argue AGAINST the proposal in 6 concise bullet points."},
-        {"role":"user","content":s["task"]}
+        {"role": "system", "content": f"You are CON. {HINT_PROPOSER} Argue AGAINST the proposal in 6 concise bullet points."},
+        {"role": "user", "content": f"Task:\n{s['task']}\n\nRelevant context:\n{context}\n\nProvide CON arguments."}
     ], which="Q4")
 
     pro, con = await asyncio.gather(pro_task, con_task)
@@ -73,11 +96,22 @@ async def n_propose_debate(s: CollectiveState) -> CollectiveState:
     return {**s, "proposals": [pro, con]}
 
 async def n_judge(s: CollectiveState) -> CollectiveState:
-    """Judge node - uses F16 to synthesize proposals into final verdict."""
+    """Judge node - uses F16 to synthesize proposals into final verdict.
+
+    Confidentiality: Judge receives FULL context (no tag filtering) to make
+    informed decisions considering both domain knowledge and process context.
+    """
+    # Fetch full context for judge (no tag filtering)
+    full_context = fetch_domain_context(s["task"], limit=10, for_proposer=False)
+
+    proposals_text = "\n\n---\n\n".join(s.get("proposals", []))
+    user_prompt = f"Task:\n{s['task']}\n\nRelevant context (full access):\n{full_context}\n\nProposals:\n\n{proposals_text}\n\nProvide: final decision, rationale, and next step."
+
     verdict = await chat_async([
-        {"role":"system","content":"You are the JUDGE. Prefer safety, clarity, and testability."},
-        {"role":"user","content":f"Given proposals below, produce a final decision + rationale + next step.\n\n{chr(10).join(s.get('proposals',[]))}"}
+        {"role": "system", "content": f"{HINT_JUDGE} You may consider all available context including process and meta information."},
+        {"role": "user", "content": user_prompt}
     ], which="F16")
+
     return {**s, "verdict": verdict}
 
 def build_collective_graph_async() -> StateGraph:

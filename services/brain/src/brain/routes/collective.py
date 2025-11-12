@@ -7,6 +7,8 @@ import os
 import time
 from prometheus_client import Counter, Histogram
 
+from ..agents.collective.metrics import pairwise_diversity
+
 # Use async graph for better performance (concurrent proposals)
 # Fall back to sync graph if async disabled via env var
 USE_ASYNC_GRAPH = os.getenv("COLLECTIVE_USE_ASYNC", "true").lower() == "true"
@@ -56,6 +58,13 @@ verdict_length = Histogram(
     "Length of judge verdict in characters",
     ["pattern"],
     buckets=[50, 100, 200, 500, 1000, 2000, 5000]
+)
+
+proposal_diversity = Histogram(
+    "collective_proposal_diversity",
+    "Diversity of proposals (1 - avg Jaccard similarity)",
+    ["pattern"],
+    buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 )
 
 class RunReq(BaseModel):
@@ -149,12 +158,16 @@ async def run_collective(req: RunReq):
             role = "pro" if (req.pattern=="debate" and i==0) else ("con" if (req.pattern=="debate" and i==1) else f"specialist_{i+1}")
             proposals.append(Proposal(role=role, text=p))
 
+        # Calculate diversity metrics
+        diversity_metrics = pairwise_diversity(props)
+
         # Record metrics before returning
         latency = time.time() - start_time
         collective_requests.labels(pattern=req.pattern, status=status).inc()
         collective_latency.labels(pattern=req.pattern).observe(latency)
         proposal_count.labels(pattern=req.pattern).observe(len(proposals))
         verdict_length.labels(pattern=req.pattern).observe(len(result.get("verdict", "")))
+        proposal_diversity.labels(pattern=req.pattern).observe(diversity_metrics["avg_diversity"])
 
         return RunRes(
             pattern=req.pattern,

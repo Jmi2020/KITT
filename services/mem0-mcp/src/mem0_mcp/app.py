@@ -34,6 +34,9 @@ class MemoryAddRequest(BaseModel):
     metadata: Dict[str, Any] = Field(
         default_factory=dict, description="Additional metadata"
     )
+    tags: Optional[List[str]] = Field(
+        None, description="Tags for categorizing and filtering memories (e.g., meta, dev, domain)"
+    )
 
 
 class MemorySearchRequest(BaseModel):
@@ -47,6 +50,12 @@ class MemorySearchRequest(BaseModel):
     limit: int = Field(5, ge=1, le=50, description="Maximum number of results")
     score_threshold: float = Field(
         0.7, ge=0.0, le=1.0, description="Minimum similarity score"
+    )
+    include_tags: Optional[List[str]] = Field(
+        None, description="Only return memories with at least one of these tags"
+    )
+    exclude_tags: Optional[List[str]] = Field(
+        None, description="Exclude memories with any of these tags"
     )
 
 
@@ -129,12 +138,14 @@ async def add_memory(request: MemoryAddRequest):
     memory_id = str(uuid4())
     created_at = datetime.utcnow()
 
-    # Prepare payload
+    # Prepare payload with tags
+    tags = request.tags if request.tags is not None else ["domain"]  # Default to domain tag
     payload = {
         "conversation_id": request.conversation_id,
         "user_id": request.user_id,
         "content": request.content,
         "metadata": request.metadata,
+        "tags": tags,
         "created_at": created_at.isoformat(),
     }
 
@@ -184,19 +195,44 @@ async def search_memories(request: MemorySearchRequest):
     if filter_conditions:
         query_filter = {"must": filter_conditions}
 
-    # Search Qdrant
+    # Search Qdrant with increased limit for post-filtering
+    # We fetch more results than requested to account for tag filtering
+    search_limit = request.limit * 3 if (request.include_tags or request.exclude_tags) else request.limit
+
     search_result = await qdrant_client.search(
         collection_name=COLLECTION_NAME,
         query_vector=query_embedding,
         query_filter=query_filter,
-        limit=request.limit,
+        limit=search_limit,
         score_threshold=request.score_threshold,
     )
 
-    # Convert results to Memory objects
+    # Helper function to check if memory passes tag filters
+    def passes_tag_filter(memory_tags: List[str]) -> bool:
+        memory_tag_set = set(memory_tags or [])
+
+        # If exclude_tags specified, reject if any match
+        if request.exclude_tags:
+            if memory_tag_set & set(request.exclude_tags):
+                return False
+
+        # If include_tags specified, require at least one match
+        if request.include_tags:
+            if not (memory_tag_set & set(request.include_tags)):
+                return False
+
+        return True
+
+    # Convert results to Memory objects, filtering by tags
     memories = []
     for hit in search_result:
         payload = hit.payload
+        memory_tags = payload.get("tags", [])
+
+        # Apply tag filter
+        if not passes_tag_filter(memory_tags):
+            continue
+
         memories.append(
             Memory(
                 id=str(hit.id),
@@ -208,6 +244,10 @@ async def search_memories(request: MemorySearchRequest):
                 score=hit.score,
             )
         )
+
+        # Stop once we have enough results
+        if len(memories) >= request.limit:
+            break
 
     return MemorySearchResponse(
         memories=memories,
