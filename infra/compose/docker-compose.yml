@@ -452,12 +452,17 @@ services:
       QDRANT_COLLECTION: kitty_memory
       EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
       EMBEDDING_DIM: 384
+      MAX_MEMORY_MB: 20480
     depends_on:
       - qdrant
     ports:
       - "8765:8765"
     networks:
       - kitty
+    deploy:
+      resources:
+        limits:
+          memory: 20G
 
 networks:
   kitty:
