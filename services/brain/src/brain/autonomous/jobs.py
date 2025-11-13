@@ -256,11 +256,38 @@ async def project_generation_cycle() -> None:
 
     Scheduled: Every 4 hours
 
+    Execution policy:
+    - Development mode (AUTONOMOUS_FULL_TIME_MODE=false): Only runs 4am-6am PST
+    - Production mode (AUTONOMOUS_FULL_TIME_MODE=true): Runs 24/7 when idle for 2h+
+
     Projects are created with status=proposed and require no additional approval.
     Tasks inherit the goal's budget allocation and are ready for execution.
     """
     try:
         struct_logger.info("project_generation_cycle_started", timestamp=datetime.utcnow().isoformat())
+
+        # Check execution policy (time window or idle detection)
+        from common.config import settings
+        from .time_utils import is_within_autonomous_window
+
+        full_time_mode = getattr(settings, "autonomous_full_time_mode", False)
+
+        if not full_time_mode:
+            # Development mode: Only run during 4am-6am PST window
+            within_window, reason = is_within_autonomous_window(start_hour=4, end_hour=6)
+            if not within_window:
+                logger.debug(f"Project generation skipped: {reason}")
+                struct_logger.debug("project_generation_outside_window", reason=reason)
+                return
+        else:
+            # Production mode: Check idle status
+            resource_manager = ResourceManager.from_settings()
+            status = resource_manager.get_status(workload=AutonomousWorkload.scheduled)
+
+            if not status.can_run_autonomous:
+                logger.debug(f"Project generation skipped: {status.reason}")
+                struct_logger.debug("project_generation_not_idle", reason=status.reason)
+                return
 
         # Import project generator
         from .project_generator import ProjectGenerator
@@ -306,6 +333,10 @@ async def task_execution_cycle() -> None:
 
     Scheduled: Every 15 minutes
 
+    Execution policy:
+    - Development mode (AUTONOMOUS_FULL_TIME_MODE=false): Only runs 4am-6am PST
+    - Production mode (AUTONOMOUS_FULL_TIME_MODE=true): Runs 24/7 when idle for 2h+
+
     Tasks are executed based on task_type routing:
     - research_gather → Perplexity API (Sprint 3.3)
     - research_synthesize → Collective meta-agent (Sprint 3.3)
@@ -314,6 +345,29 @@ async def task_execution_cycle() -> None:
     """
     try:
         struct_logger.info("task_execution_cycle_started", timestamp=datetime.utcnow().isoformat())
+
+        # Check execution policy (time window or idle detection)
+        from common.config import settings
+        from .time_utils import is_within_autonomous_window
+
+        full_time_mode = getattr(settings, "autonomous_full_time_mode", False)
+
+        if not full_time_mode:
+            # Development mode: Only run during 4am-6am PST window
+            within_window, reason = is_within_autonomous_window(start_hour=4, end_hour=6)
+            if not within_window:
+                logger.debug(f"Task execution skipped: {reason}")
+                struct_logger.debug("task_execution_outside_window", reason=reason)
+                return
+        else:
+            # Production mode: Check idle status
+            resource_manager = ResourceManager.from_settings()
+            status = resource_manager.get_status(workload=AutonomousWorkload.scheduled)
+
+            if not status.can_run_autonomous:
+                logger.debug(f"Task execution skipped: {status.reason}")
+                struct_logger.debug("task_execution_not_idle", reason=status.reason)
+                return
 
         # Import task executor
         from .task_executor import TaskExecutor
