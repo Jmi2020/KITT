@@ -428,7 +428,15 @@ class Goal(Base):
     approved_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     goal_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
 
+    # Phase 3: Outcome tracking and effectiveness
+    effectiveness_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))
+    outcome_measured_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    learn_from: Mapped[bool] = mapped_column(default=True)  # Use in feedback loop
+    baseline_captured: Mapped[bool] = mapped_column(default=False)
+    baseline_captured_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
     projects: Mapped[List["Project"]] = relationship(back_populates="goal")
+    outcome: Mapped[Optional["GoalOutcome"]] = relationship(back_populates="goal", uselist=False)
     approver: Mapped[Optional[User]] = relationship()
 
 
@@ -451,6 +459,10 @@ class Project(Base):
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     project_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+    # Phase 3: Actual tracking for effectiveness measurement
+    actual_cost_usd: Mapped[Optional[float]] = mapped_column(Numeric(12, 6))
+    actual_duration_hours: Mapped[Optional[int]] = mapped_column(Integer)
 
     goal: Mapped[Optional[Goal]] = relationship(back_populates="projects")
     tasks: Mapped[List["Task"]] = relationship(back_populates="project")
@@ -481,6 +493,46 @@ class Task(Base):
     project: Mapped[Project] = relationship(back_populates="tasks")
     dependency: Mapped[Optional["Task"]] = relationship(remote_side="Task.id")
     assignee: Mapped[Optional[User]] = relationship()
+
+
+class GoalOutcome(Base):
+    """Phase 3: Outcome tracking and effectiveness measurement for completed goals.
+
+    Tracks baseline metrics, outcome metrics, and effectiveness scores to enable
+    learning and continuous improvement of autonomous goal generation.
+    """
+
+    __tablename__ = "goal_outcomes"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    goal_id: Mapped[str] = mapped_column(ForeignKey("goals.id"), nullable=False, unique=True)
+
+    # Measurement window
+    baseline_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    measurement_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    # Baseline metrics (before goal execution)
+    # Example: {"related_failures": 8, "kb_views": 0, "manual_research_hours": 4.5}
+    baseline_metrics: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+    # Post-execution metrics (30 days after completion)
+    # Example: {"related_failures": 2, "kb_views": 23, "time_saved_hours": 15.2}
+    outcome_metrics: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+    # Effectiveness scoring (0-100 scale)
+    impact_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))  # Problem solved
+    roi_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))  # Return on investment
+    adoption_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))  # Usage metrics
+    quality_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))  # Output quality
+    effectiveness_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))  # Weighted avg
+
+    # Metadata
+    measurement_method: Mapped[Optional[str]] = mapped_column(String(50))  # 'kb_usage', 'failure_rate'
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    measured_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    measured_by: Mapped[str] = mapped_column(String(100), default="system-autonomous")
+
+    goal: Mapped[Goal] = relationship(back_populates="outcome")
 
 
 class DiscoveredDevice(Base):
@@ -580,6 +632,7 @@ __all__ = [
     "Goal",
     "Project",
     "Task",
+    "GoalOutcome",
     "DiscoveredDevice",
     "DiscoveryScan",
 ]

@@ -87,7 +87,11 @@ class OpportunityScore:
 
 
 class GoalGenerator:
-    """Generates autonomous goals from fabrication history and system patterns."""
+    """Generates autonomous goals from fabrication history and system patterns.
+
+    Phase 3: Integrates feedback loop to learn from historical effectiveness
+    and adjust goal generation priorities based on outcome measurements.
+    """
 
     def __init__(
         self,
@@ -96,6 +100,7 @@ class GoalGenerator:
         lookback_days: int = 30,
         min_failure_count: int = 3,
         min_impact_score: float = 50.0,
+        feedback_loop=None,
     ):
         """Initialize goal generator.
 
@@ -104,11 +109,13 @@ class GoalGenerator:
             lookback_days: Days of history to analyze for patterns
             min_failure_count: Minimum failures before suggesting improvement
             min_impact_score: Minimum total score to create goal (0-100)
+            feedback_loop: Optional FeedbackLoop for Phase 3 learning
         """
         self._session_factory = session_factory
         self.lookback_days = lookback_days
         self.min_failure_count = min_failure_count
         self.min_impact_score = min_impact_score
+        self.feedback_loop = feedback_loop
 
     def generate_goals(self, max_goals: int = 5) -> List[Goal]:
         """Generate high-impact autonomous goals.
@@ -142,18 +149,37 @@ class GoalGenerator:
             cost_goals = self._detect_cost_opportunities(session)
             goals.extend(cost_goals)
 
-            # Sort by impact score and take top N
-            goals_with_scores = [
-                (goal, self._calculate_impact_score(goal, session))
-                for goal in goals
-            ]
-            goals_with_scores.sort(key=lambda x: x[1].total_score, reverse=True)
+            # Calculate impact scores with feedback loop adjustment
+            goals_with_scores = []
+            for goal in goals:
+                base_score = self._calculate_impact_score(goal, session)
+
+                # Phase 3: Apply feedback loop adjustment
+                adjustment_factor = 1.0
+                if self.feedback_loop:
+                    adjustment_factor = self.feedback_loop.get_adjustment_factor(
+                        goal.goal_type
+                    )
+
+                adjusted_score = base_score.total_score * adjustment_factor
+
+                # Store both scores in goal metadata for transparency
+                if goal.goal_metadata is None:
+                    goal.goal_metadata = {}
+                goal.goal_metadata["base_impact_score"] = round(base_score.total_score, 2)
+                goal.goal_metadata["adjustment_factor"] = round(adjustment_factor, 3)
+                goal.goal_metadata["adjusted_impact_score"] = round(adjusted_score, 2)
+
+                goals_with_scores.append((goal, base_score, adjusted_score))
+
+            # Sort by adjusted score and take top N
+            goals_with_scores.sort(key=lambda x: x[2], reverse=True)
 
             # Filter by minimum score and limit
             high_impact_goals = [
                 goal
-                for goal, score in goals_with_scores
-                if score.total_score >= self.min_impact_score
+                for goal, base_score, adjusted_score in goals_with_scores
+                if adjusted_score >= self.min_impact_score
             ][:max_goals]
 
             struct_logger.info(
@@ -161,9 +187,10 @@ class GoalGenerator:
                 total_candidates=len(goals),
                 high_impact_count=len(high_impact_goals),
                 top_scores=[
-                    score.total_score
-                    for _, score in goals_with_scores[:max_goals]
+                    {"base": round(base_score.total_score, 2), "adjusted": round(adjusted, 2)}
+                    for _, base_score, adjusted in goals_with_scores[:max_goals]
                 ],
+                feedback_loop_active=self.feedback_loop is not None,
             )
 
             return high_impact_goals

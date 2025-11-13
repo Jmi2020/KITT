@@ -105,46 +105,58 @@ async def weekly_research_cycle() -> None:
 
         logger.info("🔍 Weekly research cycle starting")
 
-        # Import goal generator
+        # Import goal generator and feedback loop
         from .goal_generator import GoalGenerator
+        from .feedback_loop import create_feedback_loop
 
-        # Initialize goal generator
-        goal_gen = GoalGenerator(
-            lookback_days=30,
-            min_failure_count=3,
-            min_impact_score=50.0,
-        )
+        # Get database session
+        db = SessionLocal()
 
-        # Generate high-impact goals
-        logger.info("🎯 Analyzing opportunities and generating goals...")
-        goals = goal_gen.generate_goals(max_goals=5)
+        try:
+            # Phase 3: Create feedback loop for learning
+            feedback_loop = create_feedback_loop(db)
 
-        if not goals:
-            logger.info("📋 No high-impact goals identified this cycle")
+            # Initialize goal generator with feedback loop
+            goal_gen = GoalGenerator(
+                lookback_days=30,
+                min_failure_count=3,
+                min_impact_score=50.0,
+                feedback_loop=feedback_loop,
+            )
+
+            # Generate high-impact goals
+            logger.info("🎯 Analyzing opportunities and generating goals...")
+            goals = goal_gen.generate_goals(max_goals=5)
+
+            if not goals:
+                logger.info("📋 No high-impact goals identified this cycle")
+                struct_logger.info(
+                    "weekly_research_cycle_no_goals",
+                    message="No opportunities meeting minimum impact threshold",
+                    budget_available=float(status.budget_available)
+                )
+                return
+
+            # Persist goals to database
+            saved_count = goal_gen.persist_goals(goals)
+
+            logger.info(
+                f"✅ Weekly research cycle completed: "
+                f"{saved_count} goals created, "
+                f"awaiting approval"
+            )
+
             struct_logger.info(
-                "weekly_research_cycle_no_goals",
-                message="No opportunities meeting minimum impact threshold",
+                "weekly_research_cycle_completed",
+                goals_generated=len(goals),
+                goals_persisted=saved_count,
+                goal_types=[g.goal_type.value for g in goals],
+                top_descriptions=[g.description[:80] for g in goals[:3]],
                 budget_available=float(status.budget_available)
             )
-            return
 
-        # Persist goals to database
-        saved_count = goal_gen.persist_goals(goals)
-
-        logger.info(
-            f"✅ Weekly research cycle completed: "
-            f"{saved_count} goals created, "
-            f"awaiting approval"
-        )
-
-        struct_logger.info(
-            "weekly_research_cycle_completed",
-            goals_generated=len(goals),
-            goals_persisted=saved_count,
-            goal_types=[g.goal_type.value for g in goals],
-            top_descriptions=[g.description[:80] for g in goals[:3]],
-            budget_available=float(status.budget_available)
-        )
+        finally:
+            db.close()
 
     except Exception as exc:
         logger.error(f"❌ Weekly research cycle failed: {exc}", exc_info=True)
@@ -393,6 +405,80 @@ async def task_execution_cycle() -> None:
         struct_logger.error("task_execution_cycle_failed", error=str(exc))
 
 
+async def outcome_measurement_cycle() -> None:
+    """Measure outcomes for completed goals (Phase 3 learning).
+
+    Performs:
+    - Find goals completed exactly 30 days ago
+    - Capture baseline metrics (if not already captured)
+    - Measure outcome metrics
+    - Calculate effectiveness scores (impact, ROI, adoption, quality)
+    - Store outcomes in goal_outcomes table
+    - Update goal with effectiveness_score
+
+    Scheduled: Daily at 6:00am PST (14:00 UTC)
+
+    Effectiveness scoring:
+    - Impact (40%): Did it solve the problem?
+    - ROI (30%): Was it worth the cost?
+    - Adoption (20%): Is it being used?
+    - Quality (10%): Is the output high-quality?
+
+    Outcomes feed into the feedback loop to improve future goal generation.
+    """
+    try:
+        struct_logger.info("outcome_measurement_cycle_started", timestamp=datetime.utcnow().isoformat())
+
+        # Import outcome measurement module
+        from .outcome_measurement_cycle import run_outcome_measurement_cycle
+
+        # Get database session
+        db = SessionLocal()
+
+        try:
+            # Run outcome measurement cycle
+            logger.info("📊 Starting outcome measurement for goals completed 30 days ago...")
+            results = await run_outcome_measurement_cycle(db)
+
+            if results["status"] == "disabled":
+                logger.info("Outcome measurement cycle disabled (OUTCOME_MEASUREMENT_ENABLED=false)")
+                struct_logger.info("outcome_measurement_disabled")
+                return
+
+            if results["goals_measured"] == 0:
+                logger.info("No goals eligible for outcome measurement")
+                struct_logger.info("outcome_measurement_no_goals")
+                return
+
+            logger.info(
+                f"✅ Outcome measurement completed: "
+                f"{results['goals_measured']} goals measured, "
+                f"{results['goals_failed']} failed"
+            )
+
+            struct_logger.info(
+                "outcome_measurement_completed",
+                goals_measured=results["goals_measured"],
+                goals_failed=results["goals_failed"],
+                duration_seconds=results["duration_seconds"],
+                measurements=[
+                    {
+                        "goal_id": m["goal_id"],
+                        "goal_type": m["goal_type"],
+                        "effectiveness_score": m["effectiveness_score"],
+                    }
+                    for m in results["measurements"]
+                ],
+            )
+
+        finally:
+            db.close()
+
+    except Exception as exc:
+        logger.error(f"❌ Outcome measurement cycle failed: {exc}", exc_info=True)
+        struct_logger.error("outcome_measurement_cycle_failed", error=str(exc))
+
+
 __all__ = [
     "daily_health_check",
     "weekly_research_cycle",
@@ -400,4 +486,5 @@ __all__ = [
     "printer_fleet_health_check",
     "project_generation_cycle",
     "task_execution_cycle",
+    "outcome_measurement_cycle",
 ]

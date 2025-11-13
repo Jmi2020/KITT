@@ -157,6 +157,14 @@ class Settings(BaseSettings):
     autonomous_memory_threshold_percent: float = 70.0
     autonomous_user_id: str = "system-autonomous"
 
+    # Phase 3: Outcome Tracking & Learning
+    outcome_measurement_enabled: bool = True
+    outcome_measurement_window_days: int = 30
+    outcome_measurement_schedule: str = "0 14 * * *"  # Daily 6am PST (14:00 UTC)
+    feedback_loop_enabled: bool = True
+    feedback_loop_min_samples: int = 10  # Minimum outcomes before adjusting
+    feedback_loop_adjustment_max: float = 1.5  # Maximum 1.5x boost
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
