@@ -101,10 +101,11 @@ async def lifespan(app: FastAPI):
             job_id="printer_fleet_health_check",
         )
 
-        # Project generation - Every 4 hours (checks for approved goals)
-        scheduler.add_interval_job(
+        # Project generation - Daily at 4:30am PST (12:30 UTC)
+        scheduler.add_cron_job(
             func=project_generation_cycle,
-            hours=4,
+            hour=12,
+            minute=30,
             job_id="project_generation_cycle",
         )
 

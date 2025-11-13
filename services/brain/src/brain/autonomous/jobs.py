@@ -246,7 +246,7 @@ async def printer_fleet_health_check() -> None:
 
 
 async def project_generation_cycle() -> None:
-    """Generate projects from approved goals (every 4 hours).
+    """Generate projects from approved goals (daily).
 
     Performs:
     - Query for approved goals without projects
@@ -254,11 +254,11 @@ async def project_generation_cycle() -> None:
     - Set task dependencies and priorities
     - Log project creation for user visibility
 
-    Scheduled: Every 4 hours
+    Scheduled: Daily at 4:30am PST (12:30 UTC)
 
     Execution policy:
-    - Development mode (AUTONOMOUS_FULL_TIME_MODE=false): Only runs 4am-6am PST
-    - Production mode (AUTONOMOUS_FULL_TIME_MODE=true): Runs 24/7 when idle for 2h+
+    - Development mode (AUTONOMOUS_FULL_TIME_MODE=false): Runs at scheduled time only
+    - Production mode (AUTONOMOUS_FULL_TIME_MODE=true): Runs at scheduled time when idle for 2h+
 
     Projects are created with status=proposed and require no additional approval.
     Tasks inherit the goal's budget allocation and are ready for execution.
@@ -266,21 +266,13 @@ async def project_generation_cycle() -> None:
     try:
         struct_logger.info("project_generation_cycle_started", timestamp=datetime.utcnow().isoformat())
 
-        # Check execution policy (time window or idle detection)
+        # Check execution policy (idle detection in production mode)
         from common.config import settings
-        from .time_utils import is_within_autonomous_window
 
         full_time_mode = getattr(settings, "autonomous_full_time_mode", False)
 
-        if not full_time_mode:
-            # Development mode: Only run during 4am-6am PST window
-            within_window, reason = is_within_autonomous_window(start_hour=4, end_hour=6)
-            if not within_window:
-                logger.debug(f"Project generation skipped: {reason}")
-                struct_logger.debug("project_generation_outside_window", reason=reason)
-                return
-        else:
-            # Production mode: Check idle status
+        if full_time_mode:
+            # Production mode: Check idle status before running
             resource_manager = ResourceManager.from_settings()
             status = resource_manager.get_status(workload=AutonomousWorkload.scheduled)
 
