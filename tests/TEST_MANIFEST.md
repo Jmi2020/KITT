@@ -2,8 +2,8 @@
 
 **Purpose**: Comprehensive test documentation for batch execution on workstation deployment.
 
-**Last Updated**: 2025-11-12
-**Total Tests**: 40 unit tests + integration tests (pending)
+**Last Updated**: 2025-11-13
+**Total Tests**: 40 unit tests + 3 integration tests
 **Test Framework**: pytest
 **Coverage Target**: >80% for autonomous system
 
@@ -175,56 +175,146 @@ pytest tests/ -v -m "not integration"
 
 ---
 
-## Integration Tests (Pending Implementation)
+## Integration Tests (Sprint 3.4 - IMPLEMENTED)
 
-### test_autonomous_integration.py (Sprint 3)
-**Location**: `tests/integration/test_autonomous_integration.py` (to be created)
-**Estimated Test Count**: 8-10 tests
+### test_autonomous_workflow.py
+**Location**: `tests/integration/test_autonomous_workflow.py`
+**Lines**: 700+
+**Test Count**: 3 integration tests
 **Coverage**: End-to-end autonomous workflows
 
-**Planned Test Scenarios**:
+**Test Classes**:
 
-1. **Complete Autonomous Cycle**
-   - Start with clean database
-   - Seed fabrication failures (8 first_layer failures)
-   - Trigger weekly_research_cycle manually
-   - Verify goals generated with correct scores
-   - Approve goal via API
-   - Verify status change to `approved`
+#### 1. test_autonomous_workflow_end_to_end
+**Purpose**: Verify complete autonomous research workflow from goal generation to KB article creation
 
-2. **Resource Manager Integration**
-   - Test budget exhaustion prevents job execution
-   - Test idle detection prevents job execution
-   - Test resource status updates correctly
+**Workflow Tested**:
+```
+Goal Generation → Goal Approval → Project Generation →
+Task 1: research_gather (Perplexity) →
+Task 2: research_synthesize (Collective) →
+Task 3: kb_create (KnowledgeUpdater) →
+Task 4: review_commit (Git) →
+Project Complete → Goal Complete
+```
 
-3. **Scheduler Job Execution**
-   - Test daily_health_check executes and logs
-   - Test weekly_research_cycle triggers on schedule
-   - Test job failures don't crash scheduler
+**Test Steps**:
+1. Seed database with 3 PETG warping fabrication failures
+2. Run GoalGenerator - verify fabrication_failure_analysis goal created
+3. Approve goal (simulated manual step)
+4. Run ProjectGenerator - verify 4 tasks created with correct dependencies
+5. Execute task 1 (research_gather) with mock Perplexity API
+6. Execute task 2 (research_synthesize) with mock collective meta-agent
+7. Execute task 3 (kb_create) - verify KB article file created with YAML frontmatter
+8. Execute task 4 (review_commit) with mock git operations
+9. Verify all tasks marked as completed
+10. Verify project marked as completed
+11. Verify goal marked as completed
 
-4. **Knowledge Base Updates**
-   - Test material creation and git commit
-   - Test technique guide creation
-   - Test research article generation
+**Mocks & Fixtures**:
+- `mock_perplexity`: Provides realistic PETG warping research response
+- `mock_collective`: Provides structured KB article outline
+- `mock_kb_updater`: Writes to tmp_path for testing
+- `seed_fabrication_failures`: Creates 3 failed jobs with PETG warping
 
-5. **API Endpoint Integration**
-   - Test /api/autonomy/goals listing
-   - Test /api/autonomy/goals/{id}/approve
-   - Test /api/autonomy/goals/{id}/reject
-   - Test error handling for invalid goal IDs
+**Assertions**:
+- Goal generated with correct type and description
+- Project created with 4 tasks
+- Task dependency chain: gather → synthesize → kb_create → commit
+- Each task executes in correct order (dependency blocking works)
+- KB article created with proper YAML frontmatter
+- Project and goal marked as completed
 
-6. **CLI Command Integration**
-   - Test `kitty-cli autonomy list`
-   - Test `kitty-cli autonomy approve <id>`
-   - Test `kitty-cli autonomy status`
+**Runtime**: ~5-10 seconds
 
-**Prerequisites for Integration Tests**:
+#### 2. test_task_dependency_blocking
+**Purpose**: Verify task dependency tracking prevents out-of-order execution
+
+**Scenario**:
+- Create project with 3 tasks in dependency chain
+- Task 1 has no dependencies
+- Task 2 depends on Task 1
+- Task 3 depends on Task 2
+
+**Test Steps**:
+1. Call `_find_ready_tasks()` - should return only Task 1
+2. Mark Task 1 as completed
+3. Call `_find_ready_tasks()` - should return only Task 2
+4. Mark Task 2 as completed
+5. Call `_find_ready_tasks()` - should return only Task 3
+
+**Assertions**:
+- Only tasks with no blocking dependencies are returned
+- Dependency chain enforced correctly
+- Task execution order guaranteed
+
+**Runtime**: <1 second
+
+#### 3. test_failed_task_blocks_dependents
+**Purpose**: Verify failed tasks block dependent tasks from executing
+
+**Scenario**:
+- Create project with 2 tasks (Task 2 depends on Task 1)
+- Mark Task 1 as failed
+- Attempt to execute Task 2
+
+**Test Steps**:
+1. Create task dependency chain
+2. Mark Task 1 as failed with error result
+3. Call `_find_ready_tasks()` - should return empty list
+4. Call `_update_project_status()` - project should be in_progress (not completed)
+5. Verify goal still in approved status (not completed)
+
+**Assertions**:
+- Failed tasks block dependent tasks
+- No tasks ready when dependency failed
+- Project marked as in_progress (has failures)
+- Project not marked as completed
+- Goal not marked as completed
+
+**Runtime**: <1 second
+
+---
+
+### Running Integration Tests
+
+**Prerequisites**:
 - PostgreSQL test database running
-- Alembic migrations applied
-- Brain service running (or use TestClient)
-- Test fixtures for seeding data
+- llama.cpp servers running (Q4/F16) OR use mocks
+- PERPLEXITY_API_KEY in .env OR use mocks
 
-**Execution Time Estimate**: ~30-60 seconds
+**Commands**:
+```bash
+# Run all integration tests
+pytest tests/integration/test_autonomous_workflow.py -v -s
+
+# Run with coverage
+pytest tests/integration/test_autonomous_workflow.py --cov=services.brain.src.brain.autonomous --cov-report=html -v
+
+# Run only integration tests (skip unit tests)
+pytest tests/ -v -m integration
+
+# Run with verbose output
+pytest tests/integration/test_autonomous_workflow.py -v -s -vv
+```
+
+**Expected Output**:
+```
+tests/integration/test_autonomous_workflow.py::test_autonomous_workflow_end_to_end PASSED
+✅ End-to-end autonomous workflow test passed!
+✅ Goal: Research PETG warping prevention techniques...
+✅ Project: Research PETG warping mitigation
+✅ Tasks completed: 4
+✅ KB article created: 2025-W46-petg-warping-prevention.md
+
+tests/integration/test_autonomous_workflow.py::test_task_dependency_blocking PASSED
+✅ Task dependency blocking test passed!
+
+tests/integration/test_autonomous_workflow.py::test_failed_task_blocks_dependents PASSED
+✅ Failed task blocking test passed!
+```
+
+**Execution Time**: ~10-15 seconds total
 
 ---
 
