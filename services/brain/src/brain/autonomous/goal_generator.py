@@ -19,7 +19,7 @@ from common.db.models import (
     GoalType,
     GoalStatus,
     FabricationJob,
-    JobStatus,
+    FabricationStatus,
     RoutingDecision,
 )
 from common.db import SessionLocal
@@ -188,7 +188,7 @@ class GoalGenerator:
             select(FabricationJob)
             .where(
                 and_(
-                    FabricationJob.status == JobStatus.failed,
+                    FabricationJob.status == FabricationStatus.failed,
                     FabricationJob.created_at >= cutoff_date,
                 )
             )

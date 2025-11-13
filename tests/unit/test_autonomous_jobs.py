@@ -5,13 +5,13 @@ from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from decimal import Decimal
 from datetime import datetime
 
-from services.brain.src.brain.autonomous.jobs import (
+from brain.autonomous.jobs import (
     daily_health_check,
     weekly_research_cycle,
     knowledge_base_update,
     printer_fleet_health_check,
 )
-from services.brain.src.brain.autonomous.resource_manager import (
+from brain.autonomous.resource_manager import (
     ResourceStatus,
     AutonomousWorkload,
 )
@@ -53,7 +53,7 @@ class TestDailyHealthCheck:
     """Tests for daily_health_check job."""
 
     @pytest.mark.asyncio
-    @patch('services.brain.src.brain.autonomous.jobs.ResourceManager')
+    @patch('brain.autonomous.jobs.ResourceManager')
     async def test_health_check_success(self, mock_rm_class, mock_resource_status_ready):
         """Test daily health check runs successfully."""
         # Setup mocks
@@ -76,7 +76,7 @@ class TestDailyHealthCheck:
         mock_rm.get_autonomous_budget_summary.assert_called_once_with(days=7)
 
     @pytest.mark.asyncio
-    @patch('services.brain.src.brain.autonomous.jobs.ResourceManager')
+    @patch('brain.autonomous.jobs.ResourceManager')
     async def test_health_check_handles_errors(self, mock_rm_class, caplog):
         """Test health check handles errors gracefully."""
         # Setup mock to raise error
@@ -93,7 +93,7 @@ class TestWeeklyResearchCycle:
     """Tests for weekly_research_cycle job."""
 
     @pytest.mark.asyncio
-    @patch('services.brain.src.brain.autonomous.jobs.ResourceManager')
+    @patch('brain.autonomous.jobs.ResourceManager')
     async def test_research_cycle_runs_when_ready(
         self, mock_rm_class, mock_resource_status_ready
     ):
@@ -112,7 +112,7 @@ class TestWeeklyResearchCycle:
         )
 
     @pytest.mark.asyncio
-    @patch('services.brain.src.brain.autonomous.jobs.ResourceManager')
+    @patch('brain.autonomous.jobs.ResourceManager')
     async def test_research_cycle_skips_when_blocked(
         self, mock_rm_class, mock_resource_status_blocked, caplog
     ):
@@ -129,7 +129,7 @@ class TestWeeklyResearchCycle:
         assert "Weekly research cycle skipped" in caplog.text
 
     @pytest.mark.asyncio
-    @patch('services.brain.src.brain.autonomous.jobs.ResourceManager')
+    @patch('brain.autonomous.jobs.ResourceManager')
     async def test_research_cycle_handles_errors(self, mock_rm_class, caplog):
         """Test research cycle handles errors gracefully."""
         # Setup mock to raise error
@@ -146,8 +146,8 @@ class TestKnowledgeBaseUpdate:
     """Tests for knowledge_base_update job."""
 
     @pytest.mark.asyncio
-    @patch('services.brain.src.brain.autonomous.jobs.ResourceManager')
-    @patch('services.brain.src.brain.autonomous.jobs.KnowledgeUpdater')
+    @patch('brain.autonomous.jobs.ResourceManager')
+    @patch('brain.autonomous.jobs.KnowledgeUpdater')
     async def test_kb_update_runs_when_ready(
         self, mock_kb_class, mock_rm_class, mock_resource_status_ready
     ):
@@ -172,7 +172,7 @@ class TestKnowledgeBaseUpdate:
         mock_kb.list_research.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch('services.brain.src.brain.autonomous.jobs.ResourceManager')
+    @patch('brain.autonomous.jobs.ResourceManager')
     async def test_kb_update_skips_when_blocked(
         self, mock_rm_class, mock_resource_status_blocked, caplog
     ):
@@ -189,7 +189,7 @@ class TestKnowledgeBaseUpdate:
         assert "Knowledge base update skipped" in caplog.text
 
     @pytest.mark.asyncio
-    @patch('services.brain.src.brain.autonomous.jobs.ResourceManager')
+    @patch('brain.autonomous.jobs.ResourceManager')
     async def test_kb_update_handles_errors(self, mock_rm_class, caplog):
         """Test knowledge base update handles errors gracefully."""
         # Setup mock to raise error
@@ -219,7 +219,7 @@ class TestPrinterFleetHealthCheck:
         """Test printer fleet check handles errors gracefully."""
         # Run printer fleet check with patched error
         with patch(
-            'services.brain.src.brain.autonomous.jobs.struct_logger.info',
+            'brain.autonomous.jobs.struct_logger.info',
             side_effect=Exception("Fabrication service unreachable")
         ):
             await printer_fleet_health_check()
@@ -232,7 +232,7 @@ class TestJobScheduleIntegration:
     """Integration tests for job scheduling."""
 
     @pytest.mark.asyncio
-    @patch('services.brain.src.brain.autonomous.jobs.ResourceManager')
+    @patch('brain.autonomous.jobs.ResourceManager')
     async def test_all_jobs_have_correct_signatures(self, mock_rm_class):
         """Test all job functions are async callables with no required args."""
         jobs = [
@@ -252,7 +252,7 @@ class TestJobScheduleIntegration:
             assert code.co_argcount == 0, f"{job.__name__} should accept no arguments"
 
     @pytest.mark.asyncio
-    @patch('services.brain.src.brain.autonomous.jobs.ResourceManager')
+    @patch('brain.autonomous.jobs.ResourceManager')
     async def test_jobs_use_resource_manager_correctly(
         self, mock_rm_class, mock_resource_status_ready
     ):
@@ -278,8 +278,8 @@ class TestJobExecutionTiming:
 
     def test_job_schedules_match_requirements(self):
         """Test job schedules match 4am-6am UTC window."""
-        from services.brain.src.brain.app import lifespan
-        from services.brain.src.brain.autonomous.scheduler import get_scheduler
+        from brain.app import lifespan
+        from brain.autonomous.scheduler import get_scheduler
         from common.config import settings
 
         # Temporarily enable autonomous mode
@@ -299,7 +299,7 @@ class TestJobExecutionTiming:
 
                     # Verify jobs are registered
                     job_info = scheduler.get_job_info()
-                    assert job_info["job_count"] == 4
+                    assert job_info["job_count"] == 6
 
                     # Verify job IDs
                     job_ids = [job["id"] for job in job_info["jobs"]]
@@ -307,6 +307,8 @@ class TestJobExecutionTiming:
                     assert "weekly_research_cycle" in job_ids
                     assert "knowledge_base_update" in job_ids
                     assert "printer_fleet_health_check" in job_ids
+                    assert "project_generation_cycle" in job_ids
+                    assert "task_execution_cycle" in job_ids
 
             asyncio.run(test_lifespan())
 

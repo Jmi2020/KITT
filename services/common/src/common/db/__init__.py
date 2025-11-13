@@ -15,4 +15,14 @@ DATABASE_URL = (
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-__all__ = ["engine", "SessionLocal"]
+
+def get_db():
+    """FastAPI dependency for database sessions."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+__all__ = ["engine", "SessionLocal", "get_db"]

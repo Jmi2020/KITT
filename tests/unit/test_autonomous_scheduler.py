@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
 
-from services.brain.src.brain.autonomous.scheduler import AutonomousScheduler, get_scheduler
+from brain.autonomous.scheduler import AutonomousScheduler, get_scheduler
 
 
 class TestAutonomousScheduler:
@@ -219,7 +219,7 @@ class TestSchedulerEventHandling:
 class TestSchedulerLifecycle:
     """Test scheduler integration with brain service lifecycle."""
 
-    @patch('services.brain.src.brain.autonomous.scheduler.BackgroundScheduler')
+    @patch('brain.autonomous.scheduler.BackgroundScheduler')
     def test_scheduler_integrates_with_lifespan(self, mock_scheduler_class):
         """Test scheduler integrates with FastAPI lifespan."""
         mock_scheduler_instance = MagicMock()

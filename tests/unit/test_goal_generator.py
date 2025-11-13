@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import uuid
 
-from services.brain.src.brain.autonomous.goal_generator import (
+from brain.autonomous.goal_generator import (
     GoalGenerator,
     OpportunityScore,
 )
