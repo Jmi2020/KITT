@@ -348,7 +348,19 @@ class ResearchMCPServer(MCPServer):
                 )
 
             output = perplexity_result["output"]
-            logger.info("Perplexity research completed (%d chars)", len(output))
+            raw = perplexity_result.get("raw", {})
+
+            # Extract citations from multiple possible locations
+            citations = (
+                raw.get("citations", []) or
+                (raw.get("choices", [{}])[0].get("metadata", {}).get("citations", []) if raw.get("choices") else [])
+            )
+
+            # Extract usage data for cost tracking
+            usage = raw.get("usage", {})
+
+            logger.info("Perplexity research completed (%d chars, %d citations, %d tokens)",
+                       len(output), len(citations), usage.get("total_tokens", 0))
 
             return ToolResult(
                 success=True,
@@ -356,11 +368,15 @@ class ResearchMCPServer(MCPServer):
                     "query": query,
                     "research": output,
                     "source": "perplexity",
+                    "citations": citations,
+                    "usage": usage,
                 },
                 metadata={
                     "tool": "research_deep",
                     "query": query,
                     "content_length": len(output),
+                    "citation_count": len(citations),
+                    "tokens_used": usage.get("total_tokens", 0),
                 },
             )
 

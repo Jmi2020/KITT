@@ -80,6 +80,34 @@ class TaskExecutor:
         # Initialize collective graph (lazy, built on first use)
         self._collective_graph = None
 
+    def _calculate_perplexity_cost(self, tokens: int, model: str) -> float:
+        """Calculate Perplexity API cost based on model and token count.
+
+        Args:
+            tokens: Total token count (input + output)
+            model: Perplexity model name
+
+        Returns:
+            Cost in USD
+
+        Note:
+            Pricing is per 1M tokens as of 2025-01.
+            For models with different input/output pricing, we use the average.
+            Actual costs may vary slightly; check https://docs.perplexity.ai/guides/pricing
+        """
+        # Pricing per 1M tokens (as of 2025-01)
+        # For models with split pricing, use average of input/output
+        pricing = {
+            "sonar": 0.20,                    # $0.20 combined input/output
+            "sonar-pro": 9.0,                 # Average of $3 input + $15 output
+            "sonar-reasoning": 3.0,           # Average of $1 input + $5 output
+            "sonar-reasoning-pro": 5.0,       # Average of $2 input + $8 output
+            "sonar-deep-research": 9.0,       # Estimated, similar to sonar-pro
+        }
+
+        rate = pricing.get(model, 0.20)  # Default to sonar pricing
+        return (tokens / 1_000_000) * rate
+
     def execute_ready_tasks(self, limit: int = 5) -> List[Task]:
         """Execute tasks that are ready to run.
 
@@ -292,14 +320,16 @@ class TaskExecutor:
         else:
             results = loop.run_until_complete(self._gather_research_async(queries))
 
-        # Estimate cost (rough estimate: ~$0.001 per query)
-        cost_usd = len(queries) * 0.001
+        # Calculate actual cost based on token usage
+        total_tokens = sum(r.get("usage", {}).get("total_tokens", 0) for r in results)
+        cost_usd = self._calculate_perplexity_cost(total_tokens, model=self._mcp._model)
 
         result = {
             "task_type": "research_gather",
             "queries_executed": len(queries),
             "queries": queries,
             "cost_usd": cost_usd,
+            "total_tokens": total_tokens,
             "results": results,
             "status": "completed",
         }
@@ -308,6 +338,7 @@ class TaskExecutor:
             "research_gather_completed",
             task_id=task.id,
             queries_count=len(queries),
+            total_tokens=total_tokens,
             cost_usd=cost_usd,
         )
 
@@ -334,17 +365,25 @@ class TaskExecutor:
                 # Extract output
                 output = response.get("output", "")
 
-                # Parse sources from raw response if available
+                # Parse sources and usage from raw response
+                # Try multiple locations as Perplexity API format may vary
                 raw = response.get("raw", {})
-                sources = []
-                if "citations" in raw:
-                    sources = raw["citations"]
+
+                # Extract citations from multiple possible locations
+                sources = (
+                    raw.get("citations", []) or  # Top-level citations
+                    (raw.get("choices", [{}])[0].get("metadata", {}).get("citations", []) if raw.get("choices") else [])  # Choice metadata
+                )
+
+                # Extract usage data for cost tracking
+                usage = raw.get("usage", {})
 
                 results.append(
                     {
                         "query": query,
                         "summary": output,
                         "sources": sources,
+                        "usage": usage,
                         "timestamp": datetime.utcnow().isoformat(),
                     }
                 )
@@ -359,6 +398,7 @@ class TaskExecutor:
                         "summary": "",
                         "error": str(exc),
                         "sources": [],
+                        "usage": {},
                     }
                 )
 

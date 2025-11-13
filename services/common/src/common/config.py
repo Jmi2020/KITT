@@ -115,6 +115,9 @@ class Settings(BaseSettings):
     # External providers
     perplexity_base_url: str = "https://api.perplexity.ai"
     perplexity_api_key: Optional[str] = None
+    perplexity_model_search: str = "sonar"
+    perplexity_model_reasoning: str = "sonar-reasoning-pro"
+    perplexity_model_research: str = "sonar-pro"
     openai_base_url: str = "https://api.openai.com"
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-4o"
