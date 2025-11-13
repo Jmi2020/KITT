@@ -294,10 +294,64 @@ async def project_generation_cycle() -> None:
         struct_logger.error("project_generation_cycle_failed", error=str(exc))
 
 
+async def task_execution_cycle() -> None:
+    """Execute ready tasks (every 15 minutes).
+
+    Performs:
+    - Find tasks ready for execution (pending, no blocking dependencies)
+    - Execute up to 5 tasks per cycle
+    - Update task status (pending → in_progress → completed/failed)
+    - Mark dependent tasks as ready
+    - Update project/goal completion status
+
+    Scheduled: Every 15 minutes
+
+    Tasks are executed based on task_type routing:
+    - research_gather → Perplexity API (Sprint 3.3)
+    - research_synthesize → Collective meta-agent (Sprint 3.3)
+    - kb_create → KnowledgeUpdater (Sprint 3.3)
+    - review_commit → Git operations (Sprint 3.3)
+    """
+    try:
+        struct_logger.info("task_execution_cycle_started", timestamp=datetime.utcnow().isoformat())
+
+        # Import task executor
+        from .task_executor import TaskExecutor
+
+        # Initialize executor
+        task_exec = TaskExecutor()
+
+        # Execute ready tasks
+        logger.info("⚙️ Checking for ready tasks...")
+        executed_tasks = task_exec.execute_ready_tasks(limit=5)
+
+        if not executed_tasks:
+            logger.info("No tasks ready for execution")
+            struct_logger.info("task_execution_no_tasks")
+            return
+
+        logger.info(
+            f"✅ Task execution completed: "
+            f"{len(executed_tasks)} tasks executed"
+        )
+
+        struct_logger.info(
+            "task_execution_cycle_completed",
+            tasks_executed=len(executed_tasks),
+            task_titles=[t.title[:60] for t in executed_tasks],
+            task_ids=[t.id for t in executed_tasks],
+        )
+
+    except Exception as exc:
+        logger.error(f"❌ Task execution cycle failed: {exc}", exc_info=True)
+        struct_logger.error("task_execution_cycle_failed", error=str(exc))
+
+
 __all__ = [
     "daily_health_check",
     "weekly_research_cycle",
     "knowledge_base_update",
     "printer_fleet_health_check",
     "project_generation_cycle",
+    "task_execution_cycle",
 ]
