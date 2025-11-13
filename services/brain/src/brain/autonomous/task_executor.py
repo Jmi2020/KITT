@@ -3,16 +3,20 @@
 Executes tasks based on task_type, updating status and managing dependencies.
 """
 
+import asyncio
 import logging
+import subprocess
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import structlog
 from sqlalchemy import select, and_
 from sqlalchemy.orm import Session
 
+from common.config import settings
 from common.db.models import (
     Task,
     TaskStatus,
@@ -22,6 +26,10 @@ from common.db.models import (
     GoalStatus,
 )
 from common.db import SessionLocal
+
+from brain.routing.cloud_clients import MCPClient
+from brain.agents.collective.graph_async import build_collective_graph_async
+from brain.knowledge.updater import KnowledgeUpdater
 
 logger = logging.getLogger(__name__)
 struct_logger = structlog.get_logger()
@@ -41,13 +49,36 @@ class TaskExecutor:
     def __init__(
         self,
         session_factory=SessionLocal,
+        mcp_client: Optional[MCPClient] = None,
+        kb_updater: Optional[KnowledgeUpdater] = None,
     ):
         """Initialize task executor.
 
         Args:
             session_factory: SQLAlchemy session factory
+            mcp_client: Perplexity MCP client (optional, will create if needed)
+            kb_updater: Knowledge base updater (optional, will create if needed)
         """
         self._session_factory = session_factory
+
+        # Initialize Perplexity MCP client
+        if mcp_client:
+            self._mcp = mcp_client
+        elif settings.perplexity_api_key:
+            self._mcp = MCPClient(
+                base_url=settings.perplexity_base_url,
+                api_key=settings.perplexity_api_key,
+                model=getattr(settings, "perplexity_model_search", "sonar"),
+            )
+        else:
+            self._mcp = None
+            logger.warning("Perplexity API key not configured, research_gather will fail")
+
+        # Initialize Knowledge Updater
+        self._kb_updater = kb_updater or KnowledgeUpdater()
+
+        # Initialize collective graph (lazy, built on first use)
+        self._collective_graph = None
 
     def execute_ready_tasks(self, limit: int = 5) -> List[Task]:
         """Execute tasks that are ready to run.
@@ -236,6 +267,12 @@ class TaskExecutor:
         """
         logger.info(f"🔍 Executing research gather: {task.title}")
 
+        # Check if Perplexity is configured
+        if not self._mcp:
+            raise RuntimeError(
+                "Perplexity API not configured. Set PERPLEXITY_API_KEY in .env"
+            )
+
         # Extract search queries from metadata
         queries = task.task_metadata.get("search_queries", [])
         max_cost = task.task_metadata.get("max_cost_usd", 1.0)
@@ -244,29 +281,88 @@ class TaskExecutor:
             logger.warning("No search queries provided, using task description")
             queries = [task.description]
 
-        # TODO: Sprint 3.3 - Integrate Perplexity API
-        # For now, return placeholder
-        logger.info(f"Would execute {len(queries)} Perplexity searches")
-        logger.info(f"Queries: {queries[:3]}")
+        logger.info(f"Executing {len(queries)} Perplexity searches")
+
+        # Execute searches using Perplexity API (async)
+        # Run in event loop since _execute_task is synchronous
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Create new loop if one is already running
+            results = asyncio.run(self._gather_research_async(queries))
+        else:
+            results = loop.run_until_complete(self._gather_research_async(queries))
+
+        # Estimate cost (rough estimate: ~$0.001 per query)
+        cost_usd = len(queries) * 0.001
 
         result = {
             "task_type": "research_gather",
             "queries_executed": len(queries),
             "queries": queries,
-            "cost_usd": 0.0,  # Placeholder
-            "results": [
-                {
-                    "query": q,
-                    "summary": f"[PLACEHOLDER] Research results for: {q}",
-                    "sources": [],
-                }
-                for q in queries[:3]  # Limit to 3 for placeholder
-            ],
-            "status": "placeholder_complete",
-            "note": "Perplexity integration pending Sprint 3.3",
+            "cost_usd": cost_usd,
+            "results": results,
+            "status": "completed",
         }
 
+        struct_logger.info(
+            "research_gather_completed",
+            task_id=task.id,
+            queries_count=len(queries),
+            cost_usd=cost_usd,
+        )
+
         return result
+
+    async def _gather_research_async(
+        self, queries: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Execute multiple research queries in parallel.
+
+        Args:
+            queries: List of search queries
+
+        Returns:
+            List of result dictionaries
+        """
+        results = []
+
+        for query in queries:
+            try:
+                # Query Perplexity API
+                response = await self._mcp.query({"query": query})
+
+                # Extract output
+                output = response.get("output", "")
+
+                # Parse sources from raw response if available
+                raw = response.get("raw", {})
+                sources = []
+                if "citations" in raw:
+                    sources = raw["citations"]
+
+                results.append(
+                    {
+                        "query": query,
+                        "summary": output,
+                        "sources": sources,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                )
+
+                logger.info(f"✅ Research query completed: {query[:60]}...")
+
+            except Exception as exc:
+                logger.error(f"Failed to execute query '{query}': {exc}", exc_info=True)
+                results.append(
+                    {
+                        "query": query,
+                        "summary": "",
+                        "error": str(exc),
+                        "sources": [],
+                    }
+                )
+
+        return results
 
     def _execute_research_synthesize(self, task: Task, session: Session) -> Dict[str, Any]:
         """Execute research synthesis task (collective meta-agent).
@@ -298,21 +394,87 @@ class TaskExecutor:
         # Extract research results
         research_results = gather_task.result.get("results", [])
 
-        # TODO: Sprint 3.3 - Use collective meta-agent for synthesis
-        logger.info(f"Would synthesize {len(research_results)} research results")
+        if not research_results:
+            return {
+                "error": "No research results to synthesize",
+                "status": "failed",
+            }
+
+        logger.info(f"Synthesizing {len(research_results)} research results using collective meta-agent")
+
+        # Build collective graph if not already built
+        if not self._collective_graph:
+            self._collective_graph = build_collective_graph_async()
+
+        # Prepare synthesis task prompt
+        research_summary = "\n\n".join([
+            f"Query: {r.get('query', 'Unknown')}\n"
+            f"Summary: {r.get('summary', 'No summary')}\n"
+            f"Sources: {', '.join(r.get('sources', []))}"
+            for r in research_results
+        ])
+
+        synthesis_prompt = f"""Synthesize the following research findings into a structured knowledge base article outline.
+
+Research Topic: {task.title}
+Goal: {project.goal.description if project.goal else 'Unknown'}
+
+Research Findings:
+{research_summary}
+
+Please provide:
+1. A concise title for the knowledge base article
+2. An executive summary (2-3 sentences)
+3. A structured outline with key sections and bullet points
+4. Key insights and recommendations
+5. Suggested tags for categorization
+
+Format your response as a structured outline suitable for a knowledge base article."""
+
+        # Run collective meta-agent (council pattern with k=3 specialists)
+        # Run in event loop since this is synchronous context
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            synthesis_result = asyncio.run(self._run_collective_synthesis(synthesis_prompt))
+        else:
+            synthesis_result = loop.run_until_complete(
+                self._run_collective_synthesis(synthesis_prompt)
+            )
+
+        # Extract verdict from collective result
+        synthesis = synthesis_result.get("verdict", "")
 
         result = {
             "task_type": "research_synthesize",
             "input_count": len(research_results),
-            "synthesis": "[PLACEHOLDER] Synthesized outline from research results",
-            "key_points": [
-                "Point 1: Material properties",
-                "Point 2: Print settings",
-                "Point 3: Suppliers",
-            ],
-            "status": "placeholder_complete",
-            "note": "Collective meta-agent integration pending Sprint 3.3",
+            "synthesis": synthesis,
+            "collective_logs": synthesis_result.get("logs", ""),
+            "status": "completed",
         }
+
+        struct_logger.info(
+            "research_synthesize_completed",
+            task_id=task.id,
+            input_count=len(research_results),
+        )
+
+        return result
+
+    async def _run_collective_synthesis(self, prompt: str) -> Dict[str, Any]:
+        """Run collective meta-agent for synthesis.
+
+        Args:
+            prompt: Synthesis task prompt
+
+        Returns:
+            Collective result with verdict
+        """
+        # Invoke collective graph
+        result = await self._collective_graph.ainvoke({
+            "task": prompt,
+            "pattern": "council",  # Use council pattern for synthesis
+            "k": 3,  # 3 specialist proposers
+        })
 
         return result
 
@@ -331,10 +493,13 @@ class TaskExecutor:
         # Get synthesis results
         project = session.get(Project, task.project_id)
         synthesize_task = None
+        gather_task = None
+
         for t in project.tasks:
             if t.task_metadata.get("task_type") == "research_synthesize":
                 synthesize_task = t
-                break
+            elif t.task_metadata.get("task_type") == "research_gather":
+                gather_task = t
 
         if not synthesize_task or not synthesize_task.result:
             logger.warning("No synthesis results found")
@@ -343,21 +508,75 @@ class TaskExecutor:
                 "status": "failed",
             }
 
-        # Determine KB category
-        kb_category = task.task_metadata.get("kb_category", "research")
+        # Extract synthesis content
+        synthesis = synthesize_task.result.get("synthesis", "")
 
-        # TODO: Sprint 3.3 - Use KnowledgeUpdater to create article
-        logger.info(f"Would create KB article in {kb_category}/")
+        if not synthesis:
+            return {
+                "error": "Empty synthesis content",
+                "status": "failed",
+            }
 
-        result = {
-            "task_type": "kb_create",
-            "kb_category": kb_category,
-            "file_path": f"knowledge/{kb_category}/placeholder-article.md",
-            "status": "placeholder_complete",
-            "note": "KnowledgeUpdater integration pending Sprint 3.3",
-        }
+        # Extract sources from gather task
+        sources = []
+        if gather_task and gather_task.result:
+            for r in gather_task.result.get("results", []):
+                sources.extend(r.get("sources", []))
 
-        return result
+        # Get goal info for metadata
+        goal = project.goal if project.goal else None
+        goal_id = goal.id if goal else None
+
+        # Extract topic from task or goal
+        topic = task.task_metadata.get("topic", task.title)
+
+        # Get cost from gather task
+        cost_usd = None
+        if gather_task and gather_task.result:
+            cost_usd = gather_task.result.get("cost_usd", 0.0)
+
+        logger.info(f"Creating knowledge base article: {topic}")
+
+        # Create research article using KnowledgeUpdater
+        # auto_commit=False because review_commit task will handle git operations
+        try:
+            file_path = self._kb_updater.create_research_article(
+                topic=topic,
+                content=synthesis,
+                goal_id=goal_id,
+                project_id=project.id,
+                cost_usd=cost_usd,
+                sources=sources,
+                auto_commit=False,  # Will be committed by review_commit task
+            )
+
+            result = {
+                "task_type": "kb_create",
+                "topic": topic,
+                "file_path": str(file_path),
+                "goal_id": goal_id,
+                "project_id": project.id,
+                "sources_count": len(sources),
+                "status": "completed",
+            }
+
+            struct_logger.info(
+                "kb_create_completed",
+                task_id=task.id,
+                file_path=str(file_path),
+                sources_count=len(sources),
+            )
+
+            logger.info(f"✅ Knowledge base article created: {file_path}")
+
+            return result
+
+        except Exception as exc:
+            logger.error(f"Failed to create KB article: {exc}", exc_info=True)
+            return {
+                "error": str(exc),
+                "status": "failed",
+            }
 
     def _execute_review_commit(self, task: Task, session: Session) -> Dict[str, Any]:
         """Execute review and git commit task.
@@ -386,44 +605,256 @@ class TaskExecutor:
                 "status": "failed",
             }
 
-        file_path = kb_task.result.get("file_path")
+        file_path_str = kb_task.result.get("file_path")
+        file_path = Path(file_path_str)
 
-        # TODO: Sprint 3.3 - Git operations
-        logger.info(f"Would commit file: {file_path}")
+        if not file_path.exists():
+            logger.error(f"KB article file not found: {file_path}")
+            return {
+                "error": f"File not found: {file_path}",
+                "status": "failed",
+            }
 
-        result = {
-            "task_type": "review_commit",
-            "file_path": file_path,
-            "commit_sha": "placeholder_commit_sha",
-            "status": "placeholder_complete",
-            "note": "Git commit integration pending Sprint 3.3",
-        }
+        # Extract topic for commit message
+        topic = kb_task.result.get("topic", "research")
 
-        return result
+        # Validate file (basic check for YAML frontmatter)
+        try:
+            with open(file_path, "r") as f:
+                content = f.read()
+                if not content.startswith("---"):
+                    logger.warning("File missing YAML frontmatter, but proceeding with commit")
+        except Exception as exc:
+            logger.error(f"Failed to read file for validation: {exc}")
+            return {
+                "error": f"File validation failed: {exc}",
+                "status": "failed",
+            }
+
+        # Execute git operations
+        logger.info(f"Committing file: {file_path}")
+
+        try:
+            # Get repo root (knowledge base parent directory)
+            repo_root = file_path.parent.parent.parent
+
+            # Get relative path from repo root
+            rel_path = file_path.relative_to(repo_root)
+
+            # Git add
+            add_result = subprocess.run(
+                ["git", "add", str(rel_path)],
+                cwd=repo_root,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            # Git commit with autonomous tag
+            commit_message = f"KB: autonomous update - {topic}"
+            commit_result = subprocess.run(
+                ["git", "commit", "-m", commit_message],
+                cwd=repo_root,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            # Get commit SHA
+            sha_result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo_root,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            commit_sha = sha_result.stdout.strip()
+
+            result = {
+                "task_type": "review_commit",
+                "file_path": str(file_path),
+                "commit_sha": commit_sha,
+                "commit_message": commit_message,
+                "status": "completed",
+            }
+
+            struct_logger.info(
+                "review_commit_completed",
+                task_id=task.id,
+                file_path=str(rel_path),
+                commit_sha=commit_sha,
+            )
+
+            logger.info(f"✅ Git commit successful: {commit_sha[:8]} - {commit_message}")
+
+            return result
+
+        except subprocess.CalledProcessError as exc:
+            error_msg = exc.stderr if exc.stderr else str(exc)
+            logger.error(f"Git commit failed: {error_msg}", exc_info=True)
+            return {
+                "error": f"Git commit failed: {error_msg}",
+                "status": "failed",
+            }
 
     def _execute_improvement_research(self, task: Task, session: Session) -> Dict[str, Any]:
-        """Execute improvement research task."""
+        """Execute improvement research task.
+
+        This combines research_gather + research_synthesize into a single task
+        for improvement goals (smaller scope than full research goals).
+        """
         logger.info(f"🔧 Executing improvement research: {task.title}")
+
+        # Check if Perplexity is configured
+        if not self._mcp:
+            raise RuntimeError(
+                "Perplexity API not configured. Set PERPLEXITY_API_KEY in .env"
+            )
+
+        # Extract search query from task metadata or use description
+        query = task.task_metadata.get("search_query", task.description)
+
+        logger.info(f"Executing improvement research query: {query}")
+
+        # Execute single Perplexity search
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            search_results = asyncio.run(self._gather_research_async([query]))
+        else:
+            search_results = loop.run_until_complete(self._gather_research_async([query]))
+
+        # Extract result
+        if search_results and len(search_results) > 0:
+            research_output = search_results[0].get("summary", "")
+            sources = search_results[0].get("sources", [])
+        else:
+            research_output = ""
+            sources = []
 
         result = {
             "task_type": "improvement_research",
-            "status": "placeholder_complete",
-            "note": "Improvement research pending Sprint 3.3",
+            "query": query,
+            "research_output": research_output,
+            "sources": sources,
+            "cost_usd": 0.001,  # Rough estimate
+            "status": "completed",
         }
+
+        struct_logger.info(
+            "improvement_research_completed",
+            task_id=task.id,
+            query=query,
+            sources_count=len(sources),
+        )
 
         return result
 
     def _execute_kb_update_technique(self, task: Task, session: Session) -> Dict[str, Any]:
-        """Execute KB technique update task."""
+        """Execute KB technique update task.
+
+        Updates an existing technique guide based on improvement research results.
+        """
         logger.info(f"📚 Executing KB technique update: {task.title}")
 
-        result = {
-            "task_type": "kb_update_technique",
-            "status": "placeholder_complete",
-            "note": "Technique update pending Sprint 3.3",
-        }
+        # Get previous task results (improvement_research)
+        project = session.get(Project, task.project_id)
+        research_task = None
+        for t in project.tasks:
+            if t.task_metadata.get("task_type") == "improvement_research":
+                research_task = t
+                break
 
-        return result
+        if not research_task or not research_task.result:
+            logger.warning("No research results found for technique update")
+            return {
+                "error": "No research results to update technique with",
+                "status": "failed",
+            }
+
+        # Extract research output
+        research_output = research_task.result.get("research_output", "")
+        sources = research_task.result.get("sources", [])
+
+        if not research_output:
+            return {
+                "error": "Empty research output",
+                "status": "failed",
+            }
+
+        # Extract technique slug from metadata
+        technique_slug = task.task_metadata.get("technique_slug")
+
+        if not technique_slug:
+            # Try to infer from task title or description
+            logger.warning("No technique_slug provided, using placeholder")
+            technique_slug = "autonomous-improvement"
+
+        logger.info(f"Updating technique: {technique_slug}")
+
+        # Format update content with research findings
+        update_content = f"""
+## Autonomous Update - {datetime.utcnow().strftime('%Y-%m-%d')}
+
+{research_output}
+
+### Sources
+{chr(10).join([f"- {source}" for source in sources])}
+"""
+
+        # Update technique guide
+        try:
+            # Check if technique exists, otherwise create it
+            technique_path = self._kb_updater.techniques_path / f"{technique_slug}.md"
+
+            if technique_path.exists():
+                # Update existing technique
+                file_path = self._kb_updater.update_material(
+                    slug=technique_slug,
+                    updates={"content": update_content},
+                    auto_commit=True,
+                )
+                action = "updated"
+            else:
+                # Create new technique guide
+                file_path = self._kb_updater.create_technique(
+                    slug=technique_slug,
+                    name=task.title,
+                    content=update_content,
+                    metadata={
+                        "autonomous": True,
+                        "project_id": project.id,
+                        "goal_id": project.goal_id,
+                    },
+                    auto_commit=True,
+                )
+                action = "created"
+
+            result = {
+                "task_type": "kb_update_technique",
+                "technique_slug": technique_slug,
+                "file_path": str(file_path),
+                "action": action,
+                "sources_count": len(sources),
+                "status": "completed",
+            }
+
+            struct_logger.info(
+                "kb_update_technique_completed",
+                task_id=task.id,
+                technique_slug=technique_slug,
+                action=action,
+            )
+
+            logger.info(f"✅ Technique {action}: {file_path}")
+
+            return result
+
+        except Exception as exc:
+            logger.error(f"Failed to update technique: {exc}", exc_info=True)
+            return {
+                "error": str(exc),
+                "status": "failed",
+            }
 
     def _execute_optimization_analyze(self, task: Task, session: Session) -> Dict[str, Any]:
         """Execute optimization analysis task."""
