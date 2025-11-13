@@ -306,18 +306,25 @@ class ProjectGenerator:
         """
         tasks = []
 
+        # Determine Perplexity model based on goal importance
+        # High-budget goals (>$2.00) use sonar-pro for deeper research
+        # Low-budget goals (<=$2.00) use sonar for cost efficiency
+        budget = float(goal.estimated_budget)
+        perplexity_model = "sonar-pro" if budget > 2.0 else "sonar"
+
         # Task 1: Gather information
         task1 = Task(
             id=str(uuid.uuid4()),
             project_id=project.id,
             title="Gather information from web sources",
-            description=f"Research {goal.description} using Perplexity API. Gather documentation, best practices, specifications, and expert recommendations.",
+            description=f"Research {goal.description} using Perplexity API ({perplexity_model}). Gather documentation, best practices, specifications, and expert recommendations.",
             status=TaskStatus.pending,
             priority=TaskPriority.high,
             task_metadata={
                 "task_type": "research_gather",
                 "search_queries": self._generate_search_queries(goal),
-                "max_cost_usd": float(goal.estimated_budget) * 0.4,  # 40% of budget
+                "max_cost_usd": budget * 0.4,  # 40% of budget
+                "perplexity_model": perplexity_model,  # Expose model selection
             },
         )
         tasks.append(task1)

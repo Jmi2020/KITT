@@ -309,20 +309,34 @@ class TaskExecutor:
             logger.warning("No search queries provided, using task description")
             queries = [task.description]
 
-        logger.info(f"Executing {len(queries)} Perplexity searches")
+        # Extract optional Perplexity search parameters and model selection
+        # These control result quality and sources
+        search_params = {}
+        if "search_domain_filter" in task.task_metadata:
+            search_params["search_domain_filter"] = task.task_metadata["search_domain_filter"]
+        if "search_recency_filter" in task.task_metadata:
+            search_params["search_recency_filter"] = task.task_metadata["search_recency_filter"]
+        if "return_related_questions" in task.task_metadata:
+            search_params["return_related_questions"] = task.task_metadata["return_related_questions"]
+
+        # Allow per-task model override (e.g., sonar-pro for high-impact research)
+        perplexity_model = task.task_metadata.get("perplexity_model", self._mcp._model)
+        search_params["model"] = perplexity_model
+
+        logger.info(f"Executing {len(queries)} Perplexity searches with model={perplexity_model}, search_params: {search_params}")
 
         # Execute searches using Perplexity API (async)
         # Run in event loop since _execute_task is synchronous
         loop = asyncio.get_event_loop()
         if loop.is_running():
             # Create new loop if one is already running
-            results = asyncio.run(self._gather_research_async(queries))
+            results = asyncio.run(self._gather_research_async(queries, search_params))
         else:
-            results = loop.run_until_complete(self._gather_research_async(queries))
+            results = loop.run_until_complete(self._gather_research_async(queries, search_params))
 
         # Calculate actual cost based on token usage
         total_tokens = sum(r.get("usage", {}).get("total_tokens", 0) for r in results)
-        cost_usd = self._calculate_perplexity_cost(total_tokens, model=self._mcp._model)
+        cost_usd = self._calculate_perplexity_cost(total_tokens, model=perplexity_model)
 
         result = {
             "task_type": "research_gather",
@@ -345,22 +359,30 @@ class TaskExecutor:
         return result
 
     async def _gather_research_async(
-        self, queries: List[str]
+        self, queries: List[str], search_params: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """Execute multiple research queries in parallel.
 
         Args:
             queries: List of search queries
+            search_params: Optional Perplexity search parameters:
+                          - search_domain_filter: List of domains to include/exclude
+                          - search_recency_filter: "day", "week", "month", "year"
+                          - return_related_questions: Include related questions
 
         Returns:
             List of result dictionaries
         """
         results = []
+        search_params = search_params or {}
 
         for query in queries:
             try:
+                # Build query payload with search parameters
+                payload = {"query": query, **search_params}
+
                 # Query Perplexity API
-                response = await self._mcp.query({"query": query})
+                response = await self._mcp.query(payload)
 
                 # Extract output
                 output = response.get("output", "")
