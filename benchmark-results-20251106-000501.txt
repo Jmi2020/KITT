@@ -1,8 +1,0 @@
-===========================================
-llama.cpp GPU Benchmark
-===========================================
-Host: http://localhost:8082
-Model: kitty-coder
-Date: Thu Nov  6 00:05:01 PST 2025
-
-ERROR: llama.cpp server not responding at http://localhost:8082
