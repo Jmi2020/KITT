@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import io
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 import aiohttp
@@ -77,7 +77,7 @@ class CameraCapture:
         Returns:
             SnapshotResult with MinIO URL or error
         """
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # Check if camera capture is enabled
         if not settings.enable_camera_capture:

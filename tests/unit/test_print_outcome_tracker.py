@@ -8,8 +8,10 @@ from decimal import Decimal
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, JSON
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.dialects.postgresql import JSONB
+from unittest.mock import patch
 
 from common.db.models import Base, FailureReason, Material, PrintOutcome
 from fabrication.monitoring.outcome_tracker import (
@@ -27,33 +29,57 @@ from fabrication.monitoring.outcome_tracker import (
 @pytest.fixture(scope="function")
 def db_session():
     """Create in-memory SQLite database for testing."""
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
+    # Create custom JSONB type that compiles to JSON for SQLite
+    from sqlalchemy import event
+    from sqlalchemy.types import JSON as JSONType
 
-    SessionLocal = sessionmaker(bind=engine)
-    session = SessionLocal()
+    engine = create_engine("sqlite:///:memory:",
+                          connect_args={'check_same_thread': False})
 
-    # Add test material
-    material = Material(
-        id="pla_black_esun",
-        material_type="pla",
-        color="black",
-        manufacturer="eSUN",
-        cost_per_kg_usd=Decimal("21.99"),
-        density_g_cm3=Decimal("1.24"),
-        nozzle_temp_min_c=190,
-        nozzle_temp_max_c=220,
-        bed_temp_min_c=50,
-        bed_temp_max_c=70,
-        properties={},
-        sustainability_score=75,
-    )
-    session.add(material)
-    session.commit()
+    # Add compiler for JSONB -> JSON when using SQLite
+    from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
 
-    yield session
+    original_visit_JSONB = getattr(SQLiteTypeCompiler, 'visit_JSONB', None)
 
-    session.close()
+    def visit_JSONB(self, type_, **kw):
+        return "JSON"
+
+    SQLiteTypeCompiler.visit_JSONB = visit_JSONB
+
+    try:
+        # Create all tables (JSONB will compile to JSON in SQLite)
+        Base.metadata.create_all(engine)
+
+        SessionLocal = sessionmaker(bind=engine)
+        session = SessionLocal()
+
+        # Add test material
+        material = Material(
+            id="pla_black_esun",
+            material_type="pla",
+            color="black",
+            manufacturer="eSUN",
+            cost_per_kg_usd=Decimal("21.99"),
+            density_g_cm3=Decimal("1.24"),
+            nozzle_temp_min_c=190,
+            nozzle_temp_max_c=220,
+            bed_temp_min_c=50,
+            bed_temp_max_c=70,
+            properties={},
+            sustainability_score=75,
+        )
+        session.add(material)
+        session.commit()
+
+        yield session
+
+        session.close()
+    finally:
+        # Restore original compiler if it existed
+        if original_visit_JSONB:
+            SQLiteTypeCompiler.visit_JSONB = original_visit_JSONB
+        elif hasattr(SQLiteTypeCompiler, 'visit_JSONB'):
+            delattr(SQLiteTypeCompiler, 'visit_JSONB')
 
 
 @pytest.fixture
@@ -377,9 +403,9 @@ def test_list_outcomes_all(outcome_tracker):
 def test_list_outcomes_filter_by_printer(outcome_tracker):
     """Test listing outcomes filtered by printer_id."""
     # Create outcomes for different printers
-    for printer in ["snapmaker_artisan", "bamboo_h2d", "snapmaker_artisan"]:
+    for idx, printer in enumerate(["snapmaker_artisan", "bamboo_h2d", "snapmaker_artisan"]):
         data = PrintOutcomeData(
-            job_id=f"job_{printer}_{id(printer)}",
+            job_id=f"job_{printer}_{idx}",
             printer_id=printer,
             material_id="pla_black_esun",
             started_at=datetime(2025, 11, 14, 10, 0, 0),

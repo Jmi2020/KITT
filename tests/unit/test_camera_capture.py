@@ -5,7 +5,7 @@ and periodic capture scheduling.
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -38,9 +38,18 @@ def mock_mqtt():
 @pytest.fixture
 def camera_capture(mock_minio, mock_mqtt):
     """CameraCapture instance with mocked dependencies."""
-    return CameraCapture(
-        minio_client=mock_minio, mqtt_client=mock_mqtt, bucket_name="test-prints"
-    )
+    # Enable feature flags for testing
+    with patch("fabrication.monitoring.camera_capture.settings") as mock_settings:
+        mock_settings.enable_camera_capture = True
+        mock_settings.enable_minio_snapshot_upload = True
+        mock_settings.enable_raspberry_pi_cameras = True
+        mock_settings.snapmaker_camera_url = "http://snapmaker-pi.local:8080/snapshot.jpg"
+        mock_settings.elegoo_camera_url = "http://elegoo-pi.local:8080/snapshot.jpg"
+
+        camera = CameraCapture(
+            minio_client=mock_minio, mqtt_client=mock_mqtt, bucket_name="test-prints"
+        )
+        yield camera
 
 
 @pytest.fixture
@@ -234,7 +243,7 @@ async def test_periodic_capture_loop_executes(camera_capture):
             success=True,
             url=f"minio://test-prints/{job_id}/{milestone}.jpg",
             milestone=milestone,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
         )
 
     camera_capture.capture_snapshot = mock_capture

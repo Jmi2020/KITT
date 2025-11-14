@@ -7,7 +7,7 @@ and stores results for future intelligence and learning.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, List, Optional
 from uuid import uuid4
@@ -133,7 +133,7 @@ class PrintOutcomeTracker:
                 quality_metrics={},
                 started_at=outcome_data.started_at,
                 completed_at=outcome_data.completed_at,
-                measured_at=datetime.utcnow(),
+                measured_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 snapshot_urls=[],
                 visual_defects=[],
             )
@@ -169,7 +169,7 @@ class PrintOutcomeTracker:
             # Timestamps
             started_at=outcome_data.started_at,
             completed_at=outcome_data.completed_at,
-            measured_at=datetime.utcnow(),
+            measured_at=datetime.now(timezone.utc).replace(tzinfo=None),
             # Visual evidence
             initial_snapshot_url=outcome_data.initial_snapshot_url,
             final_snapshot_url=outcome_data.final_snapshot_url,
@@ -177,7 +177,7 @@ class PrintOutcomeTracker:
             video_url=outcome_data.video_url,
             # Human feedback
             human_reviewed=human_feedback is not None,
-            reviewed_at=datetime.utcnow() if human_feedback else None,
+            reviewed_at=datetime.now(timezone.utc).replace(tzinfo=None) if human_feedback else None,
             reviewed_by=human_feedback.reviewed_by if human_feedback else None,
         )
 
@@ -224,7 +224,7 @@ class PrintOutcomeTracker:
             return False
 
         # Update review requested timestamp
-        outcome.review_requested_at = datetime.utcnow()
+        outcome.review_requested_at = datetime.now(timezone.utc).replace(tzinfo=None)
         self.db.commit()
 
         # Publish MQTT notification
@@ -297,7 +297,7 @@ class PrintOutcomeTracker:
 
         # Mark as reviewed
         outcome.human_reviewed = True
-        outcome.reviewed_at = datetime.utcnow()
+        outcome.reviewed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         outcome.reviewed_by = feedback.reviewed_by
 
         self.db.commit()
