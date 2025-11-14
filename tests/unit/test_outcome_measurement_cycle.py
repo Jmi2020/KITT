@@ -3,16 +3,23 @@
 Tests the scheduled job that measures outcomes for goals completed 30 days ago.
 """
 
+# ruff: noqa: E402
 import pytest
+import sys
+from pathlib import Path
 from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from services.brain.src.brain.autonomous.outcome_measurement_cycle import (
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(ROOT / "services/common/src"))
+sys.path.append(str(ROOT / "services/brain/src"))
+
+from brain.autonomous.outcome_measurement_cycle import (
     OutcomeMeasurementCycle,
     run_outcome_measurement_cycle,
 )
-from services.brain.src.brain.autonomous.outcome_tracker import (
+from brain.autonomous.outcome_tracker import (
     BaselineMetrics,
     OutcomeMetrics,
     EffectivenessScore,
@@ -48,8 +55,6 @@ def completed_goal_30_days_ago():
         rationale="KB gap",
         estimated_budget=Decimal("2.00"),
         status=GoalStatus.completed,
-        created_by="system-autonomous",
-        completed_at=completed_at,
         baseline_captured=True,
         baseline_captured_at=completed_at - timedelta(days=2),
         outcome_measured_at=None,  # Not yet measured
@@ -130,7 +135,6 @@ class TestFindGoalsForMeasurement:
             rationale="Test",
             estimated_budget=Decimal("2.00"),
             status=GoalStatus.approved,  # Not completed
-            created_by="system-autonomous",
             outcome_measured_at=None,
             learn_from=True,
         )
@@ -153,8 +157,6 @@ class TestFindGoalsForMeasurement:
             rationale="Test",
             estimated_budget=Decimal("2.00"),
             status=GoalStatus.completed,
-            created_by="system-autonomous",
-            completed_at=datetime.utcnow() - timedelta(days=20),
             outcome_measured_at=None,
             learn_from=True,
         )
@@ -170,7 +172,6 @@ class TestFindGoalsForMeasurement:
     def test_find_goals_multiple_eligible(self, measurement_cycle, db_session):
         """Test finding multiple goals eligible for measurement."""
         # Create 3 goals completed 30 days ago
-        completed_at = datetime.utcnow() - timedelta(days=30)
         goals = []
         for i in range(3):
             goal = Goal(
@@ -180,8 +181,6 @@ class TestFindGoalsForMeasurement:
                 rationale="Test",
                 estimated_budget=Decimal("2.00"),
                 status=GoalStatus.completed,
-                created_by="system-autonomous",
-                completed_at=completed_at + timedelta(hours=i),  # Within 24h window
                 baseline_captured=True,
                 outcome_measured_at=None,
                 learn_from=True,
@@ -246,8 +245,6 @@ class TestMeasureGoalOutcome:
             rationale="Test",
             estimated_budget=Decimal("1.50"),
             status=GoalStatus.completed,
-            created_by="system-autonomous",
-            completed_at=datetime.utcnow() - timedelta(days=30),
             baseline_captured=False,  # No baseline yet
             outcome_measured_at=None,
             learn_from=True,
@@ -345,8 +342,6 @@ class TestRunCycle:
             rationale="Test",
             estimated_budget=Decimal("2.00"),
             status=GoalStatus.completed,
-            created_by="system-autonomous",
-            completed_at=datetime.utcnow() - timedelta(days=30),
             baseline_captured=True,
             outcome_measured_at=None,
             learn_from=True,
@@ -359,8 +354,6 @@ class TestRunCycle:
             rationale="Test",
             estimated_budget=Decimal("2.00"),
             status=GoalStatus.completed,
-            created_by="system-autonomous",
-            completed_at=datetime.utcnow() - timedelta(days=30),
             baseline_captured=True,
             outcome_measured_at=None,
             learn_from=True,
@@ -410,7 +403,6 @@ class TestGetMeasurementStatistics:
                 rationale="Test",
                 estimated_budget=Decimal("2.00"),
                 status=GoalStatus.completed,
-                created_by="system-autonomous",
                 effectiveness_score=Decimal(str(70.0 + i * 5)),  # 70, 75, 80, 85, 90
                 outcome_measured_at=datetime.utcnow(),
             )
@@ -451,7 +443,6 @@ class TestGetMeasurementStatistics:
             rationale="Test",
             estimated_budget=Decimal("2.00"),
             status=GoalStatus.completed,
-            created_by="system-autonomous",
             effectiveness_score=Decimal("80.0"),
             outcome_measured_at=datetime.utcnow(),
         )
@@ -463,7 +454,6 @@ class TestGetMeasurementStatistics:
             rationale="Test",
             estimated_budget=Decimal("1.50"),
             status=GoalStatus.completed,
-            created_by="system-autonomous",
             effectiveness_score=Decimal("65.0"),
             outcome_measured_at=datetime.utcnow(),
         )

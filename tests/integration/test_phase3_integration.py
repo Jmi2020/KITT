@@ -4,18 +4,25 @@ Tests the full workflow: Goal creation → Baseline capture → Completion →
 Outcome measurement → Effectiveness scoring → Feedback loop learning.
 """
 
+# ruff: noqa: E402
 import pytest
+import sys
+from pathlib import Path
 from datetime import datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(ROOT / "services/common/src"))
+sys.path.append(str(ROOT / "services/brain/src"))
+
 from common.db.models import Base, Goal, GoalType, GoalStatus, Project, GoalOutcome
-from services.brain.src.brain.autonomous.outcome_tracker import OutcomeTracker
-from services.brain.src.brain.autonomous.outcome_measurement_cycle import OutcomeMeasurementCycle
-from services.brain.src.brain.autonomous.feedback_loop import FeedbackLoop
-from services.brain.src.brain.autonomous.goal_generator import GoalGenerator
+from brain.autonomous.outcome_tracker import OutcomeTracker
+from brain.autonomous.outcome_measurement_cycle import OutcomeMeasurementCycle
+from brain.autonomous.feedback_loop import FeedbackLoop
+from brain.autonomous.goal_generator import GoalGenerator
 
 
 @pytest.fixture(scope="function")
@@ -74,7 +81,6 @@ class TestPhase3FullWorkflow:
             estimated_budget=Decimal("2.50"),
             estimated_duration_hours=4,
             status=GoalStatus.approved,
-            created_by="system-autonomous",
             identified_at=datetime.utcnow(),
             approved_at=datetime.utcnow(),
             approved_by="user-test",
@@ -97,7 +103,6 @@ class TestPhase3FullWorkflow:
             title="Research sustainable PLA alternatives",
             description="Test project",
             status="completed",
-            created_by="system-autonomous",
             budget_allocated=Decimal("2.50"),
             budget_spent=Decimal("1.80"),
             actual_cost_usd=Decimal("1.80"),
@@ -154,8 +159,6 @@ class TestPhase3FullWorkflow:
                 rationale="Test",
                 estimated_budget=Decimal("2.00"),
                 status=GoalStatus.completed,
-                created_by="system-autonomous",
-                completed_at=completed_at + timedelta(hours=i),
                 baseline_captured=True,
                 baseline_captured_at=completed_at - timedelta(days=2),
                 outcome_measured_at=None,
@@ -169,7 +172,6 @@ class TestPhase3FullWorkflow:
                 title=f"Project {i}",
                 description="Test",
                 status="completed",
-                created_by="system-autonomous",
                 budget_allocated=Decimal("2.00"),
                 budget_spent=Decimal("1.50"),
                 actual_cost_usd=Decimal("1.50"),
@@ -210,7 +212,6 @@ class TestPhase3FullWorkflow:
                 rationale="Test",
                 estimated_budget=Decimal("2.00"),
                 status=GoalStatus.completed,
-                created_by="system-autonomous",
                 effectiveness_score=Decimal(str(80.0 + i)),  # 80-89
                 outcome_measured_at=datetime.utcnow(),
                 learn_from=True,
@@ -226,7 +227,6 @@ class TestPhase3FullWorkflow:
                 rationale="Test",
                 estimated_budget=Decimal("1.50"),
                 status=GoalStatus.completed,
-                created_by="system-autonomous",
                 effectiveness_score=Decimal(str(40.0 + i * 5)),  # 40, 45, 50
                 outcome_measured_at=datetime.utcnow(),
                 learn_from=True,
@@ -272,7 +272,6 @@ class TestPhase3FullWorkflow:
                 rationale="Test",
                 estimated_budget=Decimal("2.00"),
                 status=GoalStatus.completed,
-                created_by="system-autonomous",
                 effectiveness_score=Decimal("85.0"),  # High effectiveness
                 outcome_measured_at=datetime.utcnow(),
                 learn_from=True,
@@ -293,7 +292,6 @@ class TestPhase3FullWorkflow:
             rationale="Test",
             estimated_budget=Decimal("2.00"),
             status=GoalStatus.identified,
-            created_by="system-autonomous",
         )
 
         # Get adjustment factor
@@ -332,8 +330,6 @@ class TestPhase3EdgeCases:
             rationale="Test",
             estimated_budget=Decimal("2.00"),
             status=GoalStatus.completed,
-            created_by="system-autonomous",
-            completed_at=datetime.utcnow() - timedelta(days=30),
             baseline_captured=False,
         )
         test_db.add(goal)
@@ -360,8 +356,6 @@ class TestPhase3EdgeCases:
             rationale="Test",
             estimated_budget=Decimal("1.50"),
             status=GoalStatus.completed,
-            created_by="system-autonomous",
-            completed_at=datetime.utcnow() - timedelta(days=30),
             baseline_captured=True,
         )
         test_db.add(goal)
@@ -432,7 +426,6 @@ class TestPhase3Statistics:
                 rationale="Test",
                 estimated_budget=Decimal("2.00"),
                 status=GoalStatus.completed,
-                created_by="system-autonomous",
                 effectiveness_score=Decimal(str(70.0 + i * 5)),
                 outcome_measured_at=datetime.utcnow(),
             )
@@ -468,7 +461,6 @@ class TestPhase3Statistics:
                 rationale="Test",
                 estimated_budget=Decimal("2.00"),
                 status=GoalStatus.completed,
-                created_by="system-autonomous",
                 effectiveness_score=Decimal(str(effectiveness)),
                 outcome_measured_at=datetime.utcnow(),
                 learn_from=True,

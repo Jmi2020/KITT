@@ -4,12 +4,19 @@ Tests historical effectiveness analysis, adjustment factor calculation,
 and learning from goal outcomes.
 """
 
+# ruff: noqa: E402
 import pytest
+import sys
+from pathlib import Path
 from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-from services.brain.src.brain.autonomous.feedback_loop import (
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(ROOT / "services/common/src"))
+sys.path.append(str(ROOT / "services/brain/src"))
+
+from brain.autonomous.feedback_loop import (
     FeedbackLoop,
     create_feedback_loop,
 )
@@ -48,7 +55,6 @@ def measured_goals():
             description=f"Research goal {i}",
             rationale="Test",
             estimated_budget=Decimal("2.00"),
-            created_by="system-autonomous",
             effectiveness_score=Decimal(str(75.0 + i * 2.5)),  # 75, 77.5, 80, 82.5, 85, 87.5
             outcome_measured_at=datetime.utcnow(),
             learn_from=True,
@@ -64,7 +70,6 @@ def measured_goals():
             description=f"Improvement goal {i}",
             rationale="Test",
             estimated_budget=Decimal("1.50"),
-            created_by="system-autonomous",
             effectiveness_score=Decimal(str(50.0 + i * 8.3)),  # 50, 58.3, 66.6
             outcome_measured_at=datetime.utcnow(),
             learn_from=True,
@@ -79,7 +84,6 @@ def measured_goals():
         description="Optimization goal",
         rationale="Test",
         estimated_budget=Decimal("3.00"),
-        created_by="system-autonomous",
         effectiveness_score=Decimal("71.2"),
         outcome_measured_at=datetime.utcnow(),
         learn_from=True,
@@ -417,7 +421,6 @@ class TestLearningSummary:
             description="Test",
             rationale="Test",
             estimated_budget=Decimal("2.00"),
-            created_by="system-autonomous",
             effectiveness_score=Decimal("85.0"),
             outcome_measured_at=datetime.utcnow(),
             learn_from=True,
@@ -449,7 +452,6 @@ class TestEdgeCases:
             description="Test",
             rationale="Test",
             estimated_budget=Decimal("2.00"),
-            created_by="system-autonomous",
             effectiveness_score=Decimal("0.0"),
             outcome_measured_at=datetime.utcnow(),
             learn_from=True,
@@ -491,7 +493,6 @@ class TestEdgeCases:
             description="Test",
             rationale="Test",
             estimated_budget=Decimal("2.00"),
-            created_by="system-autonomous",
             effectiveness_score=Decimal("80.0"),
             outcome_measured_at=None,  # No measurement yet
             learn_from=True,

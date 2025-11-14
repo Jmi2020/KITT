@@ -4,12 +4,19 @@ Tests baseline capture, outcome measurement, and effectiveness scoring
 for research, improvement, and optimization goals.
 """
 
+# ruff: noqa: E402
 import pytest
+import sys
+from pathlib import Path
 from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-from services.brain.src.brain.autonomous.outcome_tracker import (
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(ROOT / "services/common/src"))
+sys.path.append(str(ROOT / "services/brain/src"))
+
+from brain.autonomous.outcome_tracker import (
     OutcomeTracker,
     BaselineMetrics,
     OutcomeMetrics,
@@ -42,7 +49,6 @@ def research_goal():
         estimated_budget=Decimal("2.50"),
         estimated_duration_hours=4,
         status=GoalStatus.approved,
-        created_by="system-autonomous",
         baseline_captured=False,
     )
     return goal
@@ -59,7 +65,6 @@ def improvement_goal():
         estimated_budget=Decimal("1.50"),
         estimated_duration_hours=3,
         status=GoalStatus.approved,
-        created_by="system-autonomous",
         baseline_captured=False,
         goal_metadata={"failure_reason": "first_layer", "failure_count": 8},
     )
@@ -77,7 +82,6 @@ def optimization_goal():
         estimated_budget=Decimal("3.00"),
         estimated_duration_hours=6,
         status=GoalStatus.approved,
-        created_by="system-autonomous",
         baseline_captured=False,
         goal_metadata={"frontier_cost_usd": 12.50, "frontier_ratio": 0.35},
     )
