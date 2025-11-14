@@ -155,11 +155,11 @@ class FeatureStateManager:
             List of missing dependency feature IDs
         """
         feature = feature_registry.get(feature_id)
-        if not feature or not feature.depends_on:
+        if not feature or not feature.requires:
             return []
 
         missing = []
-        for dep_id in feature.depends_on:
+        for dep_id in feature.requires:
             # Check if dependency will be enabled in pending changes
             if dep_id in pending_changes:
                 if not pending_changes[dep_id]:
@@ -190,7 +190,7 @@ class FeatureStateManager:
 
         for other_id, other_feature in feature_registry.features.items():
             # Skip if this feature doesn't depend on the one we're disabling
-            if not other_feature.depends_on or feature_id not in other_feature.depends_on:
+            if not other_feature.requires or feature_id not in other_feature.requires:
                 continue
 
             # Check if this dependent is currently enabled
@@ -220,11 +220,11 @@ class FeatureStateManager:
             current_state = self.get_current_state()
 
         feature = feature_registry.get(feature_id)
-        if not feature or not feature.depends_on:
+        if not feature or not feature.requires:
             return {}
 
         to_enable = {}
-        for dep_id in feature.depends_on:
+        for dep_id in feature.requires:
             if not current_state.get(dep_id):
                 to_enable[dep_id] = True
 
