@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime
+from decimal import Decimal
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from common.config import settings
+from common.db.models import InventoryStatus, Material as MaterialModel, InventoryItem as InventoryItemModel
 from common.logging import configure_logging, get_logger
 
 from .analysis.stl_analyzer import STLAnalyzer, ModelDimensions
 from .selector.printer_selector import PrinterSelector, PrintMode, SelectionResult
 from .status.printer_status import PrinterStatusChecker, PrinterStatus
 from .launcher.slicer_launcher import SlicerLauncher
+from .intelligence.material_inventory import MaterialInventory, InventoryFilters
 
 # Configure logging
 configure_logging()
@@ -82,14 +88,20 @@ analyzer: Optional[STLAnalyzer] = None
 status_checker: Optional[PrinterStatusChecker] = None
 selector: Optional[PrinterSelector] = None
 launcher: Optional[SlicerLauncher] = None
+material_inventory: Optional[MaterialInventory] = None
+db_session: Optional[sessionmaker] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for fabrication service startup/shutdown."""
-    global analyzer, status_checker, selector, launcher
+    global analyzer, status_checker, selector, launcher, material_inventory, db_session
 
     LOGGER.info("Starting fabrication service")
+
+    # Initialize database connection
+    engine = create_engine(settings.DATABASE_URL)
+    db_session = sessionmaker(bind=engine)
 
     # Initialize components
     analyzer = STLAnalyzer()
@@ -97,11 +109,23 @@ async def lifespan(app: FastAPI):
     selector = PrinterSelector(analyzer, status_checker)
     launcher = SlicerLauncher()
 
+    # Initialize material inventory (Phase 4)
+    db = db_session()
+    material_inventory = MaterialInventory(
+        db=db,
+        low_inventory_threshold_grams=float(getattr(settings, 'LOW_INVENTORY_THRESHOLD_GRAMS', 100.0)),
+        waste_factor=float(getattr(settings, 'MATERIAL_WASTE_FACTOR', 1.05)),
+    )
+    LOGGER.info("Material inventory initialized", threshold=material_inventory.low_inventory_threshold)
+
     yield
 
     # Cleanup
     if status_checker:
         status_checker.cleanup()
+
+    if material_inventory and material_inventory.db:
+        material_inventory.db.close()
 
     LOGGER.info("Fabrication service stopped")
 
@@ -192,6 +216,95 @@ class PrinterStatusResponse(BaseModel):
     """All printer statuses."""
 
     printers: dict[str, PrinterStatus]
+
+
+# ============================================================================
+# Phase 4: Material Inventory Request/Response Models
+# ============================================================================
+
+class MaterialResponse(BaseModel):
+    """Material catalog item response."""
+
+    id: str
+    material_type: str
+    color: str
+    manufacturer: str
+    cost_per_kg_usd: float
+    density_g_cm3: float
+    nozzle_temp_min_c: int
+    nozzle_temp_max_c: int
+    bed_temp_min_c: int
+    bed_temp_max_c: int
+    properties: Dict
+    sustainability_score: Optional[int] = None
+
+
+class InventoryItemResponse(BaseModel):
+    """Inventory item (spool) response."""
+
+    id: str
+    material_id: str
+    location: Optional[str] = None
+    purchase_date: datetime
+    initial_weight_grams: float
+    current_weight_grams: float
+    status: str
+    notes: Optional[str] = None
+
+
+class AddInventoryRequest(BaseModel):
+    """Request to add new spool to inventory."""
+
+    spool_id: str = Field(..., description="Unique spool identifier", examples=["spool_001"])
+    material_id: str = Field(..., description="Material catalog ID", examples=["pla_black_esun"])
+    initial_weight_grams: float = Field(..., description="Initial spool weight in grams", examples=[1000.0])
+    purchase_date: datetime = Field(..., description="Date spool was purchased")
+    location: Optional[str] = Field(None, description="Storage location", examples=["shelf_a"])
+    notes: Optional[str] = Field(None, description="Optional notes")
+
+
+class DeductUsageRequest(BaseModel):
+    """Request to deduct material usage from spool."""
+
+    spool_id: str = Field(..., description="Spool identifier", examples=["spool_001"])
+    grams_used: float = Field(..., description="Amount of material used in grams", examples=[150.5])
+
+
+class UsageEstimateRequest(BaseModel):
+    """Request to estimate material usage from STL."""
+
+    stl_volume_cm3: float = Field(..., description="STL model volume in cubic centimeters", examples=[100.0])
+    infill_percent: int = Field(..., description="Infill percentage (0-100)", examples=[20])
+    material_id: str = Field(..., description="Material catalog ID", examples=["pla_black_esun"])
+    supports_enabled: bool = Field(default=False, description="Whether supports are enabled")
+
+
+class UsageEstimateResponse(BaseModel):
+    """Material usage estimation result."""
+
+    estimated_grams: float
+    infill_percent: int
+    supports_enabled: bool
+    stl_volume_cm3: float
+    adjusted_volume_cm3: float
+    material_density: float
+    waste_factor: float
+
+
+class CostEstimateRequest(BaseModel):
+    """Request to estimate print cost."""
+
+    material_id: str = Field(..., description="Material catalog ID", examples=["pla_black_esun"])
+    grams_used: float = Field(..., description="Amount of material in grams", examples=[100.0])
+
+
+class CostEstimateResponse(BaseModel):
+    """Print cost estimation result."""
+
+    material_cost_usd: float
+    grams_used: float
+    cost_per_kg: float
+    material_id: str
 
 
 # ============================================================================
@@ -405,3 +518,342 @@ async def get_printer_status() -> PrinterStatusResponse:
     except Exception as e:
         LOGGER.error("Failed to get printer status", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get status: {e}")
+
+
+# ============================================================================
+# Phase 4: Material Inventory API Endpoints
+# ============================================================================
+
+@app.get("/api/fabrication/materials", response_model=List[MaterialResponse])
+async def list_materials(
+    material_type: Optional[str] = Query(None, description="Filter by material type (e.g., pla, petg)"),
+    manufacturer: Optional[str] = Query(None, description="Filter by manufacturer"),
+) -> List[MaterialResponse]:
+    """
+    List materials from catalog with optional filters.
+
+    Returns all materials if no filters specified.
+    Filter by material_type (pla, petg, abs, tpu, etc.) or manufacturer.
+    """
+    if not material_inventory:
+        raise HTTPException(status_code=500, detail="Material inventory not initialized")
+
+    try:
+        materials = material_inventory.list_materials(
+            material_type=material_type,
+            manufacturer=manufacturer
+        )
+
+        return [
+            MaterialResponse(
+                id=m.id,
+                material_type=m.material_type,
+                color=m.color,
+                manufacturer=m.manufacturer,
+                cost_per_kg_usd=float(m.cost_per_kg_usd),
+                density_g_cm3=float(m.density_g_cm3),
+                nozzle_temp_min_c=m.nozzle_temp_min_c,
+                nozzle_temp_max_c=m.nozzle_temp_max_c,
+                bed_temp_min_c=m.bed_temp_min_c,
+                bed_temp_max_c=m.bed_temp_max_c,
+                properties=m.properties,
+                sustainability_score=m.sustainability_score,
+            )
+            for m in materials
+        ]
+
+    except Exception as e:
+        LOGGER.error("Failed to list materials", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to list materials: {e}")
+
+
+@app.get("/api/fabrication/materials/{material_id}", response_model=MaterialResponse)
+async def get_material(material_id: str) -> MaterialResponse:
+    """
+    Get material by ID.
+
+    Returns material details from catalog.
+    """
+    if not material_inventory:
+        raise HTTPException(status_code=500, detail="Material inventory not initialized")
+
+    try:
+        material = material_inventory.get_material(material_id)
+
+        if not material:
+            raise HTTPException(status_code=404, detail=f"Material not found: {material_id}")
+
+        return MaterialResponse(
+            id=material.id,
+            material_type=material.material_type,
+            color=material.color,
+            manufacturer=material.manufacturer,
+            cost_per_kg_usd=float(material.cost_per_kg_usd),
+            density_g_cm3=float(material.density_g_cm3),
+            nozzle_temp_min_c=material.nozzle_temp_min_c,
+            nozzle_temp_max_c=material.nozzle_temp_max_c,
+            bed_temp_min_c=material.bed_temp_min_c,
+            bed_temp_max_c=material.bed_temp_max_c,
+            properties=material.properties,
+            sustainability_score=material.sustainability_score,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOGGER.error("Failed to get material", material_id=material_id, error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get material: {e}")
+
+
+@app.get("/api/fabrication/inventory", response_model=List[InventoryItemResponse])
+async def list_inventory(
+    material_type: Optional[str] = Query(None, description="Filter by material type"),
+    status: Optional[str] = Query(None, description="Filter by status (available, in_use, depleted)"),
+    min_weight_grams: Optional[float] = Query(None, description="Minimum weight in grams"),
+    max_weight_grams: Optional[float] = Query(None, description="Maximum weight in grams"),
+    location: Optional[str] = Query(None, description="Filter by location"),
+) -> List[InventoryItemResponse]:
+    """
+    List inventory items (spools) with optional filters.
+
+    Returns all spools if no filters specified.
+    """
+    if not material_inventory:
+        raise HTTPException(status_code=500, detail="Material inventory not initialized")
+
+    try:
+        # Build filters
+        filters = InventoryFilters(
+            material_type=material_type,
+            status=InventoryStatus(status) if status else None,
+            min_weight_grams=min_weight_grams,
+            max_weight_grams=max_weight_grams,
+            location=location,
+        )
+
+        items = material_inventory.list_inventory(filters)
+
+        return [
+            InventoryItemResponse(
+                id=item.id,
+                material_id=item.material_id,
+                location=item.location,
+                purchase_date=item.purchase_date,
+                initial_weight_grams=float(item.initial_weight_grams),
+                current_weight_grams=float(item.current_weight_grams),
+                status=item.status.value,
+                notes=item.notes,
+            )
+            for item in items
+        ]
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        LOGGER.error("Failed to list inventory", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to list inventory: {e}")
+
+
+@app.get("/api/fabrication/inventory/{spool_id}", response_model=InventoryItemResponse)
+async def get_inventory_item(spool_id: str) -> InventoryItemResponse:
+    """
+    Get inventory item (spool) by ID.
+
+    Returns spool details including current weight and status.
+    """
+    if not material_inventory:
+        raise HTTPException(status_code=500, detail="Material inventory not initialized")
+
+    try:
+        item = material_inventory.get_inventory(spool_id)
+
+        if not item:
+            raise HTTPException(status_code=404, detail=f"Spool not found: {spool_id}")
+
+        return InventoryItemResponse(
+            id=item.id,
+            material_id=item.material_id,
+            location=item.location,
+            purchase_date=item.purchase_date,
+            initial_weight_grams=float(item.initial_weight_grams),
+            current_weight_grams=float(item.current_weight_grams),
+            status=item.status.value,
+            notes=item.notes,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOGGER.error("Failed to get inventory item", spool_id=spool_id, error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get inventory item: {e}")
+
+
+@app.post("/api/fabrication/inventory", response_model=InventoryItemResponse, status_code=201)
+async def add_inventory(request: AddInventoryRequest) -> InventoryItemResponse:
+    """
+    Add new spool to inventory.
+
+    Creates a new inventory item with initial weight and status=available.
+    """
+    if not material_inventory:
+        raise HTTPException(status_code=500, detail="Material inventory not initialized")
+
+    try:
+        item = material_inventory.add_inventory(
+            spool_id=request.spool_id,
+            material_id=request.material_id,
+            initial_weight_grams=request.initial_weight_grams,
+            purchase_date=request.purchase_date,
+            location=request.location,
+            notes=request.notes,
+        )
+
+        return InventoryItemResponse(
+            id=item.id,
+            material_id=item.material_id,
+            location=item.location,
+            purchase_date=item.purchase_date,
+            initial_weight_grams=float(item.initial_weight_grams),
+            current_weight_grams=float(item.current_weight_grams),
+            status=item.status.value,
+            notes=item.notes,
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        LOGGER.error("Failed to add inventory", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to add inventory: {e}")
+
+
+@app.post("/api/fabrication/inventory/deduct", response_model=InventoryItemResponse)
+async def deduct_material_usage(request: DeductUsageRequest) -> InventoryItemResponse:
+    """
+    Deduct material usage from spool.
+
+    Updates current_weight_grams after a print job.
+    Auto-updates status to depleted if weight reaches 0.
+    """
+    if not material_inventory:
+        raise HTTPException(status_code=500, detail="Material inventory not initialized")
+
+    try:
+        item = material_inventory.deduct_usage(
+            spool_id=request.spool_id,
+            grams_used=request.grams_used,
+        )
+
+        return InventoryItemResponse(
+            id=item.id,
+            material_id=item.material_id,
+            location=item.location,
+            purchase_date=item.purchase_date,
+            initial_weight_grams=float(item.initial_weight_grams),
+            current_weight_grams=float(item.current_weight_grams),
+            status=item.status.value,
+            notes=item.notes,
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        LOGGER.error("Failed to deduct usage", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to deduct usage: {e}")
+
+
+@app.get("/api/fabrication/inventory/low", response_model=List[InventoryItemResponse])
+async def check_low_inventory() -> List[InventoryItemResponse]:
+    """
+    Check for low inventory items.
+
+    Returns spools with weight below threshold (default: 100g).
+    Useful for triggering procurement research goals.
+    """
+    if not material_inventory:
+        raise HTTPException(status_code=500, detail="Material inventory not initialized")
+
+    try:
+        items = material_inventory.check_low_inventory()
+
+        return [
+            InventoryItemResponse(
+                id=item.id,
+                material_id=item.material_id,
+                location=item.location,
+                purchase_date=item.purchase_date,
+                initial_weight_grams=float(item.initial_weight_grams),
+                current_weight_grams=float(item.current_weight_grams),
+                status=item.status.value,
+                notes=item.notes,
+            )
+            for item in items
+        ]
+
+    except Exception as e:
+        LOGGER.error("Failed to check low inventory", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to check low inventory: {e}")
+
+
+@app.post("/api/fabrication/usage/estimate", response_model=UsageEstimateResponse)
+async def estimate_material_usage(request: UsageEstimateRequest) -> UsageEstimateResponse:
+    """
+    Estimate material usage from STL volume and print settings.
+
+    Calculates grams needed based on volume, infill, supports, density, and waste factor.
+    """
+    if not material_inventory:
+        raise HTTPException(status_code=500, detail="Material inventory not initialized")
+
+    try:
+        estimate = material_inventory.calculate_usage(
+            stl_volume_cm3=request.stl_volume_cm3,
+            infill_percent=request.infill_percent,
+            material_id=request.material_id,
+            supports_enabled=request.supports_enabled,
+        )
+
+        return UsageEstimateResponse(
+            estimated_grams=estimate.estimated_grams,
+            infill_percent=estimate.infill_percent,
+            supports_enabled=estimate.supports_enabled,
+            stl_volume_cm3=estimate.stl_volume_cm3,
+            adjusted_volume_cm3=estimate.adjusted_volume_cm3,
+            material_density=estimate.material_density,
+            waste_factor=estimate.waste_factor,
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        LOGGER.error("Failed to estimate usage", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to estimate usage: {e}")
+
+
+@app.post("/api/fabrication/cost/estimate", response_model=CostEstimateResponse)
+async def estimate_print_cost(request: CostEstimateRequest) -> CostEstimateResponse:
+    """
+    Estimate print cost based on material usage.
+
+    Calculates cost from grams used and material cost per kg.
+    """
+    if not material_inventory:
+        raise HTTPException(status_code=500, detail="Material inventory not initialized")
+
+    try:
+        estimate = material_inventory.estimate_print_cost(
+            material_id=request.material_id,
+            grams_used=request.grams_used,
+        )
+
+        return CostEstimateResponse(
+            material_cost_usd=float(estimate.material_cost_usd),
+            grams_used=estimate.grams_used,
+            cost_per_kg=float(estimate.cost_per_kg),
+            material_id=estimate.material_id,
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        LOGGER.error("Failed to estimate cost", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to estimate cost: {e}")
