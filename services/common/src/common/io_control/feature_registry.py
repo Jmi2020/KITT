@@ -21,6 +21,9 @@ class FeatureCategory(Enum):
     INTELLIGENCE = "intelligence"
     PRINTER = "printer"
     DISCOVERY = "discovery"
+    API_SERVICES = "api_services"
+    ROUTING = "routing"
+    AUTONOMOUS = "autonomous"
 
 
 class RestartScope(Enum):
@@ -258,6 +261,171 @@ class FeatureRegistry:
                 env_var="DISCOVERY_ENABLE_PERIODIC_SCANS",
                 default_value=True,
                 restart_scope=RestartScope.SERVICE,  # Restart discovery service
+            )
+        )
+
+        # ====================================================================
+        # API Services (External Paid Services)
+        # ====================================================================
+
+        self.register(
+            FeatureDefinition(
+                id="perplexity_api",
+                name="Perplexity API (MCP Tier)",
+                description="Search-augmented generation for fresh information and research",
+                category=FeatureCategory.API_SERVICES,
+                env_var="PERPLEXITY_API_KEY",
+                default_value="",
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                validation_message="Requires API key from perplexity.ai. Costs ~$0.001-0.005/query",
+                setup_instructions="Get API key from https://perplexity.ai → Settings → API",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="openai_api",
+                name="OpenAI API (Frontier Tier)",
+                description="GPT-4 and GPT-4 Turbo for complex queries requiring frontier intelligence",
+                category=FeatureCategory.API_SERVICES,
+                env_var="OPENAI_API_KEY",
+                default_value="",
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                validation_message="Requires API key from OpenAI. Costs ~$0.01-0.06/query depending on model",
+                setup_instructions="Get API key from https://platform.openai.com/api-keys",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="anthropic_api",
+                name="Anthropic API (Frontier Tier)",
+                description="Claude 3.5 Sonnet for complex reasoning and coding tasks",
+                category=FeatureCategory.API_SERVICES,
+                env_var="ANTHROPIC_API_KEY",
+                default_value="",
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                validation_message="Requires API key from Anthropic. Costs ~$0.01-0.08/query depending on model",
+                setup_instructions="Get API key from https://console.anthropic.com/settings/keys",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="zoo_cad_api",
+                name="Zoo CAD API",
+                description="Parametric CAD generation (Text-to-CAD with editable parameters)",
+                category=FeatureCategory.API_SERVICES,
+                env_var="ZOO_API_KEY",
+                default_value="",
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                validation_message="Requires API key from zoo.dev. First choice for CAD generation",
+                setup_instructions="Get API key from https://zoo.dev → Account → API Keys",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="tripo_cad_api",
+                name="Tripo CAD API",
+                description="Image-to-3D and Text-to-3D mesh generation",
+                category=FeatureCategory.API_SERVICES,
+                env_var="TRIPO_API_KEY",
+                default_value="",
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                validation_message="Requires API key from tripo.ai. Fallback for organic/mesh CAD",
+                setup_instructions="Get API key from https://platform.tripo3d.ai/api-keys",
+            )
+        )
+
+        # ====================================================================
+        # Routing Features (Intelligence Tier Selection)
+        # ====================================================================
+
+        self.register(
+            FeatureDefinition(
+                id="cloud_routing",
+                name="Cloud Routing",
+                description="Enable cloud API escalation (MCP/Frontier) when local confidence is low",
+                category=FeatureCategory.ROUTING,
+                env_var="OFFLINE_MODE",
+                default_value=False,  # False = cloud routing enabled
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                conflicts_with=["offline_mode"],
+                validation_message="Allows using Perplexity/OpenAI/Claude when local model has low confidence",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="offline_mode",
+                name="Offline Mode (Local Only)",
+                description="Disable all cloud API calls, use only local llama.cpp models",
+                category=FeatureCategory.ROUTING,
+                env_var="OFFLINE_MODE",
+                default_value=False,  # False = offline mode disabled
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                conflicts_with=["cloud_routing"],
+                validation_message="Disables Perplexity, OpenAI, Claude, Zoo, Tripo. Local-only operation.",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="function_calling",
+                name="Function Calling",
+                description="Allow LLMs to call device control functions (printer commands, CAD generation)",
+                category=FeatureCategory.ROUTING,
+                env_var="ENABLE_FUNCTION_CALLING",
+                default_value=True,
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                validation_message="Enables conversational device control via LLM function calls",
+            )
+        )
+
+        # ====================================================================
+        # Autonomous Features
+        # ====================================================================
+
+        self.register(
+            FeatureDefinition(
+                id="autonomous_mode",
+                name="Autonomous Mode",
+                description="Enable autonomous goal execution and research workflows",
+                category=FeatureCategory.AUTONOMOUS,
+                env_var="AUTONOMOUS_ENABLED",
+                default_value=False,
+                restart_scope=RestartScope.SERVICE,  # Restart brain service
+                validation_message="KITTY will autonomously pursue goals when system is idle",
+                setup_instructions="Set AUTONOMOUS_DAILY_BUDGET_USD to limit costs",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="autonomous_budget_enforcement",
+                name="Autonomous Budget Enforcement",
+                description="Enforce daily spending limits for autonomous operations",
+                category=FeatureCategory.AUTONOMOUS,
+                env_var="AUTONOMOUS_DAILY_BUDGET_USD",
+                default_value="5.00",
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                requires=["autonomous_mode"],
+                validation_message="Daily budget for autonomous API calls and operations",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="autonomous_full_time",
+                name="Autonomous Full-Time Mode",
+                description="Run autonomous workflows 24/7 (instead of only when idle)",
+                category=FeatureCategory.AUTONOMOUS,
+                env_var="AUTONOMOUS_FULL_TIME_MODE",
+                default_value=False,
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                requires=["autonomous_mode"],
+                validation_message="⚠️ KITTY will continuously execute goals. May consume budget quickly.",
             )
         )
 

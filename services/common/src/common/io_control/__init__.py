@@ -11,6 +11,10 @@ from common.io_control.feature_registry import (
     RestartScope,
     feature_registry,
 )
+from common.io_control.tool_availability import (
+    ToolAvailability,
+    get_tool_availability,
+)
 
 __all__ = [
     "FeatureCategory",
@@ -18,4 +22,6 @@ __all__ = [
     "FeatureRegistry",
     "RestartScope",
     "feature_registry",
+    "ToolAvailability",
+    "get_tool_availability",
 ]
