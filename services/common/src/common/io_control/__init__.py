@@ -15,6 +15,13 @@ from common.io_control.tool_availability import (
     ToolAvailability,
     get_tool_availability,
 )
+from common.io_control.presets import (
+    Preset,
+    get_preset,
+    list_presets,
+    estimate_cost_impact,
+    ALL_PRESETS,
+)
 
 __all__ = [
     "FeatureCategory",
@@ -24,4 +31,9 @@ __all__ = [
     "feature_registry",
     "ToolAvailability",
     "get_tool_availability",
+    "Preset",
+    "get_preset",
+    "list_presets",
+    "estimate_cost_impact",
+    "ALL_PRESETS",
 ]

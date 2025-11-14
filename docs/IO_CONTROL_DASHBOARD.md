@@ -663,6 +663,191 @@ Validate current state for dependency issues.
 }
 ```
 
+### GET /api/io-control/health
+
+Get health status for all enabled features.
+
+**Response:**
+```json
+[
+  {
+    "feature_id": "perplexity_api",
+    "feature_name": "Perplexity API (MCP Tier)",
+    "is_healthy": true,
+    "message": "Healthy"
+  },
+  {
+    "feature_id": "openai_api",
+    "feature_name": "OpenAI API",
+    "is_healthy": false,
+    "message": "Health check failed"
+  }
+]
+```
+
+### GET /api/io-control/features/{feature_id}/dependencies
+
+Get missing dependencies and auto-resolved dependencies for a feature.
+
+**Response:**
+```json
+{
+  "feature_id": "bamboo_camera",
+  "missing_dependencies": ["camera_capture"],
+  "auto_resolved": {
+    "camera_capture": true
+  }
+}
+```
+
+### POST /api/io-control/preview
+
+Preview the impact of applying changes before making them.
+
+**Request:**
+```json
+{
+  "changes": {
+    "perplexity_api": true,
+    "openai_api": true,
+    "camera_capture": true
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "dependencies": {
+    "bamboo_camera": ["camera_capture"]
+  },
+  "costs": {
+    "enabled_paid_services": ["perplexity_api", "openai_api"],
+    "estimated_cost_per_query": {
+      "min": 0.011,
+      "max": 0.065,
+      "unit": "USD"
+    },
+    "estimated_daily_cost_100_queries": {
+      "min": 1.10,
+      "max": 6.50,
+      "unit": "USD"
+    }
+  },
+  "restarts": {
+    "scopes": ["none"],
+    "services": []
+  },
+  "conflicts": {},
+  "health_warnings": {
+    "openai_api": "Health check failed"
+  }
+}
+```
+
+### GET /api/io-control/tool-availability
+
+Get tool availability status based on current I/O control settings.
+
+**Response:**
+```json
+{
+  "available_tools": {
+    "perplexity_search": true,
+    "openai_completion": false,
+    "printer_control": true,
+    "camera_capture": true,
+    "cloud_routing": false,
+    "autonomous_execution": false
+  },
+  "enabled_functions": [
+    "control_printer",
+    "get_printer_status",
+    "capture_snapshot",
+    "search_web"
+  ],
+  "unavailable_message": "The following tools are currently disabled:\n  - openai_completion: Add OPENAI_API_KEY to .env\n  - cloud_routing: Disable OFFLINE_MODE in I/O Control\n  - autonomous_execution: Enable AUTONOMOUS_ENABLED in I/O Control\n\nEnable tools via: kitty-io-control or Web UI at /api/io-control"
+}
+```
+
+### GET /api/io-control/presets
+
+List all available presets with cost estimates.
+
+**Response:**
+```json
+[
+  {
+    "id": "development",
+    "name": "Development Mode",
+    "description": "All features mocked, no external dependencies required",
+    "features": {
+      "perplexity_api": false,
+      "openai_api": false,
+      "offline_mode": true,
+      "camera_capture": false,
+      "autonomous_mode": false
+    },
+    "cost_estimate": {
+      "enabled_paid_services": [],
+      "estimated_cost_per_query": {
+        "min": 0.0,
+        "max": 0.0,
+        "unit": "USD"
+      }
+    }
+  },
+  {
+    "id": "production",
+    "name": "Production Mode",
+    "description": "All real hardware and APIs enabled (requires configuration)",
+    "features": {
+      "perplexity_api": true,
+      "openai_api": true,
+      "cloud_routing": true,
+      "camera_capture": true,
+      "autonomous_mode": true
+    },
+    "cost_estimate": {
+      "enabled_paid_services": ["perplexity_api", "openai_api", "anthropic_api", "zoo_cad_api", "tripo_cad_api"],
+      "estimated_cost_per_query": {
+        "min": 0.071,
+        "max": 0.63,
+        "unit": "USD"
+      },
+      "estimated_daily_cost_100_queries": {
+        "min": 7.10,
+        "max": 63.00,
+        "unit": "USD"
+      }
+    }
+  }
+]
+```
+
+### GET /api/io-control/presets/{preset_id}
+
+Get details for a specific preset.
+
+**Response:** Same as single preset from list above.
+
+### POST /api/io-control/presets/{preset_id}/apply
+
+Apply a preset configuration.
+
+**Request:**
+Query param: `persist=true` (optional)
+
+**Response:**
+```json
+{
+  "success": true,
+  "preset_id": "development",
+  "preset_name": "Development Mode",
+  "updated_count": 15
+}
+```
+
 ## Integration with Phase 4
 
 The I/O Control Dashboard is the recommended way to manage all Phase 4 features:

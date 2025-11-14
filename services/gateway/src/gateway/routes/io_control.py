@@ -10,7 +10,16 @@ import redis
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from common.io_control import FeatureCategory, FeatureDefinition, RestartScope, feature_registry
+from common.io_control import (
+    FeatureCategory,
+    FeatureDefinition,
+    RestartScope,
+    feature_registry,
+    get_tool_availability,
+    get_preset,
+    list_presets,
+    ALL_PRESETS,
+)
 from common.io_control.state_manager import FeatureStateManager
 
 router = APIRouter(prefix="/api/io-control", tags=["io-control"])
@@ -68,6 +77,49 @@ class BulkUpdateRequest(BaseModel):
 
     changes: Dict[str, bool | str]
     persist: bool = True
+
+
+class PreviewChangesRequest(BaseModel):
+    """Request to preview changes."""
+
+    changes: Dict[str, bool | str]
+
+
+class PreviewChangesResponse(BaseModel):
+    """Response with change preview."""
+
+    dependencies: Dict[str, List[str]]
+    costs: Dict
+    restarts: Dict
+    conflicts: Dict[str, List[str]]
+    health_warnings: Dict[str, str]
+
+
+class HealthStatusResponse(BaseModel):
+    """Health status for enabled features."""
+
+    feature_id: str
+    feature_name: str
+    is_healthy: bool
+    message: str
+
+
+class ToolAvailabilityResponse(BaseModel):
+    """Tool availability status."""
+
+    available_tools: Dict[str, bool]
+    enabled_functions: List[str]
+    unavailable_message: str
+
+
+class PresetResponse(BaseModel):
+    """Preset configuration."""
+
+    id: str
+    name: str
+    description: str
+    features: Dict[str, bool | str]
+    cost_estimate: Dict
 
 
 class DashboardStateResponse(BaseModel):
@@ -294,3 +346,140 @@ async def validate_current_state():
                     issues.append({"feature_id": feature_id, "feature_name": feature.name, "issue": reason})
 
     return {"valid": len(issues) == 0, "issues": issues}
+
+
+# ============================================================================
+# New Enhancement Endpoints
+# ============================================================================
+
+
+@router.get("/health", response_model=List[HealthStatusResponse])
+async def get_health_status():
+    """Get health status for all enabled features."""
+    current_state = state_manager.get_current_state()
+    health_status = feature_registry.get_health_status(current_state)
+
+    results = []
+    for feature_id, (is_healthy, message) in health_status.items():
+        feature = feature_registry.get(feature_id)
+        if feature:
+            results.append(
+                HealthStatusResponse(
+                    feature_id=feature_id,
+                    feature_name=feature.name,
+                    is_healthy=is_healthy,
+                    message=message,
+                )
+            )
+
+    return results
+
+
+@router.get("/features/{feature_id}/dependencies")
+async def get_feature_dependencies(feature_id: str):
+    """Get missing dependencies for a feature."""
+    feature = feature_registry.get(feature_id)
+    if not feature:
+        raise HTTPException(status_code=404, detail=f"Feature not found: {feature_id}")
+
+    missing = state_manager.get_missing_dependencies(feature_id)
+    resolved = state_manager.resolve_dependencies(feature_id)
+
+    return {
+        "feature_id": feature_id,
+        "missing_dependencies": missing,
+        "auto_resolved": resolved,
+    }
+
+
+@router.post("/preview", response_model=PreviewChangesResponse)
+async def preview_changes(request: PreviewChangesRequest):
+    """Preview the impact of applying changes."""
+    preview = state_manager.preview_changes(request.changes)
+
+    return PreviewChangesResponse(
+        dependencies=preview["dependencies"],
+        costs=preview["costs"],
+        restarts=preview["restarts"],
+        conflicts=preview["conflicts"],
+        health_warnings=preview["health_warnings"],
+    )
+
+
+@router.get("/tool-availability", response_model=ToolAvailabilityResponse)
+async def get_tool_availability_status():
+    """Get tool availability status based on current I/O control settings."""
+    tool_checker = get_tool_availability(redis_client)
+    available_tools = tool_checker.get_available_tools()
+    enabled_functions = tool_checker.get_enabled_function_names()
+    unavailable_message = tool_checker.get_unavailable_tools_message()
+
+    return ToolAvailabilityResponse(
+        available_tools=available_tools,
+        enabled_functions=enabled_functions,
+        unavailable_message=unavailable_message,
+    )
+
+
+@router.get("/presets", response_model=List[PresetResponse])
+async def get_presets():
+    """List all available presets."""
+    from common.io_control.presets import estimate_cost_impact
+
+    presets = list_presets()
+    results = []
+
+    for preset in presets:
+        cost_estimate = estimate_cost_impact(preset)
+        results.append(
+            PresetResponse(
+                id=preset.id,
+                name=preset.name,
+                description=preset.description,
+                features=preset.features,
+                cost_estimate=cost_estimate,
+            )
+        )
+
+    return results
+
+
+@router.get("/presets/{preset_id}", response_model=PresetResponse)
+async def get_preset_details(preset_id: str):
+    """Get details for a specific preset."""
+    from common.io_control.presets import estimate_cost_impact
+
+    preset = get_preset(preset_id)
+    if not preset:
+        raise HTTPException(status_code=404, detail=f"Preset not found: {preset_id}")
+
+    cost_estimate = estimate_cost_impact(preset)
+
+    return PresetResponse(
+        id=preset.id,
+        name=preset.name,
+        description=preset.description,
+        features=preset.features,
+        cost_estimate=cost_estimate,
+    )
+
+
+@router.post("/presets/{preset_id}/apply")
+async def apply_preset(preset_id: str, persist: bool = True):
+    """Apply a preset configuration."""
+    preset = get_preset(preset_id)
+    if not preset:
+        raise HTTPException(status_code=404, detail=f"Preset not found: {preset_id}")
+
+    # Apply all preset features
+    success, errors = state_manager.bulk_set(preset.features, persist=persist)
+
+    if not success:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+
+    return {
+        "success": True,
+        "preset_id": preset_id,
+        "preset_name": preset.name,
+        "updated_count": len(preset.features),
+    }

@@ -16,6 +16,7 @@ import redis
 
 from common.config import Settings
 from common.io_control.feature_registry import RestartScope, feature_registry
+from common.io_control.presets import estimate_cost_impact, Preset
 from common.logging import get_logger
 
 LOGGER = get_logger(__name__)
@@ -34,6 +35,204 @@ class FeatureStateManager:
         self.redis = redis_client
         self.env_file = env_file or Path("/home/user/KITT/.env")
         self.settings = Settings()
+
+    # ========================================================================
+    # Preview and Validation
+    # ========================================================================
+
+    def preview_changes(
+        self, changes: Dict[str, bool | str]
+    ) -> Dict[str, any]:
+        """Preview the impact of applying changes.
+
+        Args:
+            changes: Dict of feature_id -> new_value
+
+        Returns:
+            Dict with:
+                - dependencies: Missing dependencies that need to be enabled
+                - costs: Cost impact estimate
+                - restarts: Services that will restart
+                - conflicts: Features that would break
+                - health_warnings: Features with known health issues
+        """
+        current_state = self.get_current_state()
+        preview = {
+            "dependencies": {},
+            "costs": {"enabled_paid_services": [], "estimated_cost_per_query": {}},
+            "restarts": {"scopes": set(), "services": []},
+            "conflicts": {},
+            "health_warnings": {},
+        }
+
+        # Check dependencies for features being enabled
+        for feature_id, new_value in changes.items():
+            if new_value and isinstance(new_value, bool):
+                missing_deps = self._check_missing_dependencies(feature_id, current_state, changes)
+                if missing_deps:
+                    preview["dependencies"][feature_id] = missing_deps
+
+        # Check conflicts for features being disabled
+        for feature_id, new_value in changes.items():
+            if not new_value and isinstance(new_value, bool):
+                conflicts = self._check_dependents(feature_id, current_state, changes)
+                if conflicts:
+                    preview["conflicts"][feature_id] = conflicts
+
+        # Calculate cost impact (for enabled API services)
+        cost_features = {}
+        for feature_id, new_value in changes.items():
+            feature = feature_registry.get(feature_id)
+            if feature and new_value:
+                cost_features[feature_id] = new_value
+
+        if cost_features:
+            # Build a temporary preset to estimate costs
+            temp_preset = Preset(
+                id="preview",
+                name="Preview",
+                description="Temporary preset for cost estimation",
+                features=cost_features,
+            )
+            preview["costs"] = estimate_cost_impact(temp_preset)
+
+        # Determine restart scopes
+        restart_scopes = set()
+        for feature_id in changes.keys():
+            feature = feature_registry.get(feature_id)
+            if feature and feature.restart_scope != RestartScope.NONE:
+                restart_scopes.add(feature.restart_scope)
+                preview["restarts"]["scopes"].add(feature.restart_scope.value)
+
+        # Map scopes to services
+        if RestartScope.SERVICE in restart_scopes:
+            preview["restarts"]["services"].append("fabrication")
+        if RestartScope.LLAMACPP in restart_scopes:
+            preview["restarts"]["services"].append("llama.cpp servers")
+        if RestartScope.STACK in restart_scopes:
+            preview["restarts"]["services"] = ["All Docker services"]
+
+        # Convert set to list for JSON serialization
+        preview["restarts"]["scopes"] = list(preview["restarts"]["scopes"])
+
+        # Check health for features being enabled
+        for feature_id, new_value in changes.items():
+            if new_value and isinstance(new_value, bool):
+                feature = feature_registry.get(feature_id)
+                if feature and feature.health_check:
+                    is_healthy, message = feature_registry.check_health(feature_id)
+                    if not is_healthy:
+                        preview["health_warnings"][feature_id] = message
+
+        return preview
+
+    def get_missing_dependencies(self, feature_id: str) -> list[str]:
+        """Get list of missing dependencies for a feature.
+
+        Args:
+            feature_id: Feature to check
+
+        Returns:
+            List of feature IDs that are dependencies but not enabled
+        """
+        current_state = self.get_current_state()
+        return self._check_missing_dependencies(feature_id, current_state, {})
+
+    def _check_missing_dependencies(
+        self,
+        feature_id: str,
+        current_state: Dict[str, bool | str],
+        pending_changes: Dict[str, bool | str],
+    ) -> list[str]:
+        """Check for missing dependencies considering pending changes.
+
+        Args:
+            feature_id: Feature to check
+            current_state: Current feature state
+            pending_changes: Changes being applied
+
+        Returns:
+            List of missing dependency feature IDs
+        """
+        feature = feature_registry.get(feature_id)
+        if not feature or not feature.depends_on:
+            return []
+
+        missing = []
+        for dep_id in feature.depends_on:
+            # Check if dependency will be enabled in pending changes
+            if dep_id in pending_changes:
+                if not pending_changes[dep_id]:
+                    missing.append(dep_id)
+            # Otherwise check current state
+            elif not current_state.get(dep_id):
+                missing.append(dep_id)
+
+        return missing
+
+    def _check_dependents(
+        self,
+        feature_id: str,
+        current_state: Dict[str, bool | str],
+        pending_changes: Dict[str, bool | str],
+    ) -> list[str]:
+        """Check which enabled features depend on this one.
+
+        Args:
+            feature_id: Feature being disabled
+            current_state: Current feature state
+            pending_changes: Changes being applied
+
+        Returns:
+            List of feature IDs that would break
+        """
+        dependents = []
+
+        for other_id, other_feature in feature_registry.features.items():
+            # Skip if this feature doesn't depend on the one we're disabling
+            if not other_feature.depends_on or feature_id not in other_feature.depends_on:
+                continue
+
+            # Check if this dependent is currently enabled
+            if other_id in pending_changes:
+                is_enabled = pending_changes[other_id]
+            else:
+                is_enabled = current_state.get(other_id)
+
+            if is_enabled:
+                dependents.append(other_id)
+
+        return dependents
+
+    def resolve_dependencies(
+        self, feature_id: str, current_state: Optional[Dict[str, bool | str]] = None
+    ) -> Dict[str, bool]:
+        """Auto-resolve dependencies for a feature.
+
+        Args:
+            feature_id: Feature to enable
+            current_state: Optional current state (fetched if not provided)
+
+        Returns:
+            Dict of additional features to enable (feature_id -> True)
+        """
+        if current_state is None:
+            current_state = self.get_current_state()
+
+        feature = feature_registry.get(feature_id)
+        if not feature or not feature.depends_on:
+            return {}
+
+        to_enable = {}
+        for dep_id in feature.depends_on:
+            if not current_state.get(dep_id):
+                to_enable[dep_id] = True
+
+                # Recursively resolve dependencies of dependencies
+                nested_deps = self.resolve_dependencies(dep_id, current_state)
+                to_enable.update(nested_deps)
+
+        return to_enable
 
     # ========================================================================
     # State Reading
@@ -90,6 +289,47 @@ class FeatureStateManager:
     # ========================================================================
     # State Writing
     # ========================================================================
+
+    def set_feature_with_deps(
+        self,
+        feature_id: str,
+        value: bool | str,
+        persist: bool = True,
+        trigger_restart: bool = True,
+    ) -> tuple[bool, Optional[str], Dict[str, bool]]:
+        """Set feature value with automatic dependency resolution.
+
+        Args:
+            feature_id: Feature identifier
+            value: New value
+            persist: Whether to write to .env file
+            trigger_restart: Whether to trigger service restart if needed
+
+        Returns:
+            Tuple of (success, error_message, enabled_dependencies)
+        """
+        # If enabling, check for missing dependencies
+        if value and isinstance(value, bool):
+            missing_deps = self.get_missing_dependencies(feature_id)
+            if missing_deps:
+                # Auto-resolve dependencies
+                auto_enabled = self.resolve_dependencies(feature_id)
+
+                # Build changes dict
+                changes = auto_enabled.copy()
+                changes[feature_id] = value
+
+                # Apply all changes
+                success, errors = self.bulk_set(changes, persist=persist)
+                if success:
+                    return True, None, auto_enabled
+                else:
+                    error_msg = "; ".join(f"{k}: {v}" for k, v in errors.items())
+                    return False, error_msg, {}
+
+        # No dependencies, use regular set
+        success, error = self.set_feature(feature_id, value, persist, trigger_restart)
+        return success, error, {}
 
     def set_feature(
         self,

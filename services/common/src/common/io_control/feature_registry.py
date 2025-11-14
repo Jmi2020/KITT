@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Callable
 
+from . import health_checks
+
 
 class FeatureCategory(Enum):
     """Category of feature for grouping in UI."""
@@ -277,6 +279,7 @@ class FeatureRegistry:
                 env_var="PERPLEXITY_API_KEY",
                 default_value="",
                 restart_scope=RestartScope.NONE,  # Hot-reload
+                health_check=health_checks.check_perplexity_api,
                 validation_message="Requires API key from perplexity.ai. Costs ~$0.001-0.005/query",
                 setup_instructions="Get API key from https://perplexity.ai → Settings → API",
             )
@@ -291,6 +294,7 @@ class FeatureRegistry:
                 env_var="OPENAI_API_KEY",
                 default_value="",
                 restart_scope=RestartScope.NONE,  # Hot-reload
+                health_check=health_checks.check_openai_api,
                 validation_message="Requires API key from OpenAI. Costs ~$0.01-0.06/query depending on model",
                 setup_instructions="Get API key from https://platform.openai.com/api-keys",
             )
@@ -305,6 +309,7 @@ class FeatureRegistry:
                 env_var="ANTHROPIC_API_KEY",
                 default_value="",
                 restart_scope=RestartScope.NONE,  # Hot-reload
+                health_check=health_checks.check_anthropic_api,
                 validation_message="Requires API key from Anthropic. Costs ~$0.01-0.08/query depending on model",
                 setup_instructions="Get API key from https://console.anthropic.com/settings/keys",
             )
@@ -319,6 +324,7 @@ class FeatureRegistry:
                 env_var="ZOO_API_KEY",
                 default_value="",
                 restart_scope=RestartScope.NONE,  # Hot-reload
+                health_check=health_checks.check_zoo_api,
                 validation_message="Requires API key from zoo.dev. First choice for CAD generation",
                 setup_instructions="Get API key from https://zoo.dev → Account → API Keys",
             )
@@ -333,6 +339,7 @@ class FeatureRegistry:
                 env_var="TRIPO_API_KEY",
                 default_value="",
                 restart_scope=RestartScope.NONE,  # Hot-reload
+                health_check=health_checks.check_tripo_api,
                 validation_message="Requires API key from tripo.ai. Fallback for organic/mesh CAD",
                 setup_instructions="Get API key from https://platform.tripo3d.ai/api-keys",
             )
@@ -518,6 +525,46 @@ class FeatureRegistry:
                 return False, f"Conflicts with '{conflict_name}' (disable it first)"
 
         return True, None
+
+    def check_health(self, feature_id: str) -> tuple[bool, Optional[str]]:
+        """Check health of a feature.
+
+        Args:
+            feature_id: Feature to check
+
+        Returns:
+            Tuple of (is_healthy, status_message)
+        """
+        feature = self.get(feature_id)
+        if not feature:
+            return False, f"Feature not found: {feature_id}"
+
+        if not feature.health_check:
+            return True, "No health check defined"
+
+        try:
+            is_healthy = feature.health_check()
+            if is_healthy:
+                return True, "Healthy"
+            else:
+                return False, "Health check failed (not configured or unreachable)"
+        except Exception as e:
+            return False, f"Health check error: {str(e)}"
+
+    def get_health_status(self, current_state: Dict[str, bool]) -> Dict[str, tuple[bool, str]]:
+        """Get health status for all enabled features.
+
+        Args:
+            current_state: Current enabled state of all features
+
+        Returns:
+            Dict mapping feature_id to (is_healthy, status_message)
+        """
+        health_status = {}
+        for feature_id, is_enabled in current_state.items():
+            if is_enabled:
+                health_status[feature_id] = self.check_health(feature_id)
+        return health_status
 
     def can_disable(self, feature_id: str, current_state: Dict[str, bool]) -> tuple[bool, Optional[str]]:
         """Check if a feature can be disabled.
