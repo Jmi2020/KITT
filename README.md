@@ -986,6 +986,14 @@ Each server follows a consistent pattern:
 - **[Security Hardening](ops/runbooks/security-hardening.md)**: Safety configurations
 - **[Troubleshooting](docs/troubleshooting.md)**: Common issues and solutions
 
+### Phase 4: Fabrication Intelligence
+
+- **[Phase 4 Progress Summary](docs/PHASE4_PROGRESS_SUMMARY.md)**: Current implementation status and timeline
+- **[Feature Flags Guide](docs/PHASE4_FEATURE_FLAGS_GUIDE.md)**: I/O controls for incremental testing (cameras, MQTT, MinIO)
+- **[Computer Vision Print Monitoring](docs/CV_PRINT_MONITORING_DESIGN.md)**: Camera integration and human-in-loop design
+- **[Materials Database Guide](docs/materials-database-guide.md)**: Filament catalog and inventory management
+- **[Phase 4 Specification](specs/004-FabricationIntelligence/spec.md)**: Complete Phase 4 technical specification
+
 ### Developer Resources
 
 - **[Architecture Overview](docs/architecture.md)**: System design deep dive
@@ -1070,6 +1078,45 @@ UNIFI_URL=https://unifi.local
 UNIFI_USERNAME=admin
 UNIFI_PASSWORD=...
 ```
+
+### Phase 4 Feature Flags (I/O Controls)
+
+Enable/disable external device dependencies for incremental testing. See **[Feature Flags Guide](docs/PHASE4_FEATURE_FLAGS_GUIDE.md)** for complete documentation.
+
+```bash
+# Print Outcome Tracking
+ENABLE_PRINT_OUTCOME_TRACKING=true       # Database tracking (always enabled)
+
+# Camera Integration (disable during development without hardware)
+ENABLE_CAMERA_CAPTURE=false              # Master switch - returns mock URLs when disabled
+ENABLE_BAMBOO_CAMERA=false               # Bamboo Labs built-in camera via MQTT
+ENABLE_RASPBERRY_PI_CAMERAS=false        # Snapmaker/Elegoo Pi cameras via HTTP
+
+# Camera Endpoints (when enabled)
+SNAPMAKER_CAMERA_URL=http://snapmaker-pi.local:8080/snapshot.jpg
+ELEGOO_CAMERA_URL=http://elegoo-pi.local:8080/snapshot.jpg
+
+# Snapshot Configuration
+CAMERA_SNAPSHOT_INTERVAL_MINUTES=5       # Progress snapshots during prints
+CAMERA_FIRST_LAYER_SNAPSHOT_DELAY=5      # First layer capture timing
+
+# Storage
+ENABLE_MINIO_SNAPSHOT_UPLOAD=false       # Actual uploads vs mock URLs
+
+# Human Feedback
+ENABLE_HUMAN_FEEDBACK_REQUESTS=true      # MQTT notifications to UI
+HUMAN_FEEDBACK_AUTO_REQUEST=true         # Auto-request after every print
+
+# Intelligence (requires historical data)
+ENABLE_PRINT_INTELLIGENCE=false          # Success prediction and recommendations
+PRINT_INTELLIGENCE_MIN_SAMPLES=30        # Minimum outcomes before predictions
+```
+
+**Development Mode:**
+Set `ENABLE_CAMERA_CAPTURE=false` to test the complete workflow without physical cameras. All features work with mock data, no external dependencies required.
+
+**Production Mode:**
+Enable features incrementally: test Snapmaker Pi camera first, then add Bamboo Labs, then enable MinIO storage, etc.
 
 ### Performance Tuning
 
@@ -1320,21 +1367,32 @@ curl -X POST http://localhost:8080/api/voice/transcript \
 - [x] Command broker with allow-lists
 - [x] Web research with citation tracking
 
-### Phase 3: Voice & Fabrication 🚧 IN PROGRESS
-- [ ] Voice-to-print pipeline
-- [ ] OctoPrint/Klipper integration
-- [ ] UniFi camera CV monitoring
-- [ ] Print queue management
-- [ ] Slicer automation
+### Phase 3: Autonomous Learning ✅ COMPLETE
+- [x] Goal identification system
+- [x] Project proposal workflow
+- [x] Research goal execution (Perplexity integration)
+- [x] Outcome tracking and effectiveness measurement
+- [x] Knowledge base integration
+- [x] Budget-aware autonomous operation
 
-### Phase 4: Safety & Access 📋 PLANNED
+### Phase 4: Fabrication Intelligence 🚧 IN PROGRESS
+- [x] Material inventory system (12 materials, cost/usage tracking)
+- [x] Print outcome tracking with visual evidence
+- [x] Camera integration (Bamboo Labs MQTT + Raspberry Pi HTTP)
+- [x] Human-in-loop feedback workflow
+- [x] I/O feature flags for incremental testing
+- [ ] Print intelligence (success prediction, recommendations)
+- [ ] Queue optimization (batch by material, prioritize deadlines)
+- [ ] Autonomous procurement (research suppliers when low inventory)
+
+### Phase 5: Safety & Access 📋 PLANNED
 - [ ] UniFi Access integration
 - [ ] Zone presence detection
 - [ ] Enhanced hazard workflows
 - [ ] Multi-factor confirmation
 - [ ] Audit dashboard
 
-### Phase 5: Advanced Features 📋 PLANNED
+### Phase 6: Advanced Features 📋 PLANNED
 - [ ] Multi-user support
 - [ ] Role-based access control
 - [ ] Advanced observability (Loki, Tempo)
