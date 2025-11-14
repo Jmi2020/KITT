@@ -105,6 +105,7 @@ class GoalType(enum.Enum):
     fabrication = "fabrication"
     improvement = "improvement"
     optimization = "optimization"
+    procurement = "procurement"  # Phase 4: Material procurement research
 
 
 class GoalStatus(enum.Enum):
@@ -164,6 +165,39 @@ class ScanStatus(enum.Enum):
     running = "running"
     completed = "completed"
     failed = "failed"
+
+
+class FailureReason(enum.Enum):
+    """Phase 4: Print failure classification."""
+    first_layer_adhesion = "first_layer_adhesion"
+    warping = "warping"
+    stringing = "stringing"
+    spaghetti = "spaghetti"
+    nozzle_clog = "nozzle_clog"
+    filament_runout = "filament_runout"
+    layer_shift = "layer_shift"
+    overheating = "overheating"
+    support_failure = "support_failure"
+    user_cancelled = "user_cancelled"
+    power_failure = "power_failure"
+    other = "other"
+
+
+class InventoryStatus(enum.Enum):
+    """Phase 4: Material inventory spool status."""
+    available = "available"
+    in_use = "in_use"
+    depleted = "depleted"
+    reserved = "reserved"
+
+
+class QueueStatus(enum.Enum):
+    """Phase 4: Print queue job status."""
+    queued = "queued"
+    printing = "printing"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
 
 
 class User(Base):
@@ -437,6 +471,7 @@ class Goal(Base):
 
     projects: Mapped[List["Project"]] = relationship(back_populates="goal")
     outcome: Mapped[Optional["GoalOutcome"]] = relationship(back_populates="goal", uselist=False)
+    print_outcomes: Mapped[List["PrintOutcome"]] = relationship(back_populates="goal")  # Phase 4
     approver: Mapped[Optional[User]] = relationship()
 
 
@@ -535,6 +570,154 @@ class GoalOutcome(Base):
     goal: Mapped[Goal] = relationship(back_populates="outcome")
 
 
+class Material(Base):
+    """Phase 4: Filament material catalog.
+
+    Tracks material properties, costs, and temperature ranges for
+    intelligent material selection and inventory management.
+    """
+
+    __tablename__ = "materials"
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)  # e.g., "pla_black_esun"
+    material_type: Mapped[str] = mapped_column(String(50), nullable=False)  # pla, petg, abs, tpu
+    color: Mapped[str] = mapped_column(String(50), nullable=False)
+    manufacturer: Mapped[str] = mapped_column(String(120), nullable=False)
+    cost_per_kg_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    density_g_cm3: Mapped[float] = mapped_column(Numeric(4, 2), nullable=False)  # e.g., 1.24 for PLA
+
+    # Temperature ranges
+    nozzle_temp_min_c: Mapped[int] = mapped_column(Integer, nullable=False)
+    nozzle_temp_max_c: Mapped[int] = mapped_column(Integer, nullable=False)
+    bed_temp_min_c: Mapped[int] = mapped_column(Integer, nullable=False)
+    bed_temp_max_c: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Material properties
+    properties: Mapped[dict] = mapped_column(JSONB, default=dict)  # strength, flexibility, food_safe, etc.
+    sustainability_score: Mapped[Optional[int]] = mapped_column(Integer)  # 0-100
+
+    # Metadata
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=datetime.utcnow)
+
+    # Relationships
+    inventory: Mapped[List["InventoryItem"]] = relationship(back_populates="material")
+    print_outcomes: Mapped[List["PrintOutcome"]] = relationship(back_populates="material")
+    queued_prints: Mapped[List["QueuedPrint"]] = relationship(back_populates="material")
+
+
+class InventoryItem(Base):
+    """Phase 4: Physical filament spool inventory.
+
+    Tracks individual spools with current weight, enabling material
+    usage tracking and low-inventory alerts.
+    """
+
+    __tablename__ = "inventory"
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)  # spool ID
+    material_id: Mapped[str] = mapped_column(ForeignKey("materials.id"), nullable=False)
+    location: Mapped[Optional[str]] = mapped_column(String(120))  # shelf, bin, printer
+    purchase_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    initial_weight_grams: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    current_weight_grams: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    status: Mapped[InventoryStatus] = mapped_column(Enum(InventoryStatus), nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Metadata
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=datetime.utcnow)
+
+    # Relationships
+    material: Mapped[Material] = relationship(back_populates="inventory")
+    queued_prints: Mapped[List["QueuedPrint"]] = relationship(back_populates="spool")
+
+
+class PrintOutcome(Base):
+    """Phase 4: Historical print job outcomes for learning.
+
+    Captures success/failure, quality scores, and print settings to enable
+    intelligent success prediction and setting recommendations.
+    """
+
+    __tablename__ = "print_outcomes"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    job_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    goal_id: Mapped[Optional[str]] = mapped_column(ForeignKey("goals.id"))  # if autonomous
+    printer_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    material_id: Mapped[str] = mapped_column(ForeignKey("materials.id"), nullable=False)
+
+    # Outcome
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    failure_reason: Mapped[Optional[FailureReason]] = mapped_column(Enum(FailureReason))
+    quality_score: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)  # 0-100
+
+    # Actuals
+    actual_duration_hours: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False)
+    actual_cost_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    material_used_grams: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+
+    # Print Settings
+    print_settings: Mapped[dict] = mapped_column(JSONB, nullable=False)  # temp, speed, layer height, infill
+
+    # Quality Metrics (if available)
+    quality_metrics: Mapped[dict] = mapped_column(JSONB, default=dict)  # layer_consistency, surface_finish
+
+    # Timestamps
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    measured_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    goal: Mapped[Optional[Goal]] = relationship(back_populates="print_outcomes")
+    material: Mapped[Material] = relationship(back_populates="print_outcomes")
+
+
+class QueuedPrint(Base):
+    """Phase 4: Print queue with optimization metadata.
+
+    Tracks queued print jobs with priority scoring, deadline management,
+    and optimization reasoning.
+    """
+
+    __tablename__ = "print_queue"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    job_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    stl_path: Mapped[str] = mapped_column(String(500), nullable=False)
+
+    # Assignment
+    printer_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    material_id: Mapped[str] = mapped_column(ForeignKey("materials.id"), nullable=False)
+    spool_id: Mapped[Optional[str]] = mapped_column(ForeignKey("inventory.id"))
+
+    # Scheduling
+    status: Mapped[QueueStatus] = mapped_column(Enum(QueueStatus), nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False)  # 1-10
+    deadline: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    scheduled_start: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Estimates
+    estimated_duration_hours: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False)
+    estimated_material_grams: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    estimated_cost_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    success_probability: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))  # 0-100
+
+    # Optimization Metadata
+    priority_score: Mapped[Optional[float]] = mapped_column(Numeric(10, 4))
+    optimization_reasoning: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Timestamps
+    queued_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Relationships
+    material: Mapped[Material] = relationship(back_populates="queued_prints")
+    spool: Mapped[Optional[InventoryItem]] = relationship(back_populates="queued_prints")
+
+
 class DiscoveredDevice(Base):
     """Network-discovered IoT devices (printers, Raspberry Pi, ESP32, etc.)."""
 
@@ -612,6 +795,9 @@ __all__ = [
     "DiscoveryMethod",
     "DiscoveredDeviceType",
     "ScanStatus",
+    "FailureReason",  # Phase 4
+    "InventoryStatus",  # Phase 4
+    "QueueStatus",  # Phase 4
     # Models
     "User",
     "Zone",
@@ -633,6 +819,10 @@ __all__ = [
     "Project",
     "Task",
     "GoalOutcome",
+    "Material",  # Phase 4
+    "InventoryItem",  # Phase 4
+    "PrintOutcome",  # Phase 4
+    "QueuedPrint",  # Phase 4
     "DiscoveredDevice",
     "DiscoveryScan",
 ]
