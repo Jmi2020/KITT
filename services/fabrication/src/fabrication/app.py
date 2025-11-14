@@ -29,7 +29,8 @@ from .selector.printer_selector import PrinterSelector, PrintMode, SelectionResu
 from .status.printer_status import PrinterStatusChecker, PrinterStatus
 from .launcher.slicer_launcher import SlicerLauncher
 from .intelligence.material_inventory import MaterialInventory, InventoryFilters
-from .print_outcome_tracker import PrintOutcomeTracker, PrintOutcomeData
+from .monitoring.outcome_tracker import PrintOutcomeTracker, PrintOutcomeData
+from .monitoring.camera_capture import CameraCapture
 
 # Configure logging
 configure_logging()
@@ -973,41 +974,52 @@ async def record_print_outcome(request: RecordOutcomeRequest) -> PrintOutcomeRes
         raise HTTPException(status_code=500, detail="Outcome tracker not initialized")
 
     try:
-        # Parse failure reason if provided
-        failure_reason = None
-        if request.failure_reason:
-            try:
-                failure_reason = FailureReason(request.failure_reason)
-            except ValueError:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid failure reason: {request.failure_reason}"
-                )
-
-        # Create outcome data
+        # Create outcome data (factual print data)
         outcome_data = PrintOutcomeData(
             job_id=request.job_id,
             printer_id=request.printer_id,
             material_id=request.material_id,
-            success=request.success,
-            quality_score=request.quality_score,
+            started_at=request.started_at,
+            completed_at=request.completed_at,
             actual_duration_hours=request.actual_duration_hours,
             actual_cost_usd=request.actual_cost_usd,
             material_used_grams=request.material_used_grams,
             print_settings=request.print_settings,
-            started_at=request.started_at,
-            completed_at=request.completed_at,
-            failure_reason=failure_reason,
-            quality_metrics=request.quality_metrics,
             initial_snapshot_url=request.initial_snapshot_url,
             final_snapshot_url=request.final_snapshot_url,
             snapshot_urls=request.snapshot_urls,
             video_url=request.video_url,
             goal_id=request.goal_id,
+            quality_metrics=request.quality_metrics,
         )
 
-        # Record outcome
-        outcome = outcome_tracker.record_outcome(outcome_data)
+        # Create human feedback if evaluation provided
+        human_feedback = None
+        if request.quality_score > 0 or request.failure_reason:
+            # Parse failure reason
+            failure_reason = None
+            if request.failure_reason:
+                try:
+                    failure_reason = FailureReason(request.failure_reason)
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid failure reason: {request.failure_reason}"
+                    )
+
+            # Import HumanFeedback
+            from .monitoring.outcome_tracker import HumanFeedback
+
+            human_feedback = HumanFeedback(
+                success=request.success,
+                failure_reason=failure_reason,
+                quality_scores={"overall": int(request.quality_score / 10)} if request.quality_score > 0 else None,
+                notes=None,
+                reviewed_by="api_user",
+            )
+
+        # Capture outcome
+        outcome = outcome_tracker.capture_outcome(outcome_data, human_feedback)
 
         return _outcome_to_response(outcome)
 
@@ -1018,10 +1030,10 @@ async def record_print_outcome(request: RecordOutcomeRequest) -> PrintOutcomeRes
         raise HTTPException(status_code=500, detail=f"Failed to record outcome: {e}")
 
 
-@app.get("/api/fabrication/outcomes/{outcome_id}", response_model=PrintOutcomeResponse)
-async def get_print_outcome(outcome_id: str) -> PrintOutcomeResponse:
+@app.get("/api/fabrication/outcomes/{job_id}", response_model=PrintOutcomeResponse)
+async def get_print_outcome(job_id: str) -> PrintOutcomeResponse:
     """
-    Get print outcome by ID.
+    Get print outcome by job ID.
 
     Returns outcome details including visual evidence and human review status.
     """
@@ -1029,17 +1041,17 @@ async def get_print_outcome(outcome_id: str) -> PrintOutcomeResponse:
         raise HTTPException(status_code=500, detail="Outcome tracker not initialized")
 
     try:
-        outcome = outcome_tracker.get_outcome(outcome_id)
+        outcome = outcome_tracker.get_outcome(job_id)
 
         if not outcome:
-            raise HTTPException(status_code=404, detail=f"Outcome not found: {outcome_id}")
+            raise HTTPException(status_code=404, detail=f"Outcome not found: {job_id}")
 
         return _outcome_to_response(outcome)
 
     except HTTPException:
         raise
     except Exception as e:
-        LOGGER.error("Failed to get outcome", outcome_id=outcome_id, error=str(e), exc_info=True)
+        LOGGER.error("Failed to get outcome", job_id=job_id, error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get outcome: {e}")
 
 
@@ -1076,8 +1088,8 @@ async def list_print_outcomes(
         raise HTTPException(status_code=500, detail=f"Failed to list outcomes: {e}")
 
 
-@app.patch("/api/fabrication/outcomes/{outcome_id}/review", response_model=PrintOutcomeResponse)
-async def update_outcome_review(outcome_id: str, request: UpdateReviewRequest) -> PrintOutcomeResponse:
+@app.patch("/api/fabrication/outcomes/{job_id}/review", response_model=PrintOutcomeResponse)
+async def update_outcome_review(job_id: str, request: UpdateReviewRequest) -> PrintOutcomeResponse:
     """
     Update print outcome with human review.
 
@@ -1099,21 +1111,30 @@ async def update_outcome_review(outcome_id: str, request: UpdateReviewRequest) -
                     detail=f"Invalid failure reason: {request.failure_reason}"
                 )
 
-        # Update review
-        outcome = outcome_tracker.update_human_review(
-            outcome_id=outcome_id,
-            reviewed_by=request.reviewed_by,
-            quality_score=request.quality_score,
+        # Import HumanFeedback
+        from .monitoring.outcome_tracker import HumanFeedback
+
+        # Create feedback object
+        # Infer success from quality_score or presence of failure_reason
+        success = (request.quality_score or 0) > 50 if request.quality_score else not failure_reason
+
+        feedback = HumanFeedback(
+            success=success,
             failure_reason=failure_reason,
+            quality_scores={"overall": int((request.quality_score or 0) / 10)} if request.quality_score else None,
             notes=request.notes,
+            reviewed_by=request.reviewed_by,
         )
+
+        # Record feedback
+        outcome = outcome_tracker.record_human_feedback(job_id, feedback)
 
         return _outcome_to_response(outcome)
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        LOGGER.error("Failed to update review", outcome_id=outcome_id, error=str(e), exc_info=True)
+        LOGGER.error("Failed to update review", job_id=job_id, error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to update review: {e}")
 
 

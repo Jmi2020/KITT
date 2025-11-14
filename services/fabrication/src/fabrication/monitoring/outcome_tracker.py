@@ -470,3 +470,50 @@ class PrintOutcomeTracker:
 
         # Default: success without detailed scores = 80
         return 80.0
+
+    def get_statistics(
+        self,
+        printer_id: Optional[str] = None,
+        material_id: Optional[str] = None,
+    ) -> Dict:
+        """Get print outcome statistics.
+
+        Args:
+            printer_id: Optional filter by printer
+            material_id: Optional filter by material
+
+        Returns:
+            Statistics dict with success_rate, avg_quality, total_outcomes, etc.
+        """
+        query = self.db.query(PrintOutcome)
+
+        if printer_id:
+            query = query.filter(PrintOutcome.printer_id == printer_id)
+
+        if material_id:
+            query = query.filter(PrintOutcome.material_id == material_id)
+
+        outcomes = query.all()
+
+        if not outcomes:
+            return {
+                "total_outcomes": 0,
+                "success_rate": 0.0,
+                "avg_quality_score": 0.0,
+                "avg_duration_hours": 0.0,
+                "total_cost_usd": 0.0,
+            }
+
+        total = len(outcomes)
+        successes = sum(1 for o in outcomes if o.success)
+        avg_quality = sum(float(o.quality_score) for o in outcomes) / total
+        avg_duration = sum(float(o.actual_duration_hours) for o in outcomes) / total
+        total_cost = sum(float(o.actual_cost_usd) for o in outcomes)
+
+        return {
+            "total_outcomes": total,
+            "success_rate": round(successes / total, 3),
+            "avg_quality_score": round(avg_quality, 2),
+            "avg_duration_hours": round(avg_duration, 2),
+            "total_cost_usd": round(total_cost, 2),
+        }
