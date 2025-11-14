@@ -669,6 +669,24 @@ class PrintOutcome(Base):
     completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     measured_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+    # Visual Evidence (Phase 1: Human-in-Loop)
+    initial_snapshot_url: Mapped[Optional[str]] = mapped_column(String(500))  # First layer snapshot
+    final_snapshot_url: Mapped[Optional[str]] = mapped_column(String(500))  # Completed print
+    snapshot_urls: Mapped[list] = mapped_column(JSONB, default=list)  # All periodic snapshots
+    video_url: Mapped[Optional[str]] = mapped_column(String(500))  # Full timelapse (optional)
+
+    # Human Feedback (Phase 1: Human-in-Loop)
+    human_reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
+    review_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(100))
+
+    # Visual Characteristics (Phase 2+: Future Autonomous Detection)
+    visual_defects: Mapped[list] = mapped_column(JSONB, default=list)  # Detected visual issues
+    anomaly_detected: Mapped[bool] = mapped_column(Boolean, default=False)
+    anomaly_confidence: Mapped[Optional[float]] = mapped_column(Numeric(3, 2))  # 0.00-1.00
+    auto_stopped: Mapped[bool] = mapped_column(Boolean, default=False)  # Did KITTY auto-stop?
+
     # Relationships
     goal: Mapped[Optional[Goal]] = relationship(back_populates="print_outcomes")
     material: Mapped[Material] = relationship(back_populates="print_outcomes")
