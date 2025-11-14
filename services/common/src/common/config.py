@@ -53,6 +53,21 @@ class Settings(BaseSettings):
     # Fabrication / Multi-Printer Control
     printer_config: str = "config/printers.yaml"
 
+    # Phase 4: Print Monitoring & Intelligence (Feature Flags)
+    enable_print_outcome_tracking: bool = True
+    enable_camera_capture: bool = False  # Master switch for all camera features
+    enable_bamboo_camera: bool = False
+    enable_raspberry_pi_cameras: bool = False
+    snapmaker_camera_url: str = "http://snapmaker-pi.local:8080/snapshot.jpg"
+    elegoo_camera_url: str = "http://elegoo-pi.local:8080/snapshot.jpg"
+    camera_snapshot_interval_minutes: int = 5
+    camera_first_layer_snapshot_delay: int = 5
+    enable_minio_snapshot_upload: bool = False
+    enable_human_feedback_requests: bool = True
+    human_feedback_auto_request: bool = True
+    enable_print_intelligence: bool = False
+    print_intelligence_min_samples: int = 30
+
     # Network Discovery
     discovery_port: int = 8500
     discovery_scan_interval_minutes: int = 15

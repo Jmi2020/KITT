@@ -14,10 +14,12 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
+from common.config import Settings
 from common.db.models import FailureReason, PrintOutcome
 from common.logging import get_logger
 
 LOGGER = get_logger(__name__)
+settings = Settings()
 
 
 @dataclass
@@ -110,6 +112,32 @@ class PrintOutcomeTracker:
         Raises:
             ValueError: If job_id already exists or material_id not found
         """
+        # Check if print outcome tracking is enabled
+        if not settings.enable_print_outcome_tracking:
+            LOGGER.warning(
+                "Print outcome tracking disabled by feature flag, skipping",
+                job_id=outcome_data.job_id,
+            )
+            # Return minimal mock outcome without database insert
+            return PrintOutcome(
+                id=str(uuid4()),
+                job_id=outcome_data.job_id,
+                printer_id=outcome_data.printer_id,
+                material_id=outcome_data.material_id,
+                success=True,
+                quality_score=Decimal("0.0"),
+                actual_duration_hours=Decimal(str(outcome_data.actual_duration_hours)),
+                actual_cost_usd=Decimal(str(outcome_data.actual_cost_usd)),
+                material_used_grams=Decimal(str(outcome_data.material_used_grams)),
+                print_settings=outcome_data.print_settings,
+                quality_metrics={},
+                started_at=outcome_data.started_at,
+                completed_at=outcome_data.completed_at,
+                measured_at=datetime.utcnow(),
+                snapshot_urls=[],
+                visual_defects=[],
+            )
+
         # Check for duplicate job_id
         existing = self.db.query(PrintOutcome).filter_by(job_id=outcome_data.job_id).first()
         if existing:
@@ -179,6 +207,13 @@ class PrintOutcomeTracker:
         Returns:
             True if request published successfully, False otherwise
         """
+        # Check if human feedback requests are enabled
+        if not settings.enable_human_feedback_requests:
+            LOGGER.debug(
+                "Human feedback requests disabled by feature flag", job_id=job_id
+            )
+            return False
+
         outcome = self.db.query(PrintOutcome).filter_by(job_id=job_id).first()
         if not outcome:
             LOGGER.error("Print outcome not found", job_id=job_id)

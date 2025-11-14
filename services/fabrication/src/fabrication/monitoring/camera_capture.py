@@ -13,9 +13,11 @@ from datetime import datetime
 from typing import Dict, Optional
 
 import aiohttp
+from common.config import Settings
 from common.logging import get_logger
 
 LOGGER = get_logger(__name__)
+settings = Settings()
 
 
 @dataclass
@@ -76,6 +78,23 @@ class CameraCapture:
             SnapshotResult with MinIO URL or error
         """
         timestamp = datetime.utcnow()
+
+        # Check if camera capture is enabled
+        if not settings.enable_camera_capture:
+            LOGGER.debug(
+                "Camera capture disabled by feature flag",
+                printer_id=printer_id,
+                job_id=job_id,
+                milestone=milestone,
+            )
+            # Return mock URL when disabled
+            mock_url = f"minio://{self.bucket_name}/{job_id}/{milestone}_{timestamp.strftime('%Y%m%d_%H%M%S')}.jpg"
+            return SnapshotResult(
+                success=True,
+                url=mock_url,
+                milestone=milestone,
+                timestamp=timestamp,
+            )
 
         LOGGER.info(
             "Capturing snapshot",
@@ -144,6 +163,11 @@ class CameraCapture:
         Returns:
             JPEG image data or None if failed
         """
+        # Check if Bamboo camera is enabled
+        if not settings.enable_bamboo_camera:
+            LOGGER.debug("Bamboo Labs camera disabled by feature flag", printer_id=printer_id)
+            return None
+
         if not self.mqtt_client:
             LOGGER.warning("MQTT client not configured, cannot capture Bamboo Labs snapshot")
             return None
@@ -175,11 +199,15 @@ class CameraCapture:
         Returns:
             JPEG image data or None if failed
         """
-        # Map printer ID to Raspberry Pi camera endpoint
-        # TODO: Get these from configuration or device registry
+        # Check if Raspberry Pi cameras are enabled
+        if not settings.enable_raspberry_pi_cameras:
+            LOGGER.debug("Raspberry Pi cameras disabled by feature flag", printer_id=printer_id)
+            return None
+
+        # Map printer ID to Raspberry Pi camera endpoint from settings
         camera_endpoints = {
-            "snapmaker_artisan": "http://snapmaker-pi.local:8080/snapshot.jpg",
-            "elegoo_giga": "http://elegoo-pi.local:8080/snapshot.jpg",
+            "snapmaker_artisan": settings.snapmaker_camera_url,
+            "elegoo_giga": settings.elegoo_camera_url,
         }
 
         endpoint = camera_endpoints.get(printer_id)
@@ -229,15 +257,16 @@ class CameraCapture:
         Returns:
             MinIO URL (e.g., "minio://prints/job123/start_20250314_120000.jpg")
         """
-        if not self.minio_client:
-            # Return mock URL for testing
-            object_name = f"{job_id}/{milestone}_{timestamp.strftime('%Y%m%d_%H%M%S')}.jpg"
+        # Generate object name (used for both mock and real upload)
+        object_name = f"{job_id}/{milestone}_{timestamp.strftime('%Y%m%d_%H%M%S')}.jpg"
+
+        # Check if MinIO upload is enabled
+        if not settings.enable_minio_snapshot_upload or not self.minio_client:
+            # Return mock URL when disabled or client not configured
+            LOGGER.debug("MinIO upload disabled, returning mock URL", object_name=object_name)
             return f"minio://{self.bucket_name}/{object_name}"
 
         try:
-            # Generate object name: prints/{job_id}/{milestone}_{timestamp}.jpg
-            object_name = f"{job_id}/{milestone}_{timestamp.strftime('%Y%m%d_%H%M%S')}.jpg"
-
             # Upload to MinIO
             self.minio_client.put_object(
                 bucket_name=self.bucket_name,

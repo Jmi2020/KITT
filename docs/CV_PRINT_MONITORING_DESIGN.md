@@ -4,6 +4,20 @@
 
 KITTY will use visual monitoring from multiple camera sources to track print quality and eventually detect failures automatically. This document outlines the phased approach from human-in-the-loop feedback to autonomous failure detection.
 
+## Feature Flags
+
+All Phase 4 print monitoring features are controlled by feature flags to enable incremental testing. See `docs/PHASE4_FEATURE_FLAGS_GUIDE.md` for complete documentation.
+
+**Quick Reference:**
+- `ENABLE_CAMERA_CAPTURE` - Master switch for all camera features (default: `false`)
+- `ENABLE_BAMBOO_CAMERA` - Bamboo Labs MQTT snapshots (default: `false`)
+- `ENABLE_RASPBERRY_PI_CAMERAS` - Snapmaker/Elegoo HTTP snapshots (default: `false`)
+- `ENABLE_MINIO_SNAPSHOT_UPLOAD` - Actual file uploads vs. mock URLs (default: `false`)
+- `ENABLE_HUMAN_FEEDBACK_REQUESTS` - MQTT review notifications (default: `true`)
+
+**Development Mode:**
+Set `ENABLE_CAMERA_CAPTURE=false` to test workflow without hardware. All camera calls return mock URLs immediately.
+
 ---
 
 ## Camera Sources
