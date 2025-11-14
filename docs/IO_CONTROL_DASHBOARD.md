@@ -149,6 +149,153 @@ State Manager
 - **Network Discovery** - Auto-discover devices on local network
   - Restart: Service (discovery)
 
+### 8. API Services
+External paid services with cost implications:
+
+- **Perplexity API (MCP Tier)** - Search-augmented generation for fresh information
+  - Hot-reload: Yes
+  - Cost: ~$0.001-0.005/query
+  - Setup: Get API key from https://perplexity.ai → Settings → API
+  - Env: `PERPLEXITY_API_KEY`
+
+- **OpenAI API (Frontier Tier)** - GPT-4 and GPT-4 Turbo for complex queries
+  - Hot-reload: Yes
+  - Cost: ~$0.01-0.06/query depending on model
+  - Setup: Get API key from https://platform.openai.com/api-keys
+  - Env: `OPENAI_API_KEY`
+
+- **Anthropic API (Frontier Tier)** - Claude 3.5 Sonnet for complex reasoning
+  - Hot-reload: Yes
+  - Cost: ~$0.01-0.08/query depending on model
+  - Setup: Get API key from https://console.anthropic.com/settings/keys
+  - Env: `ANTHROPIC_API_KEY`
+
+- **Zoo CAD API** - Parametric CAD generation (Text-to-CAD)
+  - Hot-reload: Yes
+  - Setup: Get API key from https://zoo.dev → Account → API Keys
+  - Env: `ZOO_API_KEY`
+  - Note: First choice for CAD generation
+
+- **Tripo CAD API** - Image-to-3D and Text-to-3D mesh generation
+  - Hot-reload: Yes
+  - Setup: Get API key from https://platform.tripo3d.ai/api-keys
+  - Env: `TRIPO_API_KEY`
+  - Note: Fallback for organic/mesh CAD
+
+### 9. Routing
+Intelligence tier selection and function calling controls:
+
+- **Cloud Routing** - Enable cloud API escalation (MCP/Frontier)
+  - Hot-reload: Yes
+  - Conflicts with: offline_mode
+  - Description: Allow using Perplexity/OpenAI/Claude when local model has low confidence
+  - Env: `OFFLINE_MODE=false`
+
+- **Offline Mode (Local Only)** - Disable all cloud API calls
+  - Hot-reload: Yes
+  - Conflicts with: cloud_routing
+  - Description: Local-only operation, no external API calls
+  - Env: `OFFLINE_MODE=true`
+  - Note: Disables Perplexity, OpenAI, Claude, Zoo, Tripo
+
+- **Function Calling** - Allow LLMs to call device control functions
+  - Hot-reload: Yes
+  - Description: Enable conversational device control (printer commands, CAD generation)
+  - Env: `ENABLE_FUNCTION_CALLING=true`
+
+### 10. Autonomous
+Goal execution and budget controls:
+
+- **Autonomous Mode** - Enable autonomous goal execution
+  - Restart: Service (brain)
+  - Description: KITTY will autonomously pursue goals when system is idle
+  - Setup: Set AUTONOMOUS_DAILY_BUDGET_USD to limit costs
+  - Env: `AUTONOMOUS_ENABLED=false`
+
+- **Autonomous Budget Enforcement** - Daily spending limits
+  - Hot-reload: Yes
+  - Requires: autonomous_mode
+  - Description: Enforce daily budget for autonomous API calls
+  - Env: `AUTONOMOUS_DAILY_BUDGET_USD=5.00`
+
+- **Autonomous Full-Time Mode** - Run workflows 24/7
+  - Hot-reload: Yes
+  - Requires: autonomous_mode
+  - Warning: ⚠️ KITTY will continuously execute goals. May consume budget quickly.
+  - Env: `AUTONOMOUS_FULL_TIME_MODE=false`
+
+## Tool Availability System
+
+**NEW**: Pre-query validation ensures KITTY knows which tools are enabled before making LLM calls.
+
+### Overview
+
+The `ToolAvailability` class checks which tools/functions are available based on:
+- API keys configured in `.env`
+- Feature flags enabled via I/O Control
+- Offline mode status
+- Hardware configured (printer IPs, camera URLs)
+
+This prevents KITTY from attempting to use disabled tools and provides clear error messages.
+
+### Usage
+
+```python
+from common.io_control import get_tool_availability
+
+# Initialize (typically in brain service)
+tool_checker = get_tool_availability(redis_client)
+
+# Check if cloud routing is allowed
+if not tool_checker.should_allow_cloud_routing():
+    # Force local-only model
+
+# Get list of enabled function names
+enabled_functions = tool_checker.get_enabled_function_names()
+# Returns: ["control_printer", "generate_cad_zoo", "search_web", ...]
+
+# Only provide enabled functions to LLM function_calling schema
+function_definitions = [
+    func for func in all_functions
+    if func["name"] in enabled_functions
+]
+
+# Get availability status for all tools
+available = tool_checker.get_available_tools()
+# Returns: {
+#   "perplexity_search": True,
+#   "openai_completion": False,  # No API key
+#   "printer_control": True,
+#   ...
+# }
+
+# Get human-readable status message
+message = tool_checker.get_unavailable_tools_message()
+# Prints helpful hints for enabling disabled tools
+```
+
+### Integration Points
+
+1. **Brain Service** - Filter function definitions before LLM calls
+2. **Routing Logic** - Check `should_allow_cloud_routing()` before escalation
+3. **UI Dashboard** - Display tool availability status
+4. **Error Messages** - Show `get_unavailable_tools_message()` when tools unavailable
+
+### Supported Tools
+
+| Tool | Requires | Check Method |
+|------|----------|--------------|
+| `perplexity_search` | PERPLEXITY_API_KEY | `_check_perplexity()` |
+| `openai_completion` | OPENAI_API_KEY | `_check_openai()` |
+| `anthropic_completion` | ANTHROPIC_API_KEY | `_check_anthropic()` |
+| `zoo_cad_generation` | ZOO_API_KEY, not offline | `_check_zoo_cad()` |
+| `tripo_cad_generation` | TRIPO_API_KEY, not offline | `_check_tripo_cad()` |
+| `printer_control` | Function calling enabled, printer IPs | `_check_printers()` |
+| `camera_capture` | ENABLE_CAMERA_CAPTURE | `_check_camera()` |
+| `minio_upload` | ENABLE_MINIO_SNAPSHOT_UPLOAD | `_check_minio()` |
+| `cloud_routing` | OFFLINE_MODE=false | `_check_offline_mode()` |
+| `autonomous_execution` | AUTONOMOUS_ENABLED | `_check_autonomous()` |
+
 ## Smart Restart Logic
 
 The dashboard intelligently determines what needs to restart when features change:
