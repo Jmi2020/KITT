@@ -426,6 +426,25 @@ KITTY transforms your Mac Studio into a conversational command center for your e
 - **Manages fabrication workflows** from voice command through slicing, printing, and quality monitoring
 - **Stays safe** with built-in hazard workflows, confirmation phrases, and audit logging
 - **Keeps learning** with semantic memory storage and citation-tracked research capabilities
+- **Everything has a switch** - Every feature and device integration can be individually controlled via TUI or Web API for safe development and incremental deployment
+
+### Core Design Philosophy: "Everything Has a Switch"
+
+A cornerstone principle of KITTY is **controllability**. Every external device, feature, and capability can be individually enabled or disabled through the I/O Control Dashboard:
+
+- **🧪 Safe Development** - Test the entire workflow without physical hardware by disabling cameras, printers, or storage
+- **📈 Incremental Deployment** - Enable one camera at a time, add MinIO storage when ready, activate intelligence features after collecting data
+- **🔧 Rapid Troubleshooting** - Isolate issues by toggling individual components (e.g., disable Bamboo Labs camera to test Snapmaker)
+- **🔄 Hot-Reload** - Most features update instantly via Redis without restart (camera capture, outcome tracking, MinIO uploads)
+- **🎯 Smart Restarts** - When restart is needed, only the affected service restarts (fabrication service vs full stack)
+- **✅ Dependency Validation** - Dashboard prevents enabling features without prerequisites (e.g., can't enable Bamboo camera without MQTT broker)
+
+**Control Interfaces:**
+- **TUI**: `python ops/scripts/kitty-io-control.py` - Interactive terminal dashboard with visual indicators
+- **Web API**: `http://localhost:8080/api/io-control/*` - Programmatic control for automation
+- **Documentation**: See `docs/IO_CONTROL_DASHBOARD.md` for complete guide
+
+This makes KITTY **testable without hardware**, **deployable incrementally**, and **debuggable component-by-component** - critical for a system managing physical fabrication equipment.
 
 ### Why "Offline-First"?
 
