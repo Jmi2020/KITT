@@ -15,7 +15,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from common.config import settings
-from common.db.models import InventoryStatus, Material as MaterialModel, InventoryItem as InventoryItemModel
+from common.db.models import (
+    InventoryStatus,
+    Material as MaterialModel,
+    InventoryItem as InventoryItemModel,
+    PrintOutcome as PrintOutcomeModel,
+    FailureReason,
+)
 from common.logging import configure_logging, get_logger
 
 from .analysis.stl_analyzer import STLAnalyzer, ModelDimensions
@@ -23,6 +29,7 @@ from .selector.printer_selector import PrinterSelector, PrintMode, SelectionResu
 from .status.printer_status import PrinterStatusChecker, PrinterStatus
 from .launcher.slicer_launcher import SlicerLauncher
 from .intelligence.material_inventory import MaterialInventory, InventoryFilters
+from .print_outcome_tracker import PrintOutcomeTracker, PrintOutcomeData
 
 # Configure logging
 configure_logging()
@@ -89,13 +96,14 @@ status_checker: Optional[PrinterStatusChecker] = None
 selector: Optional[PrinterSelector] = None
 launcher: Optional[SlicerLauncher] = None
 material_inventory: Optional[MaterialInventory] = None
+outcome_tracker: Optional[PrintOutcomeTracker] = None
 db_session: Optional[sessionmaker] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for fabrication service startup/shutdown."""
-    global analyzer, status_checker, selector, launcher, material_inventory, db_session
+    global analyzer, status_checker, selector, launcher, material_inventory, outcome_tracker, db_session
 
     LOGGER.info("Starting fabrication service")
 
@@ -118,6 +126,14 @@ async def lifespan(app: FastAPI):
     )
     LOGGER.info("Material inventory initialized", threshold=material_inventory.low_inventory_threshold)
 
+    # Initialize print outcome tracker (Phase 4)
+    outcome_tracker = PrintOutcomeTracker(
+        db=db,
+        camera_capture=None,  # Will be set when CameraCapture is implemented
+        mqtt_client=None,     # TODO: Wire up MQTT client for feedback requests
+    )
+    LOGGER.info("Print outcome tracker initialized", enabled=settings.enable_print_outcome_tracking)
+
     yield
 
     # Cleanup
@@ -126,6 +142,9 @@ async def lifespan(app: FastAPI):
 
     if material_inventory and material_inventory.db:
         material_inventory.db.close()
+
+    if outcome_tracker and outcome_tracker.db:
+        outcome_tracker.db.close()
 
     LOGGER.info("Fabrication service stopped")
 
@@ -305,6 +324,81 @@ class CostEstimateResponse(BaseModel):
     grams_used: float
     cost_per_kg: float
     material_id: str
+
+
+# ============================================================================
+# Phase 4: Print Outcome Request/Response Models
+# ============================================================================
+
+class RecordOutcomeRequest(BaseModel):
+    """Request to record a print outcome."""
+
+    job_id: str = Field(..., description="Unique job identifier", examples=["job_20250114_001"])
+    printer_id: str = Field(..., description="Printer that executed job", examples=["bamboo_h2d"])
+    material_id: str = Field(..., description="Material catalog ID", examples=["pla_black_esun"])
+    success: bool = Field(..., description="Whether print succeeded")
+    quality_score: float = Field(..., description="Quality rating 0-100", ge=0, le=100)
+    actual_duration_hours: float = Field(..., description="Print duration in hours", examples=[2.5])
+    actual_cost_usd: float = Field(..., description="Total print cost", examples=[1.25])
+    material_used_grams: float = Field(..., description="Material consumed", examples=[100.5])
+    print_settings: Dict = Field(..., description="Print settings (temp, speed, layer height, infill)")
+    started_at: datetime = Field(..., description="Print start timestamp")
+    completed_at: datetime = Field(..., description="Print completion timestamp")
+    failure_reason: Optional[str] = Field(None, description="Failure classification if not successful")
+    quality_metrics: Optional[Dict] = Field(None, description="Quality metrics (layer_consistency, surface_finish)")
+    initial_snapshot_url: Optional[str] = Field(None, description="First layer snapshot URL")
+    final_snapshot_url: Optional[str] = Field(None, description="Completed print snapshot URL")
+    snapshot_urls: Optional[List[str]] = Field(None, description="All periodic snapshot URLs")
+    video_url: Optional[str] = Field(None, description="Timelapse video URL")
+    goal_id: Optional[str] = Field(None, description="Goal ID if autonomous")
+
+
+class PrintOutcomeResponse(BaseModel):
+    """Print outcome response."""
+
+    id: str
+    job_id: str
+    printer_id: str
+    material_id: str
+    success: bool
+    failure_reason: Optional[str] = None
+    quality_score: float
+    actual_duration_hours: float
+    actual_cost_usd: float
+    material_used_grams: float
+    print_settings: Dict
+    quality_metrics: Dict
+    started_at: datetime
+    completed_at: datetime
+    measured_at: datetime
+    initial_snapshot_url: Optional[str] = None
+    final_snapshot_url: Optional[str] = None
+    snapshot_urls: List[str] = []
+    video_url: Optional[str] = None
+    human_reviewed: bool
+    review_requested_at: Optional[datetime] = None
+    reviewed_at: Optional[datetime] = None
+    reviewed_by: Optional[str] = None
+    goal_id: Optional[str] = None
+
+
+class UpdateReviewRequest(BaseModel):
+    """Request to update human review."""
+
+    reviewed_by: str = Field(..., description="Reviewer user ID", examples=["user_123"])
+    quality_score: Optional[float] = Field(None, description="Updated quality score 0-100", ge=0, le=100)
+    failure_reason: Optional[str] = Field(None, description="Updated failure reason")
+    notes: Optional[str] = Field(None, description="Review notes")
+
+
+class OutcomeStatisticsResponse(BaseModel):
+    """Outcome statistics response."""
+
+    total_outcomes: int
+    success_rate: float
+    avg_quality_score: float
+    avg_duration_hours: float
+    total_cost_usd: float
 
 
 # ============================================================================
@@ -857,3 +951,224 @@ async def estimate_print_cost(request: CostEstimateRequest) -> CostEstimateRespo
     except Exception as e:
         LOGGER.error("Failed to estimate cost", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to estimate cost: {e}")
+
+
+# ============================================================================
+# Phase 4: Print Outcome API Endpoints
+# ============================================================================
+
+@app.post("/api/fabrication/outcomes", response_model=PrintOutcomeResponse, status_code=201)
+async def record_print_outcome(request: RecordOutcomeRequest) -> PrintOutcomeResponse:
+    """
+    Record a print outcome to database.
+
+    Captures success/failure, quality metrics, and visual evidence for learning.
+    Optionally requests human feedback via MQTT if enabled.
+
+    Feature flags:
+    - ENABLE_PRINT_OUTCOME_TRACKING: Must be true to record outcomes
+    - ENABLE_HUMAN_FEEDBACK_REQUESTS: Auto-request human review via MQTT
+    """
+    if not outcome_tracker:
+        raise HTTPException(status_code=500, detail="Outcome tracker not initialized")
+
+    try:
+        # Parse failure reason if provided
+        failure_reason = None
+        if request.failure_reason:
+            try:
+                failure_reason = FailureReason(request.failure_reason)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid failure reason: {request.failure_reason}"
+                )
+
+        # Create outcome data
+        outcome_data = PrintOutcomeData(
+            job_id=request.job_id,
+            printer_id=request.printer_id,
+            material_id=request.material_id,
+            success=request.success,
+            quality_score=request.quality_score,
+            actual_duration_hours=request.actual_duration_hours,
+            actual_cost_usd=request.actual_cost_usd,
+            material_used_grams=request.material_used_grams,
+            print_settings=request.print_settings,
+            started_at=request.started_at,
+            completed_at=request.completed_at,
+            failure_reason=failure_reason,
+            quality_metrics=request.quality_metrics,
+            initial_snapshot_url=request.initial_snapshot_url,
+            final_snapshot_url=request.final_snapshot_url,
+            snapshot_urls=request.snapshot_urls,
+            video_url=request.video_url,
+            goal_id=request.goal_id,
+        )
+
+        # Record outcome
+        outcome = outcome_tracker.record_outcome(outcome_data)
+
+        return _outcome_to_response(outcome)
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        LOGGER.error("Failed to record outcome", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to record outcome: {e}")
+
+
+@app.get("/api/fabrication/outcomes/{outcome_id}", response_model=PrintOutcomeResponse)
+async def get_print_outcome(outcome_id: str) -> PrintOutcomeResponse:
+    """
+    Get print outcome by ID.
+
+    Returns outcome details including visual evidence and human review status.
+    """
+    if not outcome_tracker:
+        raise HTTPException(status_code=500, detail="Outcome tracker not initialized")
+
+    try:
+        outcome = outcome_tracker.get_outcome(outcome_id)
+
+        if not outcome:
+            raise HTTPException(status_code=404, detail=f"Outcome not found: {outcome_id}")
+
+        return _outcome_to_response(outcome)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOGGER.error("Failed to get outcome", outcome_id=outcome_id, error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get outcome: {e}")
+
+
+@app.get("/api/fabrication/outcomes", response_model=List[PrintOutcomeResponse])
+async def list_print_outcomes(
+    printer_id: Optional[str] = Query(None, description="Filter by printer"),
+    material_id: Optional[str] = Query(None, description="Filter by material"),
+    success: Optional[bool] = Query(None, description="Filter by success status"),
+    limit: int = Query(100, description="Max results", ge=1, le=1000),
+    offset: int = Query(0, description="Pagination offset", ge=0),
+) -> List[PrintOutcomeResponse]:
+    """
+    List print outcomes with optional filters.
+
+    Returns outcomes ordered by completion time (most recent first).
+    Use for historical analysis and success rate tracking.
+    """
+    if not outcome_tracker:
+        raise HTTPException(status_code=500, detail="Outcome tracker not initialized")
+
+    try:
+        outcomes = outcome_tracker.list_outcomes(
+            printer_id=printer_id,
+            material_id=material_id,
+            success=success,
+            limit=limit,
+            offset=offset,
+        )
+
+        return [_outcome_to_response(outcome) for outcome in outcomes]
+
+    except Exception as e:
+        LOGGER.error("Failed to list outcomes", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to list outcomes: {e}")
+
+
+@app.patch("/api/fabrication/outcomes/{outcome_id}/review", response_model=PrintOutcomeResponse)
+async def update_outcome_review(outcome_id: str, request: UpdateReviewRequest) -> PrintOutcomeResponse:
+    """
+    Update print outcome with human review.
+
+    Allows operators to refine quality scores, failure classifications, and add notes.
+    Critical for training intelligence models (Phase 4: Print Intelligence).
+    """
+    if not outcome_tracker:
+        raise HTTPException(status_code=500, detail="Outcome tracker not initialized")
+
+    try:
+        # Parse failure reason if provided
+        failure_reason = None
+        if request.failure_reason:
+            try:
+                failure_reason = FailureReason(request.failure_reason)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid failure reason: {request.failure_reason}"
+                )
+
+        # Update review
+        outcome = outcome_tracker.update_human_review(
+            outcome_id=outcome_id,
+            reviewed_by=request.reviewed_by,
+            quality_score=request.quality_score,
+            failure_reason=failure_reason,
+            notes=request.notes,
+        )
+
+        return _outcome_to_response(outcome)
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        LOGGER.error("Failed to update review", outcome_id=outcome_id, error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update review: {e}")
+
+
+@app.get("/api/fabrication/outcomes/statistics", response_model=OutcomeStatisticsResponse)
+async def get_outcome_statistics(
+    printer_id: Optional[str] = Query(None, description="Filter by printer"),
+    material_id: Optional[str] = Query(None, description="Filter by material"),
+) -> OutcomeStatisticsResponse:
+    """
+    Get print outcome statistics.
+
+    Returns success rate, average quality score, duration, and total cost.
+    Used for printer/material performance tracking and intelligence training.
+    """
+    if not outcome_tracker:
+        raise HTTPException(status_code=500, detail="Outcome tracker not initialized")
+
+    try:
+        stats = outcome_tracker.get_statistics(
+            printer_id=printer_id,
+            material_id=material_id,
+        )
+
+        return OutcomeStatisticsResponse(**stats)
+
+    except Exception as e:
+        LOGGER.error("Failed to get statistics", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get statistics: {e}")
+
+
+def _outcome_to_response(outcome: PrintOutcomeModel) -> PrintOutcomeResponse:
+    """Convert PrintOutcome model to response."""
+    return PrintOutcomeResponse(
+        id=outcome.id,
+        job_id=outcome.job_id,
+        printer_id=outcome.printer_id,
+        material_id=outcome.material_id,
+        success=outcome.success,
+        failure_reason=outcome.failure_reason.value if outcome.failure_reason else None,
+        quality_score=float(outcome.quality_score),
+        actual_duration_hours=float(outcome.actual_duration_hours),
+        actual_cost_usd=float(outcome.actual_cost_usd),
+        material_used_grams=float(outcome.material_used_grams),
+        print_settings=outcome.print_settings,
+        quality_metrics=outcome.quality_metrics or {},
+        started_at=outcome.started_at,
+        completed_at=outcome.completed_at,
+        measured_at=outcome.measured_at,
+        initial_snapshot_url=outcome.initial_snapshot_url,
+        final_snapshot_url=outcome.final_snapshot_url,
+        snapshot_urls=outcome.snapshot_urls or [],
+        video_url=outcome.video_url,
+        human_reviewed=outcome.human_reviewed,
+        review_requested_at=outcome.review_requested_at,
+        reviewed_at=outcome.reviewed_at,
+        reviewed_by=outcome.reviewed_by,
+        goal_id=outcome.goal_id,
+    )
