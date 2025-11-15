@@ -92,6 +92,16 @@ warn() {
     echo -e "${YELLOW}⚠${NC} $1" | tee -a "$STARTUP_LOG"
 }
 
+to_lower() {
+    echo "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+is_enabled() {
+    local value
+    value=$(to_lower "${1:-1}")
+    [[ "$value" == "1" || "$value" == "true" || "$value" == "yes" || "$value" == "on" ]]
+}
+
 # ========================================
 # Load Environment
 # ========================================
@@ -141,25 +151,50 @@ MAX_WAIT=600  # 10 minutes for model loading
 ELAPSED=0
 INTERVAL=10
 
-while [ $ELAPSED -lt $MAX_WAIT ]; do
-    Q4_HEALTH=$(curl -s http://localhost:8083/health 2>/dev/null | grep -o '"status":"ok"' || echo "")
-    F16_HEALTH=$(curl -s http://localhost:8082/health 2>/dev/null | grep -o '"status":"ok"' || echo "")
+PORTS_TO_CHECK=("$Q4_PORT")
+PORT_LABELS=("$Q4_ALIAS (Q4)")
+PORTS_TO_CHECK+=("$F16_PORT")
+PORT_LABELS+=("$F16_ALIAS (F16)")
 
-    if [ -n "$Q4_HEALTH" ] && [ -n "$F16_HEALTH" ]; then
+SUMMARY_ENABLED="${LLAMACPP_SUMMARY_ENABLED:-1}"
+VISION_ENABLED="${LLAMACPP_VISION_ENABLED:-1}"
+
+if is_enabled "$SUMMARY_ENABLED"; then
+    PORTS_TO_CHECK+=("$SUMMARY_PORT")
+    PORT_LABELS+=("$SUMMARY_ALIAS (summary)")
+fi
+
+if is_enabled "$VISION_ENABLED"; then
+    PORTS_TO_CHECK+=("$VISION_PORT")
+    PORT_LABELS+=("$VISION_ALIAS (vision)")
+fi
+
+while [ $ELAPSED -lt $MAX_WAIT ]; do
+    missing=()
+    for idx in "${!PORTS_TO_CHECK[@]}"; do
+        port="${PORTS_TO_CHECK[$idx]}"
+        label="${PORT_LABELS[$idx]}"
+        if ! curl -s "http://localhost:${port}/health" 2>/dev/null | grep -q '"status":"ok"'; then
+            missing+=("${label}:${port}")
+        fi
+    done
+
+    if [ ${#missing[@]} -eq 0 ]; then
         success "All llama.cpp servers healthy"
         break
     fi
 
     if [ $((ELAPSED % 30)) -eq 0 ]; then
-        log "Still waiting for llama.cpp servers... (${ELAPSED}s elapsed)"
+        log "Still waiting for llama.cpp servers... missing: ${missing[*]} (${ELAPSED}s elapsed)"
     fi
 
     sleep $INTERVAL
     ELAPSED=$((ELAPSED + INTERVAL))
 done
 
-if [ $ELAPSED -ge $MAX_WAIT ]; then
+if [ ${#missing[@]} -ne 0 ]; then
     error "llama.cpp servers failed to become healthy within ${MAX_WAIT}s"
+    error "Still waiting on: ${missing[*]}"
     error "Check logs: $LOG_DIR/llamacpp-*.log"
     exit 1
 fi

@@ -57,8 +57,8 @@ F16_N_PARALLEL="${LLAMACPP_F16_PARALLEL:-2}"
 F16_LOG="$LOG_DIR/llamacpp-f16.log"
 F16_PID="$LOG_DIR/llamacpp-f16.pid"
 
-# Summary Server (Text Summarization)
-SUMMARY_MODEL="${LLAMACPP_SUMMARY_MODEL:-llama-3.2-3b-summarization/Llama-3.2-3B-Instruct-Q4_K_M.gguf}"
+# Summary Server (Text Summarization - Hermes 3)
+SUMMARY_MODEL="${LLAMACPP_SUMMARY_MODEL:-Hermes-3-8B/Hermes-3-Llama-3.1-8B.Q4_K_M.gguf}"
 SUMMARY_PORT="${LLAMACPP_SUMMARY_PORT:-8084}"
 SUMMARY_ALIAS="${LLAMACPP_SUMMARY_ALIAS:-kitty-summary}"
 SUMMARY_LOG="$LOG_DIR/llamacpp-summary.log"

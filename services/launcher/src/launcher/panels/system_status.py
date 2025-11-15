@@ -1,5 +1,7 @@
 """System status panel showing llama.cpp and Docker service health."""
 
+import asyncio
+
 from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
@@ -8,7 +10,7 @@ from textual.widgets import Static
 from textual.worker import Worker
 
 from launcher.managers.docker_manager import DockerManager
-from launcher.managers.llama_manager import LlamaManager
+from launcher.managers.llama_manager import LlamaInstanceStatus, LlamaManager
 
 
 class SystemStatusPanel(Static):
@@ -72,6 +74,7 @@ class SystemStatusPanel(Static):
         self.llama_manager = LlamaManager()
         self.docker_manager = DockerManager()
         self._update_worker: Worker | None = None
+        self.llama_instances: list[LlamaInstanceStatus] = []
 
     def compose(self) -> ComposeResult:
         """Compose the status panel layout."""
@@ -79,8 +82,10 @@ class SystemStatusPanel(Static):
 
         with Container(classes="status-grid"):
             # llama.cpp status
-            yield Static("llama.cpp Server:", classes="status-label")
+            yield Static("llama.cpp Servers:", classes="status-label")
             yield Static(self._format_llama_status(), id="llama-status", classes="status-value")
+            yield Static("", classes="status-label")
+            yield Static("[dim]Detecting instances...[/dim]", id="llama-status-detail", classes="service-list")
 
             # Docker status
             yield Static("Docker Services:", classes="status-label")
@@ -100,16 +105,26 @@ class SystemStatusPanel(Static):
         """Background task to update status every 3 seconds."""
         while True:
             await self.update_status()
-            await self.app.sleep(3.0)
+            await asyncio.sleep(3.0)
 
     async def update_status(self) -> None:
         """Fetch and update status information."""
         # Update llama.cpp status
-        llama_status = await self.llama_manager.get_status()
+        llama_instances = await self.llama_manager.get_all_statuses()
+        self.llama_instances = llama_instances
 
-        if llama_status.running:
+        enabled_instances = [inst for inst in llama_instances if inst.enabled]
+        running_instances = [inst for inst in enabled_instances if inst.running]
+
+        if not enabled_instances:
+            self.llama_status = "Offline"
+            self.llama_model = ""
+        elif len(running_instances) == len(enabled_instances):
             self.llama_status = "Healthy"
-            self.llama_model = llama_status.model or "unknown"
+            self.llama_model = running_instances[0].model or "unknown"
+        elif running_instances:
+            self.llama_status = "Degraded"
+            self.llama_model = running_instances[0].model or "unknown"
         else:
             self.llama_status = "Offline"
             self.llama_model = ""
@@ -135,6 +150,10 @@ class SystemStatusPanel(Static):
         llama_widget = self.query_one("#llama-status", Static)
         llama_widget.update(self._format_llama_status())
 
+        # Update list of llama servers
+        detail_widget = self.query_one("#llama-status-detail", Static)
+        detail_widget.update(self._format_llama_instances())
+
         # Update Docker status display
         docker_widget = self.query_one("#docker-status", Static)
         docker_widget.update(self._format_docker_status())
@@ -142,28 +161,51 @@ class SystemStatusPanel(Static):
     def _format_llama_status(self) -> str:
         """Format llama.cpp status with color coding."""
         if self.llama_status == "Healthy":
-            status_str = f"[green]✓ Running[/green]"
-            if self.llama_model:
-                # Shorten model name if too long
-                model_name = self.llama_model.split("/")[-1] if "/" in self.llama_model else self.llama_model
-                if len(model_name) > 40:
-                    model_name = model_name[:37] + "..."
-                status_str += f"\n  Model: [dim]{model_name}[/dim]"
-            status_str += f"\n  URL: [dim]{self.llama_manager.base_url}[/dim]"
+            status_str = "[green]✓ All llama.cpp servers running[/green]"
+        elif self.llama_status == "Degraded":
+            status_str = "[yellow]⚠ Partial availability[/yellow]"
         else:
-            status_str = f"[red]✗ Offline[/red]\n  URL: [dim]{self.llama_manager.base_url}[/dim]"
+            status_str = "[red]✗ Offline[/red]"
 
         return status_str
+
+    def _format_llama_instances(self) -> str:
+        """Format the list of llama.cpp instances."""
+        if not self.llama_instances:
+            return "[dim]No instances detected[/dim]"
+
+        lines = []
+        for inst in self.llama_instances:
+            label = f"{inst.name} [dim](:{inst.port})[/dim]"
+
+            if not inst.enabled:
+                lines.append(f"[dim]⏸ {label} — disabled[/dim]")
+            elif inst.running:
+                lines.append(f"[green]✓ {label}[/green]")
+            else:
+                reason = inst.error or "offline"
+                lines.append(f"[red]✗ {label}[/red] [dim]- {reason}[/dim]")
+
+        return "\n".join(lines)
 
     def _format_docker_status(self) -> str:
         """Format Docker status with color coding."""
         if self.docker_status == "Healthy":
-            status_str = f"[green]✓ Running[/green]\n"
+            if self.service_count == 0:
+                return "[yellow]⚠ No services discovered[/yellow]"
+
+            if self.running_count == self.service_count:
+                status_str = "[green]✓ Running[/green]\n"
+            else:
+                status_str = "[yellow]⚠ Partial[/yellow]\n"
+
             status_str += f"  Services: {self.running_count}/{self.service_count} running"
 
             if self.running_count < self.service_count:
-                status_str = status_str.replace("[green]", "[yellow]")
-                status_str += f"\n  [yellow]{self.service_count - self.running_count} service(s) stopped[/yellow]"
+                status_str += (
+                    f"\n  [yellow]{self.service_count - self.running_count} "
+                    "service(s) stopped[/yellow]"
+                )
         else:
             status_str = "[red]✗ Offline[/red]\n  Docker daemon not running"
 

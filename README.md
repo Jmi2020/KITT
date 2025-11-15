@@ -306,20 +306,21 @@ pip install -e services/launcher/
 kitty
 
 # TUI Features:
-# h - Toggle system health status (Docker services, llama.cpp)
-# d - Toggle detailed service list (all containers with ports)
-# r - Toggle reasoning log viewer (watch AI thinking in real-time!)
-# s - Show startup instructions
-# m - Launch Model Manager (replaces launcher in same terminal)
-# c - Launch CLI (validates health, replaces launcher in same terminal)
-# q - Quit
+# k - Start KITTY stack (llama.cpp + Docker via start-all.sh)
+# x - Stop stack (stop-all.sh)
+# c - Launch CLI (health checks + kitty-cli shell)
+# m - Launch Model Manager (swap llama.cpp models)
+# o - Open Web Console (React/Vision UI)
+# i - Launch I/O dashboard (feature toggles & presets)
+# h - Toggle system health panel, d - detailed services
+# r - Reasoning log viewer, s - startup instructions, q - Quit
 
 # What you get:
-# ✓ Real-time Docker service health monitoring
-# ✓ llama.cpp server status with model info
-# ✓ Live reasoning logs with tier distribution, confidence, costs
-# ✓ Quick access to Model Manager and CLI
-# ✓ Beautiful terminal UI with color coding
+# ✓ Access-All control center with quick-action buttons + keyboard shortcuts
+# ✓ Start/stop scripts with live logs streamed into the console
+# ✓ Real-time Docker + llama.cpp health overview, reasoning log viewer
+# ✓ One-key access to CLI, Model Manager, I/O dashboard, and the web console
+# ✓ Beautiful terminal UI with status chips, helpful notifications, and historical log panel
 ```
 
 **Reasoning Log Viewer** (`r` key in launcher):
