@@ -1386,6 +1386,8 @@ curl -X POST http://localhost:8080/api/voice/transcript \
 - [x] CAD generation (Zoo/Tripo/local)
 - [x] Command broker with allow-lists
 - [x] Web research with citation tracking
+- [x] Conversation history persistence with resume picker (CLI + Web UI)
+- [x] Multi-provider collective workflows with configurable providers/models
 
 ### Phase 3: Autonomous Learning ✅ COMPLETE
 - [x] Goal identification system
@@ -1396,6 +1398,7 @@ curl -X POST http://localhost:8080/api/voice/transcript \
 - [x] Budget-aware autonomous operation
 
 ### Phase 4: Fabrication Intelligence 🚧 IN PROGRESS
+- [x] I/O Control dashboard (health checks, presets, dependency resolution, tool availability)
 - [x] Material inventory system (12 materials, cost/usage tracking)
 - [x] Print outcome tracking with visual evidence
 - [x] Camera integration (Bamboo Labs MQTT + Raspberry Pi HTTP)
