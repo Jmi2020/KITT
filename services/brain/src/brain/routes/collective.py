@@ -1,11 +1,16 @@
 
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-from typing import Literal, Optional, List, Dict, Any
+import logging
 import os
 import time
+from typing import Any, Dict, List, Literal, Optional
+
+from fastapi import APIRouter, HTTPException
 from prometheus_client import Counter, Histogram
+from pydantic import BaseModel, ConfigDict, Field
+
+from common.db.conversations import record_conversation_message
+from common.db.models import ConversationRole
 
 from ..agents.collective.metrics import pairwise_diversity
 
@@ -31,6 +36,7 @@ else:
 _HAS_CODING = False
 
 router = APIRouter(prefix="/api/collective", tags=["collective"])
+logger = logging.getLogger(__name__)
 
 # Prometheus metrics
 collective_requests = Counter(
@@ -68,10 +74,14 @@ proposal_diversity = Histogram(
 )
 
 class RunReq(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     task: str = Field(..., description="Natural language task")
     pattern: Literal["pipeline","council","debate"] = "pipeline"
     k: int = Field(3, ge=2, le=7, description="council size")
     max_steps: int = Field(8, ge=1, le=20)
+    conversation_id: Optional[str] = Field(default=None, alias="conversationId")
+    user_id: Optional[str] = Field(default=None, alias="userId")
 
 class Proposal(BaseModel):
     role: str
@@ -114,6 +124,27 @@ async def run_collective(req: RunReq):
     """
     start_time = time.time()
     status = "success"
+
+    if req.conversation_id:
+        try:
+            record_conversation_message(
+                conversation_id=req.conversation_id,
+                role=ConversationRole.user,
+                content=f"[collective:{req.pattern}] {req.task}",
+                user_id=req.user_id,
+                metadata={
+                    "command": "collective",
+                    "pattern": req.pattern,
+                    "k": req.k,
+                },
+                title_hint=req.task,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to record collective request for %s: %s",
+                req.conversation_id,
+                exc,
+            )
 
     try:
         proposals: List[Proposal] = []
@@ -169,10 +200,37 @@ async def run_collective(req: RunReq):
         verdict_length.labels(pattern=req.pattern).observe(len(result.get("verdict", "")))
         proposal_diversity.labels(pattern=req.pattern).observe(diversity_metrics["avg_diversity"])
 
+        verdict_text = result.get("verdict", "")
+
+        if req.conversation_id:
+            try:
+                proposal_lines = [
+                    f"{prop.role}: {prop.text.strip()}" for prop in proposals
+                ]
+                assistant_body = "\n\n".join(proposal_lines + [f"Verdict: {verdict_text}"])
+                record_conversation_message(
+                    conversation_id=req.conversation_id,
+                    role=ConversationRole.assistant,
+                    content=assistant_body,
+                    metadata={
+                        "command": "collective",
+                        "pattern": req.pattern,
+                        "k": req.k,
+                        "proposalCount": len(proposals),
+                        "verdict": verdict_text,
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Failed to record collective response for %s: %s",
+                    req.conversation_id,
+                    exc,
+                )
+
         return RunRes(
             pattern=req.pattern,
             proposals=proposals,
-            verdict=result.get("verdict",""),
+            verdict=verdict_text,
             logs=result.get("logs",""),
             aux={}
         )
@@ -180,4 +238,23 @@ async def run_collective(req: RunReq):
     except Exception as exc:
         status = "error"
         collective_requests.labels(pattern=req.pattern, status=status).inc()
+        if req.conversation_id:
+            try:
+                record_conversation_message(
+                    conversation_id=req.conversation_id,
+                    role=ConversationRole.assistant,
+                    content=f"Collective request failed: {exc}",
+                    metadata={
+                        "command": "collective",
+                        "pattern": req.pattern,
+                        "k": req.k,
+                        "error": True,
+                    },
+                )
+            except Exception as log_exc:  # noqa: BLE001
+                logger.warning(
+                    "Failed to record collective error for %s: %s",
+                    req.conversation_id,
+                    log_exc,
+                )
         raise

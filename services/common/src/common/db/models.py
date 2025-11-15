@@ -266,6 +266,33 @@ class ConversationSession(Base):
     state: Mapped[dict] = mapped_column(JSONB, default=dict)
     active_participants: Mapped[List[str]] = mapped_column(JSONB, default=list)
     last_message_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    title: Mapped[Optional[str]] = mapped_column(String(200))
+    message_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_user_message: Mapped[Optional[str]] = mapped_column(Text)
+    last_assistant_message: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class ConversationRole(enum.Enum):
+    user = "user"
+    assistant = "assistant"
+    system = "system"
+    tool = "tool"
+
+
+class ConversationMessage(Base):
+    __tablename__ = "conversation_messages"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversation_sessions.id"), nullable=False
+    )
+    role: Mapped[ConversationRole] = mapped_column(Enum(ConversationRole), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    message_metadata: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    conversation: Mapped[ConversationSession] = relationship()
 
 
 class DeviceCommand(Base):
@@ -824,6 +851,8 @@ __all__ = [
     "DeviceCommand",
     "TelemetryEvent",
     "ConversationSession",
+    "ConversationRole",
+    "ConversationMessage",
     "RoutingDecision",
     "CADJob",
     "CADArtifact",

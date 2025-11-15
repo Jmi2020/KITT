@@ -32,6 +32,7 @@ from .routes.providers import router as providers_router
 from .routes.query import router as query_router
 from .routes.memory import router as memory_router
 from .routes.usage import router as usage_router
+from .routes.conversations import router as conversations_router
 
 # Configure standard logging
 configure_logging()
@@ -144,6 +145,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="KITTY Brain API", lifespan=lifespan)
 app.include_router(query_router)
+app.include_router(conversations_router)
 app.include_router(projects_router)
 app.include_router(models_router)
 app.include_router(autonomy_router)

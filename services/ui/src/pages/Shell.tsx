@@ -20,7 +20,24 @@ interface Message {
     tokens_used?: number;
     cost_usd?: number;
     fallback_occurred?: boolean;
-  };
+  };  
+}
+
+interface ConversationSummary {
+  conversationId: string;
+  title?: string;
+  lastMessageAt?: string;
+  lastUserMessage?: string;
+  lastAssistantMessage?: string;
+  messageCount: number;
+}
+
+interface ConversationMessageRecord {
+  messageId: string;
+  role: string;
+  content: string;
+  createdAt: string;
+  metadata?: Record<string, any>;
 }
 
 interface ShellState {
@@ -48,6 +65,7 @@ const COMMANDS = [
   { cmd: '/usage', desc: 'Show provider usage dashboard' },
   { cmd: '/trace', desc: 'Toggle agent reasoning trace' },
   { cmd: '/agent', desc: 'Toggle ReAct agent mode' },
+  { cmd: '/history', desc: 'Browse & resume conversation sessions' },
   { cmd: '/collective', desc: 'Multi-agent collaboration' },
   { cmd: '/remember', desc: 'Store a long-term memory note' },
   { cmd: '/memories', desc: 'Search saved memories' },
@@ -69,6 +87,10 @@ const Shell = () => {
   });
   const [showCommands, setShowCommands] = useState(false);
   const [filteredCommands, setFilteredCommands] = useState(COMMANDS);
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState<ConversationSummary[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -131,6 +153,40 @@ Verbosity: ${state.verbosity}/5  |  Agent: ${state.agentEnabled ? 'ON' : 'OFF'} 
     inputRef.current?.focus();
   };
 
+  const historyPreview = (entry: ConversationSummary) => {
+    return entry.title?.trim() || entry.lastUserMessage?.trim() || entry.lastAssistantMessage?.trim() || entry.conversationId;
+  };
+
+  const formatHistoryTimestamp = (value?: string) => {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const loadHistory = async () => {
+    setIsHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const response = await fetch('/api/conversations?limit=25&userId=web-user');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      setHistory(data.conversations || []);
+    } catch (error: any) {
+      setHistoryError(error.message || 'Failed to load history');
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showHistory) {
+      loadHistory();
+    }
+  }, [showHistory]);
+
   const handleCommand = async (command: string): Promise<boolean> => {
     const parts = command.slice(1).split(/\s+/);
     const cmd = parts[0].toLowerCase();
@@ -170,6 +226,10 @@ Commands are executed locally when possible.`);
       case 'clear':
         setMessages([]);
         addMessage('system', '🗑️  Message history cleared (session continues)');
+        return true;
+
+      case 'history':
+        setShowHistory(true);
         return true;
 
       case 'trace':
@@ -286,6 +346,8 @@ Commands are executed locally when possible.`);
           task: parts.slice(taskStart).join(' '),
           pattern,
           k,
+          conversationId: state.conversationId,
+          userId: 'web-user',
         };
       } else if (userInput.startsWith('/usage')) {
         endpoint = '/api/usage/metrics';
@@ -338,6 +400,35 @@ Commands are executed locally when possible.`);
     }
   };
 
+  const resumeConversation = async (summary: ConversationSummary) => {
+    try {
+      setHistoryError(null);
+      const response = await fetch(`/api/conversations/${summary.conversationId}/messages?limit=100`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      const transcript: Message[] = (data.messages || []).map((msg: ConversationMessageRecord) => ({
+        id: msg.messageId,
+        type: msg.role === 'assistant' ? 'assistant' : msg.role === 'system' ? 'system' : 'user',
+        content: msg.content,
+        timestamp: new Date(msg.createdAt),
+        metadata: msg.metadata,
+      }));
+      const resumeNote: Message = {
+        id: crypto.randomUUID(),
+        type: 'system',
+        content: `Resumed session ${summary.conversationId.slice(0, 8)}...`,
+        timestamp: new Date(),
+      };
+      setMessages([...transcript, resumeNote]);
+      setState(prev => ({ ...prev, conversationId: summary.conversationId }));
+      setShowHistory(false);
+    } catch (error: any) {
+      setHistoryError(error.message || 'Failed to resume session');
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -378,6 +469,9 @@ Commands are executed locally when possible.`);
           <span className={`status-badge ${state.traceEnabled ? 'active' : ''}`} title="Trace Mode">
             🔍 {state.traceEnabled ? 'ON' : 'OFF'}
           </span>
+          <button className="history-button" onClick={() => setShowHistory(true)}>
+            📜 History
+          </button>
         </div>
       </div>
 
@@ -476,10 +570,46 @@ Commands are executed locally when possible.`);
             {isThinking ? '⏳' : '📤'}
           </button>
         </div>
-        <div className="shell-hint">
-          Press Enter to send • Type / for commands • ESC to close dropdown
-        </div>
+      <div className="shell-hint">
+        Press Enter to send • Type / for commands • ESC to close dropdown
       </div>
+    </div>
+      {showHistory && (
+        <div className="history-overlay">
+          <div className="history-panel">
+            <div className="history-panel-header">
+              <h3>Resume Conversation</h3>
+              <button className="history-close" onClick={() => setShowHistory(false)}>✕</button>
+            </div>
+            {isHistoryLoading ? (
+              <p>Loading history…</p>
+            ) : historyError ? (
+              <p className="history-error">{historyError}</p>
+            ) : (
+              <div className="history-list">
+                {history.length === 0 ? (
+                  <p>No saved sessions yet.</p>
+                ) : (
+                  history.map(entry => (
+                    <button
+                      key={entry.conversationId}
+                      className="history-item"
+                      onClick={() => resumeConversation(entry)}
+                    >
+                      <div className="history-item-title">{historyPreview(entry)}</div>
+                      <div className="history-item-meta">
+                        <span>{formatHistoryTimestamp(entry.lastMessageAt)}</span>
+                        <span>{entry.messageCount} msgs</span>
+                        <span>{entry.conversationId.slice(0, 8)}...</span>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

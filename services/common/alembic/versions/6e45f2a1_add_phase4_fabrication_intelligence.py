@@ -14,7 +14,7 @@ Phase 4: Fabrication Intelligence "Making Things"
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID, ENUM
 
 
 # revision identifiers, used by Alembic.
@@ -28,7 +28,7 @@ def upgrade():
     """Apply Phase 4 fabrication intelligence schema changes."""
 
     # Add new enum types
-    failure_reason_enum = sa.Enum(
+    failure_reason_enum = ENUM(
         'first_layer_adhesion', 'warping', 'stringing', 'spaghetti',
         'nozzle_clog', 'filament_runout', 'layer_shift', 'overheating',
         'support_failure', 'user_cancelled', 'power_failure', 'other',
@@ -36,13 +36,13 @@ def upgrade():
     )
     failure_reason_enum.create(op.get_bind(), checkfirst=True)
 
-    inventory_status_enum = sa.Enum(
+    inventory_status_enum = ENUM(
         'available', 'in_use', 'depleted', 'reserved',
         name='inventorystatus'
     )
     inventory_status_enum.create(op.get_bind(), checkfirst=True)
 
-    queue_status_enum = sa.Enum(
+    queue_status_enum = ENUM(
         'queued', 'printing', 'completed', 'failed', 'cancelled',
         name='queuestatus'
     )
@@ -86,7 +86,7 @@ def upgrade():
         sa.Column('purchase_date', sa.DateTime, nullable=False),
         sa.Column('initial_weight_grams', sa.Numeric(10, 2), nullable=False),
         sa.Column('current_weight_grams', sa.Numeric(10, 2), nullable=False),
-        sa.Column('status', sa.Enum(name='inventorystatus'), nullable=False),
+        sa.Column('status', ENUM(name='inventorystatus', create_type=False), nullable=False),
         sa.Column('notes', sa.Text),
 
         # Metadata
@@ -105,7 +105,7 @@ def upgrade():
 
         # Outcome
         sa.Column('success', sa.Boolean, nullable=False),
-        sa.Column('failure_reason', sa.Enum(name='failurereason')),
+        sa.Column('failure_reason', ENUM(name='failurereason', create_type=False)),
         sa.Column('quality_score', sa.Numeric(5, 2), nullable=False),
 
         # Actuals
@@ -140,7 +140,7 @@ def upgrade():
         sa.Column('spool_id', sa.String(100), sa.ForeignKey('inventory.id')),
 
         # Scheduling
-        sa.Column('status', sa.Enum(name='queuestatus'), nullable=False),
+        sa.Column('status', ENUM(name='queuestatus', create_type=False), nullable=False),
         sa.Column('priority', sa.Integer, nullable=False),
         sa.Column('deadline', sa.DateTime),
         sa.Column('scheduled_start', sa.DateTime),

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Dict, Optional, Tuple
 from uuid import uuid4
@@ -10,11 +11,14 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, ConfigDict
 
-from common.db.models import RoutingTier
+from common.db.conversations import record_conversation_message
+from common.db.models import ConversationRole, RoutingTier
 from common.verbosity import VerbosityLevel, clamp_level, describe_level, get_verbosity_level
 from ..dependencies import get_orchestrator
 from ..models.context import DeviceSelection
 from ..orchestrator import BrainOrchestrator
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["query"])
 
@@ -156,6 +160,23 @@ async def post_query(
     final_provider = inline_provider or body.provider
     final_model = inline_model or body.model
 
+    try:
+        record_conversation_message(
+            conversation_id=body.conversation_id,
+            role=ConversationRole.user,
+            content=cleaned_prompt,
+            user_id=body.user_id,
+            metadata={
+                "intent": body.intent,
+                "provider": final_provider,
+                "model": final_model,
+                "toolMode": body.tool_mode,
+            },
+            title_hint=cleaned_prompt,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to record user message for %s: %s", body.conversation_id, exc)
+
     # TODO: Pass provider/model to orchestrator when multi-provider routing is integrated
     # For now, just use the cleaned prompt
 
@@ -172,6 +193,23 @@ async def post_query(
         use_agent=body.use_agent,
         tool_mode=body.tool_mode,
     )
+    try:
+        record_conversation_message(
+            conversation_id=body.conversation_id,
+            role=ConversationRole.assistant,
+            content=routing_result.output or "",
+            metadata={
+                "tier": routing_result.tier.value,
+                "confidence": routing_result.confidence,
+                "latencyMs": routing_result.latency_ms,
+                "cached": routing_result.cached,
+                "routingMetadata": routing_result.metadata or {},
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Failed to record assistant message for %s: %s", body.conversation_id, exc
+        )
     routing_details = None
     if verbosity_level >= VerbosityLevel.CONCISE:
         routing_details = {"tier": routing_result.tier.value}

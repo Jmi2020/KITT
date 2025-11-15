@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Set
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import quote_plus, urlencode, urlparse
 
 import httpx
 import typer
@@ -116,7 +116,7 @@ USER_UUID = _env(
     str(uuid.uuid5(uuid.NAMESPACE_DNS, USER_NAME)),
 )
 DEFAULT_VERBOSITY = int(_env("VERBOSITY", "3"))
-CLI_TIMEOUT = float(_env("KITTY_CLI_TIMEOUT", "900"))
+CLI_TIMEOUT = float(_env("KITTY_CLI_TIMEOUT", "1200"))
 MAX_REFERENCE_CONTEXT = int(_env("KITTY_REFERENCE_CONTEXT", "6"))
 TRIPO_REFERENCE_LIMIT = int(_env("TRIPO_MAX_IMAGE_REFS", "2"))
 _SLUG_PATTERN = re.compile(r"[A-Za-z0-9]+")
@@ -147,6 +147,127 @@ def _friendly_name(title: Optional[str], source: Optional[str], existing: Set[st
     slug = _unique_slug(base, existing)
     existing.add(slug)
     return slug
+
+
+def _parse_iso_timestamp(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _format_history_time(value: Optional[str], show_date: bool = False) -> str:
+    parsed = _parse_iso_timestamp(value)
+    if not parsed:
+        return "—"
+    if show_date:
+        return parsed.strftime("%Y-%m-%d %H:%M")
+    return parsed.strftime("%m-%d %H:%M")
+
+
+def _conversation_preview(entry: Dict[str, Any]) -> str:
+    title = entry.get("title")
+    if title:
+        return title
+    last_user = entry.get("lastUserMessage")
+    last_assistant = entry.get("lastAssistantMessage")
+    for candidate in (last_user, last_assistant):
+        if candidate:
+            text = candidate.strip().replace("\n", " ")
+            return text[:80] + ("…" if len(text) > 80 else "")
+    return entry.get("conversationId", "unknown")
+
+
+def _fetch_conversation_history(limit: int = 10, search: Optional[str] = None) -> List[Dict[str, Any]]:
+    params: Dict[str, Any] = {"limit": limit, "userId": state.user_id}
+    if search:
+        params["search"] = search
+    url = f"{API_BASE}/api/conversations?{urlencode(params)}"
+    data = _get_json(url)
+    return data.get("conversations", [])
+
+
+def _history_picker(limit: int = 10, search: Optional[str] = None) -> None:
+    try:
+        conversations = _fetch_conversation_history(limit=limit, search=search)
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to load conversation history: {exc}")
+        return
+
+    if not conversations:
+        console.print("[yellow]No past conversations found.")
+        return
+
+    table = Table(title="Conversation History", show_lines=False)
+    table.add_column("#", justify="right", style="cyan")
+    table.add_column("Last Active")
+    table.add_column("Messages", justify="right")
+    table.add_column("Preview")
+
+    for idx, entry in enumerate(conversations, start=1):
+        table.add_row(
+            str(idx),
+            _format_history_time(entry.get("lastMessageAt"), show_date=True),
+            str(entry.get("messageCount", 0)),
+            _conversation_preview(entry),
+        )
+
+    console.print(table)
+    prompt = "Select a session to resume (number, id prefix, or blank to cancel): "
+    selection = console.input(f"\n[bold]{prompt}[/bold]").strip()
+    if not selection:
+        console.print("[dim]History picker cancelled.[/dim]")
+        return
+
+    chosen: Optional[Dict[str, Any]] = None
+    if selection.isdigit():
+        idx = int(selection)
+        if 1 <= idx <= len(conversations):
+            chosen = conversations[idx - 1]
+    else:
+        normalized = selection.lower()
+        for entry in conversations:
+            conv_id = entry.get("conversationId", "").lower()
+            if conv_id.startswith(normalized):
+                chosen = entry
+                break
+
+    if not chosen:
+        console.print("[red]Selection did not match any saved session.")
+        return
+
+    conversation_id = chosen.get("conversationId")
+    if not conversation_id:
+        console.print("[red]Selected entry is missing an ID.")
+        return
+
+    state.conversation_id = conversation_id
+    state.last_artifacts = []
+    preview = _conversation_preview(chosen)
+    console.print(
+        f"[green]Resumed session {conversation_id[:8]}...[/green] "
+        f"[dim]({preview})[/dim]"
+    )
+
+    transcript_url = f"{API_BASE}/api/conversations/{conversation_id}/messages?limit=20"
+    try:
+        transcript = _get_json(transcript_url).get("messages", [])
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[yellow]Unable to load transcript: {exc}")
+        return
+
+    if not transcript:
+        console.print("[dim]No messages recorded yet for this session.")
+        return
+
+    console.print("\n[bold]Recent messages:[/bold]")
+    for entry in transcript:
+        ts = _format_history_time(entry.get("createdAt"))
+        role = entry.get("role", "?").capitalize()
+        content = entry.get("content", "")
+        console.print(f" [dim]{ts}[/dim] [cyan]{role}: [/cyan]{content}")
 
 
 @dataclass
@@ -1691,6 +1812,7 @@ def shell(
     console.print("  [cyan]/usage [seconds][/cyan]  - Show usage dashboard (auto-refresh optional)")
     console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace (no args toggles)")
     console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode (tool orchestration)")
+    console.print("  [cyan]/history [limit] [filter][/cyan] - Browse and resume earlier sessions")
     console.print("  [cyan]/collective <pattern> <task>[/cyan] - Multi-agent collaboration")
     console.print("      [dim]Patterns: council [k=N], debate, pipeline[/dim]")
     console.print("      [dim]Example: /collective council k=3 Compare PETG vs ABS[/dim]")
@@ -1748,6 +1870,7 @@ def shell(
                 )
                 console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace view")
                 console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode")
+                console.print("  [cyan]/history [limit] [filter][/cyan] - Browse & resume sessions")
                 console.print("  [cyan]/collective <pattern> <task>[/cyan] - Multi-agent collaboration")
                 console.print("      [dim]Patterns: council [k=3], debate, pipeline[/dim]")
                 console.print("      [dim]Example: /collective council k=3 Compare PETG vs ABS[/dim]")
@@ -1757,6 +1880,19 @@ def shell(
                 console.print("  [cyan]/help[/cyan]             - Show this help message")
                 console.print("  [cyan]/exit[/cyan]             - Exit interactive shell")
                 console.print("\n[dim]Type any message to chat with KITTY[/dim]\n")
+                continue
+
+            if cmd == "history":
+                limit = 10
+                search_tokens = args
+                if args and args[0].isdigit():
+                    try:
+                        limit = max(1, min(50, int(args[0])))
+                    except ValueError:
+                        limit = 10
+                    search_tokens = args[1:]
+                search = " ".join(search_tokens).strip() or None
+                _history_picker(limit=limit, search=search)
                 continue
 
             if cmd == "verbosity":
@@ -2061,12 +2197,20 @@ def shell(
                 console.print(f"\n[bold]Running {pattern} pattern (k={k})...[/]")
                 console.print(f"[dim]Task: {task}[/]")
 
+                payload = {
+                    "task": task,
+                    "pattern": pattern,
+                    "k": k,
+                    "conversationId": state.conversation_id,
+                    "userId": state.user_id,
+                }
+
                 with console.status("[bold green]Generating proposals..."):
                     try:
                         response = httpx.post(
                             f"{API_BASE}/api/collective/run",
-                            json={"task": task, "pattern": pattern, "k": k},
-                            timeout=180.0  # 3 minutes for Quality-First mode
+                            json=payload,
+                            timeout=CLI_TIMEOUT
                         )
                         response.raise_for_status()
                         data = response.json()
