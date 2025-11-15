@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import '../styles/Shell.css';
+import ProviderSelector from '../components/ProviderSelector';
+import ProviderBadge, { ProviderMetadata } from '../components/ProviderBadge';
 
 interface Message {
   id: string;
@@ -12,6 +14,12 @@ interface Message {
     latency?: number;
     artifacts?: any[];
     pattern?: string;
+    // Multi-provider metadata
+    provider_used?: string;
+    model_used?: string;
+    tokens_used?: number;
+    cost_usd?: number;
+    fallback_occurred?: boolean;
   };
 }
 
@@ -20,11 +28,17 @@ interface ShellState {
   verbosity: number;
   agentEnabled: boolean;
   traceEnabled: boolean;
+  // Multi-provider state
+  selectedProvider: string | null;
+  selectedModel: string | null;
 }
 
 const COMMANDS = [
   { cmd: '/help', desc: 'Show all available commands' },
   { cmd: '/verbosity', desc: 'Set response detail level (1-5)' },
+  { cmd: '/provider', desc: 'Select LLM provider (local/openai/anthropic/etc)' },
+  { cmd: '/model', desc: 'Select specific model' },
+  { cmd: '/providers', desc: 'List all available providers' },
   { cmd: '/cad', desc: 'Generate CAD model from description' },
   { cmd: '/generate', desc: 'Generate image with Stable Diffusion' },
   { cmd: '/list', desc: 'Show cached artifacts' },
@@ -50,6 +64,8 @@ const Shell = () => {
     verbosity: 3,
     agentEnabled: true,
     traceEnabled: false,
+    selectedProvider: null,
+    selectedModel: null,
   });
   const [showCommands, setShowCommands] = useState(false);
   const [filteredCommands, setFilteredCommands] = useState(COMMANDS);
@@ -178,6 +194,37 @@ Commands are executed locally when possible.`);
         }
         return true;
 
+      case 'provider':
+        if (args.length === 0) {
+          const current = state.selectedProvider || 'local';
+          addMessage('system', `Current provider: ${current}`);
+        } else {
+          const providerName = args[0].toLowerCase();
+          if (providerName === 'local' || providerName === 'none') {
+            setState(prev => ({ ...prev, selectedProvider: null, selectedModel: null }));
+            addMessage('system', '✓ Provider set to: local (Q4)');
+          } else {
+            setState(prev => ({ ...prev, selectedProvider: providerName, selectedModel: null }));
+            addMessage('system', `✓ Provider set to: ${providerName}\n💡 Enable in I/O Control if disabled`);
+          }
+        }
+        return true;
+
+      case 'model':
+        if (args.length === 0) {
+          const current = state.selectedModel || state.selectedProvider || 'local Q4';
+          addMessage('system', `Current model: ${current}`);
+        } else {
+          const modelName = args[0];
+          setState(prev => ({ ...prev, selectedModel: modelName }));
+          addMessage('system', `✓ Model set to: ${modelName}`);
+        }
+        return true;
+
+      case 'providers':
+        // This will be handled by API, but we could show local status
+        return false; // Send to API
+
       default:
         return false; // Command not handled locally, send to API
     }
@@ -217,6 +264,9 @@ Commands are executed locally when possible.`);
         prompt: userInput,
         verbosity: state.verbosity,
         useAgent: state.agentEnabled,
+        // Multi-provider support
+        provider: state.selectedProvider,
+        model: state.selectedModel,
       };
 
       // Special routing for specific commands
@@ -351,7 +401,12 @@ Commands are executed locally when possible.`);
                   <span className="dot"></span>
                 </div>
               ) : (
-                <pre className="message-text">{msg.content}</pre>
+                <>
+                  <pre className="message-text">{msg.content}</pre>
+                  {msg.type === 'assistant' && (
+                    <ProviderBadge metadata={msg.metadata as ProviderMetadata} />
+                  )}
+                </>
               )}
               {msg.metadata && (
                 <div className="message-metadata">
@@ -391,6 +446,18 @@ Commands are executed locally when possible.`);
           </div>
         )}
         <div className="shell-input-wrapper">
+          <ProviderSelector
+            selectedProvider={state.selectedProvider}
+            selectedModel={state.selectedModel}
+            onProviderChange={(provider, model) => {
+              setState(prev => ({
+                ...prev,
+                selectedProvider: provider,
+                selectedModel: model,
+              }));
+            }}
+            apiBase="http://localhost:8000"
+          />
           <input
             ref={inputRef}
             type="text"

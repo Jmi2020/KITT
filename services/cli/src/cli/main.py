@@ -161,6 +161,8 @@ class SessionState:
     stored_images: List[Dict[str, Any]] = field(default_factory=list)
     show_trace: bool = True
     agent_enabled: bool = True
+    provider: Optional[str] = None  # Multi-provider collective: selected provider
+    model: Optional[str] = None  # Multi-provider collective: selected model
 
 
 state = SessionState()
@@ -694,6 +696,46 @@ def _search_memories(query: str, limit: int = 5) -> None:
         console.print(f"[cyan]{idx}[/] {created} | {snippet}")
 
 
+def _parse_inline_provider(query: str) -> tuple[str, Optional[str], Optional[str]]:
+    """Parse inline provider/model syntax from query.
+
+    Syntax:
+        @provider: <query>  - One-off provider override
+        #model: <query>     - One-off model override
+
+    Returns:
+        Tuple of (cleaned_query, provider, model)
+    """
+    provider_override = None
+    model_override = None
+
+    # Check for @provider: syntax
+    provider_match = re.match(r'^@(\w+):\s*(.+)$', query, re.IGNORECASE)
+    if provider_match:
+        provider_override = provider_match.group(1).lower()
+        query = provider_match.group(2)
+
+    # Check for #model: syntax
+    model_match = re.match(r'^#([\w-]+):\s*(.+)$', query, re.IGNORECASE)
+    if model_match:
+        model_override = model_match.group(1).lower()
+        query = model_match.group(2)
+        # Auto-detect provider from model name
+        provider_map = {
+            "gpt": "openai",
+            "claude": "anthropic",
+            "mistral": "mistral",
+            "sonar": "perplexity",
+            "gemini": "gemini",
+        }
+        for prefix, prov in provider_map.items():
+            if model_override.startswith(prefix):
+                provider_override = prov
+                break
+
+    return query, provider_override, model_override
+
+
 def _format_prompt(user_prompt: str) -> str:
     reference_block = _format_reference_block()
     if not reference_block:
@@ -995,15 +1037,32 @@ def say(
     """Send a conversational message with intelligent agent reasoning.
 
     Models are automatically managed by the Model Manager - no need to specify.
+
+    Supports inline provider/model override:
+        @openai: <query>           - Use OpenAI for this query
+        #gpt-4o-mini: <query>      - Use specific model (auto-detects provider)
     """
     text = " ".join(message)
-    formatted_prompt = _format_prompt(text)
+
+    # Parse inline provider/model syntax
+    cleaned_text, provider_override, model_override = _parse_inline_provider(text)
+
+    formatted_prompt = _format_prompt(cleaned_text)
     payload: Dict[str, Any] = {
         "conversationId": state.conversation_id,
         "userId": state.user_id,
         "intent": "chat.prompt",
         "prompt": formatted_prompt,
     }
+
+    # Add provider/model from state or inline override
+    active_provider = provider_override or state.provider
+    active_model = model_override or state.model
+    if active_provider:
+        payload["provider"] = active_provider
+    if active_model:
+        payload["model"] = active_model
+
     if isinstance(agent, OptionInfo):
         agent = None
 
@@ -1620,6 +1679,9 @@ def shell(
     # Commands help
     console.print("\n[bold]Commands:[/bold]")
     console.print("  [cyan]/verbosity <1-5>[/cyan]  - Set response detail level")
+    console.print("  [cyan]/provider <name>[/cyan]  - Select LLM provider (openai, anthropic, mistral, gemini, local)")
+    console.print("  [cyan]/model <name>[/cyan]     - Select specific model (auto-detects provider)")
+    console.print("  [cyan]/providers[/cyan]        - List available providers and their status")
     console.print("  [cyan]/cad <prompt>[/cyan]     - Generate CAD models")
     console.print("  [cyan]/generate <prompt>[/cyan] - Generate image with Stable Diffusion")
     console.print("  [cyan]/list[/cyan]             - Show cached artifacts")
@@ -1672,6 +1734,9 @@ def shell(
             if cmd == "help":
                 console.print("\n[bold]Available Commands:[/bold]")
                 console.print("  [cyan]/verbosity <1-5>[/cyan]  - Set verbosity (1=terse, 5=exhaustive)")
+                console.print("  [cyan]/provider <name>[/cyan]  - Select LLM provider (openai, anthropic, mistral, gemini, local)")
+                console.print("  [cyan]/model <name>[/cyan]     - Select specific model (gpt-4o-mini, claude-3-5-haiku, etc)")
+                console.print("  [cyan]/providers[/cyan]        - List all available providers and status")
                 console.print("  [cyan]/cad <prompt>[/cyan]     - Generate CAD model from description")
                 console.print("  [cyan]/generate <prompt>[/cyan] - Generate image with Stable Diffusion")
                 console.print("  [cyan]/list[/cyan]             - List cached CAD artifacts")
@@ -1852,6 +1917,109 @@ def shell(
                         console.print("[green]Agent mode disabled")
                     else:
                         console.print("[red]Usage: /agent on|off")
+                continue
+
+            if cmd == "provider":
+                if not args:
+                    if state.provider:
+                        console.print(f"[yellow]Current provider: {state.provider}")
+                    else:
+                        console.print("[yellow]No provider selected (using local Q4 default)")
+                    console.print("[dim]Available: openai, anthropic, mistral, perplexity, gemini, local")
+                else:
+                    provider_name = args[0].lower()
+                    if provider_name in {"local", "none", "default", "q4"}:
+                        state.provider = None
+                        state.model = None
+                        console.print("[green]Provider reset to local Q4")
+                    elif provider_name in {"openai", "anthropic", "mistral", "perplexity", "gemini"}:
+                        state.provider = provider_name
+                        state.model = None  # Reset model when changing provider
+                        console.print(f"[green]Provider set to: {provider_name}")
+                        console.print("[dim]Note: Provider must be enabled in I/O Control for this to work")
+                    else:
+                        console.print(f"[red]Unknown provider: {provider_name}")
+                        console.print("[dim]Available: openai, anthropic, mistral, perplexity, gemini, local")
+                continue
+
+            if cmd == "model":
+                if not args:
+                    if state.model:
+                        console.print(f"[yellow]Current model: {state.model} (provider: {state.provider or 'auto-detect'})")
+                    else:
+                        console.print("[yellow]No specific model selected")
+                else:
+                    model_name = args[0].lower()
+                    # Auto-detect provider from common model names
+                    provider_map = {
+                        "gpt-4": "openai",
+                        "gpt-4o": "openai",
+                        "gpt-4o-mini": "openai",
+                        "gpt-3.5": "openai",
+                        "claude": "anthropic",
+                        "claude-3": "anthropic",
+                        "claude-3-5-haiku": "anthropic",
+                        "claude-3-5-sonnet": "anthropic",
+                        "mistral": "mistral",
+                        "mistral-small": "mistral",
+                        "mistral-medium": "mistral",
+                        "sonar": "perplexity",
+                        "gemini": "gemini",
+                        "gemini-flash": "gemini",
+                        "gemini-pro": "gemini",
+                    }
+                    detected_provider = None
+                    for prefix, prov in provider_map.items():
+                        if model_name.startswith(prefix):
+                            detected_provider = prov
+                            break
+
+                    if detected_provider:
+                        state.provider = detected_provider
+                        state.model = model_name
+                        console.print(f"[green]Model set to: {model_name} (provider: {detected_provider})")
+                    else:
+                        # Assume it's a local model alias
+                        state.provider = None
+                        state.model = None
+                        console.print(f"[yellow]Unknown model: {model_name}. Reset to local Q4.")
+                        console.print("[dim]Tip: Use full model names like 'gpt-4o-mini' or 'claude-3-5-haiku'")
+                continue
+
+            if cmd == "providers":
+                console.print("\n[bold]Multi-Provider Collective Status:[/bold]")
+                console.print("[dim]Enable providers in I/O Control Dashboard[/dim]\n")
+                try:
+                    # Try to fetch provider status from API
+                    data = _get_json(f"{API_BASE}/api/providers/available")
+                    providers = data.get("providers", {})
+                    if providers:
+                        for prov_name, prov_info in providers.items():
+                            enabled = prov_info.get("enabled", False)
+                            status = "[green]✓ ENABLED" if enabled else "[dim]✗ disabled"
+                            models = ", ".join(prov_info.get("models", []))
+                            cost = prov_info.get("cost_info", "")
+                            console.print(f"{status}[/] {prov_name}: {models}")
+                            if cost and enabled:
+                                console.print(f"       [dim]{cost}[/]")
+                    else:
+                        console.print("[yellow]No provider status available from API")
+                except Exception:
+                    # Fallback to environment-based status check
+                    console.print("[cyan]openai[/]:     GPT-4o-mini, GPT-4o")
+                    console.print("[cyan]anthropic[/]:  Claude 3.5 Haiku, Sonnet")
+                    console.print("[cyan]mistral[/]:    Mistral-small, Mistral-medium")
+                    console.print("[cyan]perplexity[/]: Sonar")
+                    console.print("[cyan]gemini[/]:     Gemini Flash, Gemini Pro")
+                    console.print("\n[dim]Enable in I/O Control to use these providers[/]")
+
+                # Show current selection
+                if state.provider:
+                    console.print(f"\n[bold]Current selection:[/] {state.provider}")
+                    if state.model:
+                        console.print(f"[bold]Current model:[/] {state.model}")
+                else:
+                    console.print("\n[bold]Current selection:[/] local Q4 (default)")
                 continue
 
             if cmd == "collective":

@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+import re
+from typing import Any, Dict, Optional, Tuple
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends
@@ -16,6 +17,76 @@ from ..models.context import DeviceSelection
 from ..orchestrator import BrainOrchestrator
 
 router = APIRouter(prefix="/api", tags=["query"])
+
+
+def parse_inline_provider_syntax(prompt: str) -> Tuple[str, Optional[str], Optional[str]]:
+    """Parse query for inline provider/model syntax.
+
+    Supports:
+    - @provider: query text
+    - #model: query text
+
+    Args:
+        prompt: User query that may contain inline syntax
+
+    Returns:
+        Tuple of (cleaned_prompt, provider, model)
+
+    Examples:
+        >>> parse_inline_provider_syntax("@openai: what is AI?")
+        ("what is AI?", "openai", None)
+
+        >>> parse_inline_provider_syntax("#gpt-4o-mini: explain quantum")
+        ("explain quantum", "openai", "gpt-4o-mini")
+
+        >>> parse_inline_provider_syntax("regular query")
+        ("regular query", None, None)
+    """
+    # Check for @provider: syntax
+    provider_match = re.match(r'^@(\w+):\s*(.+)$', prompt, re.DOTALL)
+    if provider_match:
+        provider = provider_match.group(1).lower()
+        cleaned_prompt = provider_match.group(2)
+        return cleaned_prompt, provider, None
+
+    # Check for #model: syntax
+    model_match = re.match(r'^#([\w\-\.]+):\s*(.+)$', prompt, re.DOTALL)
+    if model_match:
+        model = model_match.group(1).lower()
+        cleaned_prompt = model_match.group(2)
+
+        # Auto-detect provider from model name
+        provider = _detect_provider_from_model(model)
+
+        return cleaned_prompt, provider, model
+
+    # No inline syntax
+    return prompt, None, None
+
+
+def _detect_provider_from_model(model: str) -> Optional[str]:
+    """Detect provider from model name.
+
+    Args:
+        model: Model name (e.g., "gpt-4o-mini", "claude-3-5-haiku")
+
+    Returns:
+        Provider name if detected, None otherwise
+    """
+    patterns = {
+        "gpt-": "openai",
+        "o1-": "openai",
+        "claude-": "anthropic",
+        "mistral-": "mistral",
+        "sonar": "perplexity",
+        "gemini-": "gemini",
+    }
+
+    for pattern, provider in patterns.items():
+        if model.startswith(pattern):
+            return provider
+
+    return None
 
 
 class QueryInput(BaseModel):
@@ -33,6 +104,9 @@ class QueryInput(BaseModel):
     model_alias: Optional[str] = Field(default=None, alias="modelAlias")
     use_agent: bool = Field(default=True, alias="useAgent")
     tool_mode: str = Field(default="auto", alias="toolMode")
+    # Multi-provider support (new)
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
 
 class QueryResponse(BaseModel):
@@ -75,12 +149,22 @@ async def post_query(
     if not prompt:
         raise ValueError("prompt is required for non-device intents")
 
+    # Parse inline provider/model syntax (@provider: or #model:)
+    cleaned_prompt, inline_provider, inline_model = parse_inline_provider_syntax(prompt)
+
+    # Determine final provider/model (priority: inline > explicit > default)
+    final_provider = inline_provider or body.provider
+    final_model = inline_model or body.model
+
+    # TODO: Pass provider/model to orchestrator when multi-provider routing is integrated
+    # For now, just use the cleaned prompt
+
     verbosity_level = clamp_level(body.verbosity) if body.verbosity else get_verbosity_level()
 
     routing_result = await orchestrator.generate_response(
         conversation_id=body.conversation_id,
         request_id=uuid4().hex,
-        prompt=prompt,
+        prompt=cleaned_prompt,
         user_id=body.user_id,
         force_tier=body.force_tier,
         freshness_required=body.freshness_required,

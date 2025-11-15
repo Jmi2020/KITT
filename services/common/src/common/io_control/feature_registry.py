@@ -26,6 +26,7 @@ class FeatureCategory(Enum):
     API_SERVICES = "api_services"
     ROUTING = "routing"
     AUTONOMOUS = "autonomous"
+    COLLECTIVE_PROVIDERS = "collective_providers"
 
 
 class RestartScope(Enum):
@@ -433,6 +434,83 @@ class FeatureRegistry:
                 restart_scope=RestartScope.NONE,  # Hot-reload
                 requires=["autonomous_mode"],
                 validation_message="⚠️ KITTY will continuously execute goals. May consume budget quickly.",
+            )
+        )
+
+        # ====================================================================
+        # Collective Providers (Multi-Provider Meta-Agent Diversity)
+        # ====================================================================
+
+        self.register(
+            FeatureDefinition(
+                id="enable_openai_collective",
+                name="OpenAI Collective",
+                description="Enable OpenAI models (GPT-4o-mini) in collective meta-agent for diverse opinions",
+                category=FeatureCategory.COLLECTIVE_PROVIDERS,
+                env_var="ENABLE_OPENAI_COLLECTIVE",
+                default_value=False,
+                restart_scope=RestartScope.NONE,  # Hot-reload via ProviderRegistry
+                health_check=health_checks.check_openai_api,
+                validation_message="💰 Cost: $0.15/1M input tokens, $0.60/1M output tokens. Requires OPENAI_API_KEY.",
+                setup_instructions="Get API key from https://platform.openai.com/api-keys",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="enable_anthropic_collective",
+                name="Anthropic Collective",
+                description="Enable Anthropic models (Claude Haiku) in collective meta-agent for diverse opinions",
+                category=FeatureCategory.COLLECTIVE_PROVIDERS,
+                env_var="ENABLE_ANTHROPIC_COLLECTIVE",
+                default_value=False,
+                restart_scope=RestartScope.NONE,  # Hot-reload via ProviderRegistry
+                health_check=health_checks.check_anthropic_api,
+                validation_message="💰 Cost: $0.25/1M input tokens, $1.25/1M output tokens. Requires ANTHROPIC_API_KEY.",
+                setup_instructions="Get API key from https://console.anthropic.com/settings/keys",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="enable_mistral_collective",
+                name="Mistral Collective",
+                description="Enable Mistral models (Mistral-small) in collective meta-agent for diverse opinions",
+                category=FeatureCategory.COLLECTIVE_PROVIDERS,
+                env_var="ENABLE_MISTRAL_COLLECTIVE",
+                default_value=False,
+                restart_scope=RestartScope.NONE,  # Hot-reload via ProviderRegistry
+                validation_message="💰 Cost: $0.10/1M input tokens, $0.30/1M output tokens. Requires MISTRAL_API_KEY.",
+                setup_instructions="Get API key from https://console.mistral.ai/api-keys",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="enable_perplexity_collective",
+                name="Perplexity Collective",
+                description="Enable Perplexity models (Sonar) in collective meta-agent for search-augmented opinions",
+                category=FeatureCategory.COLLECTIVE_PROVIDERS,
+                env_var="ENABLE_PERPLEXITY_COLLECTIVE",
+                default_value=False,
+                restart_scope=RestartScope.NONE,  # Hot-reload via ProviderRegistry
+                health_check=health_checks.check_perplexity_api,
+                validation_message="💰 Cost: $0.20/1M tokens (combined). Requires PERPLEXITY_API_KEY.",
+                setup_instructions="Get API key from https://perplexity.ai → Settings → API",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="enable_gemini_collective",
+                name="Google Gemini Collective",
+                description="Enable Google Gemini models (Flash) in collective meta-agent for diverse opinions",
+                category=FeatureCategory.COLLECTIVE_PROVIDERS,
+                env_var="ENABLE_GEMINI_COLLECTIVE",
+                default_value=False,
+                restart_scope=RestartScope.NONE,  # Hot-reload via ProviderRegistry
+                validation_message="💰 Cost: $0.075/1M input tokens, $0.30/1M output tokens. Requires GEMINI_API_KEY.",
+                setup_instructions="Get API key from https://aistudio.google.com/app/apikey",
             )
         )
 

@@ -28,6 +28,7 @@ from .routes.autonomy import router as autonomy_router
 from .routes.collective import router as collective_router
 from .routes.models import router as models_router
 from .routes.projects import router as projects_router
+from .routes.providers import router as providers_router
 from .routes.query import router as query_router
 from .routes.memory import router as memory_router
 from .routes.usage import router as usage_router
@@ -149,6 +150,7 @@ app.include_router(autonomy_router)
 app.include_router(collective_router)
 app.include_router(memory_router)
 app.include_router(usage_router)
+app.include_router(providers_router)
 app.include_router(metrics_router)
 
 
