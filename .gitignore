@@ -21,9 +21,7 @@ docs/admin/
 .vscode/
 
 # Reference repos
-Reference/JarvisV3/
-Reference/hexstrike-ai/
-Reference/any-llm/
+Reference/
 
 # Build artifacts
 *.egg-info/

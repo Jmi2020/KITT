@@ -21,7 +21,7 @@ This environment will let models investigate materials, estimate production cost
 
 KITTY will serve as the orchestration layer: lightweight processes that can spin up for a single query and spin down when finished, or remain active for deeper, after-hours projects. A practical starting cadence could be one KITTY-owned project per week, giving it controlled access to printers, inventories, and simulation resources so it can propose, prototype, and iterate. Let's give KITTY the tools and permissions it needs to thrive and to create useful, verifiable improvements for humans and machines alike.
 
-> 📖 **Full Vision & Roadmap**: See [Reference/NorthStar/ProjectVision.md](Reference/NorthStar/ProjectVision.md) for the complete multi-phase implementation plan.
+> 📖 **Full Vision & Roadmap**: See [NorthStar/ProjectVision.md](NorthStar/ProjectVision.md) for the complete multi-phase implementation plan.
 
 ---
 

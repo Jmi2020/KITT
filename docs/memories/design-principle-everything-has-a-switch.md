@@ -241,7 +241,7 @@ When adding new integrations:
 
 ## Documentation
 
-- **Vision**: `Reference/NorthStar/ProjectVision.md` - Principle #6
+- **Vision**: `NorthStar/ProjectVision.md` - Principle #6
 - **README**: Core Design Philosophy section
 - **User Guide**: `docs/IO_CONTROL_DASHBOARD.md`
 - **Feature Flags**: `docs/PHASE4_FEATURE_FLAGS_GUIDE.md`

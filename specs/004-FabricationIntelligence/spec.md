@@ -661,5 +661,5 @@ MAINTENANCE_INTERVAL_HOURS=200  # Printer maintenance interval
 
 - Phase 3 Implementation: `services/brain/src/brain/autonomous/`
 - Multi-Printer Control: `specs/002-MultiPrinterControl/`
-- ProjectVision.md: `Reference/NorthStar/ProjectVision.md`
+- ProjectVision.md: `NorthStar/ProjectVision.md`
 - Current Fabrication Service: `services/fabrication/src/fabrication/app.py`

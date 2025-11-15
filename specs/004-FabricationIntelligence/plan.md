@@ -798,5 +798,5 @@ For complete Phase 4 success:
 - Phase 3 Implementation: `services/brain/src/brain/autonomous/`
 - Current Fabrication Service: `services/fabrication/src/fabrication/`
 - Multi-Printer Control Spec: `specs/002-MultiPrinterControl/`
-- ProjectVision.md Phase 4: `Reference/NorthStar/ProjectVision.md:304-328`
+- ProjectVision.md Phase 4: `NorthStar/ProjectVision.md:304-328`
 - Autonomous Operations Guide: `KITTY_AUTONOMOUS_OPERATIONS_GUIDE.md`

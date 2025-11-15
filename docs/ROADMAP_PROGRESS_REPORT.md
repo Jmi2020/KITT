@@ -2,7 +2,7 @@
 
 **Date**: 2025-11-14
 **Session**: Continuation from Phase 1-2 → Phase 3 Complete
-**Vision Document**: `Reference/NorthStar/ProjectVision.md`
+**Vision Document**: `NorthStar/ProjectVision.md`
 
 ---
 
