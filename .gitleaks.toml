@@ -1,0 +1,16 @@
+[allowlist]
+description = "Ignore documentation placeholders that do not contain credentials"
+regexes = [
+  "Authorization: Bearer <TRIPO_API_KEY>",
+  "Authorization: Bearer YOUR_API_KEY",
+  "Authorization: Bearer <FIRECRAWL_API_KEY>",
+  "Authorization: Bearer <JINA_API_KEY>",
+  "Authorization: Bearer <TAILSCALE_API_TOKEN>",
+  "Authorization: Bearer <OPENAI_API_KEY>",
+  "Authorization: Bearer your-self-hosted-key-here",
+  "X-Subscription-Token: <BRAVE_SEARCH_API_KEY>",
+  "X-Subscription-Token: YOUR_API_KEY",
+  "NTFY_TOKEN=<your_ntfy_token>",
+  "HOME_ASSISTANT_TOKEN=<HOME_ASSISTANT_LONG_LIVED_TOKEN>",
+  "secret_key: \"<SEARXNG_SECRET>\""
+]
