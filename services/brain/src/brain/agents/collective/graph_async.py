@@ -24,7 +24,7 @@ class CollectiveState(TypedDict, total=False):
 
 async def n_plan(s: CollectiveState) -> CollectiveState:
     """Plan node - uses Q4 to create high-level plan."""
-    plan = await chat_async([
+    plan, metadata = await chat_async([
         {"role":"system","content":"You are KITTY's meta-orchestrator. Plan agent roles for the task briefly."},
         {"role":"user","content":f"Task: {s['task']} | Pattern: {s.get('pattern','pipeline')} | k={s.get('k',3)}"}
     ], which="Q4")
@@ -72,10 +72,11 @@ async def n_propose_council(s: CollectiveState) -> CollectiveState:
         system_prompt = f"You are {role}. {HINT_PROPOSER}"
         user_prompt = f"Task:\n{s['task']}\n\nRelevant context:\n{context}\n\nProvide a concise proposal with justification."
 
-        return await chat_async([
+        response, metadata = await chat_async([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ], which=which_model, temperature=temperature, max_tokens=max_tokens)
+        return response
 
     # Run all proposals in parallel
     props = await asyncio.gather(*[generate_proposal(i) for i in range(k)])
@@ -106,7 +107,10 @@ async def n_propose_debate(s: CollectiveState) -> CollectiveState:
         {"role": "user", "content": f"Task:\n{s['task']}\n\nRelevant context:\n{context}\n\nProvide CON arguments."}
     ], which="Q4")
 
-    pro, con = await asyncio.gather(pro_task, con_task)
+    # Gather results (each returns tuple of (response, metadata))
+    results = await asyncio.gather(pro_task, con_task)
+    pro, pro_meta = results[0]
+    con, con_meta = results[1]
 
     return {**s, "proposals": [pro, con]}
 
@@ -122,7 +126,7 @@ async def n_judge(s: CollectiveState) -> CollectiveState:
     proposals_text = "\n\n---\n\n".join(s.get("proposals", []))
     user_prompt = f"Task:\n{s['task']}\n\nRelevant context (full access):\n{full_context}\n\nProposals:\n\n{proposals_text}\n\nProvide: final decision, rationale, and next step."
 
-    verdict = await chat_async([
+    verdict, metadata = await chat_async([
         {"role": "system", "content": f"{HINT_JUDGE} You may consider all available context including process and meta information."},
         {"role": "user", "content": user_prompt}
     ], which="F16")
