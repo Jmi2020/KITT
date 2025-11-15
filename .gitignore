@@ -16,6 +16,11 @@ services/images_service/.service.pid
 services/images_service/.rq_worker.pid
 docs/admin/
 .env.claudeweb
+.codex/
+.claude/
+.specify/
+.kitty_notes/
+tmp/
 
 # Editor
 .vscode/
