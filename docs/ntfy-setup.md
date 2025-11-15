@@ -116,7 +116,7 @@ For maximum security, self-host ntfy and use access tokens:
 # Self-hosted with authentication
 NTFY_SERVER=https://ntfy.yourdomain.com
 NTFY_TOPIC=kitty-secure
-NTFY_TOKEN=tk_AgQdq7mVBoFD37zQVN29RhuMzNIz2
+NTFY_TOKEN=<your_ntfy_token>
 ```
 
 ## Notification Examples

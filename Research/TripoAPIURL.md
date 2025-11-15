@@ -52,7 +52,7 @@ The 404 error you're experiencing suggests you may be trying to call `/image-to-
 
 Make sure your headers include:
 ```
-Authorization: Bearer YOUR_TRIPO_API_KEY
+Authorization: Bearer <TRIPO_API_KEY>
 ```
 
 The `/v2/openapi/task` endpoint handles multiple operation types (image-to-3d, text-to-3d, mesh operations, etc.) based on the `type` parameter you provide in the request body[3][4][5][6].

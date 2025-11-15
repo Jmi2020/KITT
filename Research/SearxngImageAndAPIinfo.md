@@ -82,7 +82,7 @@ curl -s --compressed \
   "https://api.search.brave.com/res/v1/images/search?q=mountain+landscapes&count=20&safesearch=moderate" \
   -H "Accept: application/json" \
   -H "Accept-Encoding: gzip" \
-  -H "X-Subscription-Token: YOUR_API_KEY"
+  -H "X-Subscription-Token: <BRAVE_SEARCH_API_KEY>"
 ```
 
 **Parameters**[8][29]:
@@ -149,12 +149,12 @@ curl -X POST "http://localhost:8888/search" \
 ```bash
 # Test web search endpoint
 curl "https://api.search.brave.com/res/v1/web/search?q=test" \
-  -H "X-Subscription-Token: YOUR_API_KEY" \
+  -H "X-Subscription-Token: <BRAVE_SEARCH_API_KEY>" \
   -H "Accept: application/json"
 
 # Test image search endpoint
 curl "https://api.search.brave.com/res/v1/images/search?q=sunset&count=5" \
-  -H "X-Subscription-Token: YOUR_API_KEY" \
+  -H "X-Subscription-Token: <BRAVE_SEARCH_API_KEY>" \
   -H "Accept: application/json"
 ```
 

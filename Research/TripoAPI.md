@@ -14,7 +14,7 @@ The Tripo API enables developers to programmatically generate high-quality 3D mo
 
 **Authentication Method:**
 - Use Bearer token authentication with your API key
-- Header format: `Authorization: Bearer YOUR_TRIPO_API_KEY`
+- Header format: `Authorization: Bearer <TRIPO_API_KEY>`
 - Generate your API key from the Tripo Platform at `https://platform.tripo3d.ai/`
 
 **Important Note:** Your API key is visible only once upon creation. Store it securely and never share it publicly.
@@ -389,7 +389,7 @@ Content-Type: multipart/form-data
 ```bash
 # 1. Generate model from text prompt
 curl -X POST https://api.tripo3d.ai/v2/openapi/text-to-3d \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Authorization: Bearer <TRIPO_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "A wooden dining chair with curved back",
@@ -401,7 +401,7 @@ curl -X POST https://api.tripo3d.ai/v2/openapi/text-to-3d \
 
 # 2. Poll for completion
 curl -X GET https://api.tripo3d.ai/v2/openapi/task/{task_id} \
-  -H "Authorization: Bearer YOUR_API_KEY"
+  -H "Authorization: Bearer <TRIPO_API_KEY>"
 
 # 3. Download model when status is "completed"
 ```
@@ -411,14 +411,14 @@ curl -X GET https://api.tripo3d.ai/v2/openapi/task/{task_id} \
 ```bash
 # 1. Upload image file
 curl -X POST https://api.tripo3d.ai/v2/openapi/upload \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Authorization: Bearer <TRIPO_API_KEY>" \
   -F "file=@product_photo.jpg"
 
 # Response includes image_url
 
 # 2. Generate 3D model from uploaded image
 curl -X POST https://api.tripo3d.ai/v2/openapi/image-to-3d \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Authorization: Bearer <TRIPO_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
     "image_url": "https://platform.tripo3d.ai/assets/uploaded_image.jpg",
@@ -437,7 +437,7 @@ curl -X POST https://api.tripo3d.ai/v2/openapi/image-to-3d \
 
 # 2. Generate from multiple views
 curl -X POST https://api.tripo3d.ai/v2/openapi/multiview-to-3d \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Authorization: Bearer <TRIPO_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
     "front_image_url": "https://...",

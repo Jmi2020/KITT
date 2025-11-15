@@ -27,7 +27,7 @@ First, create your model using any generation endpoint:
 
 ```bash
 curl -X POST https://api.tripo3d.ai/v2/openapi/image-to-3d \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Authorization: Bearer <TRIPO_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
     "image_url": "https://your-uploaded-image-url.jpg",
@@ -55,7 +55,7 @@ Poll the task status endpoint until generation is complete:
 
 ```bash
 curl -X GET https://api.tripo3d.ai/v2/openapi/task/abc123def456 \
-  -H "Authorization: Bearer YOUR_API_KEY"
+  -H "Authorization: Bearer <TRIPO_API_KEY>"
 ```
 
 **Response when complete:**
@@ -82,7 +82,7 @@ Use the **convert** endpoint with the original `task_id` to request STL format:
 
 ```bash
 curl -X POST https://api.tripo3d.ai/v2/openapi/convert \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Authorization: Bearer <TRIPO_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
     "original_task_id": "abc123def456",
@@ -114,7 +114,7 @@ Poll the convert task status:
 
 ```bash
 curl -X GET https://api.tripo3d.ai/v2/openapi/task/convert_task_999 \
-  -H "Authorization: Bearer YOUR_API_KEY"
+  -H "Authorization: Bearer <TRIPO_API_KEY>"
 ```
 
 **Response when complete:**
@@ -141,7 +141,7 @@ If you already have a GLB file or need to convert between formats:
 
 ```bash
 curl -X POST https://api.tripo3d.ai/v2/openapi/import-model \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Authorization: Bearer <TRIPO_API_KEY>" \
   -F "model_file=@your_model.glb" \
   -F "output_format=STL"
 ```

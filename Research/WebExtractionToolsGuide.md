@@ -173,7 +173,7 @@ if __name__ == "__main__":
 curl https://r.jina.ai/https://example.com
 
 # With API key for higher rate limit
-curl -H "Authorization: Bearer YOUR_API_KEY" \
+curl -H "Authorization: Bearer <JINA_API_KEY>" \
      https://r.jina.ai/https://example.com
 
 # Get JSON format
@@ -460,7 +460,7 @@ curl http://localhost:3002/health
 # Scrape a page
 curl -X POST http://localhost:3002/v1/scrape \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer your-self-hosted-key-here' \
+  -H 'Authorization: Bearer <FIRECRAWL_API_KEY>' \
   -d '{
     "url": "https://example.com",
     "formats": ["markdown"]

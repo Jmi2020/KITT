@@ -135,7 +135,7 @@ corrected = match_keyword("prent", keywords)  # Returns "print"
 ```python
 import openai
 
-openai.api_key = "YOUR_API_KEY"
+openai.api_key = "<OPENAI_API_KEY>"
 
 SYSTEM_PROMPT = """You are a 3D printer command parser. Extract structured commands from natural language.
 
@@ -380,7 +380,7 @@ G-code â†’ Printer
 ```python
 import openai
 
-openai.api_key = "YOUR_API_KEY"
+openai.api_key = "<OPENAI_API_KEY>"
 
 OPENSCAD_PROMPT = """You are an OpenSCAD code generator. Convert voice descriptions to valid OpenSCAD code.
 

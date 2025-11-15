@@ -526,14 +526,14 @@ tailscale set --exit-node=<device-ip> --exit-node-allow-lan-access
 **List Devices**:
 ```bash
 curl https://api.tailscale.com/api/v2/tailnet/-/devices \
-  -H "Authorization: Bearer tskey-api-xxx"
+  -H "Authorization: Bearer <TAILSCALE_API_TOKEN>"
 ```
 
 **Update Device Tags**:
 ```bash
 curl -X PATCH \
   https://api.tailscale.com/api/v2/device/<device-id> \
-  -H "Authorization: Bearer tskey-api-xxx" \
+  -H "Authorization: Bearer <TAILSCALE_API_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"tags":["tag:device","tag:ml"]}'
 ```
