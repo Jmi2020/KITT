@@ -1735,6 +1735,16 @@ curl -X POST http://localhost:8080/api/voice/transcript \
   - Queue completion time estimation (prints + changes + maintenance)
   - 3 new API endpoints: estimate, maintenance status, record maintenance
   - 40%+ reduction in material swaps, energy cost optimization
+- [x] **Automated Print Execution** (8f82bed, f0a66ed, e5f959d, 01c34c7) - Fully automated printing workflow
+  - Printer drivers: MoonrakerDriver (Klipper), BambuMqttDriver (Bamboo Labs)
+  - PrintExecutor orchestrator: upload, start, monitor, snapshot, complete
+  - 10-step automated workflow: queue → schedule → upload → print → monitor → snapshot → complete
+  - Zero manual intervention required
+  - Error handling with automatic retries (up to 2x)
+  - Real-time progress monitoring (30s intervals)
+  - Periodic snapshot capture (first layer, progress, final)
+  - Configuration: `services/fabrication/printer_config.example.yaml`
+  - Docs: `docs/PRINTER_DRIVERS.md`
 - [ ] **Print Intelligence** - Success prediction with ML, recommendations
 - [ ] **Autonomous Procurement** - Research suppliers when low inventory
 
