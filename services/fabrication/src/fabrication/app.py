@@ -110,7 +110,7 @@ async def lifespan(app: FastAPI):
     LOGGER.info("Starting fabrication service")
 
     # Initialize database connection
-    engine = create_engine(settings.DATABASE_URL)
+    engine = create_engine(settings.database_url)
     db_session = sessionmaker(bind=engine)
 
     # Initialize components

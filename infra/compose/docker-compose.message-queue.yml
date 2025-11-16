@@ -27,24 +27,8 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-kitty}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-changeme}
       RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-/}
-
-      # High availability settings
-      RABBITMQ_VM_MEMORY_HIGH_WATERMARK: 0.6  # 60% memory threshold
-      RABBITMQ_DISK_FREE_LIMIT: 2GB  # Minimum free disk space
-
-      # Performance tuning
-      RABBITMQ_CHANNEL_MAX: 2048
-      RABBITMQ_HEARTBEAT: 60
-
-      # Management plugin
-      RABBITMQ_MANAGEMENT_PATH_PREFIX: /rabbitmq
-
-      # Logging
-      RABBITMQ_LOGS: /var/log/rabbitmq/rabbitmq.log
-      RABBITMQ_SASL_LOGS: /var/log/rabbitmq/sasl.log
-
-      # Clustering (for future multi-node setup)
       RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-kitty_secret_cookie_change_me}
+      # Note: Memory and disk settings are configured in rabbitmq.conf
     ports:
       - "5672:5672"    # AMQP protocol
       - "15672:15672"  # Management UI
