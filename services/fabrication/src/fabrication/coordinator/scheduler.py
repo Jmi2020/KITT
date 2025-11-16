@@ -1,6 +1,7 @@
 """Parallel Job Scheduler - P3 #20 Multi-Printer Coordination.
 
 Schedules jobs across multiple printers with distributed locking and RabbitMQ distribution.
+Enhanced with PrintExecutor integration for automated print execution.
 """
 
 from __future__ import annotations
@@ -19,6 +20,13 @@ from common.logging import get_logger
 
 from ..status.printer_status import PrinterStatusChecker, PrinterStatus
 from .queue_optimizer import QueueOptimizer
+
+try:
+    from ..executor import PrintExecutor
+    PRINT_EXECUTOR_AVAILABLE = True
+except ImportError:
+    PRINT_EXECUTOR_AVAILABLE = False
+    LOGGER.warning("PrintExecutor not available - automated execution disabled")
 
 LOGGER = get_logger(__name__)
 
@@ -56,6 +64,7 @@ class ParallelJobScheduler:
         db: Session,
         status_checker: PrinterStatusChecker,
         queue_optimizer: QueueOptimizer,
+        print_executor: Optional["PrintExecutor"] = None,
     ):
         """Initialize scheduler.
 
@@ -63,10 +72,12 @@ class ParallelJobScheduler:
             db: Database session
             status_checker: Printer status checker
             queue_optimizer: Queue optimizer for job selection
+            print_executor: Optional PrintExecutor for automated execution
         """
         self.db = db
         self.status_checker = status_checker
         self.queue_optimizer = queue_optimizer
+        self.print_executor = print_executor
 
     async def schedule_next_jobs(
         self,
@@ -416,3 +427,122 @@ class ParallelJobScheduler:
             new_priority=new_priority,
         )
         return True
+
+    async def schedule_and_execute_jobs(
+        self,
+        executor: "PrintExecutor",
+        printer_configs: dict[str, dict],
+        force_printers: Optional[List[str]] = None,
+    ) -> List[JobAssignment]:
+        """Schedule and automatically execute jobs on idle printers.
+
+        This method combines job scheduling with automated execution:
+        1. Schedule jobs to idle printers
+        2. For each assignment, kick off PrintExecutor in background
+        3. Return assignments immediately (execution continues async)
+
+        Args:
+            executor: PrintExecutor instance
+            printer_configs: Dict mapping printer_id to driver configuration
+            force_printers: Optional list of printer IDs to force scheduling
+
+        Returns:
+            List of job assignments (execution continues in background)
+        """
+        if not PRINT_EXECUTOR_AVAILABLE:
+            LOGGER.error("PrintExecutor not available - cannot execute jobs")
+            return []
+
+        LOGGER.info("Starting schedule and execute cycle")
+
+        # Schedule jobs to idle printers
+        assignments = await self.schedule_next_jobs(force_printers)
+
+        if not assignments:
+            LOGGER.info("No jobs scheduled")
+            return []
+
+        # Kick off execution for each assignment (background tasks)
+        for assignment in assignments:
+            if assignment.status == "scheduled":
+                # Launch execution in background
+                asyncio.create_task(
+                    self._execute_job_background(
+                        executor,
+                        assignment,
+                        printer_configs.get(assignment.printer_id),
+                    )
+                )
+
+        LOGGER.info(
+            "Schedule and execute cycle complete",
+            scheduled=len(assignments),
+        )
+
+        return assignments
+
+    async def _execute_job_background(
+        self,
+        executor: "PrintExecutor",
+        assignment: JobAssignment,
+        printer_config: Optional[dict],
+    ) -> None:
+        """Execute job in background (async task).
+
+        Args:
+            executor: PrintExecutor instance
+            assignment: Job assignment details
+            printer_config: Printer driver configuration
+        """
+        if not printer_config:
+            LOGGER.error(
+                "No printer config for job execution",
+                job_id=assignment.job_id,
+                printer_id=assignment.printer_id,
+            )
+            return
+
+        try:
+            # Get job from database
+            stmt = select(QueuedPrint).where(QueuedPrint.job_id == assignment.job_id)
+            job = self.db.execute(stmt).scalar_one_or_none()
+
+            if not job:
+                LOGGER.error("Job not found for execution", job_id=assignment.job_id)
+                return
+
+            LOGGER.info(
+                "Starting background job execution",
+                job_id=assignment.job_id,
+                printer_id=assignment.printer_id,
+            )
+
+            # Execute job
+            result = await executor.execute_job(
+                job=job,
+                printer_id=assignment.printer_id,
+                printer_config=printer_config,
+            )
+
+            if result.success:
+                LOGGER.info(
+                    "Background job execution completed",
+                    job_id=assignment.job_id,
+                    printer_id=assignment.printer_id,
+                )
+            else:
+                LOGGER.error(
+                    "Background job execution failed",
+                    job_id=assignment.job_id,
+                    printer_id=assignment.printer_id,
+                    error=result.error_message,
+                )
+
+        except Exception as e:
+            LOGGER.error(
+                "Error in background job execution",
+                job_id=assignment.job_id,
+                printer_id=assignment.printer_id,
+                error=str(e),
+                exc_info=True,
+            )
