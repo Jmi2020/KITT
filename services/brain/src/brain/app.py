@@ -122,9 +122,32 @@ async def lifespan(app: FastAPI):
             logger.info("Unified permission gate initialized")
 
             # Initialize MCP servers (research & memory)
-            # TODO: Wire up actual MCP servers when available
-            app.state.research_server = None  # ResearchMCPServer with Perplexity client
-            app.state.memory_server = None    # MemoryMCPServer
+            from brain.routing.cloud_clients import MCPClient
+            from mcp.servers.research_server import ResearchMCPServer
+            from mcp.servers.memory_server import MemoryMCPServer
+
+            # Create Perplexity client for research_deep tool
+            perplexity_client = None
+            perplexity_api_key = os.getenv("PERPLEXITY_API_KEY")
+            if perplexity_api_key:
+                perplexity_base_url = os.getenv("PERPLEXITY_BASE_URL", "https://api.perplexity.ai")
+                perplexity_client = MCPClient(
+                    base_url=perplexity_base_url,
+                    api_key=perplexity_api_key,
+                    model=os.getenv("PERPLEXITY_MODEL", "sonar")
+                )
+                logger.info(f"Perplexity client initialized: {perplexity_base_url}")
+            else:
+                logger.warning("PERPLEXITY_API_KEY not set, research_deep tool will be unavailable")
+
+            # Initialize ResearchMCPServer with Perplexity client
+            app.state.research_server = ResearchMCPServer(perplexity_client=perplexity_client)
+            logger.info("Research MCP server initialized")
+
+            # Initialize MemoryMCPServer
+            memory_service_url = os.getenv("MEM0_MCP_URL", "http://mem0-mcp:8765")
+            app.state.memory_server = MemoryMCPServer(memory_service_url=memory_service_url)
+            logger.info(f"Memory MCP server initialized: {memory_service_url}")
 
             # Initialize tool executor
             app.state.tool_executor = ResearchToolExecutor(
@@ -164,6 +187,8 @@ async def lifespan(app: FastAPI):
             app.state.io_control = None
             app.state.budget_manager = None
             app.state.permission_gate = None
+            app.state.research_server = None
+            app.state.memory_server = None
             app.state.tool_executor = None
             app.state.model_coordinator = None
     else:
@@ -174,6 +199,8 @@ async def lifespan(app: FastAPI):
         app.state.io_control = None
         app.state.budget_manager = None
         app.state.permission_gate = None
+        app.state.research_server = None
+        app.state.memory_server = None
         app.state.tool_executor = None
         app.state.model_coordinator = None
 
