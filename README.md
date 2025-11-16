@@ -1099,6 +1099,22 @@ UNIFI_USERNAME=admin
 UNIFI_PASSWORD=...
 ```
 
+### Fabrication Hardware Limits
+
+KITTY needs to know each printer’s safe build volume so it can pick the right machine and warn before slicing oversized parts. Set these env vars in `.env` (defaults shown) whenever firmware limits change or you swap hardware:
+
+```env
+H2D_BUILD_WIDTH=325
+H2D_BUILD_DEPTH=320
+H2D_BUILD_HEIGHT=325
+
+ORANGESTORM_GIGA_BUILD_WIDTH=800
+ORANGESTORM_GIGA_BUILD_DEPTH=800
+ORANGESTORM_GIGA_BUILD_HEIGHT=1000
+```
+
+KITTY takes the smallest axis from each printer’s build volume as the conservative “max dimension” during printer selection.
+
 ### Phase 4 Feature Flags (I/O Controls)
 
 Enable/disable external device dependencies for incremental testing. See **[Feature Flags Guide](docs/PHASE4_FEATURE_FLAGS_GUIDE.md)** for complete documentation.
@@ -1503,18 +1519,3 @@ KITTY is built on these principles:
 <p align="center">
   <sub>KITTY: Because your workshop deserves an AI assistant that actually understands "turn that thing on over there"</sub>
 </p>
-# Printer Build Envelopes
-
-Set these env vars in `.env` to reflect your actual machines (defaults shown):
-
-```env
-H2D_BUILD_WIDTH=325
-H2D_BUILD_DEPTH=320
-H2D_BUILD_HEIGHT=325
-
-ORANGESTORM_GIGA_BUILD_WIDTH=800
-ORANGESTORM_GIGA_BUILD_DEPTH=800
-ORANGESTORM_GIGA_BUILD_HEIGHT=1000
-```
-
-KITTY takes the smallest axis from each printer’s build volume as the safe “max dimension” during printer selection. Update these whenever you change firmware limits, nozzle setups, or swap printers.
