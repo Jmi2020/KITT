@@ -98,11 +98,8 @@ CREATE INDEX IF NOT EXISTS idx_research_sessions_status ON research_sessions(sta
 CREATE INDEX IF NOT EXISTS idx_research_sessions_created ON research_sessions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_research_sessions_thread ON research_sessions(thread_id);
 
--- Foreign key to checkpoints (optional, for referential integrity)
-ALTER TABLE research_sessions
-    ADD CONSTRAINT fk_research_sessions_thread
-    FOREIGN KEY (thread_id) REFERENCES checkpoints(thread_id)
-    ON DELETE SET NULL;
+-- Note: Cannot add FK to checkpoints(thread_id) as it's not unique (composite PK)
+-- Referential integrity maintained by application layer
 
 -- Research findings: structured storage of findings
 CREATE TABLE IF NOT EXISTS research_findings (
@@ -324,7 +321,7 @@ SELECT
     AVG(CASE WHEN qm.metric_type = 'context_recall' THEN qm.metric_value END) AS avg_recall,
     COUNT(DISTINCT kg.gap_id) AS total_gaps,
     COUNT(DISTINCT CASE WHEN kg.resolved THEN kg.gap_id END) AS resolved_gaps,
-    MAX(st.saturated) AS is_saturated,
+    BOOL_OR(st.saturated) AS is_saturated,
     MAX(st.novelty_rate) AS latest_novelty_rate
 FROM research_sessions rs
 LEFT JOIN quality_metrics qm ON rs.session_id = qm.session_id

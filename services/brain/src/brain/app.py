@@ -77,8 +77,8 @@ async def lifespan(app: FastAPI):
             app.state.pg_pool = create_connection_pool(database_url)
             logger.info("PostgreSQL connection pool created")
 
-            # Initialize checkpointer
-            app.state.checkpointer = init_checkpointer(app.state.pg_pool, auto_setup=True)
+            # Initialize checkpointer (async)
+            app.state.checkpointer = await init_checkpointer(app.state.pg_pool, auto_setup=True)
             logger.info("PostgreSQL checkpointer initialized")
 
             # Initialize session manager (graph will be built in Phase 5)

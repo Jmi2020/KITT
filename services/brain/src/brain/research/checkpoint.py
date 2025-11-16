@@ -9,8 +9,8 @@ import logging
 import os
 from typing import Optional
 
-from langgraph.checkpoint.postgres import PostgresSaver
-from psycopg_pool import ConnectionPool
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg_pool import AsyncConnectionPool
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +19,9 @@ def create_connection_pool(
     database_url: Optional[str] = None,
     min_size: int = 2,
     max_size: int = 20
-) -> ConnectionPool:
+) -> AsyncConnectionPool:
     """
-    Create a PostgreSQL connection pool for checkpointing.
+    Create an async PostgreSQL connection pool for checkpointing.
 
     Args:
         database_url: PostgreSQL connection string. Defaults to DATABASE_URL env var.
@@ -29,7 +29,7 @@ def create_connection_pool(
         max_size: Maximum number of connections in pool
 
     Returns:
-        ConnectionPool configured for checkpointing
+        AsyncConnectionPool configured for checkpointing
 
     Raises:
         ValueError: If database_url is not provided and DATABASE_URL env var not set
@@ -43,11 +43,11 @@ def create_connection_pool(
         )
 
     logger.info(
-        f"Creating connection pool: min_size={min_size}, max_size={max_size}"
+        f"Creating async connection pool: min_size={min_size}, max_size={max_size}"
     )
 
-    # Create connection pool with autocommit and dict row factory
-    pool = ConnectionPool(
+    # Create async connection pool with autocommit and dict row factory
+    pool = AsyncConnectionPool(
         conninfo=database_url,
         min_size=min_size,
         max_size=max_size,
@@ -57,41 +57,41 @@ def create_connection_pool(
         }
     )
 
-    logger.info("Connection pool created successfully")
+    logger.info("Async connection pool created successfully")
     return pool
 
 
-def init_checkpointer(
-    connection_pool: ConnectionPool,
+async def init_checkpointer(
+    connection_pool: AsyncConnectionPool,
     auto_setup: bool = True
-) -> PostgresSaver:
+) -> AsyncPostgresSaver:
     """
-    Initialize PostgreSQL checkpointer for LangGraph.
+    Initialize async PostgreSQL checkpointer for LangGraph.
 
     Args:
-        connection_pool: PostgreSQL connection pool
+        connection_pool: Async PostgreSQL connection pool
         auto_setup: If True, automatically create checkpoint tables if they don't exist
 
     Returns:
-        PostgresSaver configured for checkpointing
+        AsyncPostgresSaver configured for checkpointing
 
     Example:
         ```python
         pool = create_connection_pool()
-        checkpointer = init_checkpointer(pool)
+        checkpointer = await init_checkpointer(pool)
         graph = build_research_graph(checkpointer)
         ```
     """
-    logger.info("Initializing PostgreSQL checkpointer")
+    logger.info("Initializing async PostgreSQL checkpointer")
 
-    # Create PostgresSaver
-    checkpointer = PostgresSaver(connection_pool)
+    # Create AsyncPostgresSaver
+    checkpointer = AsyncPostgresSaver(connection_pool)
 
     # Setup checkpoint tables if requested
     if auto_setup:
         try:
             logger.info("Setting up checkpoint tables")
-            checkpointer.setup()
+            await checkpointer.setup()
             logger.info("Checkpoint tables setup complete")
         except Exception as e:
             logger.warning(
@@ -112,7 +112,7 @@ class CheckpointManager:
     - Checkpoint cleanup
     """
 
-    def __init__(self, checkpointer: PostgresSaver, connection_pool: ConnectionPool):
+    def __init__(self, checkpointer: AsyncPostgresSaver, connection_pool: AsyncConnectionPool):
         self.checkpointer = checkpointer
         self.pool = connection_pool
         self.logger = logging.getLogger(__name__ + ".CheckpointManager")
@@ -157,9 +157,9 @@ class CheckpointManager:
             List of checkpoint dicts ordered by timestamp descending
         """
         try:
-            with self.pool.connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
                         """
                         SELECT
                             checkpoint_id,
@@ -176,7 +176,7 @@ class CheckpointManager:
                         (thread_id, limit)
                     )
 
-                    results = cur.fetchall()
+                    results = await cur.fetchall()
                     self.logger.info(
                         f"Found {len(results)} checkpoints for thread {thread_id}"
                     )
@@ -204,10 +204,10 @@ class CheckpointManager:
             Number of checkpoints deleted
         """
         try:
-            with self.pool.connection() as conn:
-                with conn.cursor() as cur:
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
                     # Delete old checkpoints, keeping the most recent N
-                    cur.execute(
+                    await cur.execute(
                         """
                         WITH checkpoints_to_delete AS (
                             SELECT checkpoint_id
@@ -225,7 +225,7 @@ class CheckpointManager:
                     )
 
                     deleted_count = cur.rowcount
-                    conn.commit()
+                    await conn.commit()
 
                     self.logger.info(
                         f"Deleted {deleted_count} old checkpoints for thread {thread_id}"
@@ -247,9 +247,9 @@ class CheckpointManager:
             Dict with checkpoint size statistics
         """
         try:
-            with self.pool.connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
                         """
                         SELECT
                             COUNT(*) as checkpoint_count,
@@ -263,7 +263,7 @@ class CheckpointManager:
                         (thread_id,)
                     )
 
-                    result = cur.fetchone()
+                    result = await cur.fetchone()
 
                     if result:
                         stats = {
@@ -318,9 +318,9 @@ class CheckpointManager:
             True if checkpoint is stale, False otherwise
         """
         try:
-            with self.pool.connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
                         """
                         SELECT
                             EXTRACT(EPOCH FROM (NOW() - to_timestamp((checkpoint->>'ts')::numeric))) as age_seconds
@@ -333,7 +333,7 @@ class CheckpointManager:
                         (thread_id,)
                     )
 
-                    result = cur.fetchone()
+                    result = await cur.fetchone()
 
                     if result:
                         age_seconds = result[0]
