@@ -10,11 +10,12 @@ import Research from './pages/Research';
 import IOControl from './pages/IOControl';
 import MaterialInventory from './pages/MaterialInventory';
 import PrintIntelligence from './pages/PrintIntelligence';
+import VisionService from './pages/VisionService';
 import useRemoteMode from './hooks/useRemoteMode';
 import { useTheme } from './contexts/ThemeContext';
 
 const App = () => {
-  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'shell' | 'wall' | 'vision' | 'images' | 'research' | 'iocontrol' | 'inventory' | 'intelligence'>('shell');
+  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'shell' | 'wall' | 'vision' | 'images' | 'research' | 'iocontrol' | 'inventory' | 'intelligence' | 'cameras'>('shell');
   const remoteMode = useRemoteMode();
   const { theme, toggleTheme } = useTheme();
 
@@ -40,6 +41,8 @@ const App = () => {
         return <MaterialInventory />;
       case 'intelligence':
         return <PrintIntelligence />;
+      case 'cameras':
+        return <VisionService />;
       default:
         return <Dashboard remoteMode={remoteMode} />;
     }
@@ -62,6 +65,8 @@ const App = () => {
       setActiveView('inventory');
     } else if (viewParam === 'intelligence') {
       setActiveView('intelligence');
+    } else if (viewParam === 'cameras') {
+      setActiveView('cameras');
     }
   }, []);
 
@@ -75,6 +80,7 @@ const App = () => {
           <button onClick={() => setActiveView('iocontrol')}>⚙️ I/O Control</button>
           <button onClick={() => setActiveView('inventory')}>📦 Inventory</button>
           <button onClick={() => setActiveView('intelligence')}>📊 Intelligence</button>
+          <button onClick={() => setActiveView('cameras')}>📹 Cameras</button>
           <button onClick={() => setActiveView('dashboard')}>Dashboard</button>
           <button onClick={() => setActiveView('projects')}>Projects</button>
           <button onClick={() => setActiveView('console')}>Fabrication Console</button>

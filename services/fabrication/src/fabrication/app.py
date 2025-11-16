@@ -98,13 +98,14 @@ selector: Optional[PrinterSelector] = None
 launcher: Optional[SlicerLauncher] = None
 material_inventory: Optional[MaterialInventory] = None
 outcome_tracker: Optional[PrintOutcomeTracker] = None
+camera_capture: Optional[CameraCapture] = None
 db_session: Optional[sessionmaker] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for fabrication service startup/shutdown."""
-    global analyzer, status_checker, selector, launcher, material_inventory, outcome_tracker, db_session
+    global analyzer, status_checker, selector, launcher, material_inventory, outcome_tracker, camera_capture, db_session
 
     LOGGER.info("Starting fabrication service")
 
@@ -127,10 +128,17 @@ async def lifespan(app: FastAPI):
     )
     LOGGER.info("Material inventory initialized", threshold=material_inventory.low_inventory_threshold)
 
+    # Initialize camera capture (Phase 4)
+    camera_capture = CameraCapture(
+        minio_client=None,  # TODO: Wire up MinIO client for snapshot upload
+        mqtt_client=None,   # TODO: Wire up MQTT client for Bamboo Labs
+        bucket_name="prints",
+    )
+    LOGGER.info("Camera capture initialized", enabled=settings.enable_camera_capture)
+
     # Initialize print outcome tracker (Phase 4)
     outcome_tracker = PrintOutcomeTracker(
         db=db,
-        camera_capture=None,  # Will be set when CameraCapture is implemented
         mqtt_client=None,     # TODO: Wire up MQTT client for feedback requests
     )
     LOGGER.info("Print outcome tracker initialized", enabled=settings.enable_print_outcome_tracking)
@@ -146,6 +154,8 @@ async def lifespan(app: FastAPI):
 
     if outcome_tracker and outcome_tracker.db:
         outcome_tracker.db.close()
+
+    # Note: camera_capture has no cleanup needed (no persistent resources)
 
     LOGGER.info("Fabrication service stopped")
 
@@ -1193,3 +1203,267 @@ def _outcome_to_response(outcome: PrintOutcomeModel) -> PrintOutcomeResponse:
         reviewed_by=outcome.reviewed_by,
         goal_id=outcome.goal_id,
     )
+
+
+# ============================================================================
+# Camera API Endpoints
+# ============================================================================
+
+
+class CameraStatusResponse(BaseModel):
+    """Camera status response."""
+
+    printer_id: str = Field(..., description="Printer identifier")
+    camera_type: str = Field(..., description="Camera type: bamboo_mqtt or raspberry_pi_http")
+    camera_url: Optional[str] = Field(None, description="Camera endpoint URL (for Pi cameras)")
+    status: str = Field(..., description="Camera status: online, offline, or unknown")
+    last_snapshot_url: Optional[str] = Field(None, description="Most recent snapshot URL")
+    last_snapshot_time: Optional[datetime] = Field(None, description="Timestamp of last snapshot")
+
+
+class SnapshotCaptureRequest(BaseModel):
+    """Request to capture a snapshot."""
+
+    job_id: str = Field(..., description="Print job identifier")
+    milestone: str = Field("manual", description="Snapshot milestone: start, first_layer, progress, complete, manual")
+
+
+class SnapshotCaptureResponse(BaseModel):
+    """Response from snapshot capture."""
+
+    success: bool = Field(..., description="Whether snapshot was captured successfully")
+    url: Optional[str] = Field(None, description="MinIO URL of captured snapshot")
+    error: Optional[str] = Field(None, description="Error message if failed")
+    milestone: str = Field(..., description="Snapshot milestone")
+    timestamp: datetime = Field(..., description="Capture timestamp")
+
+
+class CameraTestResponse(BaseModel):
+    """Response from camera connection test."""
+
+    success: bool = Field(..., description="Whether camera test passed")
+    latency_ms: Optional[float] = Field(None, description="Camera response latency in milliseconds")
+    error: Optional[str] = Field(None, description="Error message if failed")
+
+
+class SnapshotGalleryItem(BaseModel):
+    """Snapshot item in gallery."""
+
+    milestone: str = Field(..., description="Snapshot milestone")
+    url: str = Field(..., description="MinIO snapshot URL")
+    timestamp: datetime = Field(..., description="Capture timestamp")
+
+
+class SnapshotGalleryResponse(BaseModel):
+    """Recent snapshot gallery response."""
+
+    job_id: str = Field(..., description="Print job identifier")
+    printer_id: str = Field(..., description="Printer identifier")
+    snapshots: List[SnapshotGalleryItem] = Field(..., description="List of snapshots for this job")
+
+
+@app.get("/api/fabrication/cameras/status", response_model=List[CameraStatusResponse])
+async def get_camera_status():
+    """Get status of all printer cameras.
+
+    Returns camera status for all configured printers (Bamboo Labs, Snapmaker, Elegoo).
+    """
+    try:
+        # Define camera configurations for all printers
+        cameras = [
+            {
+                "printer_id": "bamboo_h2d",
+                "camera_type": "bamboo_mqtt",
+                "camera_url": None,  # Bamboo uses MQTT, no HTTP URL
+            },
+            {
+                "printer_id": "snapmaker_artisan",
+                "camera_type": "raspberry_pi_http",
+                "camera_url": settings.snapmaker_camera_url,
+            },
+            {
+                "printer_id": "elegoo_giga",
+                "camera_type": "raspberry_pi_http",
+                "camera_url": settings.elegoo_camera_url,
+            },
+        ]
+
+        # For now, return static status (future: implement actual camera checks)
+        status_list = []
+        for cam in cameras:
+            status_list.append(
+                CameraStatusResponse(
+                    printer_id=cam["printer_id"],
+                    camera_type=cam["camera_type"],
+                    camera_url=cam["camera_url"],
+                    status="unknown",  # Future: Test camera connectivity
+                    last_snapshot_url=None,  # Future: Query from database
+                    last_snapshot_time=None,
+                )
+            )
+
+        return status_list
+
+    except Exception as e:
+        LOGGER.error("Failed to get camera status", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get camera status: {e}")
+
+
+@app.post("/api/fabrication/cameras/{printer_id}/snapshot", response_model=SnapshotCaptureResponse)
+async def capture_snapshot(printer_id: str, request: SnapshotCaptureRequest):
+    """Capture snapshot from printer camera.
+
+    Args:
+        printer_id: Printer identifier (bamboo_h2d, snapmaker_artisan, elegoo_giga)
+        request: Snapshot capture request with job_id and milestone
+
+    Returns:
+        Snapshot capture result with MinIO URL
+    """
+    if not camera_capture:
+        raise HTTPException(status_code=503, detail="Camera capture service not available")
+
+    try:
+        # Capture snapshot
+        result = await camera_capture.capture_snapshot(
+            printer_id=printer_id,
+            job_id=request.job_id,
+            milestone=request.milestone,
+        )
+
+        return SnapshotCaptureResponse(
+            success=result.success,
+            url=result.url,
+            error=result.error,
+            milestone=result.milestone or request.milestone,
+            timestamp=result.timestamp or datetime.now(),
+        )
+
+    except Exception as e:
+        LOGGER.error(
+            "Failed to capture snapshot",
+            printer_id=printer_id,
+            job_id=request.job_id,
+            error=str(e),
+            exc_info=True,
+        )
+        return SnapshotCaptureResponse(
+            success=False,
+            url=None,
+            error=str(e),
+            milestone=request.milestone,
+            timestamp=datetime.now(),
+        )
+
+
+@app.get("/api/fabrication/cameras/{printer_id}/test", response_model=CameraTestResponse)
+async def test_camera_connection(printer_id: str):
+    """Test camera connection and measure latency.
+
+    Args:
+        printer_id: Printer identifier
+
+    Returns:
+        Connection test result with latency
+    """
+    if not camera_capture:
+        raise HTTPException(status_code=503, detail="Camera capture service not available")
+
+    try:
+        import time
+
+        start_time = time.time()
+
+        # Attempt to capture test snapshot
+        result = await camera_capture.capture_snapshot(
+            printer_id=printer_id,
+            job_id="test_connection",
+            milestone="test",
+        )
+
+        latency_ms = (time.time() - start_time) * 1000
+
+        return CameraTestResponse(
+            success=result.success,
+            latency_ms=latency_ms if result.success else None,
+            error=result.error,
+        )
+
+    except Exception as e:
+        LOGGER.error("Camera test failed", printer_id=printer_id, error=str(e), exc_info=True)
+        return CameraTestResponse(
+            success=False,
+            latency_ms=None,
+            error=str(e),
+        )
+
+
+@app.get("/api/fabrication/cameras/snapshots/recent", response_model=List[SnapshotGalleryResponse])
+async def get_recent_snapshots(limit: int = Query(10, ge=1, le=100)):
+    """Get recent snapshot galleries grouped by job.
+
+    Args:
+        limit: Maximum number of job galleries to return (default: 10)
+
+    Returns:
+        List of snapshot galleries grouped by job_id
+    """
+    if not outcome_tracker:
+        raise HTTPException(status_code=503, detail="Outcome tracker service not available")
+
+    try:
+        # Get recent print outcomes with snapshots
+        outcomes = outcome_tracker.list_outcomes(limit=limit)
+
+        galleries = []
+        for outcome in outcomes:
+            if not outcome.snapshot_urls and not outcome.initial_snapshot_url and not outcome.final_snapshot_url:
+                continue  # Skip outcomes without snapshots
+
+            snapshots = []
+
+            # Add initial snapshot
+            if outcome.initial_snapshot_url:
+                snapshots.append(
+                    SnapshotGalleryItem(
+                        milestone="initial",
+                        url=outcome.initial_snapshot_url,
+                        timestamp=outcome.started_at,
+                    )
+                )
+
+            # Add progress snapshots (stored in snapshot_urls JSONB array)
+            if outcome.snapshot_urls:
+                for idx, url in enumerate(outcome.snapshot_urls):
+                    snapshots.append(
+                        SnapshotGalleryItem(
+                            milestone=f"progress_{idx + 1}",
+                            url=url,
+                            timestamp=outcome.started_at,  # Approximate, could be enhanced
+                        )
+                    )
+
+            # Add final snapshot
+            if outcome.final_snapshot_url:
+                snapshots.append(
+                    SnapshotGalleryItem(
+                        milestone="final",
+                        url=outcome.final_snapshot_url,
+                        timestamp=outcome.completed_at,
+                    )
+                )
+
+            if snapshots:
+                galleries.append(
+                    SnapshotGalleryResponse(
+                        job_id=outcome.job_id,
+                        printer_id=outcome.printer_id,
+                        snapshots=snapshots,
+                    )
+                )
+
+        return galleries
+
+    except Exception as e:
+        LOGGER.error("Failed to get recent snapshots", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get recent snapshots: {e}")
