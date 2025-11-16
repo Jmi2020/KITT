@@ -10,9 +10,10 @@ This plan implements four interconnected systems to enable KITT's autonomous res
 
 **Key Outcomes:**
 - Hours-long research sessions with automatic crash recovery
-- 85% cost reduction through intelligent Q4/F16 routing
+- 90%+ cost reduction through intelligent multi-model routing (Q4/F16/Gemma/Hermes locally, GPT-5/Claude for critical decisions)
 - Quantitative stopping criteria (RAGAS metrics + saturation detection)
 - Real-time quality monitoring and gap detection
+- Tiered consultation strategy leveraging all available models optimally
 
 ---
 
@@ -497,8 +498,10 @@ class BreadthFirstAgent:
 **Model Registry:**
 ```python
 MODEL_REGISTRY = {
+    # Local Models (Zero Cost)
     "llama-3.1-8b-q4": {
         "type": "local",
+        "family": "llama",
         "cost": 0.0,
         "latency_p50": 0.5,
         "latency_p95": 1.2,
@@ -515,6 +518,7 @@ MODEL_REGISTRY = {
     },
     "llama-3.1-70b-f16": {
         "type": "local",
+        "family": "llama",
         "cost": 0.0,
         "latency_p50": 5.0,
         "latency_p95": 12.0,
@@ -529,21 +533,99 @@ MODEL_REGISTRY = {
         "max_tokens": 4096,
         "endpoint": "http://localhost:8002/v1/chat/completions"
     },
-    "gpt-4": {
+    "gemma-3-27b": {
+        "type": "local",
+        "family": "gemma",
+        "cost": 0.0,
+        "latency_p50": 3.0,
+        "latency_p95": 7.0,
+        "capabilities": {
+            "reasoning": 0.75,
+            "tool_use": 0.65,
+            "code": 0.75,
+            "math": 0.8,
+            "synthesis": 0.7
+        },
+        "context_window": 16384,
+        "max_tokens": 4096,
+        "endpoint": "http://localhost:8003/v1/chat/completions"
+    },
+    "hermes-3-70b": {
+        "type": "local",
+        "family": "hermes",
+        "cost": 0.0,
+        "latency_p50": 5.5,
+        "latency_p95": 13.0,
+        "capabilities": {
+            "reasoning": 0.8,
+            "tool_use": 0.85,
+            "code": 0.75,
+            "math": 0.75,
+            "synthesis": 0.85
+        },
+        "context_window": 32768,
+        "max_tokens": 4096,
+        "endpoint": "http://localhost:8004/v1/chat/completions"
+    },
+
+    # External Models (Paid)
+    "gpt-4o": {
         "type": "external",
-        "cost": 0.03,  # per 1k tokens
-        "latency_p50": 2.0,
-        "latency_p95": 5.0,
+        "family": "openai",
+        "cost": 0.0025,  # per 1k input tokens (cheaper than GPT-4)
+        "cost_output": 0.01,  # per 1k output tokens
+        "latency_p50": 1.5,
+        "latency_p95": 4.0,
         "capabilities": {
             "reasoning": 0.95,
-            "tool_use": 0.9,
-            "code": 0.9,
-            "math": 0.9,
+            "tool_use": 0.95,
+            "code": 0.95,
+            "math": 0.95,
             "synthesis": 0.95
         },
         "context_window": 128000,
-        "max_tokens": 4096,
-        "endpoint": "https://api.openai.com/v1/chat/completions"
+        "max_tokens": 16384,
+        "endpoint": "https://api.openai.com/v1/chat/completions",
+        "model_name": "gpt-4o"
+    },
+    "gpt-5": {
+        "type": "external",
+        "family": "openai",
+        "cost": 0.005,  # estimated, adjust when released
+        "cost_output": 0.015,
+        "latency_p50": 2.0,
+        "latency_p95": 5.0,
+        "capabilities": {
+            "reasoning": 0.98,
+            "tool_use": 0.98,
+            "code": 0.98,
+            "math": 0.98,
+            "synthesis": 0.98
+        },
+        "context_window": 200000,
+        "max_tokens": 32768,
+        "endpoint": "https://api.openai.com/v1/chat/completions",
+        "model_name": "gpt-5",
+        "enabled": False  # Enable when GPT-5 is released
+    },
+    "claude-3-5-sonnet": {
+        "type": "external",
+        "family": "anthropic",
+        "cost": 0.003,  # per 1k input tokens
+        "cost_output": 0.015,  # per 1k output tokens
+        "latency_p50": 2.0,
+        "latency_p95": 5.5,
+        "capabilities": {
+            "reasoning": 0.96,
+            "tool_use": 0.93,
+            "code": 0.95,
+            "math": 0.94,
+            "synthesis": 0.97
+        },
+        "context_window": 200000,
+        "max_tokens": 8192,
+        "endpoint": "https://api.anthropic.com/v1/messages",
+        "model_name": "claude-3-5-sonnet-20241022"
     }
 }
 
@@ -551,6 +633,16 @@ class ModelCapabilityRegistry:
     def __init__(self):
         self.registry = MODEL_REGISTRY.copy()
         self.performance_tracker = PerformanceTracker()
+
+        # Filter out disabled models
+        self.registry = {
+            k: v for k, v in self.registry.items()
+            if v.get("enabled", True)
+        }
+
+        # Group models by type for tiered consultation
+        self.local_models = [k for k, v in self.registry.items() if v["type"] == "local"]
+        self.external_models = [k for k, v in self.registry.items() if v["type"] == "external"]
 
     def get_best_model(self, task_type: str,
                        max_cost: float = 0.0,
@@ -592,20 +684,176 @@ class ModelCapabilityRegistry:
             self.registry[model_id]['latency_p50'] = avg_latency
 ```
 
+**Tiered Consultation Strategy:**
+
+The consultation strategy uses **5 tiers** based on decision criticality, maximizing zero-cost local model diversity while reserving expensive external models for critical decisions only.
+
+```python
+class ConsultationConfig:
+    """Configuration for tiered multi-model consultation strategy"""
+
+    def __init__(self):
+        # Tier definitions: models to use at each criticality level
+        self.tiers = {
+            # Tier 0: Single local model (fastest, zero cost)
+            "trivial": {
+                "models": ["llama-3.1-8b-q4"],
+                "max_latency": 1.0,
+                "use_cases": ["tool selection", "API formatting", "simple lookup"]
+            },
+
+            # Tier 1: Local diversity (zero cost, multiple perspectives)
+            "low": {
+                "models": ["llama-3.1-8b-q4", "gemma-3-27b"],
+                "max_latency": 5.0,
+                "use_cases": ["basic synthesis", "supplier comparison", "data validation"]
+            },
+
+            # Tier 2: All local models (zero cost, maximum local consensus)
+            "medium": {
+                "models": ["llama-3.1-8b-q4", "llama-3.1-70b-f16", "gemma-3-27b", "hermes-3-70b"],
+                "max_latency": 10.0,
+                "use_cases": ["research synthesis", "material property analysis", "cost evaluation"]
+            },
+
+            # Tier 3: Local + best external (moderate cost, high quality)
+            "high": {
+                "models": ["llama-3.1-70b-f16", "gemma-3-27b", "hermes-3-70b", "gpt-4o"],
+                "max_latency": 15.0,
+                "use_cases": ["final material selection", "trade-off decisions", "research validation"]
+            },
+
+            # Tier 4: All available models (highest cost, critical decisions)
+            "critical": {
+                "models": ["llama-3.1-70b-f16", "gemma-3-27b", "hermes-3-70b", "gpt-4o", "claude-3-5-sonnet"],
+                "max_latency": 20.0,
+                "use_cases": ["safety-critical decisions", "high-cost commitments", "final report validation"]
+            }
+        }
+
+        # Budget controls
+        self.max_external_calls_per_session = int(os.getenv("MAX_EXTERNAL_CALLS_PER_SESSION", "10"))
+        self.max_cost_per_session = float(os.getenv("MAX_COST_PER_SESSION_USD", "2.00"))
+
+        # Decision type to tier mapping
+        self.decision_tier_map = {
+            "tool_selection": "trivial",
+            "api_formatting": "trivial",
+            "data_lookup": "trivial",
+            "basic_synthesis": "low",
+            "supplier_comparison": "low",
+            "data_validation": "low",
+            "research_synthesis": "medium",
+            "material_analysis": "medium",
+            "cost_evaluation": "medium",
+            "material_selection": "high",
+            "trade_off_decision": "high",
+            "research_validation": "high",
+            "safety_critical": "critical",
+            "final_validation": "critical",
+            "high_cost_commitment": "critical"
+        }
+
+    def get_models_for_decision(self,
+                                decision_type: str,
+                                current_cost: float = 0.0,
+                                external_calls_used: int = 0,
+                                allow_external: bool = True) -> List[str]:
+        """Select models based on decision importance and budget constraints"""
+
+        # Get base tier for decision type
+        tier = self.decision_tier_map.get(decision_type, "medium")
+
+        # Check if tier override is set via environment
+        env_override = os.getenv(f"{decision_type.upper()}_TIER")
+        if env_override and env_override in self.tiers:
+            tier = env_override
+
+        models = self.tiers[tier]["models"].copy()
+
+        # Budget enforcement: remove external models if over budget
+        if not allow_external or current_cost >= self.max_cost_per_session:
+            models = [m for m in models if m.startswith(("llama", "gemma", "hermes"))]
+            logger.warning(f"Budget limit reached (${current_cost:.2f}), using local models only")
+
+        # External call limit: remove external models if quota exceeded
+        if external_calls_used >= self.max_external_calls_per_session:
+            models = [m for m in models if m.startswith(("llama", "gemma", "hermes"))]
+            logger.warning(f"External call limit reached ({external_calls_used}), using local models only")
+
+        # Filter out models that aren't enabled
+        registry = ModelCapabilityRegistry()
+        models = [m for m in models if m in registry.registry]
+
+        if not models:
+            # Fallback to Q4 if no models available
+            logger.error("No models available after filtering, falling back to Q4")
+            models = ["llama-3.1-8b-q4"]
+
+        logger.info(f"Decision '{decision_type}' (tier={tier}): selected models={models}")
+        return models
+
+    def get_aggregator_model(self, models: List[str]) -> str:
+        """Select best model as aggregator (highest capability)"""
+
+        # Preference order: Claude > GPT-5 > GPT-4o > F16 > Hermes > Gemma > Q4
+        preference = [
+            "claude-3-5-sonnet",
+            "gpt-5",
+            "gpt-4o",
+            "llama-3.1-70b-f16",
+            "hermes-3-70b",
+            "gemma-3-27b",
+            "llama-3.1-8b-q4"
+        ]
+
+        for preferred in preference:
+            if preferred in models:
+                return preferred
+
+        # Fallback to first available
+        return models[0] if models else "llama-3.1-70b-f16"
+
+    def estimate_cost(self, models: List[str], estimated_tokens: int = 1000) -> float:
+        """Estimate cost for consulting these models"""
+
+        registry = ModelCapabilityRegistry()
+        total_cost = 0.0
+
+        for model_id in models:
+            if model_id in registry.registry:
+                spec = registry.registry[model_id]
+                input_cost = spec.get("cost", 0.0) * (estimated_tokens / 1000)
+                output_cost = spec.get("cost_output", spec.get("cost", 0.0)) * (estimated_tokens / 1000)
+                total_cost += input_cost + output_cost
+
+        return total_cost
+```
+
 **Coordinator:**
 ```python
 class KITTModelCoordinator:
-    def __init__(self):
+    def __init__(self, session_id: str = None):
+        self.session_id = session_id
         self.registry = ModelCapabilityRegistry()
+        self.consultation_config = ConsultationConfig()
         self.client = httpx.AsyncClient(timeout=60.0)
         self.cache = SemanticCache()
 
+        # Enhanced stats tracking
         self.stats = {
             "q4_calls": 0,
             "f16_calls": 0,
-            "external_calls": 0,
+            "gemma_calls": 0,
+            "hermes_calls": 0,
+            "gpt4o_calls": 0,
+            "gpt5_calls": 0,
+            "claude_calls": 0,
+            "external_calls": 0,  # Total external API calls
             "cache_hits": 0,
-            "total_cost": 0.0
+            "total_cost": 0.0,    # Running cost in USD
+            "cost_by_model": {},  # Per-model cost tracking
+            "decisions_by_tier": {}  # Count decisions per tier
         }
 
     async def coordinate(self,
@@ -711,10 +959,39 @@ Provide: synthesized answer with key insights."""
 **Implementation:**
 ```python
 class MixtureOfAgentsDebate:
-    def __init__(self, proposer_models: List[str], aggregator_model: str):
-        self.proposers = proposer_models
-        self.aggregator = aggregator_model
-        self.coordinator = KITTModelCoordinator()
+    def __init__(self,
+                 decision_type: str,
+                 session_id: str,
+                 current_cost: float = 0.0,
+                 external_calls_used: int = 0,
+                 allow_external: bool = True):
+        """Initialize MoA with dynamic model selection based on decision criticality"""
+
+        self.decision_type = decision_type
+        self.session_id = session_id
+        self.coordinator = KITTModelCoordinator(session_id)
+        self.consultation_config = ConsultationConfig()
+
+        # Dynamically select models based on decision type and budget
+        self.proposers = self.consultation_config.get_models_for_decision(
+            decision_type=decision_type,
+            current_cost=current_cost,
+            external_calls_used=external_calls_used,
+            allow_external=allow_external
+        )
+
+        # Select best model as aggregator
+        self.aggregator = self.consultation_config.get_aggregator_model(self.proposers)
+
+        # Track costs
+        self.current_cost = current_cost
+        self.external_calls_used = external_calls_used
+
+        logger.info(
+            f"MoA initialized for '{decision_type}': "
+            f"proposers={self.proposers}, aggregator={self.aggregator}, "
+            f"budget=${current_cost:.2f}/{self.consultation_config.max_cost_per_session}"
+        )
 
     async def debate(self, query: str, context: Dict, rounds: int = 2) -> DebateResult:
         """Multi-round debate for critical decisions"""
@@ -729,11 +1006,23 @@ class MixtureOfAgentsDebate:
         # Final aggregation
         final_decision = await self._aggregate_proposals(query, proposals, context)
 
+        # Calculate debate cost
+        debate_cost = self.coordinator.stats["total_cost"] - self.current_cost
+        external_calls_made = sum(
+            1 for p in proposals
+            if p.model in ["gpt-4o", "gpt-5", "claude-3-5-sonnet"]
+        )
+
         return DebateResult(
             decision=final_decision,
             proposals=proposals,
             rounds=rounds,
-            consensus_score=self._calculate_consensus(proposals)
+            consensus_score=self._calculate_consensus(proposals),
+            models_used=self.proposers,
+            aggregator_model=self.aggregator,
+            cost=debate_cost,
+            external_calls=external_calls_made,
+            decision_type=self.decision_type
         )
 
     async def _generate_independent_proposals(self, query: str, context: Dict) -> List[Proposal]:
@@ -809,8 +1098,17 @@ Provide:
 **Success Criteria:**
 - MoA produces better decisions than single model (measured via validation)
 - Consensus score increases across rounds
-- Critical material selection uses MoA with Q4, F16, and optionally GPT-4
-- Debate history stored for analysis
+- Tiered strategy working correctly:
+  - Trivial decisions use single model (Q4)
+  - Low-tier uses local diversity (Q4, Gemma)
+  - Medium-tier uses all local models (Q4, F16, Gemma, Hermes)
+  - High-tier adds external (all local + GPT-4o)
+  - Critical tier uses all available (all local + GPT-4o + Claude)
+- Budget controls enforced (max $2/session, max 10 external calls)
+- Cost tracking accurate (within 5% of actual API costs)
+- External models only used when tier requires them
+- Fallback to local models when budget exceeded
+- Debate history and costs stored for analysis
 
 ---
 
@@ -1983,10 +2281,20 @@ Four-system architecture enabling 2-6 hour autonomous research with fault tolera
 # PostgreSQL
 DATABASE_URL=postgresql://user:pass@localhost:5432/kitt
 
-# LLM Endpoints
+# Local LLM Endpoints
 LLAMACPP_Q4_ENDPOINT=http://localhost:8001/v1/chat/completions
 LLAMACPP_F16_ENDPOINT=http://localhost:8002/v1/chat/completions
+LLAMACPP_GEMMA_ENDPOINT=http://localhost:8003/v1/chat/completions
+LLAMACPP_HERMES_ENDPOINT=http://localhost:8004/v1/chat/completions
+
+# External API Keys
 OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+
+# External Model Configuration
+OPENAI_MODEL=gpt-4o  # or gpt-5 when available
+ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+ENABLE_GPT5=false    # Set to true when GPT-5 is released
 
 # Research Configuration
 RESEARCH_MAX_ITERATIONS=15
@@ -1995,11 +2303,35 @@ RESEARCH_SATURATION_THRESHOLD=0.05
 RESEARCH_MIN_CONFIDENCE=0.6
 RESEARCH_MIN_COMPLETENESS=0.7
 
-# Model Routing
+# Budget Controls
+MAX_EXTERNAL_CALLS_PER_SESSION=10
+MAX_COST_PER_SESSION_USD=2.00
+ALLOW_EXTERNAL_MODELS=true  # Set false to use only local models
+
+# Tiered Consultation Strategy
+# Override default tier for specific decision types (optional)
+MATERIAL_SELECTION_TIER=high      # Use high tier (local + GPT-4o)
+RESEARCH_VALIDATION_TIER=high     # Use high tier
+FINAL_VALIDATION_TIER=critical    # Use critical tier (all models)
+SAFETY_CRITICAL_TIER=critical     # Use critical tier
+TOOL_SELECTION_TIER=trivial       # Use trivial tier (single model)
+
+# Model Routing (Legacy - kept for backward compatibility)
 MODEL_ROUTING_ENABLED=true
 MODEL_Q4_WEIGHT=0.8
 MODEL_F16_WEIGHT=0.15
 MODEL_EXTERNAL_WEIGHT=0.05
+
+# Quality Metrics Thresholds
+RAGAS_FAITHFULNESS_THRESHOLD=0.85
+RAGAS_RELEVANCY_THRESHOLD=0.75
+RAGAS_PRECISION_THRESHOLD=0.70
+RAGAS_RECALL_THRESHOLD=0.65
+
+# Cache Configuration
+SEMANTIC_CACHE_ENABLED=true
+SEMANTIC_CACHE_TTL_SECONDS=3600
+SEMANTIC_CACHE_SIMILARITY_THRESHOLD=0.95
 ```
 
 ### Database Migration
@@ -2010,9 +2342,17 @@ psql $DATABASE_URL -f migrations/006_research_checkpoints.sql
 
 ### Service Start
 ```bash
-# Start llama.cpp servers
-./scripts/start_llamacpp_q4.sh
-./scripts/start_llamacpp_f16.sh
+# Start all local LLM servers
+./scripts/start_llamacpp_q4.sh      # Port 8001
+./scripts/start_llamacpp_f16.sh     # Port 8002
+./scripts/start_llamacpp_gemma.sh   # Port 8003
+./scripts/start_llamacpp_hermes.sh  # Port 8004
+
+# Verify all models are running
+curl http://localhost:8001/v1/models
+curl http://localhost:8002/v1/models
+curl http://localhost:8003/v1/models
+curl http://localhost:8004/v1/models
 
 # Start brain service with research
 cd services/brain
@@ -2034,9 +2374,18 @@ uv run uvicorn brain.main:app --reload --port 8080
 - ✅ Strategy selection improves efficiency by 30%+
 
 ### Phase 3 (Model Coordination)
-- ✅ Q4 handles 70-80% of queries
-- ✅ Cost reduction >85% vs all-GPT-4
-- ✅ Quality maintained at 90-95% of GPT-4 level
+- ✅ Local models (Q4/F16/Gemma/Hermes) handle 85-95% of queries
+- ✅ Cost reduction >90% vs all-GPT-4o baseline
+- ✅ Quality maintained at 90-95% of GPT-4o level
+- ✅ Tiered consultation working:
+  - Trivial tier: 40-50% of decisions (single model)
+  - Low tier: 20-30% of decisions (local diversity)
+  - Medium tier: 15-25% of decisions (all local models)
+  - High tier: 5-10% of decisions (local + GPT-4o)
+  - Critical tier: <5% of decisions (all available)
+- ✅ Budget controls enforce limits (no session exceeds $2 or 10 external calls)
+- ✅ External models only consulted when tier requires them
+- ✅ Cost tracking accurate within 5% of actual API costs
 
 ### Phase 4 (Quality Metrics)
 - ✅ RAGAS faithfulness >0.85 for critical findings
