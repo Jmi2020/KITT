@@ -1,6 +1,12 @@
 """Task executor for autonomous project execution.
 
 Executes tasks based on task_type, updating status and managing dependencies.
+
+Features:
+- Distributed locking to prevent race conditions in concurrent job execution
+- Task type routing (research_gather, research_synthesize, kb_create, etc.)
+- Dependency management
+- Project/goal status tracking
 """
 
 import asyncio
@@ -13,6 +19,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import structlog
+import redis.asyncio as aioredis
 from sqlalchemy import select, and_
 from sqlalchemy.orm import Session
 
@@ -30,6 +37,7 @@ from common.db import SessionLocal
 from brain.routing.cloud_clients import MCPClient
 from brain.agents.collective.graph_async import build_collective_graph_async
 from brain.knowledge.updater import KnowledgeUpdater
+from brain.autonomous.distributed_lock import LockManager, get_lock_manager
 
 logger = logging.getLogger(__name__)
 struct_logger = structlog.get_logger()
@@ -51,6 +59,7 @@ class TaskExecutor:
         session_factory=SessionLocal,
         mcp_client: Optional[MCPClient] = None,
         kb_updater: Optional[KnowledgeUpdater] = None,
+        lock_manager: Optional[LockManager] = None,
     ):
         """Initialize task executor.
 
@@ -58,8 +67,11 @@ class TaskExecutor:
             session_factory: SQLAlchemy session factory
             mcp_client: Perplexity MCP client (optional, will create if needed)
             kb_updater: Knowledge base updater (optional, will create if needed)
+            lock_manager: Distributed lock manager (optional, uses global if not provided)
         """
         self._session_factory = session_factory
+        # Use provided lock manager, or fallback to global instance
+        self._lock_manager = lock_manager or get_lock_manager()
 
         # Initialize Perplexity MCP client
         if mcp_client:
@@ -108,12 +120,16 @@ class TaskExecutor:
         rate = pricing.get(model, 0.20)  # Default to sonar pricing
         return (tokens / 1_000_000) * rate
 
-    def execute_ready_tasks(self, limit: int = 5) -> List[Task]:
-        """Execute tasks that are ready to run.
+    async def execute_ready_tasks(self, limit: int = 5) -> List[Task]:
+        """Execute tasks that are ready to run with distributed locking.
 
         A task is ready if:
         - status = pending
         - depends_on is None OR depends_on task has status = completed
+        - NOT currently locked (being executed by another job)
+
+        Uses distributed locking to prevent race conditions when multiple
+        APScheduler jobs run concurrently.
 
         Args:
             limit: Maximum number of tasks to execute in one cycle
@@ -137,18 +153,44 @@ class TaskExecutor:
             executed_tasks = []
             for task in ready_tasks:
                 try:
-                    # Execute the task
-                    success = self._execute_task(task, session)
+                    # Try to acquire distributed lock for this task
+                    if self._lock_manager:
+                        try:
+                            async with self._lock_manager.lock_task(task.id):
+                                # Lock acquired - execute task
+                                success = await self._execute_task_async(task, session)
 
-                    if success:
-                        executed_tasks.append(task)
-                        logger.info(
-                            f"✅ Task executed: {task.title} (ID: {task.id[:16]}...)"
-                        )
+                                if success:
+                                    executed_tasks.append(task)
+                                    logger.info(
+                                        f"✅ Task executed: {task.title} (ID: {task.id[:16]}...)"
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"⚠️ Task execution incomplete: {task.title}"
+                                    )
+                        except RuntimeError as lock_err:
+                            # Failed to acquire lock - task is being executed by another job
+                            logger.info(
+                                f"⏭️ Skipping task (locked by another job): {task.title}"
+                            )
+                            continue
                     else:
+                        # No lock manager - execute without locking (backwards compatible)
                         logger.warning(
-                            f"⚠️ Task execution incomplete: {task.title}"
+                            "LockManager not configured - executing without distributed locks"
                         )
+                        success = await self._execute_task_async(task, session)
+
+                        if success:
+                            executed_tasks.append(task)
+                            logger.info(
+                                f"✅ Task executed: {task.title} (ID: {task.id[:16]}...)"
+                            )
+                        else:
+                            logger.warning(
+                                f"⚠️ Task execution incomplete: {task.title}"
+                            )
 
                 except Exception as exc:
                     logger.error(
@@ -171,6 +213,7 @@ class TaskExecutor:
                 "task_execution_completed",
                 tasks_executed=len(executed_tasks),
                 task_ids=[t.id for t in executed_tasks],
+                skipped=len(ready_tasks) - len(executed_tasks)
             )
 
             return executed_tasks
@@ -211,6 +254,22 @@ class TaskExecutor:
                 break
 
         return ready_tasks
+
+    async def _execute_task_async(self, task: Task, session: Session) -> bool:
+        """Async wrapper for task execution.
+
+        Runs the synchronous _execute_task in a thread pool to avoid blocking
+        the event loop during long-running task execution.
+
+        Args:
+            task: Task object to execute
+            session: Database session
+
+        Returns:
+            True if task completed successfully, False otherwise
+        """
+        # Run synchronous task execution in thread pool
+        return await asyncio.to_thread(self._execute_task, task, session)
 
     def _execute_task(self, task: Task, session: Session) -> bool:
         """Execute a single task based on task_type.

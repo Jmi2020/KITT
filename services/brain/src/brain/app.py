@@ -113,6 +113,25 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"Redis not available for I/O Control: {redis_err}")
                 app.state.io_control = None
 
+            # Initialize async Redis client for distributed locking
+            try:
+                import redis.asyncio as aioredis
+                from brain.autonomous.distributed_lock import set_lock_manager
+
+                async_redis_client = aioredis.Redis(
+                    host=os.getenv("REDIS_HOST", "redis"),
+                    port=int(os.getenv("REDIS_PORT", "6379")),
+                    db=0,
+                    decode_responses=True  # Async client uses decode_responses=True
+                )
+                # Initialize global lock manager
+                set_lock_manager(async_redis_client)
+                app.state.async_redis = async_redis_client
+                logger.info("Async Redis client and distributed lock manager initialized")
+            except Exception as async_redis_err:
+                logger.warning(f"Async Redis not available for distributed locking: {async_redis_err}")
+                app.state.async_redis = None
+
             # Initialize budget manager with I/O Control defaults
             budget_config = BudgetConfig(
                 max_total_cost_usd=Decimal(os.getenv("RESEARCH_BUDGET_USD", "2.0")),
@@ -344,6 +363,15 @@ async def lifespan(app: FastAPI):
             logger.info("PostgreSQL connection pool closed")
         except Exception as e:
             logger.error(f"Error closing connection pool: {e}")
+
+    # Cleanup async Redis client
+    if hasattr(app.state, 'async_redis') and app.state.async_redis is not None:
+        logger.info("Closing async Redis connection")
+        try:
+            await app.state.async_redis.close()
+            logger.info("Async Redis connection closed")
+        except Exception as e:
+            logger.error(f"Error closing async Redis: {e}")
 
     if autonomous_enabled:
         logger.info("Stopping autonomous scheduler")
