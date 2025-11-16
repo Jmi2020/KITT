@@ -6,7 +6,7 @@ Tracks costs, enforces budgets, and optimizes spending across research sessions.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from decimal import Decimal
 from datetime import datetime
 import asyncio

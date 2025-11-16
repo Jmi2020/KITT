@@ -6,6 +6,7 @@ I/O Control → Budget → UnifiedPermissionGate → ResearchToolExecutor → MC
 """
 
 import pytest
+import pytest_asyncio
 import os
 from decimal import Decimal
 from unittest.mock import AsyncMock, Mock, patch
@@ -110,7 +111,7 @@ class TestResearchPermissionFlowIntegration:
             "cloud_routing": False,
         })
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def budget_manager_ample(self):
         """Budget manager with ample budget"""
         config = BudgetConfig(
@@ -119,7 +120,7 @@ class TestResearchPermissionFlowIntegration:
         )
         return BudgetManager(config=config)
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def budget_manager_limited(self):
         """Budget manager with limited budget"""
         config = BudgetConfig(

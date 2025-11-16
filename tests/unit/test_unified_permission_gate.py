@@ -8,6 +8,7 @@ Tests the 3-layer permission hierarchy:
 """
 
 import pytest
+import pytest_asyncio
 from decimal import Decimal
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -50,7 +51,7 @@ class TestUnifiedPermissionGate:
             "cloud_routing": False,
         })
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def mock_budget_manager(self):
         """Budget manager with available budget"""
         config = BudgetConfig(
@@ -59,7 +60,7 @@ class TestUnifiedPermissionGate:
         )
         return BudgetManager(config=config)
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def mock_budget_manager_depleted(self):
         """Budget manager with depleted budget"""
         config = BudgetConfig(

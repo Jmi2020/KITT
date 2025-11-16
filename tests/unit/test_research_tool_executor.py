@@ -5,6 +5,9 @@ Tests tool execution with UnifiedPermissionGate integration.
 """
 
 import pytest
+import pytest_asyncio
+from enum import Enum
+import pytest_asyncio
 from decimal import Decimal
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -101,7 +104,7 @@ class TestResearchToolExecutor:
         """Mock memory MCP server"""
         return MockMCPServer()
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def mock_permission_gate_allow(self):
         """Permission gate that allows all calls"""
         gate = Mock(spec=UnifiedPermissionGate)
@@ -115,7 +118,7 @@ class TestResearchToolExecutor:
         gate.record_actual_cost = Mock()
         return gate
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def mock_permission_gate_deny(self):
         """Permission gate that denies calls"""
         gate = Mock(spec=UnifiedPermissionGate)
@@ -128,7 +131,7 @@ class TestResearchToolExecutor:
         ))
         return gate
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def mock_permission_gate_prompt(self):
         """Permission gate that requires user prompt"""
         gate = Mock(spec=UnifiedPermissionGate)
@@ -436,11 +439,17 @@ class TestResearchToolExecutor:
             budget_manager=None
         )
 
-        # This should trigger the else clause in execute()
-        with pytest.raises(ValueError):
-            # ToolType is an enum, so we can't create invalid values
-            # Instead test with a tool that the mock doesn't handle
-            pass
+        class UnknownTool(Enum):
+            UNKNOWN = "unknown_tool"
+
+        result = await executor.execute(
+            tool_name=UnknownTool.UNKNOWN,
+            arguments={},
+            context=execution_context
+        )
+
+        assert result.success is False
+        assert "Unknown tool type" in (result.error or "")
 
     @pytest.mark.asyncio
     async def test_execute_tool_failure(
