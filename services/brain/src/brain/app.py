@@ -70,8 +70,15 @@ async def lifespan(app: FastAPI):
     if database_url:
         logger.info("Initializing research infrastructure")
         try:
+            from decimal import Decimal
+            import redis
             from brain.research.checkpoint import create_connection_pool, init_checkpointer
             from brain.research.session_manager import ResearchSessionManager
+            from brain.research.permissions import UnifiedPermissionGate
+            from brain.research.models.budget import BudgetManager, BudgetConfig
+            from brain.research.models.coordinator import ModelCoordinator
+            from brain.research.tools.mcp_integration import ResearchToolExecutor
+            from common.io_control.state_manager import FeatureStateManager
 
             # Create PostgreSQL connection pool
             app.state.pg_pool = create_connection_pool(database_url)
@@ -80,6 +87,59 @@ async def lifespan(app: FastAPI):
             # Initialize checkpointer (async)
             app.state.checkpointer = await init_checkpointer(app.state.pg_pool, auto_setup=True)
             logger.info("PostgreSQL checkpointer initialized")
+
+            # Initialize I/O Control state manager (Redis)
+            try:
+                redis_client = redis.Redis(
+                    host=os.getenv("REDIS_HOST", "redis"),
+                    port=int(os.getenv("REDIS_PORT", "6379")),
+                    db=0,
+                    decode_responses=False
+                )
+                redis_client.ping()
+                app.state.io_control = FeatureStateManager(redis_client=redis_client)
+                logger.info("I/O Control state manager initialized")
+            except Exception as redis_err:
+                logger.warning(f"Redis not available for I/O Control: {redis_err}")
+                app.state.io_control = None
+
+            # Initialize budget manager with I/O Control defaults
+            budget_config = BudgetConfig(
+                max_total_cost_usd=Decimal(os.getenv("RESEARCH_BUDGET_USD", "2.0")),
+                max_external_calls=int(os.getenv("RESEARCH_EXTERNAL_CALL_LIMIT", "10"))
+            )
+            app.state.budget_manager = BudgetManager(config=budget_config)
+            logger.info(f"Budget manager initialized: ${budget_config.max_total_cost_usd}, {budget_config.max_external_calls} calls")
+
+            # Initialize unified permission gate
+            app.state.permission_gate = UnifiedPermissionGate(
+                io_control_state_manager=app.state.io_control,
+                budget_manager=app.state.budget_manager,
+                omega_password=os.getenv("API_OVERRIDE_PASSWORD", "omega"),
+                auto_approve_trivial=os.getenv("AUTO_APPROVE_TRIVIAL", "true").lower() == "true",
+                auto_approve_low_cost=os.getenv("AUTO_APPROVE_LOW_COST", "false").lower() == "true"
+            )
+            logger.info("Unified permission gate initialized")
+
+            # Initialize MCP servers (research & memory)
+            # TODO: Wire up actual MCP servers when available
+            app.state.research_server = None  # ResearchMCPServer with Perplexity client
+            app.state.memory_server = None    # MemoryMCPServer
+
+            # Initialize tool executor
+            app.state.tool_executor = ResearchToolExecutor(
+                research_server=app.state.research_server,
+                memory_server=app.state.memory_server,
+                permission_gate=app.state.permission_gate,
+                budget_manager=app.state.budget_manager
+            )
+            logger.info("Research tool executor initialized")
+
+            # Initialize model coordinator
+            app.state.model_coordinator = ModelCoordinator(
+                permission_gate=app.state.permission_gate
+            )
+            logger.info("Model coordinator initialized")
 
             # Build research graph (Phase 5)
             from brain.research.graph import build_research_graph
@@ -101,11 +161,21 @@ async def lifespan(app: FastAPI):
             app.state.pg_pool = None
             app.state.checkpointer = None
             app.state.session_manager = None
+            app.state.io_control = None
+            app.state.budget_manager = None
+            app.state.permission_gate = None
+            app.state.tool_executor = None
+            app.state.model_coordinator = None
     else:
         logger.warning("DATABASE_URL not configured, research infrastructure disabled")
         app.state.pg_pool = None
         app.state.checkpointer = None
         app.state.session_manager = None
+        app.state.io_control = None
+        app.state.budget_manager = None
+        app.state.permission_gate = None
+        app.state.tool_executor = None
+        app.state.model_coordinator = None
 
     # Start autonomous scheduler if enabled
     autonomous_enabled = getattr(settings, "autonomous_enabled", False)
