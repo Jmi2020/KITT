@@ -176,32 +176,6 @@ class ModelRegistry:
         # EXTERNAL MODELS (via APIs)
         # ============================================================
 
-        # GPT-4o - OpenAI's latest model
-        self.register_model(ModelInfo(
-            model_id="gpt-4o",
-            model_name="GPT-4o",
-            provider="openai",
-            tier=ModelTier.EXTERNAL_PREMIUM,
-            capabilities={
-                ModelCapability.REASONING,
-                ModelCapability.SYNTHESIS,
-                ModelCapability.EXTRACTION,
-                ModelCapability.VALIDATION,
-                ModelCapability.CREATIVITY,
-                ModelCapability.CODING,
-                ModelCapability.MULTILINGUAL,
-                ModelCapability.LONG_CONTEXT,
-            },
-            context_window=128000,
-            max_tokens=16384,
-            avg_latency_ms=2000.0,
-            cost_input_per_1k=Decimal("0.005"),   # $5 per 1M input tokens
-            cost_output_per_1k=Decimal("0.015"),  # $15 per 1M output tokens
-            requires_api_key=True,
-            description="OpenAI's latest multimodal model. Excellent for complex reasoning.",
-            use_cases=["critical decisions", "complex synthesis", "high-stakes validation"]
-        ))
-
         # Claude Sonnet 4.5 - Anthropic's latest model
         self.register_model(ModelInfo(
             model_id="claude-sonnet-4-5-20250929",
