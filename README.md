@@ -314,6 +314,90 @@ Final Answer:
 - **Fault-tolerant**: Full checkpointing, resume from any failure point
 - **Budget-aware**: Hard limits prevent runaway costs ($2/session ceiling)
 
+#### Permission System & Budget Control
+
+The research pipeline uses a **3-layer permission hierarchy** to control API usage and costs:
+
+**Layer 1: I/O Control** (Hard Gate)
+- Checks if API provider is enabled in dashboard
+- Respects offline mode and cloud routing settings
+- Instant denial if provider disabled
+- Control via I/O Control dashboard (Redis-backed)
+
+**Layer 2: Budget** (Hard Gate)
+- Enforces `$2.00/session` budget limit (configurable via `RESEARCH_BUDGET_USD`)
+- Tracks external API call limit (`10 calls` default, configurable via `RESEARCH_EXTERNAL_CALL_LIMIT`)
+- Instant denial if budget exceeded or call limit reached
+
+**Layer 3: Runtime Approval** (Soft Gate)
+- **Trivial (< $0.01)**: Auto-approve always (Perplexity small queries)
+- **Low (< $0.10)**: Auto-approve if enabled, else prompt with omega password
+- **High (>= $0.10)**: Always prompt for omega password (GPT-5, Claude Sonnet 4.5)
+
+**Configuration:**
+```bash
+# Set in environment or I/O Control dashboard
+RESEARCH_BUDGET_USD=2.0              # Max budget per session
+RESEARCH_EXTERNAL_CALL_LIMIT=10     # Max external calls per session
+API_OVERRIDE_PASSWORD=omega          # Omega password for approval
+AUTO_APPROVE_TRIVIAL=true           # Auto-approve < $0.01
+AUTO_APPROVE_LOW_COST=false         # Auto-approve < $0.10
+```
+
+**Example Permission Flows:**
+
+```bash
+# Free tools (web_search) - no permission needed
+> /research latest llama.cpp features
+# ✅ Executes immediately, $0.00 cost
+
+# Trivial cost (< $0.01) - auto-approved
+> /research vector database comparison
+# ✅ Auto-approved, executes, $0.005 charged
+
+# Low cost (< $0.10) - prompts if not auto-approved
+> /research comprehensive ML framework analysis
+# Prompts:
+# ──────────────────────────────────────────────────
+# API Permission Required
+# Provider: Perplexity
+# Estimated cost: $0.05
+# Budget remaining: $1.95
+#
+# Enter 'omega' to approve, or press Enter to deny:
+
+# High cost (>= $0.10) - always prompts
+# (Critical decision requiring GPT-5)
+# ══════════════════════════════════════════════════
+# ⚠️  HIGH-COST API CALL
+# ══════════════════════════════════════════════════
+# Provider: OpenAI
+# Estimated cost: $0.50
+# Budget remaining: $2.00
+#
+# ⚠️  This call requires explicit approval.
+# Enter 'omega' to approve, or press Enter to deny:
+
+# Blocked by I/O Control
+> /research test query
+# ❌ Perplexity API disabled in I/O Control. Enable in dashboard to use.
+
+# Blocked by budget
+# (After spending $1.95)
+> /research another query
+# ❌ Budget exceeded. Remaining: $0.05, Required: $0.10
+```
+
+**Key Features:**
+- **Single source of truth**: UnifiedPermissionGate replaces 3 separate permission managers
+- **90% reduction in complexity**: 5 layers → 3 layers, cleaner flow
+- **Smart cost-based approval**: Different rules for trivial/low/high cost calls
+- **Real-time budget tracking**: Always know how much you've spent
+- **I/O Control integration**: Respect dashboard settings, no surprises
+- **Comprehensive testing**: 50+ test cases ensure reliability
+
+For detailed architecture, see `Research/PermissionSystemArchitecture.md`.
+
 ### Vision Web Gallery
 
 ```bash
