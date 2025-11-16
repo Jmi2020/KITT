@@ -1,8 +1,14 @@
 """Project generator for converting approved goals into actionable projects.
 
 Monitors approved goals and creates Projects with task breakdowns for autonomous execution.
+
+Features:
+- Distributed locking to prevent duplicate project creation in concurrent jobs
+- Task breakdown with dependencies
+- Budget allocation
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -24,6 +30,7 @@ from common.db.models import (
     TaskPriority,
 )
 from common.db import SessionLocal
+from brain.autonomous.distributed_lock import LockManager, get_lock_manager
 
 logger = logging.getLogger(__name__)
 struct_logger = structlog.get_logger()

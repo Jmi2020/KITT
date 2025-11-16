@@ -438,6 +438,79 @@ class FeatureRegistry:
         )
 
         # ====================================================================
+        # Permission & Budget Controls (Unified Permission System)
+        # ====================================================================
+
+        self.register(
+            FeatureDefinition(
+                id="auto_approve_trivial",
+                name="Auto-Approve Trivial API Calls",
+                description="Automatically approve external API calls < $0.01 without omega password",
+                category=FeatureCategory.AUTONOMOUS,
+                env_var="AUTO_APPROVE_TRIVIAL",
+                default_value=True,  # Safe default - trivial costs
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                validation_message="Enables seamless UX for very low-cost calls (e.g., Perplexity quick search)",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="auto_approve_low_cost",
+                name="Auto-Approve Low-Cost API Calls",
+                description="Automatically approve external API calls < $0.10 without omega password",
+                category=FeatureCategory.AUTONOMOUS,
+                env_var="AUTO_APPROVE_LOW_COST",
+                default_value=False,  # Requires explicit enable
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                validation_message="⚠️ Budget protection reduced. Only enable if you trust autonomous operations.",
+                setup_instructions="Recommended for autonomous research workflows to reduce friction",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="omega_password",
+                name="Omega Password",
+                description="Password required for high-cost external API calls (>= $0.10)",
+                category=FeatureCategory.AUTONOMOUS,
+                env_var="API_OVERRIDE_PASSWORD",
+                default_value="omega",
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                validation_message="Change default password for production use",
+                setup_instructions="Set strong password in .env: API_OVERRIDE_PASSWORD=your_secret_password",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="research_budget_per_session",
+                name="Research Budget (Per Session)",
+                description="Maximum USD spend per autonomous research session",
+                category=FeatureCategory.AUTONOMOUS,
+                env_var="RESEARCH_BUDGET_USD",
+                default_value="2.00",
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                validation_message="Research sessions auto-stop when budget exhausted",
+                setup_instructions="Increase for complex research requiring more external API calls",
+            )
+        )
+
+        self.register(
+            FeatureDefinition(
+                id="research_external_call_limit",
+                name="Research External Call Limit",
+                description="Maximum number of external API calls per research session",
+                category=FeatureCategory.AUTONOMOUS,
+                env_var="RESEARCH_EXTERNAL_CALL_LIMIT",
+                default_value="10",
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                requires=["research_budget_per_session"],
+                validation_message="Hard limit on external calls per session (even if budget remains)",
+            )
+        )
+
+        # ====================================================================
         # Collective Providers (Multi-Provider Meta-Agent Diversity)
         # ====================================================================
 

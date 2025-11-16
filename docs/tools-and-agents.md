@@ -97,6 +97,27 @@ KITTY implements three MCP servers, each providing specialized tools.
 
 Wraps CAD generation APIs (Zoo, Tripo, local) with a unified tool interface.
 
+**Provider Selection Guide:**
+
+- **Zoo CAD** (Parametric/Engineering)
+  - Best for: Engineering-grade parts, mounting brackets, mechanical fittings, parametric designs
+  - Technology: KCL (parametric modeling language) - fully editable code
+  - Output formats: STEP (CAD software), STL (3D printing), GLTF (visualization)
+  - Strengths: Precise dimensions, parametric editing, CAD software integration
+  - Use cases: Functional parts, assemblies, mechanical components, fixtures
+
+- **Tripo** (Organic/Artistic)
+  - Best for: Organic models, artistic designs, visual/aesthetic pieces, characters
+  - Technology: Image-to-3D, text-to-3D, multi-view reconstruction
+  - Output formats: GLTF/GLB (web/game), OBJ (universal), FBX (animation)
+  - Strengths: Photorealistic textures, organic shapes, rapid iteration from images
+  - Use cases: Decorative objects, character models, artistic designs, concept visualization
+
+- **Local** (Experimental)
+  - Best for: Offline generation, privacy-sensitive designs
+  - Technology: TripoSR, InstantMesh (local inference)
+  - Limitations: Requires GPU, slower than cloud APIs
+
 #### Tools
 
 **generate_cad_model**
@@ -104,7 +125,10 @@ Wraps CAD generation APIs (Zoo, Tripo, local) with a unified tool interface.
 - Parameters:
   - `description` (string, required): Text description of object to generate
   - `format` (string, optional): Output format (stl, step, obj, fbx) - default: stl
-  - `provider` (string, optional): CAD provider (zoo, tripo, local) - default: zoo
+  - `provider` (string, optional): CAD provider - default: zoo
+    - `zoo`: Parametric/engineering models (recommended for functional parts)
+    - `tripo`: Organic/artistic models (recommended for visual/aesthetic pieces)
+    - `local`: Offline generation (experimental)
   - `quality` (string, optional): Quality level (draft, standard, high) - default: standard
 - Returns: Model URL and metadata
 - Safety: Cloud tool - requires budget approval
@@ -115,18 +139,32 @@ Wraps CAD generation APIs (Zoo, Tripo, local) with a unified tool interface.
 - Lists recently generated CAD models
 - Useful for retrieving model history
 
-**Example:**
+**Example - Engineering Part (Zoo):**
 ```python
 result = await cad_server.execute_tool(
     "generate_cad_model",
     {
-        "description": "Small mounting bracket with 4 holes",
-        "format": "stl",
-        "provider": "zoo",
+        "description": "Mounting bracket with 4x M5 holes, 50mm x 30mm, 5mm thickness",
+        "format": "step",  # STEP for CAD software import
+        "provider": "zoo",  # Parametric/engineering
         "quality": "standard"
     }
 )
-# Returns: {"model_url": "s3://...", "format": "stl", ...}
+# Returns: {"model_url": "s3://...", "format": "step", "kcl_code": "const part = ..."}
+```
+
+**Example - Organic Model (Tripo):**
+```python
+result = await cad_server.execute_tool(
+    "generate_cad_model",
+    {
+        "description": "Decorative dragon figurine, scales and wings",
+        "format": "glb",  # GLTF for web/game engines
+        "provider": "tripo",  # Organic/artistic
+        "quality": "high"
+    }
+)
+# Returns: {"model_url": "s3://...", "format": "glb", "textures": [...]}
 ```
 
 ### Home Assistant MCP Server

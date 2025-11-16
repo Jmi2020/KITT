@@ -214,6 +214,27 @@ fi
 success "Docker services started"
 
 # ========================================
+# Phase 3.5: Start Load Balancer (P1 #4)
+# ========================================
+
+log "Phase 3.5: Starting Gateway Load Balancer"
+
+# Start load balancer with 3 gateway replicas
+if ! compose_cmd up -d gateway load-balancer 2>&1 | tee -a "$STARTUP_LOG"; then
+    warn "Load balancer startup failed (non-critical)"
+else
+    success "Load balancer started (3 gateway replicas)"
+
+    # Wait for load balancer health
+    sleep 5
+    if curl -s http://localhost:8080/healthz | grep -q "ok"; then
+        success "Load balancer health check passed"
+    else
+        warn "Load balancer health check failed (may still be starting)"
+    fi
+fi
+
+# ========================================
 # Phase 4: Validate Services
 # ========================================
 
@@ -294,10 +315,25 @@ echo "Services:"
 echo "  llama.cpp Q4:  http://localhost:8083"
 echo "  llama.cpp F16: http://localhost:8082"
 echo "  Brain API:     http://localhost:8000"
-echo "  Gateway:       http://localhost:8080"
+echo "  Gateway (LB):  http://localhost:8080  (3 replicas + HAProxy)"
+echo "  HAProxy Stats: http://localhost:8404/stats  (admin/changeme)"
 echo "  UI:            http://localhost:4173"
+echo "  Research UI:   http://localhost:8080/research  (P1 #2)"
+echo "  I/O Control:   http://localhost:8080/io-control  (P1 #3)"
 echo "  Grafana:       http://localhost:3000"
 echo "  Prometheus:    http://localhost:9090"
+echo ""
+echo "P0/P1 Features:"
+echo "  ✅ Conversation state persistence (P0 #1)"
+echo "  ✅ Autonomous job persistence (P0 #2)"
+echo "  ✅ Semantic cache TTL (P0 #3)"
+echo "  ✅ Research graph wiring (P0 #4)"
+echo "  ✅ Database writes awaited (P0 #5)"
+echo "  ✅ Distributed locking (P1 #1)"
+echo "  ✅ Research Web UI (P1 #2)"
+echo "  ✅ I/O Control Dashboard (P1 #3)"
+echo "  ✅ Gateway Load Balancer (P1 #4)"
+echo "  ✅ CAD AI Cycling Docs (P1 #5)"
 echo ""
 echo "Logs:"
 echo "  Startup:       $STARTUP_LOG"

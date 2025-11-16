@@ -20,6 +20,7 @@ services:
     environment:
       <<: *service-env
       SERVICE_NAME: brain
+      DATABASE_URL: postgresql://kitty:${POSTGRES_PASSWORD:-changeme}@postgres:5432/kitty
       QDRANT_URL: http://qdrant:6333
       MEM0_MCP_URL: http://mem0-mcp:8765
       CAD_SERVICE_URL: http://cad:8200
@@ -85,10 +86,27 @@ services:
       - ../../services/gateway:/app/services/gateway:ro
       - ../../services/mcp:/app/services/mcp:ro
       - ${KITTY_ARTIFACTS_DIR:-/Users/Shared/KITTY/artifacts}:/app/storage
-    ports:
-      - "8080:8080"
+    # No direct port mapping - accessed via load balancer
+    deploy:
+      replicas: 3  # Scale to 3 instances for high availability
     networks:
       - kitty
+
+  # HAProxy Load Balancer - Eliminates single point of failure
+  load-balancer:
+    build:
+      context: ../haproxy
+      dockerfile: Dockerfile
+    environment:
+      HAPROXY_STATS_PASSWORD: ${HAPROXY_STATS_PASSWORD:-changeme}
+    depends_on:
+      - gateway
+    ports:
+      - "8080:8080"  # Gateway traffic (load balanced)
+      - "8404:8404"  # HAProxy stats dashboard
+    networks:
+      - kitty
+    restart: unless-stopped
 
   vision-gallery:
     build:

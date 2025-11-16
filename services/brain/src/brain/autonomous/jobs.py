@@ -376,12 +376,12 @@ async def task_execution_cycle() -> None:
         # Import task executor
         from .task_executor import TaskExecutor
 
-        # Initialize executor
+        # Initialize executor (lock_manager will be injected during app startup)
         task_exec = TaskExecutor()
 
-        # Execute ready tasks
+        # Execute ready tasks (now with distributed locking)
         logger.info("⚙️ Checking for ready tasks...")
-        executed_tasks = task_exec.execute_ready_tasks(limit=5)
+        executed_tasks = await task_exec.execute_ready_tasks(limit=5)
 
         if not executed_tasks:
             logger.info("No tasks ready for execution")

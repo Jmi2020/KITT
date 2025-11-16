@@ -42,3 +42,4 @@ __pycache__/
 # Environment backups
 .env.backup.*
 *.zip
+services/brain/uv.lock

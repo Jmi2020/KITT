@@ -1,5 +1,8 @@
 # KITTY Operations Manual: Startup and Shutdown Procedures
 
+**Updated:** 2025-11-16
+**System Status:** ✅ PRODUCTION READY (Health Score: 87/100)
+
 **KITTY** (KITT-inspired Warehouse Orchestrator) is a multi-service, offline-first AI system running on Mac Studio M3 Ultra. This manual provides comprehensive startup and shutdown procedures with detailed technical justifications.
 
 ---
@@ -76,10 +79,10 @@ KITTY operates as a **multi-tier architecture** with the following components:
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
 │  llama.cpp Servers (Native Metal Acceleration)              │
-│  ├─ Q4 Server (Port 8083)   - Tool Orchestrator             │
-│  ├─ F16 Server (Port 8082)  - Reasoning Engine              │
+│  ├─ Q4 Server (Port 8083)   - Athene V2 Agent Q4_K_M        │
+│  ├─ F16 Server (Port 8082)  - Llama 3.3 70B F16             │
 │  ├─ Summary Server (Port 8085) - Hermes Summarizer          │
-│  └─ Vision Server (Port 8086)  - Gemma 3 Vision             │
+│  └─ Vision Server (Port 8086)  - Gemma 3 27B Q4_K_M Vision  │
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │

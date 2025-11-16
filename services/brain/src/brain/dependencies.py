@@ -115,12 +115,24 @@ def get_orchestrator() -> BrainOrchestrator:
     # Get LangGraph integration if enabled
     langgraph = get_langgraph_integration()
 
+    # Get persistent conversation state manager if available (from app.state)
+    # Falls back to in-memory manager if not initialized
+    state_manager = None
+    try:
+        from .app import app
+        state_manager = getattr(app.state, "conversation_state_manager", None)
+        if state_manager:
+            logger.info("Using persistent conversation state manager")
+    except Exception as e:
+        logger.warning(f"Persistent state manager not available: {e}, using in-memory")
+
     return BrainOrchestrator(
         get_context_store(),
         get_home_assistant_credentials(),
         router,
         safety_workflow=get_hazard_workflow(),
         langgraph_integration=langgraph,
+        state_manager=state_manager,
     )
 
 

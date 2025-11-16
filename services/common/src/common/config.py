@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     postgres_user: str = "kitty"
     postgres_password: str = "changeme"
 
+    @property
+    def database_url(self) -> str:
+        """Construct PostgreSQL connection URL from components.
+
+        Uses postgresql+psycopg:// scheme for psycopg3 driver.
+        """
+        return (
+            f"postgresql+psycopg://{self.postgres_user}:{self.postgres_password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        )
+
     # MinIO / artifact store
     minio_endpoint: str = "http://localhost:9000"
     minio_bucket: str = "kitty-artifacts"
