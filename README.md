@@ -243,7 +243,11 @@ kitty-cli shell
    - Chain validation across multiple layers
 
 3. **Multi-Model Coordination**
-   - **Local models** (llama.cpp): Llama 3.1 8B Q4, Llama 3.1 70B F16, Gemma 2 27B, Hermes 3 70B
+   - **Local models** (llama.cpp):
+     - Athene V2 Agent Q4_K_M (tool orchestrator, 32K context)
+     - Llama 3.3 70B F16 (deep reasoning, 65K context)
+     - Gemma 3 27B Q4_K_M Vision (multimodal with mmproj)
+     - Qwen2.5 Coder 32B Q8 (code generation specialist)
    - **External models**: GPT-5, Claude Sonnet 4.5
    - **5-tier consultation**: trivial → low → medium → high → critical
    - **Budget-aware**: $2/session max, 10 external calls limit
@@ -1617,10 +1621,12 @@ curl -X POST http://localhost:8080/api/voice/transcript \
 - [x] Knowledge base integration
 - [x] Budget-aware autonomous operation
 
-### Phase 3.5: Autonomous Research Pipeline ✅ COMPLETE
+### Phase 3.5: Autonomous Research Pipeline ✅ COMPLETE (2025-11-16)
 - [x] **Phase 1**: Database schema, checkpointing (PostgreSQL + LangGraph)
 - [x] **Phase 2**: Tool orchestration (dependency graph, wave execution, multi-layer validation, multi-strategy agents)
 - [x] **Phase 3**: Model coordination (7-model registry, 5-tier consultation, budget management, mixture-of-agents debate)
+  - ✅ Local models: Athene V2 Agent Q4, Llama 3.3 70B F16, Gemma 3 27B Vision, Qwen2.5 Coder 32B
+  - ✅ External models: GPT-5, Claude Sonnet 4.5
 - [x] **Phase 4**: Quality metrics (RAGAS, confidence scoring, saturation detection, knowledge gap analysis)
 - [x] **Phase 5**: Complete integration (LangGraph state machine, WebSocket streaming, CLI commands)
 - [x] Multi-strategy research: breadth-first, depth-first, task decomposition, hybrid
@@ -1629,6 +1635,17 @@ curl -X POST http://localhost:8080/api/voice/transcript \
 - [x] Intelligent stopping criteria: quality thresholds, saturation, budget limits, knowledge gaps
 - [x] Real-time streaming with beautiful CLI visualization
 - [x] Full session management: list, view details, resume from checkpoint
+- [x] **P0/P1 Production Readiness**: All critical and high-priority issues resolved
+  - ✅ P0 #1: Conversation state persistence
+  - ✅ P0 #2: Autonomous jobs persistence (APScheduler SQL)
+  - ✅ P0 #3: Semantic cache TTL
+  - ✅ P0 #4: Research graph wiring
+  - ✅ P0 #5: Database writes awaited
+  - ✅ P1 #1: Distributed locking
+  - ✅ P1 #2: Research Web UI
+  - ✅ P1 #3: I/O Control dashboard
+  - ✅ P1 #4: Gateway load balancer (HAProxy + 3 replicas)
+  - ✅ P1 #5: CAD AI cycling documentation
 
 ### Phase 4: Fabrication Intelligence 🚧 IN PROGRESS
 - [x] I/O Control dashboard (health checks, presets, dependency resolution, tool availability)
