@@ -87,30 +87,31 @@ class ModelRegistry:
         # LOCAL MODELS (via llama.cpp servers)
         # ============================================================
 
-        # Llama 3.1 8B Q4 - Fast general-purpose model
+        # Athene V2 Agent Q4_K_M - Fast tool orchestrator (port 8083)
         self.register_model(ModelInfo(
-            model_id="llama3.1:8b-q4",
-            model_name="Llama 3.1 8B Q4",
+            model_id="kitty-q4",
+            model_name="Athene V2 Agent Q4_K_M",
             provider="llama_cpp",
             tier=ModelTier.LOCAL_SMALL,
             capabilities={
                 ModelCapability.REASONING,
                 ModelCapability.EXTRACTION,
                 ModelCapability.FAST_INFERENCE,
+                ModelCapability.CODING,
             },
-            context_window=8192,
-            max_tokens=2048,
-            avg_latency_ms=500.0,
+            context_window=32768,
+            max_tokens=4096,
+            avg_latency_ms=400.0,
             cost_input_per_1k=Decimal("0.0"),
             cost_output_per_1k=Decimal("0.0"),
-            description="Fast 8B parameter model, quantized to 4-bit. Good for quick tasks.",
-            use_cases=["simple extraction", "quick validation", "initial analysis"]
+            description="Fast Q4 quantized agent optimized for tool calling, web search, and orchestration. 32K context window.",
+            use_cases=["tool calling", "web search", "CAD generation", "device control", "fast workflows"]
         ))
 
-        # Llama 3.1 70B F16 - High-capability local model
+        # Llama 3.3 70B F16 - Deep reasoning engine (port 8082)
         self.register_model(ModelInfo(
-            model_id="llama3.1:70b-f16",
-            model_name="Llama 3.1 70B F16",
+            model_id="kitty-f16",
+            model_name="Llama 3.3 70B F16",
             provider="llama_cpp",
             tier=ModelTier.LOCAL_LARGE,
             capabilities={
@@ -120,20 +121,21 @@ class ModelRegistry:
                 ModelCapability.VALIDATION,
                 ModelCapability.CREATIVITY,
                 ModelCapability.CODING,
+                ModelCapability.LONG_CONTEXT,
             },
-            context_window=8192,
-            max_tokens=4096,
+            context_window=65536,
+            max_tokens=8192,
             avg_latency_ms=3000.0,
             cost_input_per_1k=Decimal("0.0"),
             cost_output_per_1k=Decimal("0.0"),
-            description="Large 70B parameter model, full precision. High capability for complex tasks.",
-            use_cases=["complex reasoning", "synthesis", "validation", "code analysis"]
+            description="Full precision 70B parameter model. Comprehensive analysis, nuanced responses, complex reasoning. 65K context window.",
+            use_cases=["complex reasoning", "deep synthesis", "validation", "code analysis", "long documents"]
         ))
 
-        # Gemma 2 27B - Google's research model
+        # Gemma 3 27B Q4_K_M with mmproj - Vision/multimodal (port 8086)
         self.register_model(ModelInfo(
-            model_id="gemma2:27b",
-            model_name="Gemma 2 27B",
+            model_id="kitty-vision",
+            model_name="Gemma 3 27B Q4_K_M Vision",
             provider="llama_cpp",
             tier=ModelTier.LOCAL_MEDIUM,
             capabilities={
@@ -147,29 +149,29 @@ class ModelRegistry:
             avg_latency_ms=1500.0,
             cost_input_per_1k=Decimal("0.0"),
             cost_output_per_1k=Decimal("0.0"),
-            description="Google's 27B parameter research model. Strong reasoning capabilities.",
-            use_cases=["reasoning", "validation", "multilingual tasks"]
+            description="Multimodal model with vision capabilities. Image understanding for CAD reference analysis.",
+            use_cases=["image understanding", "vision queries", "CAD reference analysis", "multimodal tasks"]
         ))
 
-        # Hermes 3 70B - Specialized for tool use
+        # Qwen2.5 Coder 32B Q8 - Code generation specialist
         self.register_model(ModelInfo(
-            model_id="hermes3:70b",
-            model_name="Hermes 3 70B",
+            model_id="kitty-coder",
+            model_name="Qwen2.5 Coder 32B Q8",
             provider="llama_cpp",
-            tier=ModelTier.LOCAL_LARGE,
+            tier=ModelTier.LOCAL_MEDIUM,
             capabilities={
-                ModelCapability.REASONING,
-                ModelCapability.SYNTHESIS,
                 ModelCapability.CODING,
-                ModelCapability.CREATIVITY,
+                ModelCapability.REASONING,
+                ModelCapability.EXTRACTION,
+                ModelCapability.FAST_INFERENCE,
             },
             context_window=8192,
             max_tokens=4096,
-            avg_latency_ms=3200.0,
+            avg_latency_ms=1800.0,
             cost_input_per_1k=Decimal("0.0"),
             cost_output_per_1k=Decimal("0.0"),
-            description="70B parameter model fine-tuned for function calling and tool use.",
-            use_cases=["tool orchestration", "complex workflows", "code generation"]
+            description="Specialized code generation model. Q8 quantized for quality/speed balance.",
+            use_cases=["code generation", "code analysis", "programming tasks", "technical documentation"]
         ))
 
         # ============================================================
