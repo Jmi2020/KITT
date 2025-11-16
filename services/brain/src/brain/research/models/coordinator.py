@@ -3,6 +3,7 @@ Model Coordination System
 
 Implements tiered consultation strategy for autonomous research.
 Dynamically selects models based on task complexity and budget constraints.
+Integrates with I/O Control for external API permission checks.
 """
 
 import logging
@@ -19,6 +20,14 @@ from .registry import (
     ModelTier,
     get_model_registry
 )
+
+# Import I/O control safety checker
+try:
+    from brain.research.tools.safety import ToolSafetyChecker
+    SAFETY_CHECKER_AVAILABLE = True
+except ImportError:
+    ToolSafetyChecker = None
+    SAFETY_CHECKER_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -95,14 +104,52 @@ class ModelCoordinator:
         self,
         registry: Optional[ModelRegistry] = None,
         default_max_cost: Decimal = Decimal("2.0"),
-        default_prefer_local: bool = True
+        default_prefer_local: bool = True,
+        safety_checker: Optional[Any] = None
     ):
         self.registry = registry or get_model_registry()
         self.default_max_cost = default_max_cost
         self.default_prefer_local = default_prefer_local
 
+        # Safety checker for I/O control
+        if safety_checker is None and SAFETY_CHECKER_AVAILABLE:
+            self.safety_checker = ToolSafetyChecker()
+        else:
+            self.safety_checker = safety_checker
+
         # Tier configuration
         self._configure_tiers()
+
+    def _is_external_model_allowed(self, model: ModelInfo) -> tuple[bool, str]:
+        """
+        Check if external model is allowed based on I/O Control.
+
+        Args:
+            model: Model to check
+
+        Returns:
+            (allowed, reason) tuple
+        """
+        if model.provider == "llama_cpp":
+            return True, ""  # Local models always allowed
+
+        if not self.safety_checker:
+            # No safety checker, allow by default (legacy behavior)
+            return True, ""
+
+        # Map model provider to I/O control provider name
+        provider_map = {
+            "openai": "openai",
+            "anthropic": "anthropic",
+        }
+
+        provider = provider_map.get(model.provider)
+        if not provider:
+            # Unknown provider, block by default
+            return False, f"Unknown provider: {model.provider}"
+
+        # Check with safety checker
+        return self.safety_checker.can_use_external_api(provider)
 
     def _configure_tiers(self):
         """Configure consultation tiers"""
@@ -198,7 +245,13 @@ class ModelCoordinator:
                 continue
 
             # Check if external allowed
-            if model.provider != "ollama":
+            if model.provider != "llama_cpp":
+                # Check I/O control first
+                is_allowed, block_reason = self._is_external_model_allowed(model)
+                if not is_allowed:
+                    logger.debug(f"Model {model.model_id} blocked: {block_reason}")
+                    continue
+
                 if not request.allow_external:
                     continue
                 if external_calls_remaining <= 0:
@@ -270,8 +323,14 @@ class ModelCoordinator:
                 continue
             if not request.required_capabilities.issubset(model.capabilities):
                 continue
-            if model.provider != "ollama" and external_calls_remaining <= len(selected):
-                continue
+
+            # Check I/O control for external models
+            if model.provider != "llama_cpp":
+                is_allowed, block_reason = self._is_external_model_allowed(model)
+                if not is_allowed:
+                    continue
+                if external_calls_remaining <= len(selected):
+                    continue
 
             estimated_cost = self._estimate_cost(model)
             if estimated_cost > budget_remaining:
@@ -328,7 +387,7 @@ class ModelCoordinator:
         score = 0
 
         # Local models get boost if preferred
-        if model.provider == "ollama" and request.prefer_local:
+        if model.provider == "llama_cpp" and request.prefer_local:
             score += 100
 
         # More capabilities = higher score
@@ -342,7 +401,7 @@ class ModelCoordinator:
             score += max(0, int(50 - (model.avg_latency_ms / 100)))
 
         # Lower cost = higher score (for external models)
-        if model.provider != "ollama":
+        if model.provider != "llama_cpp":
             cost = float(model.cost_input_per_1k + model.cost_output_per_1k)
             score += max(0, int(50 - (cost * 1000)))
 
@@ -360,7 +419,7 @@ class ModelCoordinator:
         """Get human-readable reason for model selection"""
         reasons = []
 
-        if model.provider == "ollama":
+        if model.provider == "llama_cpp":
             reasons.append("local (zero cost)")
 
         if tier == ConsultationTier.TRIVIAL and model.tier == ModelTier.LOCAL_SMALL:
