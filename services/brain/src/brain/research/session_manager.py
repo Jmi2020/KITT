@@ -16,9 +16,10 @@ from enum import Enum
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 
-from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import StateGraph
-from psycopg_pool import ConnectionPool
+from psycopg.types.json import Json
+from psycopg_pool import AsyncConnectionPool
 
 from brain.research.checkpoint import CheckpointManager
 
@@ -75,8 +76,8 @@ class ResearchSessionManager:
     def __init__(
         self,
         graph: StateGraph,
-        checkpointer: PostgresSaver,
-        connection_pool: ConnectionPool
+        checkpointer: AsyncPostgresSaver,
+        connection_pool: AsyncConnectionPool
     ):
         """
         Initialize session manager.
@@ -154,8 +155,8 @@ class ResearchSessionManager:
                             query,
                             SessionStatus.ACTIVE.value,
                             thread_id,
-                            config,
-                            {}  # metadata
+                            Json(config),
+                            Json({})  # metadata
                         )
                     )
                     await conn.commit()
@@ -500,7 +501,7 @@ class ResearchSessionManager:
                 params.append(confidence)
             if saturation is not None:
                 updates.append("saturation_status = %s")
-                params.append(saturation)
+                params.append(Json(saturation))
 
             if not updates:
                 return True  # Nothing to update
