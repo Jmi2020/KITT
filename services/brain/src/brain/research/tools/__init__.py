@@ -2,7 +2,7 @@
 Research Tools Integration
 
 Integrates MCP tools (web_search, Perplexity, memory) with the autonomous research pipeline.
-Provides safety checks via I/O control and permission manager.
+Uses UnifiedPermissionGate for streamlined permission checks.
 """
 
 from .mcp_integration import (
@@ -11,14 +11,14 @@ from .mcp_integration import (
     ToolExecutionResult,
 )
 from .safety import (
-    ResearchPermissionManager,
-    ToolSafetyChecker,
+    ResearchPermissionManager,  # DEPRECATED: Use UnifiedPermissionGate
+    ToolSafetyChecker,  # DEPRECATED: Integrated into UnifiedPermissionGate
 )
 
 __all__ = [
     "ResearchToolExecutor",
     "ToolExecutionContext",
     "ToolExecutionResult",
-    "ResearchPermissionManager",
-    "ToolSafetyChecker",
+    "ResearchPermissionManager",  # DEPRECATED
+    "ToolSafetyChecker",  # DEPRECATED
 ]

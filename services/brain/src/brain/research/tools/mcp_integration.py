@@ -2,7 +2,7 @@
 MCP Tool Integration for Research Pipeline
 
 Integrates existing MCP tools (web_search, Perplexity, memory) with research system.
-Provides unified interface for tool execution with proper error handling.
+Uses UnifiedPermissionGate for streamlined permission checks.
 """
 
 import logging
@@ -62,15 +62,15 @@ class ResearchToolExecutor:
     Integrates:
     - MCP research server (web_search, research_deep, fetch_webpage)
     - MCP memory server (store_memory, recall_memory)
-    - I/O control feature checks
-    - Permission manager for paid APIs
+    - UnifiedPermissionGate for streamlined permission checks
     """
 
     def __init__(
         self,
         research_server: Any,
         memory_server: Optional[Any] = None,
-        permission_manager: Optional[Any] = None
+        permission_gate: Optional[Any] = None,
+        budget_manager: Optional[Any] = None
     ):
         """
         Initialize tool executor.
@@ -78,11 +78,13 @@ class ResearchToolExecutor:
         Args:
             research_server: ResearchMCPServer instance
             memory_server: Optional MemoryMCPServer instance
-            permission_manager: Optional PermissionManager for API calls
+            permission_gate: Optional UnifiedPermissionGate for API calls
+            budget_manager: Optional BudgetManager for cost tracking
         """
         self.research_server = research_server
         self.memory_server = memory_server
-        self.permission_manager = permission_manager
+        self.permission_gate = permission_gate
+        self.budget = budget_manager
 
     async def execute(
         self,
@@ -215,42 +217,62 @@ class ResearchToolExecutor:
     ) -> ToolExecutionResult:
         """Execute Perplexity deep research (paid)"""
 
-        # Request permission if permission manager available
-        if self.permission_manager:
-            approved = await self.permission_manager.request_permission(
-                tier="mcp",
+        estimated_cost = Decimal("0.005")  # $0.001-0.005 per query
+
+        # Request permission via UnifiedPermissionGate
+        if self.permission_gate:
+            permission = await self.permission_gate.check_permission(
                 provider="perplexity",
-                estimated_cost=0.005,  # $0.001-0.005 per query
-                reason="Deep research with RAG-augmented analysis",
-                conversation_id=context.session_id
+                estimated_cost=estimated_cost,
+                context={"session_id": context.session_id}
             )
 
-            if not approved:
-                return ToolExecutionResult(
-                    success=False,
-                    tool_name="research_deep",
-                    error="Permission denied: User did not approve Perplexity API call"
-                )
+            if not permission.approved:
+                # Check if we should prompt user
+                if permission.prompt_user:
+                    # Prompt for omega password
+                    approved = await self.permission_gate.prompt_user_for_approval(permission)
+                    if not approved:
+                        return ToolExecutionResult(
+                            success=False,
+                            tool_name="research_deep",
+                            error="Permission denied: User rejected Perplexity API call"
+                        )
+                else:
+                    # Hard block (I/O Control or budget)
+                    return ToolExecutionResult(
+                        success=False,
+                        tool_name="research_deep",
+                        error=permission.reason
+                    )
 
         # Execute tool
         result = await self.research_server.execute_tool("research_deep", arguments)
 
-        # Extract cost from usage
+        # Extract actual cost from usage
         usage = result.data.get("usage", {}) if result.success else {}
         total_tokens = usage.get("total_tokens", 0)
         # Perplexity pricing: ~$0.001-0.005 per request
-        estimated_cost = Decimal("0.001") + (Decimal(str(total_tokens)) * Decimal("0.00001"))
+        actual_cost = Decimal("0.001") + (Decimal(str(total_tokens)) * Decimal("0.00001"))
 
-        # Record actual cost if permission manager available
-        if self.permission_manager and result.success:
-            self.permission_manager.record_actual_cost(float(estimated_cost))
+        # Record actual cost
+        if self.permission_gate and result.success:
+            self.permission_gate.record_actual_cost(actual_cost, "perplexity")
+
+        if self.budget and result.success:
+            await self.budget.record_call(
+                model_id="perplexity",
+                cost_usd=actual_cost,
+                input_tokens=usage.get("input_tokens", 0),
+                output_tokens=usage.get("output_tokens", 0)
+            )
 
         return ToolExecutionResult(
             success=result.success,
             tool_name="research_deep",
             data=result.data if result.success else {},
             error=result.error if not result.success else None,
-            cost_usd=estimated_cost,
+            cost_usd=actual_cost,
             is_external=True,
             metadata=result.metadata or {}
         )

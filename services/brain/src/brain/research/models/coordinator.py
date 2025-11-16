@@ -21,13 +21,13 @@ from .registry import (
     get_model_registry
 )
 
-# Import I/O control safety checker
+# Import unified permission gate
 try:
-    from brain.research.tools.safety import ToolSafetyChecker
-    SAFETY_CHECKER_AVAILABLE = True
+    from brain.research.permissions import UnifiedPermissionGate
+    PERMISSION_GATE_AVAILABLE = True
 except ImportError:
-    ToolSafetyChecker = None
-    SAFETY_CHECKER_AVAILABLE = False
+    UnifiedPermissionGate = None
+    PERMISSION_GATE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -105,17 +105,14 @@ class ModelCoordinator:
         registry: Optional[ModelRegistry] = None,
         default_max_cost: Decimal = Decimal("2.0"),
         default_prefer_local: bool = True,
-        safety_checker: Optional[Any] = None
+        permission_gate: Optional[Any] = None
     ):
         self.registry = registry or get_model_registry()
         self.default_max_cost = default_max_cost
         self.default_prefer_local = default_prefer_local
 
-        # Safety checker for I/O control
-        if safety_checker is None and SAFETY_CHECKER_AVAILABLE:
-            self.safety_checker = ToolSafetyChecker()
-        else:
-            self.safety_checker = safety_checker
+        # Unified permission gate for I/O control and API approval
+        self.permission_gate = permission_gate
 
         # Tier configuration
         self._configure_tiers()
@@ -133,8 +130,9 @@ class ModelCoordinator:
         if model.provider == "llama_cpp":
             return True, ""  # Local models always allowed
 
-        if not self.safety_checker:
-            # No safety checker, allow by default (legacy behavior)
+        if not self.permission_gate:
+            # No permission gate, allow by default (legacy behavior)
+            logger.warning("No permission gate configured, allowing external models by default")
             return True, ""
 
         # Map model provider to I/O control provider name
@@ -148,8 +146,8 @@ class ModelCoordinator:
             # Unknown provider, block by default
             return False, f"Unknown provider: {model.provider}"
 
-        # Check with safety checker
-        return self.safety_checker.can_use_external_api(provider)
+        # Check I/O Control via unified permission gate
+        return self.permission_gate.check_io_control(provider)
 
     def _configure_tiers(self):
         """Configure consultation tiers"""
