@@ -95,6 +95,10 @@ class ResearchSessionManager:
         # Track active sessions and their background tasks
         self.active_sessions: Dict[str, asyncio.Task] = {}
 
+        # Track pending database writes for graceful shutdown
+        self._shutdown_event = asyncio.Event()
+        self._write_queue: List[asyncio.Task] = []
+
         logger.info("ResearchSessionManager initialized")
 
     async def create_session(
@@ -458,39 +462,53 @@ class ResearchSessionManager:
             )
 
             # Update session with final results
-            await self.update_session_stats(
-                session_id=session_id,
-                total_iterations=final_state.get("current_iteration", 0),
-                total_findings=len(final_state.get("findings", [])),
-                total_sources=len(final_state.get("sources", [])),
-                total_cost_usd=float(final_state.get("total_cost_usd", 0.0)),
-                external_calls_used=final_state.get("external_calls_used", 0)
-            )
+            try:
+                await self.update_session_stats(
+                    session_id=session_id,
+                    total_iterations=final_state.get("current_iteration", 0),
+                    total_findings=len(final_state.get("findings", [])),
+                    total_sources=len(final_state.get("sources", [])),
+                    total_cost_usd=float(final_state.get("total_cost_usd", 0.0)),
+                    external_calls_used=final_state.get("external_calls_used", 0)
+                )
+            except Exception as e:
+                logger.error(f"⚠️  Failed to update session stats (continuing): {e}")
+                # Continue even if stats update fails - mark_completed is more critical
 
-            # Mark as completed
-            await self.mark_completed(
-                session_id=session_id,
-                completeness_score=final_state.get("quality_scores", [0.0])[-1] if final_state.get("quality_scores") else None,
-                confidence_score=final_state.get("confidence_scores", [{}])[-1].get("overall") if final_state.get("confidence_scores") else None
-            )
-
-            logger.info(f"Research completed for session {session_id}")
+            # Mark as completed (CRITICAL - must succeed)
+            try:
+                await self.mark_completed(
+                    session_id=session_id,
+                    completeness_score=final_state.get("quality_scores", [0.0])[-1] if final_state.get("quality_scores") else None,
+                    confidence_score=final_state.get("confidence_scores", [{}])[-1].get("overall") if final_state.get("confidence_scores") else None
+                )
+                logger.info(f"✅ Research completed successfully for session {session_id}")
+            except Exception as e:
+                logger.error(f"🚨 CRITICAL: Failed to mark session {session_id} as completed: {e}")
+                # Session stuck in ACTIVE state - will need manual intervention or recovery
+                raise
 
         except Exception as e:
-            logger.error(f"Research failed for session {session_id}: {e}")
+            logger.error(f"🚨 Research failed for session {session_id}: {e}", exc_info=True)
 
-            # Mark as failed
-            async with self.pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute(
-                        """
-                        UPDATE research_sessions
-                        SET status = %s, updated_at = NOW(), completed_at = NOW()
-                        WHERE session_id = %s
-                        """,
-                        (SessionStatus.FAILED.value, session_id)
-                    )
-                    await conn.commit()
+            # Mark as failed (CRITICAL - must succeed)
+            try:
+                async with self.pool.connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            """
+                            UPDATE research_sessions
+                            SET status = %s, updated_at = NOW(), completed_at = NOW()
+                            WHERE session_id = %s
+                            """,
+                            (SessionStatus.FAILED.value, session_id)
+                        )
+                        await conn.commit()
+                logger.info(f"Session {session_id} marked as FAILED")
+            except Exception as mark_error:
+                logger.error(f"🚨 CRITICAL: Failed to mark session {session_id} as FAILED: {mark_error}")
+                # Session stuck in ACTIVE state - will need recovery
+                raise
 
         finally:
             # Remove from active sessions
@@ -657,8 +675,9 @@ class ResearchSessionManager:
             return True
 
         except Exception as e:
-            logger.error(f"Error updating session stats: {e}")
-            return False
+            logger.error(f"⚠️  CRITICAL: Failed to update session stats for {session_id}: {e}", exc_info=True)
+            # Don't silently swallow - re-raise to ensure caller knows about failure
+            raise
 
     async def mark_completed(
         self,
@@ -700,8 +719,9 @@ class ResearchSessionManager:
             return True
 
         except Exception as e:
-            logger.error(f"Error marking session complete: {e}")
-            return False
+            logger.error(f"⚠️  CRITICAL: Failed to mark session {session_id} as {status.value}: {e}", exc_info=True)
+            # Don't silently swallow - re-raise to ensure caller knows about failure
+            raise
 
     async def recover_stale_sessions(
         self,
@@ -793,3 +813,109 @@ class ResearchSessionManager:
         except Exception as e:
             logger.error(f"Error archiving old sessions: {e}")
             return 0
+
+    async def graceful_shutdown(self, timeout_seconds: int = 30) -> Dict[str, Any]:
+        """
+        Gracefully shutdown session manager, waiting for pending writes.
+
+        CRITICAL: Call this before shutting down brain service to ensure
+        all database writes complete. Prevents data loss on restart.
+
+        Args:
+            timeout_seconds: Maximum time to wait for pending operations
+
+        Returns:
+            Dict with shutdown stats (completed, timeout, failed)
+        """
+        logger.warning(f"Graceful shutdown initiated, waiting up to {timeout_seconds}s for pending writes")
+
+        self._shutdown_event.set()  # Signal shutdown to background tasks
+
+        stats = {
+            "active_sessions": len(self.active_sessions),
+            "completed": 0,
+            "timeout": 0,
+            "failed": 0,
+            "duration_seconds": 0
+        }
+
+        import time
+        start_time = time.time()
+
+        try:
+            # Wait for all active session tasks to complete
+            if self.active_sessions:
+                logger.info(f"Waiting for {len(self.active_sessions)} active research sessions to complete")
+
+                tasks = list(self.active_sessions.values())
+
+                done, pending = await asyncio.wait(
+                    tasks,
+                    timeout=timeout_seconds,
+                    return_when=asyncio.ALL_COMPLETED
+                )
+
+                stats["completed"] = len(done)
+                stats["timeout"] = len(pending)
+
+                # Cancel remaining tasks
+                for task in pending:
+                    logger.warning(f"Cancelling task due to shutdown timeout: {task.get_name()}")
+                    task.cancel()
+
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        logger.error(f"Error cancelling task: {e}")
+                        stats["failed"] += 1
+
+                # Check for task exceptions
+                for task in done:
+                    if task.exception():
+                        logger.error(f"Task failed during shutdown: {task.exception()}")
+                        stats["failed"] += 1
+
+            stats["duration_seconds"] = time.time() - start_time
+
+            logger.info(
+                f"Graceful shutdown complete: {stats['completed']} completed, "
+                f"{stats['timeout']} timed out, {stats['failed']} failed "
+                f"in {stats['duration_seconds']:.2f}s"
+            )
+
+            return stats
+
+        except Exception as e:
+            logger.error(f"Error during graceful shutdown: {e}")
+            stats["failed"] += 1
+            return stats
+
+    async def await_pending_writes(self, session_id: str, timeout_seconds: int = 10) -> bool:
+        """
+        Wait for pending database writes for a specific session.
+
+        Use this to ensure critical writes complete before returning to user.
+
+        Args:
+            session_id: Session ID to wait for
+            timeout_seconds: Maximum time to wait
+
+        Returns:
+            True if writes completed, False if timeout/error
+        """
+        if session_id not in self.active_sessions:
+            return True  # No pending writes
+
+        task = self.active_sessions[session_id]
+
+        try:
+            await asyncio.wait_for(task, timeout=timeout_seconds)
+            return True
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout waiting for writes to complete for session {session_id}")
+            return False
+        except Exception as e:
+            logger.error(f"Error waiting for writes for session {session_id}: {e}")
+            return False

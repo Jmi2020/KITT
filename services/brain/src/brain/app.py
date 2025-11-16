@@ -304,6 +304,15 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Brain service shutting down")
 
+    # Graceful shutdown for research session manager (wait for pending writes)
+    if hasattr(app.state, 'session_manager') and app.state.session_manager is not None:
+        logger.info("Initiating graceful shutdown for research session manager")
+        try:
+            shutdown_stats = await app.state.session_manager.graceful_shutdown(timeout_seconds=30)
+            logger.info(f"Research session manager shutdown complete: {shutdown_stats}")
+        except Exception as e:
+            logger.error(f"Error during session manager graceful shutdown: {e}")
+
     # Cleanup research infrastructure
     if hasattr(app.state, 'pg_pool') and app.state.pg_pool is not None:
         logger.info("Closing PostgreSQL connection pool")
