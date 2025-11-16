@@ -3,6 +3,11 @@ APScheduler integration for KITTY autonomous operations.
 
 Provides a wrapper around APScheduler's BackgroundScheduler for managing
 periodic tasks, cron jobs, and scheduled autonomous workflows.
+
+Features:
+- Persistent job storage via PostgreSQL (SQLAlchemyJobStore)
+- Jobs survive service restarts
+- Automatic job state persistence (next_run_time, run_count, etc.)
 """
 
 import logging
@@ -10,9 +15,12 @@ from datetime import datetime
 from typing import Callable, Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR, JobExecutionEvent
+
+from common.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -25,23 +33,43 @@ class AutonomousScheduler:
     the scheduler lifecycle integrated with the brain service.
     """
 
-    def __init__(self):
-        """Initialize the scheduler (not started)."""
+    def __init__(self, database_url: Optional[str] = None):
+        """Initialize the scheduler (not started).
+
+        Args:
+            database_url: PostgreSQL connection URL for job persistence.
+                         If None, uses settings.database_url.
+        """
         self._scheduler: Optional[BackgroundScheduler] = None
         self._is_running = False
+        self._database_url = database_url or settings.database_url
 
     def start(self) -> None:
         """
-        Start the background scheduler.
+        Start the background scheduler with persistent job storage.
 
+        Jobs are persisted to PostgreSQL and survive service restarts.
         Should be called during brain service startup.
         """
         if self._is_running:
             logger.warning("Scheduler already running, ignoring start request")
             return
 
-        logger.info("Starting autonomous scheduler")
-        self._scheduler = BackgroundScheduler(timezone="UTC")
+        logger.info("Starting autonomous scheduler with persistent job store")
+
+        # Configure persistent job store (PostgreSQL)
+        jobstores = {
+            'default': SQLAlchemyJobStore(
+                url=self._database_url,
+                tablename='apscheduler_jobs'
+            )
+        }
+
+        # Create scheduler with persistent job store
+        self._scheduler = BackgroundScheduler(
+            jobstores=jobstores,
+            timezone="UTC"
+        )
 
         # Add event listeners for job execution tracking
         self._scheduler.add_listener(
@@ -51,7 +79,16 @@ class AutonomousScheduler:
 
         self._scheduler.start()
         self._is_running = True
-        logger.info("Autonomous scheduler started successfully")
+
+        # Log existing jobs (from previous runs)
+        existing_jobs = self._scheduler.get_jobs()
+        if existing_jobs:
+            logger.info(
+                f"Autonomous scheduler started - {len(existing_jobs)} existing jobs "
+                f"restored from database"
+            )
+        else:
+            logger.info("Autonomous scheduler started - no existing jobs in database")
 
     def stop(self, wait: bool = True) -> None:
         """

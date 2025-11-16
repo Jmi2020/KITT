@@ -238,64 +238,87 @@ async def lifespan(app: FastAPI):
         scheduler.start()
 
         # Register autonomous jobs (4am-6am PST = 12pm-2pm UTC)
+        # Jobs are persisted to database, so only add if they don't already exist
+
+        existing_job_ids = {job.id for job in scheduler.get_jobs()}
+        jobs_registered = 0
 
         # Daily health check at 4:00 PST (12:00 UTC)
-        scheduler.add_cron_job(
-            func=daily_health_check,
-            hour=12,
-            minute=0,
-            job_id="daily_health_check",
-        )
+        if "daily_health_check" not in existing_job_ids:
+            scheduler.add_cron_job(
+                func=daily_health_check,
+                hour=12,
+                minute=0,
+                job_id="daily_health_check",
+            )
+            jobs_registered += 1
 
         # Weekly research cycle - Monday at 5:00 PST (13:00 UTC)
-        scheduler.add_cron_job(
-            func=weekly_research_cycle,
-            day_of_week="mon",
-            hour=13,
-            minute=0,
-            job_id="weekly_research_cycle",
-        )
+        if "weekly_research_cycle" not in existing_job_ids:
+            scheduler.add_cron_job(
+                func=weekly_research_cycle,
+                day_of_week="mon",
+                hour=13,
+                minute=0,
+                job_id="weekly_research_cycle",
+            )
+            jobs_registered += 1
 
         # Knowledge base update - Monday at 6:00 PST (14:00 UTC)
-        scheduler.add_cron_job(
-            func=knowledge_base_update,
-            day_of_week="mon",
-            hour=14,
-            minute=0,
-            job_id="knowledge_base_update",
-        )
+        if "knowledge_base_update" not in existing_job_ids:
+            scheduler.add_cron_job(
+                func=knowledge_base_update,
+                day_of_week="mon",
+                hour=14,
+                minute=0,
+                job_id="knowledge_base_update",
+            )
+            jobs_registered += 1
 
         # Printer fleet health check - Every 4 hours
-        scheduler.add_interval_job(
-            func=printer_fleet_health_check,
-            hours=4,
-            job_id="printer_fleet_health_check",
-        )
+        if "printer_fleet_health_check" not in existing_job_ids:
+            scheduler.add_interval_job(
+                func=printer_fleet_health_check,
+                hours=4,
+                job_id="printer_fleet_health_check",
+            )
+            jobs_registered += 1
 
         # Project generation - Daily at 4:30am PST (12:30 UTC)
-        scheduler.add_cron_job(
-            func=project_generation_cycle,
-            hour=12,
-            minute=30,
-            job_id="project_generation_cycle",
-        )
+        if "project_generation_cycle" not in existing_job_ids:
+            scheduler.add_cron_job(
+                func=project_generation_cycle,
+                hour=12,
+                minute=30,
+                job_id="project_generation_cycle",
+            )
+            jobs_registered += 1
 
         # Task execution - Every 15 minutes (executes ready tasks)
-        scheduler.add_interval_job(
-            func=task_execution_cycle,
-            minutes=15,
-            job_id="task_execution_cycle",
-        )
+        if "task_execution_cycle" not in existing_job_ids:
+            scheduler.add_interval_job(
+                func=task_execution_cycle,
+                minutes=15,
+                job_id="task_execution_cycle",
+            )
+            jobs_registered += 1
 
         # Outcome measurement (Phase 3) - Daily at 6:00am PST (14:00 UTC)
-        scheduler.add_cron_job(
-            func=outcome_measurement_cycle,
-            hour=14,
-            minute=0,
-            job_id="outcome_measurement_cycle",
-        )
+        if "outcome_measurement_cycle" not in existing_job_ids:
+            scheduler.add_cron_job(
+                func=outcome_measurement_cycle,
+                hour=14,
+                minute=0,
+                job_id="outcome_measurement_cycle",
+            )
+            jobs_registered += 1
 
-        logger.info("Autonomous scheduler started with 7 jobs registered (4am-6am PST / 12pm-2pm UTC)")
+        total_jobs = len(scheduler.get_jobs())
+        logger.info(
+            f"Autonomous scheduler started: {jobs_registered} new jobs registered, "
+            f"{total_jobs - jobs_registered} restored from database, "
+            f"{total_jobs} total active jobs"
+        )
     else:
         logger.info("Autonomous mode disabled (AUTONOMOUS_ENABLED=false)")
 

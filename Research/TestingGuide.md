@@ -953,6 +953,219 @@ The hit/miss tracking is persistent in Redis hash `kitty:semantic-cache:stats`.
 
 ---
 
+## Testing APScheduler Job Persistence
+
+### Overview
+
+APScheduler jobs are now persisted to PostgreSQL, ensuring scheduled autonomous tasks survive service restarts. Jobs are stored in the `apscheduler_jobs` table.
+
+### Configuration
+
+No environment variables needed - uses the same `DATABASE_URL` as other services.
+
+### Testing Job Persistence
+
+#### 1. Verify Jobs Are Persisted
+
+```python
+from sqlalchemy import create_engine, text
+from common.config import settings
+
+# Connect to database
+engine = create_engine(settings.database_url)
+
+# Check apscheduler_jobs table
+with engine.connect() as conn:
+    result = conn.execute(text("SELECT id, next_run_time FROM apscheduler_jobs ORDER BY id"))
+    jobs = result.fetchall()
+
+    print(f"Persisted jobs: {len(jobs)}")
+    for job_id, next_run in jobs:
+        print(f"  - {job_id}: next run at {next_run}")
+```
+
+**Expected Output:**
+```
+Persisted jobs: 7
+  - daily_health_check: next run at 1705420800.0
+  - knowledge_base_update: next run at 1705416000.0
+  - outcome_measurement_cycle: next run at 1705420800.0
+  - printer_fleet_health_check: next run at 1705412400.0
+  - project_generation_cycle: next run at 1705416600.0
+  - task_execution_cycle: next run at 1705413000.0
+  - weekly_research_cycle: next run at 1705413000.0
+```
+
+#### 2. Test Job Survival Across Restart
+
+```bash
+# Start brain service
+docker-compose up -d brain
+
+# Wait for scheduler to start
+sleep 5
+
+# Check jobs in database
+psql $DATABASE_URL -c "SELECT COUNT(*) FROM apscheduler_jobs;"
+# Expected: 7
+
+# Restart brain service
+docker-compose restart brain
+
+# Wait for scheduler to reload
+sleep 5
+
+# Check jobs still exist
+psql $DATABASE_URL -c "SELECT COUNT(*) FROM apscheduler_jobs;"
+# Expected: 7 (same jobs, not duplicated)
+
+# Check brain logs for job restoration
+docker-compose logs brain | grep "restored from database"
+# Expected: "7 jobs restored from database, 0 new jobs registered"
+```
+
+#### 3. Test Job State Persistence
+
+```python
+from brain.autonomous.scheduler import get_scheduler
+
+scheduler = get_scheduler()
+scheduler.start()
+
+# Check job next_run_time is preserved
+jobs = scheduler.get_jobs()
+for job in jobs:
+    print(f"{job.id}: next_run_time={job.next_run_time}")
+
+# Next run times should match values in database (not reset to "now")
+```
+
+#### 4. Test Job Addition (First Start)
+
+```python
+from brain.autonomous.scheduler import get_scheduler
+
+# Clear database
+from sqlalchemy import create_engine, text
+engine = create_engine(settings.database_url)
+with engine.connect() as conn:
+    conn.execute(text("DELETE FROM apscheduler_jobs"))
+    conn.commit()
+
+# Start scheduler
+scheduler = get_scheduler()
+scheduler.start()
+
+# Trigger job registration (normally done in app.py)
+from brain.autonomous.jobs import daily_health_check
+
+scheduler.add_cron_job(
+    func=daily_health_check,
+    hour=12,
+    minute=0,
+    job_id="daily_health_check",
+)
+
+# Verify job is in database
+with engine.connect() as conn:
+    result = conn.execute(text("SELECT id FROM apscheduler_jobs WHERE id = 'daily_health_check'"))
+    assert result.fetchone() is not None
+    print("✅ Job persisted to database")
+```
+
+### Monitoring Job Store Health
+
+```sql
+-- Count active jobs
+SELECT COUNT(*) FROM apscheduler_jobs;
+
+-- View all jobs with next run time
+SELECT
+    id,
+    TO_TIMESTAMP(next_run_time) as next_run_utc,
+    EXTRACT(EPOCH FROM (TO_TIMESTAMP(next_run_time) - NOW())) / 60 as minutes_until_run
+FROM apscheduler_jobs
+ORDER BY next_run_time;
+
+-- Check for stuck jobs (next_run_time in the past)
+SELECT
+    id,
+    TO_TIMESTAMP(next_run_time) as next_run_utc
+FROM apscheduler_jobs
+WHERE next_run_time < EXTRACT(EPOCH FROM NOW())
+ORDER BY next_run_time;
+```
+
+### Troubleshooting
+
+#### Jobs Not Persisting
+
+```bash
+# Check if table exists
+psql $DATABASE_URL -c "\dt apscheduler_jobs"
+
+# If table doesn't exist, run migration
+cd services/common
+alembic upgrade head
+
+# Check migration applied
+psql $DATABASE_URL -c "SELECT version_num FROM alembic_version;"
+# Should include: k1l2m3n4o5p6
+```
+
+#### Duplicate Jobs After Restart
+
+Check brain service logs for:
+```
+# BAD: Jobs being re-registered when they already exist
+Autonomous scheduler started: 7 new jobs registered, 0 restored from database
+
+# GOOD: Jobs restored from database
+Autonomous scheduler started: 0 new jobs registered, 7 restored from database
+```
+
+If seeing duplicates:
+1. Check that `app.py` is checking `existing_job_ids` before adding jobs
+2. Clear duplicates: `DELETE FROM apscheduler_jobs; docker-compose restart brain`
+
+#### Jobs Not Executing
+
+```python
+from brain.autonomous.scheduler import get_scheduler
+
+scheduler = get_scheduler()
+
+# Check job status
+jobs = scheduler.get_jobs()
+for job in jobs:
+    print(f"{job.id}:")
+    print(f"  Next run: {job.next_run_time}")
+    print(f"  Trigger: {job.trigger}")
+    print(f"  Pending: {job.pending}")
+
+# Check scheduler is running
+assert scheduler.is_running
+```
+
+If jobs aren't executing:
+1. Check next_run_time is in the future
+2. Verify scheduler event listener is registered
+3. Check brain service logs for job execution events
+4. Ensure autonomous mode is enabled: `AUTONOMOUS_ENABLED=true`
+
+#### Job State Corruption
+
+If job_state column contains invalid pickled data:
+```sql
+-- Remove corrupted job
+DELETE FROM apscheduler_jobs WHERE id = 'corrupted_job_id';
+
+-- Restart brain service to re-register
+docker-compose restart brain
+```
+
+---
+
 ## References
 
 - **Permission System Architecture**: `Research/PermissionSystemArchitecture.md`
