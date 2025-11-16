@@ -7,11 +7,12 @@ import WallTerminal from './pages/WallTerminal';
 import VisionGallery from './pages/VisionGallery';
 import ImageGenerator from './pages/ImageGenerator';
 import Research from './pages/Research';
+import IOControl from './pages/IOControl';
 import useRemoteMode from './hooks/useRemoteMode';
 import { useTheme } from './contexts/ThemeContext';
 
 const App = () => {
-  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'shell' | 'wall' | 'vision' | 'images' | 'research'>('shell');
+  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'shell' | 'wall' | 'vision' | 'images' | 'research' | 'iocontrol'>('shell');
   const remoteMode = useRemoteMode();
   const { theme, toggleTheme } = useTheme();
 
@@ -31,6 +32,8 @@ const App = () => {
         return <ImageGenerator />;
       case 'research':
         return <Research />;
+      case 'iocontrol':
+        return <IOControl />;
       default:
         return <Dashboard remoteMode={remoteMode} />;
     }
@@ -47,6 +50,8 @@ const App = () => {
       setActiveView('shell');
     } else if (viewParam === 'research') {
       setActiveView('research');
+    } else if (viewParam === 'iocontrol') {
+      setActiveView('iocontrol');
     }
   }, []);
 
@@ -57,6 +62,7 @@ const App = () => {
         <nav>
           <button onClick={() => setActiveView('shell')}>💬 Shell</button>
           <button onClick={() => setActiveView('research')}>🔬 Research</button>
+          <button onClick={() => setActiveView('iocontrol')}>⚙️ I/O Control</button>
           <button onClick={() => setActiveView('dashboard')}>Dashboard</button>
           <button onClick={() => setActiveView('projects')}>Projects</button>
           <button onClick={() => setActiveView('console')}>Fabrication Console</button>
