@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KITT Print Queue Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 1rem;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: #1e293b;
+            border-radius: 0.5rem;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            color: #3b82f6;
+        }
+
+        .refresh-btn {
+            padding: 0.5rem 1rem;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: background 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: #2563eb;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: #1e293b;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border-left: 4px solid #3b82f6;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-top: 0.5rem;
+        }
+
+        .printers-section {
+            margin-bottom: 2rem;
+        }
+
+        .printers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1rem;
+        }
+
+        .printer-card {
+            background: #1e293b;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid #334155;
+        }
+
+        .printer-card.online {
+            border-left: 4px solid #10b981;
+        }
+
+        .printer-card.printing {
+            border-left: 4px solid #f59e0b;
+        }
+
+        .printer-card.offline {
+            border-left: 4px solid #6b7280;
+        }
+
+        .printer-name {
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .printer-status {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .printer-status.idle {
+            background: #10b981;
+            color: white;
+        }
+
+        .printer-status.printing {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .printer-status.offline {
+            background: #6b7280;
+            color: white;
+        }
+
+        .queue-section {
+            margin-top: 2rem;
+        }
+
+        .section-title {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            color: #f1f5f9;
+        }
+
+        .jobs-grid {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .job-card {
+            background: #1e293b;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border-left: 4px solid #64748b;
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .job-card.priority-high {
+            border-left-color: #ef4444;
+        }
+
+        .job-card.priority-medium {
+            border-left-color: #f59e0b;
+        }
+
+        .job-card.priority-low {
+            border-left-color: #3b82f6;
+        }
+
+        .queue-position {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #64748b;
+            min-width: 3rem;
+            text-align: center;
+        }
+
+        .job-info {
+            flex: 1;
+        }
+
+        .job-name {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .job-meta {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .job-badge {
+            display: inline-block;
+            padding: 0.125rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .status-queued {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .status-scheduled {
+            background: #8b5cf6;
+            color: white;
+        }
+
+        .status-printing {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .status-completed {
+            background: #10b981;
+            color: white;
+        }
+
+        .status-failed {
+            background: #ef4444;
+            color: white;
+        }
+
+        .job-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .btn {
+            padding: 0.375rem 0.75rem;
+            border-radius: 0.25rem;
+            border: none;
+            cursor: pointer;
+            font-size: 0.75rem;
+            transition: all 0.2s;
+        }
+
+        .btn-cancel {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-cancel:hover {
+            background: #dc2626;
+        }
+
+        .btn-priority {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .btn-priority:hover {
+            background: #2563eb;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #64748b;
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #64748b;
+        }
+
+        .error {
+            background: #7f1d1d;
+            color: #fecaca;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.75);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: #1e293b;
+            padding: 2rem;
+            border-radius: 0.5rem;
+            max-width: 400px;
+            width: 90%;
+        }
+
+        .modal-title {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+            justify-content: flex-end;
+        }
+
+        input[type="number"] {
+            width: 100%;
+            padding: 0.5rem;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 0.25rem;
+            color: #e2e8f0;
+            font-size: 1rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+            color: #94a3b8;
+        }
+
+        .deadline-badge {
+            background: #ef4444;
+            color: white;
+            padding: 0.125rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🖨️ KITT Print Queue Dashboard</h1>
+        <button class="refresh-btn" onclick="loadDashboard()">↻ Refresh</button>
+    </div>
+
+    <div id="error-container"></div>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-label">Total Jobs</div>
+            <div class="stat-value" id="stat-total">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Queued</div>
+            <div class="stat-value" id="stat-queued">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Printing</div>
+            <div class="stat-value" id="stat-printing">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Urgent Jobs</div>
+            <div class="stat-value" id="stat-urgent">-</div>
+        </div>
+    </div>
+
+    <div class="printers-section">
+        <h2 class="section-title">Printer Status</h2>
+        <div class="printers-grid" id="printers-container">
+            <div class="loading">Loading printer status...</div>
+        </div>
+    </div>
+
+    <div class="queue-section">
+        <h2 class="section-title">Print Queue</h2>
+        <div class="jobs-grid" id="jobs-container">
+            <div class="loading">Loading queue...</div>
+        </div>
+    </div>
+
+    <!-- Priority Modal -->
+    <div class="modal" id="priority-modal">
+        <div class="modal-content">
+            <h3 class="modal-title">Update Job Priority</h3>
+            <label for="priority-input">New Priority (1-10, 1=highest)</label>
+            <input type="number" id="priority-input" min="1" max="10" value="5">
+            <div class="modal-buttons">
+                <button class="btn" onclick="closePriorityModal()">Cancel</button>
+                <button class="btn btn-priority" onclick="submitPriority()">Update</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let currentJobId = null;
+
+        // Load dashboard data
+        async function loadDashboard() {
+            await Promise.all([
+                loadPrinterStatus(),
+                loadQueueStatus(),
+                loadStatistics()
+            ]);
+        }
+
+        // Load printer status
+        async function loadPrinterStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/fabrication/printer_status`);
+                const data = await response.json();
+
+                const container = document.getElementById('printers-container');
+                container.innerHTML = '';
+
+                const printerNames = {
+                    'bamboo_h2d': 'Bamboo H2D',
+                    'elegoo_giga': 'Elegoo OrangeStorm Giga',
+                    'snapmaker_artisan': 'Snapmaker Artisan'
+                };
+
+                for (const [printerId, status] of Object.entries(data.printers)) {
+                    const card = document.createElement('div');
+                    card.className = `printer-card ${status.is_printing ? 'printing' : (status.is_online ? 'online' : 'offline')}`;
+
+                    const statusClass = status.is_printing ? 'printing' : (status.is_online ? 'idle' : 'offline');
+                    const statusText = status.is_printing ? 'Printing' : (status.is_online ? 'Idle' : 'Offline');
+
+                    card.innerHTML = `
+                        <div class="printer-name">${printerNames[printerId] || printerId}</div>
+                        <div class="printer-status ${statusClass}">${statusText}</div>
+                        ${status.current_job ? `<div style="margin-top: 0.5rem; font-size: 0.875rem;">Job: ${status.current_job}</div>` : ''}
+                        ${status.progress_percent ? `<div style="margin-top: 0.5rem; font-size: 0.875rem;">Progress: ${status.progress_percent}%</div>` : ''}
+                    `;
+                    container.appendChild(card);
+                }
+            } catch (error) {
+                console.error('Failed to load printer status:', error);
+                showError('Failed to load printer status');
+            }
+        }
+
+        // Load queue status
+        async function loadQueueStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/fabrication/queue?limit=50`);
+                const data = await response.json();
+
+                const container = document.getElementById('jobs-container');
+                container.innerHTML = '';
+
+                if (data.jobs.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📭</div>
+                            <div>No jobs in queue</div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                data.jobs.forEach(job => {
+                    const card = createJobCard(job);
+                    container.appendChild(card);
+                });
+            } catch (error) {
+                console.error('Failed to load queue:', error);
+                showError('Failed to load queue status');
+            }
+        }
+
+        // Create job card element
+        function createJobCard(job) {
+            const card = document.createElement('div');
+
+            let priorityClass = 'priority-low';
+            if (job.priority <= 3) priorityClass = 'priority-high';
+            else if (job.priority <= 6) priorityClass = 'priority-medium';
+
+            card.className = `job-card ${priorityClass}`;
+
+            const queuePosition = job.queue_position || '-';
+            const statusClass = `status-${job.status}`;
+            const material = job.material_id.replace(/_/g, ' ').toUpperCase();
+            const hours = job.estimated_duration_hours.toFixed(1);
+            const cost = job.estimated_cost_usd.toFixed(2);
+
+            // Check if deadline is approaching
+            let deadlineWarning = '';
+            if (job.deadline) {
+                const deadline = new Date(job.deadline);
+                const now = new Date();
+                const hoursUntil = (deadline - now) / (1000 * 60 * 60);
+
+                if (hoursUntil < 24 && hoursUntil > 0) {
+                    deadlineWarning = `<span class="deadline-badge">⏰ ${hoursUntil.toFixed(1)}h until deadline</span>`;
+                } else if (hoursUntil <= 0) {
+                    deadlineWarning = `<span class="deadline-badge">⚠️ OVERDUE</span>`;
+                }
+            }
+
+            card.innerHTML = `
+                <div class="queue-position">#${queuePosition}</div>
+                <div class="job-info">
+                    <div class="job-name">${job.job_name}</div>
+                    <div class="job-meta">
+                        <span class="job-badge ${statusClass}">${job.status}</span>
+                        <span>Priority: ${job.priority}</span>
+                        <span>${material}</span>
+                        <span>⏱️ ${hours}h</span>
+                        <span>💰 $${cost}</span>
+                        ${job.printer_id ? `<span>🖨️ ${job.printer_id}</span>` : ''}
+                        ${deadlineWarning}
+                    </div>
+                </div>
+                <div class="job-actions">
+                    ${job.status === 'queued' || job.status === 'scheduled' ? `
+                        <button class="btn btn-priority" onclick="openPriorityModal('${job.job_id}')">Priority</button>
+                        <button class="btn btn-cancel" onclick="cancelJob('${job.job_id}')">Cancel</button>
+                    ` : ''}
+                </div>
+            `;
+
+            return card;
+        }
+
+        // Load statistics
+        async function loadStatistics() {
+            try {
+                const response = await fetch(`${API_BASE}/api/fabrication/queue/statistics`);
+                const data = await response.json();
+
+                document.getElementById('stat-total').textContent = data.total_jobs;
+                document.getElementById('stat-queued').textContent = data.by_status.queued || 0;
+                document.getElementById('stat-printing').textContent = data.by_status.printing || 0;
+                document.getElementById('stat-urgent').textContent = data.upcoming_deadlines + data.overdue;
+            } catch (error) {
+                console.error('Failed to load statistics:', error);
+            }
+        }
+
+        // Cancel job
+        async function cancelJob(jobId) {
+            if (!confirm('Are you sure you want to cancel this job?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/fabrication/jobs/${jobId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    loadDashboard();
+                } else {
+                    const error = await response.json();
+                    showError(error.detail || 'Failed to cancel job');
+                }
+            } catch (error) {
+                console.error('Failed to cancel job:', error);
+                showError('Failed to cancel job');
+            }
+        }
+
+        // Open priority modal
+        function openPriorityModal(jobId) {
+            currentJobId = jobId;
+            document.getElementById('priority-modal').classList.add('active');
+            document.getElementById('priority-input').focus();
+        }
+
+        // Close priority modal
+        function closePriorityModal() {
+            currentJobId = null;
+            document.getElementById('priority-modal').classList.remove('active');
+        }
+
+        // Submit priority update
+        async function submitPriority() {
+            const priority = parseInt(document.getElementById('priority-input').value);
+
+            if (priority < 1 || priority > 10) {
+                alert('Priority must be between 1 and 10');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/fabrication/jobs/${currentJobId}/priority`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ priority })
+                });
+
+                if (response.ok) {
+                    closePriorityModal();
+                    loadDashboard();
+                } else {
+                    const error = await response.json();
+                    showError(error.detail || 'Failed to update priority');
+                }
+            } catch (error) {
+                console.error('Failed to update priority:', error);
+                showError('Failed to update priority');
+            }
+        }
+
+        // Show error message
+        function showError(message) {
+            const container = document.getElementById('error-container');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error';
+            errorDiv.textContent = message;
+            container.appendChild(errorDiv);
+
+            setTimeout(() => {
+                errorDiv.remove();
+            }, 5000);
+        }
+
+        // Close modal on outside click
+        document.getElementById('priority-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'priority-modal') {
+                closePriorityModal();
+            }
+        });
+
+        // Auto-refresh every 10 seconds
+        setInterval(loadDashboard, 10000);
+
+        // Initial load
+        loadDashboard();
+    </script>
+</body>
+</html>

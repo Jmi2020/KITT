@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -220,6 +222,11 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Mount static files for queue dashboard
+static_dir = Path(__file__).parent.parent.parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
 # ============================================================================
@@ -474,6 +481,16 @@ class OutcomeStatisticsResponse(BaseModel):
 async def health() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+@app.get("/queue")
+async def queue_dashboard():
+    """Serve print queue dashboard UI."""
+    static_dir = Path(__file__).parent.parent.parent / "static"
+    queue_html = static_dir / "queue.html"
+    if queue_html.exists():
+        return FileResponse(queue_html)
+    raise HTTPException(status_code=404, detail="Queue dashboard not found")
 
 
 @app.post("/api/fabrication/open_in_slicer")
