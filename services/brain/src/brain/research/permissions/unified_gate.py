@@ -161,7 +161,7 @@ class UnifiedPermissionGate:
 
         return True, ""
 
-    def _check_budget(self, estimated_cost: Decimal) -> tuple[bool, str]:
+    async def _check_budget(self, estimated_cost: Decimal) -> tuple[bool, str]:
         """
         Layer 2: Check budget (hard gate).
 
@@ -175,8 +175,8 @@ class UnifiedPermissionGate:
             # No budget manager, allow (legacy behavior)
             return True, ""
 
-        status = self.budget.get_status()
-        budget_remaining = Decimal(str(status.get("budget_remaining", 0)))
+        status = await self.budget.get_status()
+        budget_remaining = status.budget_remaining
 
         if budget_remaining < estimated_cost:
             return False, (
@@ -203,7 +203,7 @@ class UnifiedPermissionGate:
         else:
             return ApprovalTier.HIGH
 
-    def _check_runtime_approval(
+    async def _check_runtime_approval(
         self,
         provider: str,
         estimated_cost: Decimal,
@@ -225,6 +225,12 @@ class UnifiedPermissionGate:
         Returns:
             PermissionResult
         """
+        # Get budget info for prompts
+        budget_remaining_str = "N/A"
+        if self.budget:
+            status = await self.budget.get_status()
+            budget_remaining_str = f"${status.budget_remaining:.2f}"
+
         if approval_tier == ApprovalTier.TRIVIAL:
             # Always auto-approve trivial costs
             if self.auto_approve_trivial:
@@ -257,7 +263,7 @@ class UnifiedPermissionGate:
                         f"API Permission Required\n"
                         f"Provider: {provider.title()}\n"
                         f"Estimated cost: ${estimated_cost:.2f}\n"
-                        f"Budget remaining: ${self.budget.get_status()['budget_remaining']:.2f}\n"
+                        f"Budget remaining: {budget_remaining_str}\n"
                         f"\nEnter '{self.omega_password}' to approve, or press Enter to deny: "
                     ),
                     approval_tier=approval_tier,
@@ -277,7 +283,7 @@ class UnifiedPermissionGate:
                     f"{'═' * 50}\n"
                     f"Provider: {provider.title()}\n"
                     f"Estimated cost: ${estimated_cost:.2f}\n"
-                    f"Budget remaining: ${self.budget.get_status()['budget_remaining']:.2f}\n"
+                    f"Budget remaining: {budget_remaining_str}\n"
                     f"\n⚠️  This call requires explicit approval.\n"
                     f"Enter '{self.omega_password}' to approve, or press Enter to deny: "
                 ),
@@ -328,7 +334,7 @@ class UnifiedPermissionGate:
             )
 
         # Layer 2: Budget (hard gate)
-        budget_allowed, budget_reason = self._check_budget(estimated_cost)
+        budget_allowed, budget_reason = await self._check_budget(estimated_cost)
         if not budget_allowed:
             logger.warning(f"Budget check blocked {provider}: {budget_reason}")
             return PermissionResult(
@@ -341,7 +347,7 @@ class UnifiedPermissionGate:
 
         # Layer 3: Runtime Approval (soft gate)
         approval_tier = self._determine_approval_tier(estimated_cost)
-        result = self._check_runtime_approval(provider, estimated_cost, approval_tier)
+        result = await self._check_runtime_approval(provider, estimated_cost, approval_tier)
 
         logger.info(
             f"Permission result for {provider}: approved={result.approved}, "
