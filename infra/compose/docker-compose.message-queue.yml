@@ -1,0 +1,108 @@
+# Message Queue - RabbitMQ for Async Event Bus
+#
+# This compose file adds RabbitMQ message broker for asynchronous task
+# distribution, event sourcing, and decoupled service communication.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.message-queue.yml up -d
+#
+# Architecture:
+#   RabbitMQ: Message broker with management UI
+#   Exchanges: Topic-based routing for different event types
+#   Queues: Durable queues with retry and dead-letter handling
+#   Patterns: Pub/Sub, Work Queues, RPC, Event Sourcing
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # RabbitMQ Message Broker
+  # ============================================================================
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    restart: unless-stopped
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-kitty}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-changeme}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-/}
+
+      # High availability settings
+      RABBITMQ_VM_MEMORY_HIGH_WATERMARK: 0.6  # 60% memory threshold
+      RABBITMQ_DISK_FREE_LIMIT: 2GB  # Minimum free disk space
+
+      # Performance tuning
+      RABBITMQ_CHANNEL_MAX: 2048
+      RABBITMQ_HEARTBEAT: 60
+
+      # Management plugin
+      RABBITMQ_MANAGEMENT_PATH_PREFIX: /rabbitmq
+
+      # Logging
+      RABBITMQ_LOGS: /var/log/rabbitmq/rabbitmq.log
+      RABBITMQ_SASL_LOGS: /var/log/rabbitmq/sasl.log
+
+      # Clustering (for future multi-node setup)
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-kitty_secret_cookie_change_me}
+    ports:
+      - "5672:5672"    # AMQP protocol
+      - "15672:15672"  # Management UI
+      - "15692:15692"  # Prometheus metrics
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - rabbitmq_logs:/var/log/rabbitmq
+      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    networks:
+      - kitty
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # RabbitMQ Prometheus Exporter (optional - already included in management plugin)
+  # Metrics available at http://localhost:15692/metrics
+
+  # ============================================================================
+  # Message Queue Consumer Services
+  # ============================================================================
+
+  # Event Processor Service
+  # Consumes events from various exchanges and processes them
+  event-processor:
+    build:
+      context: ../..
+      dockerfile: services/event-processor/Dockerfile
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: event-processor
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-kitty}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/${RABBITMQ_VHOST:-/}
+      POSTGRES_HOST: postgres-primary
+      POSTGRES_PORT: 5432
+      REDIS_URL: redis://redis-master:6379/0
+    depends_on:
+      - rabbitmq
+      - postgres
+      - redis
+    volumes:
+      - ../../services/common:/app/services/common:ro
+      - ../../services/event-processor:/app/services/event-processor:ro
+    networks:
+      - kitty
+    restart: unless-stopped
+    deploy:
+      replicas: 2  # Scale for parallel processing
+    profiles:
+      - with-event-processor  # Optional: Only start if explicitly enabled
+
+networks:
+  kitty:
+    external: true
+
+volumes:
+  rabbitmq_data:
+  rabbitmq_logs:
