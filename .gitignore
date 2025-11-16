@@ -21,6 +21,8 @@ docs/admin/
 .specify/
 .kitty_notes/
 tmp/
+AGENTS.md
+CLAUDE.md
 
 # Editor
 .vscode/
