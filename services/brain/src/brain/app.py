@@ -33,6 +33,7 @@ from .routes.query import router as query_router
 from .routes.memory import router as memory_router
 from .routes.usage import router as usage_router
 from .routes.conversations import router as conversations_router
+from .research.routes import router as research_router
 
 # Configure standard logging
 configure_logging()
@@ -56,11 +57,51 @@ async def lifespan(app: FastAPI):
     Lifespan context manager for brain service startup/shutdown.
 
     Handles:
+    - PostgreSQL connection pool and checkpointer for research sessions
+    - Research session manager initialization
     - Starting/stopping autonomous scheduler
     - Registering scheduled jobs
     """
     # Startup
     logger.info("Brain service starting up")
+
+    # Initialize research infrastructure if DATABASE_URL is configured
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        logger.info("Initializing research infrastructure")
+        try:
+            from brain.research.checkpoint import create_connection_pool, init_checkpointer
+            from brain.research.session_manager import ResearchSessionManager
+
+            # Create PostgreSQL connection pool
+            app.state.pg_pool = create_connection_pool(database_url)
+            logger.info("PostgreSQL connection pool created")
+
+            # Initialize checkpointer
+            app.state.checkpointer = init_checkpointer(app.state.pg_pool, auto_setup=True)
+            logger.info("PostgreSQL checkpointer initialized")
+
+            # Initialize session manager (graph will be built in Phase 5)
+            # For now, pass None for graph - it will be updated when graph is ready
+            app.state.research_graph = None
+            app.state.session_manager = ResearchSessionManager(
+                graph=app.state.research_graph,
+                checkpointer=app.state.checkpointer,
+                connection_pool=app.state.pg_pool
+            )
+            logger.info("Research session manager initialized")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize research infrastructure: {e}")
+            logger.warning("Research endpoints will not be available")
+            app.state.pg_pool = None
+            app.state.checkpointer = None
+            app.state.session_manager = None
+    else:
+        logger.warning("DATABASE_URL not configured, research infrastructure disabled")
+        app.state.pg_pool = None
+        app.state.checkpointer = None
+        app.state.session_manager = None
 
     # Start autonomous scheduler if enabled
     autonomous_enabled = getattr(settings, "autonomous_enabled", False)
@@ -136,6 +177,15 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Brain service shutting down")
 
+    # Cleanup research infrastructure
+    if hasattr(app.state, 'pg_pool') and app.state.pg_pool is not None:
+        logger.info("Closing PostgreSQL connection pool")
+        try:
+            await app.state.pg_pool.close()
+            logger.info("PostgreSQL connection pool closed")
+        except Exception as e:
+            logger.error(f"Error closing connection pool: {e}")
+
     if autonomous_enabled:
         logger.info("Stopping autonomous scheduler")
         scheduler = get_scheduler()
@@ -154,6 +204,7 @@ app.include_router(memory_router)
 app.include_router(usage_router)
 app.include_router(providers_router)
 app.include_router(metrics_router)
+app.include_router(research_router)  # Autonomous research sessions
 
 
 @app.get("/healthz")

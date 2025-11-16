@@ -11,7 +11,7 @@ import logging
 from typing import Optional, List
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends, Query
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends, Query, Request
 from pydantic import BaseModel, Field
 
 from brain.research.session_manager import (
@@ -94,10 +94,13 @@ class StatusResponse(BaseModel):
 # Dependency Injection
 # ============================================================================
 
-async def get_session_manager() -> ResearchSessionManager:
+async def get_session_manager(request: Request) -> ResearchSessionManager:
     """Get session manager from app state"""
-    from fastapi import Request
-    request = Request.scope
+    if not hasattr(request.app.state, 'session_manager') or request.app.state.session_manager is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Research service not available (DATABASE_URL not configured)"
+        )
     return request.app.state.session_manager
 
 
