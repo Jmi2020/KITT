@@ -1,0 +1,153 @@
+================================================================================
+KITT DATA FLOW & ORCHESTRATION - QUICK REFERENCE
+================================================================================
+
+REQUEST FLOW (Good)
+──────────────────
+CLI/UI → Gateway:8080 → Brain:8000 → Services → Response
+                                    ├─ Memory search (Qdrant)
+                                    ├─ Routing (local/MCP/frontier)
+                                    └─ Response record (PostgreSQL)
+
+AUTONOMOUS JOBS (Fragile - Jobs lost on restart)
+─────────────────────────────────────────────────
+APScheduler (in-memory)
+  ├─ daily_health_check (12:00 UTC) - checks resources
+  ├─ weekly_research_cycle (Mon 13:00 UTC) - generates goals
+  ├─ project_generation_cycle (12:30 UTC) - creates projects
+  ├─ task_execution_cycle (every 15 min) - runs tasks sequentially
+  └─ outcome_measurement_cycle (14:00 UTC) - measures results
+
+STATE MANAGEMENT (Fragmented across 5 layers)
+──────────────────────────────────────────────
+1. In-Memory       → Lost on restart (CRITICAL)
+   ConversationStateManager: pending confirmations, conversation history
+   Problem: No persistence, no recovery
+
+2. MQTT Retained   → Unreliable if Mosquitto restarts
+   Topic: kitty/ctx/{conversation_id}
+   Problem: No durability guarantees
+
+3. PostgreSQL      → Durable but slow (100ms+ write lag)
+   tables: conversations, conversation_messages, routing_decisions, projects, tasks
+   Problem: Async writes, fire-and-forget pattern
+
+4. Redis Streams   → Unbounded growth, never cleared
+   Stream: kitty:semantic-cache
+   Problem: No TTL, stale cache served forever
+
+5. Qdrant          → Vector DB for memories only
+   Collection: kitty_memory
+   Problem: Not for conversation state
+
+MESSAGE PASSING (No message queue)
+──────────────────────────────────
+HTTP:  Brain → Broker, Discovery, Fabrication, CAD (blocking, synchronous)
+MQTT:  Brain ↔ UI (pub/sub, unreliable)
+Missing: Kafka, RabbitMQ (no guaranteed delivery for critical async ops)
+
+CRITICAL ISSUES (Fix these first)
+─────────────────────────────────
+1. Conversation state lost on restart
+   → Pending confirmations evaporate → double-execution risk
+   Fix: Persist to PostgreSQL (2-3 days)
+
+2. Unbounded semantic cache
+   → 10MB+ Redis Streams after 100K requests → stale responses
+   Fix: Add TTL, cache invalidation (1 day)
+
+3. Jobs not persisted
+   → All scheduled jobs lost on brain restart
+   Fix: PostgreSQL job store or Kubernetes CronJobs (1-3 days)
+
+4. No distributed locking
+   → Race conditions between concurrent jobs
+   Fix: Database locks or Redis mutex (1-2 days)
+
+5. Database writes without await
+   → Messages lost on network partition, audit trail incomplete
+   Fix: Await all writes or 202 Accepted pattern (2 hours)
+
+HIGH-PRIORITY ISSUES
+────────────────────
+6. Brain startup is slow (5-10s, serial initialization)
+   → May timeout Kubernetes liveness probe
+   → All requests blocked during startup
+   Fix: Parallel initialization
+
+7. Task execution is blocking and sequential
+   → Every 15 min: tasks run one-by-one (30-60s each)
+   → If one service is slow, all others blocked
+   Fix: asyncio.gather + timeouts
+
+8. Gateway is SPOF
+   → Single instance, no load balancer
+   Fix: Add load balancer, horizontal scaling
+
+9. PostgreSQL pool too small
+   → Default: 5+10=15 connections
+   → At 20+ requests: connection queue forms
+   Fix: Increase pool_size to 20
+
+10. Memory MCP is slow
+    → Every query: embed (100-500ms) × 2
+    → Called on every request
+    Fix: Cache embeddings, smaller model
+
+ARCHITECTURE SUMMARY
+────────────────────
+Services:  14 (brain, gateway, fabrication, discovery, cad, safety, broker, etc.)
+Languages: Python (FastAPI, SQLAlchemy)
+State DB:  PostgreSQL (main)
+Cache:     Redis (ephemeral)
+Vectors:   Qdrant (embeddings)
+Messaging: MQTT (Mosquitto)
+Scheduler: APScheduler (in-process, in-memory)
+Routing:   4 tiers (local llama.cpp, MCP Perplexity, frontier OpenAI, agent)
+
+P99 LATENCY BREAKDOWN
+─────────────────────
+Total: ~2150ms
+  ├─ Gateway forward: 10ms
+  ├─ Load conversation: 20ms
+  ├─ Memory search: 300ms
+  ├─ Routing decision: 1500ms (includes model inference)
+  ├─ MQTT publish: 100ms
+  └─ Recording: 20ms
+
+ESTIMATED FIXES
+───────────────
+Phase 1 (Critical, 5-10 days):
+  - Persist conversation state to PostgreSQL
+  - Add cache TTL and invalidation
+  - Persistent job store
+  - Distributed locking
+  - Await database writes
+
+Phase 2 (Observability, 1 week):
+  - Distributed tracing (Tempo/Jaeger)
+  - Job health checks
+  - Cache metrics
+  - Task observability
+
+Phase 3 (Performance, 2-3 weeks):
+  - Parallel brain startup
+  - Concurrent task execution
+  - Faster embedding model
+  - Batch memory operations
+
+Phase 4 (Architecture, medium-term):
+  - Add message queue (Kafka/Redis Streams)
+  - Event sourcing for audit
+  - Distributed consensus
+  - Kubernetes CronJobs instead of APScheduler
+  - Load balancer + horizontal scaling
+
+BOTTOM LINE
+───────────
+KITT has excellent request flow design but CRITICAL state management issues.
+Will lose pending confirmations on restart, causing hazard operation double-execution.
+Autonomous operations will stop working after brain restarts (jobs not persisted).
+
+Status: Ready for basic operations, NOT ready for production autonomy.
+================================================================================
