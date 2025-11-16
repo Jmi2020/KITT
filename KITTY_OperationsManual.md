@@ -1443,3 +1443,38 @@ For additional support:
 **Last Updated**: 2025-11-10
 **Version**: 1.0.0
 **Maintainer**: KITTY Development Team
+
+---
+
+## Automated Print Execution - Operations Guide
+
+### Setup Printer Drivers (One-Time)
+
+1. **Copy printer configuration**:
+```bash
+cp services/fabrication/printer_config.example.yaml services/fabrication/printer_config.yaml
+chmod 600 services/fabrication/printer_config.yaml
+```
+
+2. **Configure each printer** in `printer_config.yaml`:
+   - Bamboo H2D: MQTT broker, device_id, access_code
+   - Elegoo Giga: Moonraker URL (http://elegoo-giga.local:7125)
+   - Snapmaker Artisan: Moonraker URL (http://snapmaker-artisan.local:7125)
+
+3. **Test connectivity**:
+```bash
+# Test Moonraker
+curl http://elegoo-giga.local:7125/server/info
+
+# Test Bamboo MQTT
+mosquitto_sub -h bamboo-h2d.local -u bblp -P <access_code> -t "device/<device_id>/report"
+```
+
+### Automated Printing Workflow
+
+**Submit Job** → **Queue Optimization** → **Schedule** → **Execute** → **Monitor** → **Complete**
+
+All steps automated - zero manual intervention required!
+
+**Documentation**: See `docs/PRINTER_DRIVERS.md` for complete setup guide.
+
