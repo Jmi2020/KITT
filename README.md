@@ -163,19 +163,24 @@ pip install -e services/cli/
 kitty-cli shell
 
 # Inside the shell:
-> /help                        # Show available commands
-> /verbosity 3                 # Set response detail (1-5)
-> /cad Create a hex box        # Generate CAD model
-> /list                        # Show cached artifacts
-> /queue 1 printer_01          # Queue artifact to printer
-> /remember Ordered more PLA   # Save a long-term note
-> /memories PLA                # Recall saved notes (optional query)
-> /vision gandalf rubber duck  # Search & store reference images
-> /images                      # List stored reference image links
-> /generate futuristic drone   # Generate image with Stable Diffusion
-> /usage 5                     # Monitor paid provider usage (refresh every 5s)
-> /reset                       # Start a fresh conversation/session
-> /exit                        # Exit shell
+> /help                              # Show available commands
+> /research <query>                  # Autonomous research with real-time streaming
+> /sessions [limit]                  # List all research sessions
+> /session <id>                      # View detailed session info and metrics
+> /stream <id>                       # Stream progress of active research
+> /verbosity 3                       # Set response detail (1-5)
+> /cad Create a hex box              # Generate CAD model
+> /list                              # Show cached artifacts
+> /queue 1 printer_01                # Queue artifact to printer
+> /remember Ordered more PLA         # Save a long-term note
+> /memories PLA                      # Recall saved notes (optional query)
+> /vision gandalf rubber duck        # Search & store reference images
+> /images                            # List stored reference image links
+> /generate futuristic drone         # Generate image with Stable Diffusion
+> /collective council k=3 Compare... # Multi-agent collaboration
+> /usage 5                           # Monitor paid provider usage (refresh every 5s)
+> /reset                             # Start a fresh conversation/session
+> /exit                              # Exit shell
 
 # Quick one-off queries
 kitty-cli say "What printers are online?"
@@ -193,6 +198,121 @@ kitty-cli usage --refresh 5
 ```
 
 The CLI prints a gallery link (default `http://localhost:4173/?view=vision&session=...&query=...`) whenever image selection would help. Override the target with `KITTY_UI_BASE` if your React UI runs elsewhere.
+
+### Autonomous Research Pipeline
+
+KITTY includes a **5-phase autonomous research system** that combines multi-strategy exploration, multi-layer validation, multi-model coordination, quality metrics, and intelligent stopping criteria.
+
+```bash
+# Launch interactive shell
+kitty-cli shell
+
+# Start autonomous research with real-time streaming
+> /research latest advances in multi-material 3D printing
+
+# Live progress appears with beautiful visualization:
+┌─ Research in Progress... ────────────────────────────┐
+│ Current Node: execute_iteration                      │
+│ Iteration: 5/15                                       │
+│ Findings: 18                                          │
+│ Saturation: 🟢 No (novelty: 28%)                     │
+└───────────────────────────────────────────────────────┘
+
+# List all research sessions
+> /sessions
+
+# View detailed metrics for a specific session
+> /session abc123def456
+
+# Resume streaming an active session
+> /stream abc123def456
+```
+
+**Research Pipeline Features:**
+
+1. **Multi-Strategy Research**
+   - `breadth_first`: Cast wide net across many sources
+   - `depth_first`: Deep dive into specific topics
+   - `task_decomposition`: Break complex queries into subtasks
+   - `hybrid`: Adaptive combination (default)
+
+2. **Multi-Layer Validation**
+   - Schema validation for tool outputs
+   - Format validation (JSON, citations, etc.)
+   - Quality validation (hallucination detection, claim support)
+   - Chain validation across multiple layers
+
+3. **Multi-Model Coordination**
+   - **Local models** (llama.cpp): Llama 3.1 8B Q4, Llama 3.1 70B F16, Gemma 2 27B, Hermes 3 70B
+   - **External models**: GPT-5, Claude Sonnet 4.5
+   - **5-tier consultation**: trivial → low → medium → high → critical
+   - **Budget-aware**: $2/session max, 10 external calls limit
+   - **Mixture-of-Agents debate**: Multi-model consensus for critical decisions
+
+4. **Quality Metrics & Stopping**
+   - **RAGAS metrics**: Faithfulness, relevancy, precision, recall
+   - **Confidence scoring**: 6-factor analysis (source quality, diversity, claim support, model agreement, citations, recency)
+   - **Saturation detection**: Novelty rate tracking, diminishing returns detection
+   - **Knowledge gap detection**: Critical gaps identified for targeted exploration
+   - **Multi-signal stopping**: Quality threshold + saturation + budget + gaps resolved
+
+5. **Session Management**
+   - Full state checkpointing via PostgreSQL + LangGraph
+   - Resume from any point after failure
+   - WebSocket streaming for real-time progress
+   - Comprehensive metrics dashboard
+
+**Example Workflow:**
+
+```bash
+# Research with default settings (hybrid strategy, $2 budget)
+> /research best practices for PETG outdoor use
+
+# System automatically:
+# 1. Selects hybrid strategy
+# 2. Executes tools in parallel waves (tool dependency graph)
+# 3. Validates outputs through multi-layer pipeline
+# 4. Consults models based on task complexity (tier-based)
+# 5. Computes quality metrics after each iteration
+# 6. Detects saturation and knowledge gaps
+# 7. Stops when quality thresholds met + gaps resolved
+# 8. Synthesizes final answer
+
+# View sessions
+> /sessions 20
+╭─────────────────── Research Sessions ───────────────────╮
+│ #  Session ID      Query          Status    Strategy  ... │
+│ 1  abc123...       best practice  completed hybrid    ... │
+│ 2  def456...       PETG vs ABS    active    breadth   ... │
+╰──────────────────────────────────────────────────────────╯
+
+# Detailed view shows:
+> /session abc123def456
+- Strategy: hybrid (adaptive)
+- Iterations: 8/15 (stopped early - quality met)
+- Budget: $0.15 / $1.85 remaining
+- External calls: 2/10 used
+- Findings: 24 (avg confidence: 0.82)
+- Quality score: 0.91 (target: 0.70)
+- Saturation: Yes (novelty: 12% < 15% threshold)
+- Knowledge gaps: 0 critical gaps remaining
+- Models used: llama3.1:8b-q4, gemma2:27b, claude-sonnet-4-5
+
+Final Answer:
+╭────────────────────────────────────────────────────╮
+│ Based on 24 validated sources with 82% confidence │
+│ ...comprehensive synthesized answer...             │
+╰────────────────────────────────────────────────────╯
+```
+
+**Benefits:**
+
+- **Cost-effective**: Local models handle 70%+ of work, external models only for complex/critical tasks
+- **High quality**: Multi-layer validation catches hallucinations, RAGAS ensures factual accuracy
+- **Intelligent stopping**: Doesn't waste budget on saturated exploration
+- **Transparent**: Real-time streaming shows exactly what's happening
+- **Fault-tolerant**: Full checkpointing, resume from any failure point
+- **Budget-aware**: Hard limits prevent runaway costs ($2/session ceiling)
 
 ### Vision Web Gallery
 
@@ -1412,6 +1532,19 @@ curl -X POST http://localhost:8080/api/voice/transcript \
 - [x] Outcome tracking and effectiveness measurement
 - [x] Knowledge base integration
 - [x] Budget-aware autonomous operation
+
+### Phase 3.5: Autonomous Research Pipeline ✅ COMPLETE
+- [x] **Phase 1**: Database schema, checkpointing (PostgreSQL + LangGraph)
+- [x] **Phase 2**: Tool orchestration (dependency graph, wave execution, multi-layer validation, multi-strategy agents)
+- [x] **Phase 3**: Model coordination (7-model registry, 5-tier consultation, budget management, mixture-of-agents debate)
+- [x] **Phase 4**: Quality metrics (RAGAS, confidence scoring, saturation detection, knowledge gap analysis)
+- [x] **Phase 5**: Complete integration (LangGraph state machine, WebSocket streaming, CLI commands)
+- [x] Multi-strategy research: breadth-first, depth-first, task decomposition, hybrid
+- [x] Multi-layer validation pipeline: schema, format, quality, hallucination detection
+- [x] Multi-model coordination: Local (llama.cpp) + external (GPT-5, Claude Sonnet 4.5)
+- [x] Intelligent stopping criteria: quality thresholds, saturation, budget limits, knowledge gaps
+- [x] Real-time streaming with beautiful CLI visualization
+- [x] Full session management: list, view details, resume from checkpoint
 
 ### Phase 4: Fabrication Intelligence 🚧 IN PROGRESS
 - [x] I/O Control dashboard (health checks, presets, dependency resolution, tool availability)
