@@ -16,8 +16,9 @@ IMAGE_SERVICE_HEALTH_ENDPOINT="$IMAGE_SERVICE_URL"
 cd "$PROJECT_ROOT"
 
 # Docker compose helper (always run from infra/compose)
+# Includes message queue (P2 #15) by default
 compose_cmd() {
-    (cd "$COMPOSE_DIR" && docker compose "$@")
+    (cd "$COMPOSE_DIR" && docker compose -f docker-compose.yml -f docker-compose.message-queue.yml "$@")
 }
 
 is_images_service_running() {
@@ -258,7 +259,7 @@ else
 fi
 
 # Check critical services
-CRITICAL_SERVICES=("brain" "gateway" "postgres" "redis")
+CRITICAL_SERVICES=("brain" "gateway" "postgres" "redis" "rabbitmq")
 for service in "${CRITICAL_SERVICES[@]}"; do
     if compose_cmd ps | grep -q "$service.*Up"; then
         success "$service service healthy"
@@ -322,6 +323,7 @@ echo "  Research UI:   http://localhost:8080/research  (P1 #2)"
 echo "  I/O Control:   http://localhost:8080/io-control  (P1 #3)"
 echo "  Grafana:       http://localhost:3000"
 echo "  Prometheus:    http://localhost:9090"
+echo "  RabbitMQ:      http://localhost:15672/rabbitmq/  (kitty/changeme)"
 echo ""
 echo "P0/P1 Features:"
 echo "  ✅ Conversation state persistence (P0 #1)"
@@ -334,6 +336,13 @@ echo "  ✅ Research Web UI (P1 #2)"
 echo "  ✅ I/O Control Dashboard (P1 #3)"
 echo "  ✅ Gateway Load Balancer (P1 #4)"
 echo "  ✅ CAD AI Cycling Docs (P1 #5)"
+echo ""
+echo "P2 Features:"
+echo "  ✅ Material Inventory Dashboard (P2 #11)"
+echo "  ✅ Print Intelligence Dashboard (P2 #12)"
+echo "  ✅ Vision Service Dashboard (P2 #13)"
+echo "  ✅ Database Clustering Ready (P2 #14)"
+echo "  ✅ RabbitMQ Message Queue (P2 #15) - http://localhost:15672/rabbitmq/"
 echo ""
 echo "Logs:"
 echo "  Startup:       $STARTUP_LOG"

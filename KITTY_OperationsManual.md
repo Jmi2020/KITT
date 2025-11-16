@@ -22,32 +22,27 @@
 
 ## Quick Reference
 
-### Startup (Validated - Recommended)
+### Startup (Recommended)
 
 ```bash
 cd /Users/Shared/Coding/KITT
-./ops/scripts/start-kitty-validated.sh
+./ops/scripts/start-all.sh
 ```
 
 **What it does**: Starts entire KITTY stack with health checks and sequential validation.
-
-### Startup (Quick - No Validation)
-
-```bash
-cd /Users/Shared/Coding/KITT
-./ops/scripts/start-kitty.sh
-```
-
-**What it does**: Starts all services quickly without validation checks.
+- Starts llama.cpp servers (Q4, F16, summary, vision)
+- Starts all Docker services (brain, gateway, fabrication, RabbitMQ, etc.)
+- Validates health of critical services
+- Shows startup summary with URLs
 
 ### Shutdown
 
 ```bash
 cd /Users/Shared/Coding/KITT
-./ops/scripts/stop-kitty.sh
+./ops/scripts/stop-all.sh
 ```
 
-**What it does**: Gracefully stops all KITTY services (llama.cpp servers, Docker containers, images service).
+**What it does**: Gracefully stops all KITTY services (llama.cpp servers, Docker containers including RabbitMQ, images service).
 
 ### Verify Running Services
 

@@ -50,9 +50,9 @@ KITTY uses a layered architecture that must start in a specific order:
    └─ Voice interface
 ```
 
-**The Easy Way** - `./ops/scripts/start-kitty-validated.sh` handles this entire sequence automatically:
+**The Easy Way** - `./ops/scripts/start-all.sh` handles this entire sequence automatically:
 1. Checks for running llama.cpp servers (or starts them if configured in `.env`)
-2. Starts all Docker services
+2. Starts all Docker services (including RabbitMQ message queue)
 3. Validates health of each component
 4. Shows you what's ready and where to access it
 
@@ -72,12 +72,12 @@ cp .env.example .env
 #    LLAMACPP_F16_MODEL=llama-3-70b/Llama-3.3-70B-Instruct-F16/...gguf
 
 # 3. Start everything with validated startup script
-./ops/scripts/start-kitty-validated.sh
+./ops/scripts/start-all.sh
 # This automatically:
 # ✓ Starts Q4 llama.cpp server (port 8083)
 # ✓ Starts F16 llama.cpp server (port 8082)
 # ✓ Waits for both to be healthy
-# ✓ Starts all Docker services
+# ✓ Starts all Docker services (including RabbitMQ)
 # ✓ Validates each service
 # ✓ Shows you access points and log locations
 ```
@@ -124,13 +124,10 @@ docker compose -f infra/compose/docker-compose.yml up -d --build
 
 ```bash
 # Start llama.cpp + all Docker services (validated startup)
-./ops/scripts/start-kitty-validated.sh
-
-# Quick start (legacy script, less validation)
-./ops/scripts/start-kitty.sh
+./ops/scripts/start-all.sh
 
 # Stop everything
-./ops/scripts/stop-kitty.sh
+./ops/scripts/stop-all.sh
 
 # Only stop llama.cpp (leave Docker stack alone)
 ./ops/scripts/stop-llamacpp.sh
@@ -1027,7 +1024,7 @@ huggingface-cli download Qwen/Qwen2.5-Coder-32B-Instruct-GGUF \
 alembic -c services/common/alembic.ini upgrade head
 ```
 
-That's it! KITTY is now running. Press `Ctrl+C` to stop, or run `./ops/scripts/stop-kitty.sh`.
+That's it! KITTY is now running. Press `Ctrl+C` to stop, or run `./ops/scripts/stop-all.sh`.
 
 ---
 

@@ -13,8 +13,10 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 COMPOSE_DIR="$PROJECT_ROOT/infra/compose"
 cd "$PROJECT_ROOT"
 
+# Docker compose helper (always run from infra/compose)
+# Includes message queue (P2 #15) for proper shutdown
 compose_cmd() {
-    (cd "$COMPOSE_DIR" && docker compose "$@")
+    (cd "$COMPOSE_DIR" && docker compose -f docker-compose.yml -f docker-compose.message-queue.yml "$@")
 }
 
 # Color codes
