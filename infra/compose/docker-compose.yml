@@ -20,6 +20,7 @@ services:
     environment:
       <<: *service-env
       SERVICE_NAME: brain
+      DATABASE_URL: postgresql://kitty:${POSTGRES_PASSWORD:-changeme}@postgres:5432/kitty
       QDRANT_URL: http://qdrant:6333
       MEM0_MCP_URL: http://mem0-mcp:8765
       CAD_SERVICE_URL: http://cad:8200
