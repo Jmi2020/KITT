@@ -450,6 +450,10 @@ class CommandCompleter(Completer):
         self.commands = {
             "help": "Show this help message",
             "verbosity": "Set response detail level (1-5)",
+            "research": "Start autonomous research with streaming",
+            "sessions": "List all research sessions",
+            "session": "View detailed session info and metrics",
+            "stream": "Stream progress of active research session",
             "cad": "Generate CAD model from description",
             "generate": "Generate image with Stable Diffusion",
             "list": "List cached CAD artifacts",
@@ -1594,6 +1598,261 @@ def select_image(
     console.print(f"\n[dim]Use this URL with Tripo for image-to-3D conversion")
 
 
+def _format_research_sessions_table(sessions: List[Dict[str, Any]]) -> Table:
+    """Format research sessions as a rich table."""
+    table = Table(title="Research Sessions", show_lines=False, header_style="bold cyan")
+    table.add_column("#", justify="right", style="cyan")
+    table.add_column("Session ID", style="green")
+    table.add_column("Query", overflow="fold")
+    table.add_column("Status")
+    table.add_column("Strategy")
+    table.add_column("Iterations", justify="right")
+    table.add_column("Findings", justify="right")
+    table.add_column("Budget", justify="right")
+    table.add_column("Created")
+
+    for idx, session in enumerate(sessions, 1):
+        session_id = session.get("session_id", "")[:12] + "..."
+        query = session.get("query", "")[:40]
+        status = session.get("status", "unknown")
+        strategy = session.get("strategy", "N/A")
+        iterations = str(session.get("current_iteration", 0))
+        findings_count = str(len(session.get("findings", [])))
+        budget_used = f"${float(session.get('total_cost_usd', 0)):.2f}"
+        created = _format_history_time(session.get("created_at"))
+
+        # Color status
+        status_color = {
+            "active": "green",
+            "completed": "blue",
+            "failed": "red",
+            "paused": "yellow"
+        }.get(status, "white")
+
+        table.add_row(
+            str(idx),
+            session_id,
+            query,
+            f"[{status_color}]{status}[/{status_color}]",
+            strategy,
+            iterations,
+            findings_count,
+            budget_used,
+            created
+        )
+
+    return table
+
+
+def _display_session_detail(session_id: str) -> None:
+    """Display detailed research session information."""
+    try:
+        data = _get_json(f"{API_BASE}/api/research/sessions/{session_id}")
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to fetch session: {exc}")
+        raise typer.Exit(1) from exc
+
+    session = data.get("session", {})
+    if not session:
+        console.print(f"[red]Session {session_id} not found")
+        raise typer.Exit(1)
+
+    # Header
+    console.print(Panel.fit(
+        f"[bold cyan]Research Session: {session_id[:16]}...[/bold cyan]\n"
+        f"[dim]{session.get('query', 'No query')}[/dim]",
+        border_style="cyan"
+    ))
+
+    # Status panel
+    status_table = Table.grid(padding=(0, 2))
+    status_table.add_column(style="cyan")
+    status_table.add_column()
+
+    status_table.add_row("Status:", session.get("status", "unknown"))
+    status_table.add_row("Strategy:", session.get("strategy", "N/A"))
+    status_table.add_row("Iteration:", f"{session.get('current_iteration', 0)}/{session.get('config', {}).get('max_iterations', 15)}")
+    status_table.add_row("Budget:", f"${float(session.get('total_cost_usd', 0)):.2f} / ${float(session.get('budget_remaining', 0)):.2f} remaining")
+    status_table.add_row("Ext. Calls:", f"{session.get('external_calls_used', 0)}/{session.get('external_calls_remaining', 0) + session.get('external_calls_used', 0)}")
+
+    console.print(Panel(status_table, title="[bold]Session Info", border_style="green"))
+
+    # Findings
+    findings = session.get("findings", [])
+    if findings:
+        findings_table = Table(title=f"Findings ({len(findings)})", show_lines=True, header_style="bold cyan")
+        findings_table.add_column("Content", overflow="fold")
+        findings_table.add_column("Confidence", justify="right")
+
+        for finding in findings[:10]:  # Show first 10
+            content = finding.get("content", "")[:100]
+            confidence = finding.get("confidence", 0)
+            findings_table.add_row(content, f"{confidence:.2f}")
+
+        console.print(findings_table)
+        if len(findings) > 10:
+            console.print(f"[dim]...and {len(findings) - 10} more findings[/dim]\n")
+    else:
+        console.print("[yellow]No findings yet[/yellow]\n")
+
+    # Quality metrics
+    quality_scores = session.get("quality_scores", [])
+    if quality_scores:
+        latest_quality = quality_scores[-1]
+        console.print(f"[bold]Latest Quality Score:[/bold] {latest_quality:.2f}")
+
+    # Saturation
+    saturation = session.get("saturation_status")
+    if saturation:
+        is_saturated = saturation.get("is_saturated", False)
+        novelty_rate = saturation.get("novelty_rate", 0)
+        sat_color = "yellow" if is_saturated else "green"
+        console.print(f"[bold]Saturation:[/bold] [{sat_color}]{'Yes' if is_saturated else 'No'}[/{sat_color}] (novelty: {novelty_rate:.2%})")
+
+    # Knowledge gaps
+    gaps = session.get("knowledge_gaps", [])
+    if gaps:
+        console.print(f"\n[bold yellow]Knowledge Gaps ({len(gaps)}):[/bold yellow]")
+        for gap in gaps[:5]:
+            console.print(f"  - {gap.get('description', 'Unknown')}")
+
+    # Models used
+    models = session.get("models_used", [])
+    if models:
+        console.print(f"\n[bold]Models Used:[/bold] {', '.join(models)}")
+
+    # Final answer
+    final_answer = session.get("final_answer")
+    if final_answer:
+        console.print(Panel(
+            final_answer,
+            title="[bold green]Final Answer",
+            border_style="green"
+        ))
+
+
+def _stream_research_progress(session_id: str, user_id: str, query: str) -> None:
+    """Stream research progress with real-time updates."""
+    import json
+    import asyncio
+    import websockets
+
+    console.print(Panel.fit(
+        f"[bold cyan]Starting Autonomous Research[/bold cyan]\n"
+        f"[dim]{query}[/dim]",
+        border_style="cyan"
+    ))
+
+    async def stream():
+        # Use WebSocket to stream research progress
+        ws_url = f"ws://{API_BASE.replace('http://', '').replace('https://', '')}/api/research/sessions/{session_id}/stream"
+
+        try:
+            async with websockets.connect(ws_url, timeout=CLI_TIMEOUT) as websocket:
+                with Live(console=console, refresh_per_second=2) as live:
+                    current_iteration = 0
+                    findings_count = 0
+
+                    async for message in websocket:
+                        data = json.loads(message)
+                        msg_type = data.get("type")
+
+                        if msg_type == "progress":
+                            # Update live display
+                            node = data.get("node", "")
+                            iteration = data.get("iteration", 0)
+                            findings_count = data.get("findings_count", 0)
+                            saturation = data.get("saturation", {})
+
+                            if iteration > current_iteration:
+                                current_iteration = iteration
+
+                            # Build progress table
+                            progress_table = Table.grid(padding=(0, 2))
+                            progress_table.add_column(style="cyan")
+                            progress_table.add_column()
+
+                            progress_table.add_row("Current Node:", f"[green]{node}[/green]")
+                            progress_table.add_row("Iteration:", f"{iteration}")
+                            progress_table.add_row("Findings:", f"{findings_count}")
+
+                            if saturation:
+                                is_saturated = saturation.get("is_saturated", False)
+                                sat_emoji = "🟡" if is_saturated else "🟢"
+                                progress_table.add_row("Saturation:", f"{sat_emoji} {'Yes' if is_saturated else 'No'}")
+
+                            panel = Panel(
+                                progress_table,
+                                title=f"[bold cyan]Research in Progress...",
+                                border_style="cyan"
+                            )
+                            live.update(panel)
+
+                        elif msg_type == "complete":
+                            console.print("\n[bold green]✓ Research Complete![/bold green]")
+                            console.print(f"[dim]{data.get('message', '')}[/dim]\n")
+                            break
+
+                        elif msg_type == "error":
+                            console.print(f"\n[bold red]✗ Research Failed[/bold red]")
+                            console.print(f"[red]{data.get('error', 'Unknown error')}[/red]\n")
+                            break
+
+        except Exception as exc:
+            console.print(f"\n[red]Streaming error: {exc}[/red]")
+            console.print(f"[yellow]Session is running in background. Check with /session {session_id}[/yellow]\n")
+
+    # Run async stream
+    try:
+        asyncio.run(stream())
+    except Exception as exc:
+        console.print(f"[red]Failed to stream: {exc}[/red]")
+        console.print(f"[yellow]Session may still be running. Check with /session {session_id}[/yellow]\n")
+
+
+def _start_research(query: str, config: Optional[Dict[str, Any]] = None) -> str:
+    """Start autonomous research session."""
+    payload = {
+        "user_id": state.user_id,
+        "query": query,
+        "config": config or {}
+    }
+
+    try:
+        data = _post_json(f"{API_BASE}/api/research/sessions", payload)
+        session_id = data.get("session_id")
+        if not session_id:
+            console.print("[red]Failed to create research session")
+            raise typer.Exit(1)
+
+        console.print(f"[green]Created session: {session_id[:16]}...[/green]")
+        return session_id
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to start research: {exc}")
+        raise typer.Exit(1) from exc
+
+
+def _list_research_sessions(limit: int = 10) -> None:
+    """List recent research sessions."""
+    try:
+        data = _get_json(f"{API_BASE}/api/research/sessions?limit={limit}&user_id={state.user_id}")
+        sessions = data.get("sessions", [])
+
+        if not sessions:
+            console.print("[yellow]No research sessions found[/yellow]")
+            console.print("[dim]Start one with /research <query>[/dim]\n")
+            return
+
+        table = _format_research_sessions_table(sessions)
+        console.print(table)
+        console.print(f"\n[dim]View details with /session <id>[/dim]")
+        console.print(f"[dim]Stream progress with /stream <id>[/dim]\n")
+
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to list sessions: {exc}")
+        raise typer.Exit(1) from exc
+
+
 @app.command()
 def autonomy(
     action: str = typer.Argument(..., help="Action: list, approve, reject, status"),
@@ -1798,27 +2057,37 @@ def shell(
     ))
 
     # Commands help
-    console.print("\n[bold]Commands:[/bold]")
+    console.print("\n[bold]Research Pipeline:[/bold]")
+    console.print("  [cyan]/research <query>[/cyan]   - Start autonomous research with real-time streaming")
+    console.print("  [cyan]/sessions [limit][/cyan]   - List all research sessions")
+    console.print("  [cyan]/session <id>[/cyan]       - View detailed session info and metrics")
+    console.print("  [cyan]/stream <id>[/cyan]        - Stream progress of active research session")
+
+    console.print("\n[bold]Conversational AI:[/bold]")
     console.print("  [cyan]/verbosity <1-5>[/cyan]  - Set response detail level")
     console.print("  [cyan]/provider <name>[/cyan]  - Select LLM provider (openai, anthropic, mistral, gemini, local)")
     console.print("  [cyan]/model <name>[/cyan]     - Select specific model (auto-detects provider)")
     console.print("  [cyan]/providers[/cyan]        - List available providers and their status")
+    console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace (no args toggles)")
+    console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode (tool orchestration)")
+    console.print("  [cyan]/collective <pattern> <task>[/cyan] - Multi-agent collaboration")
+    console.print("      [dim]Patterns: council [k=N], debate, pipeline[/dim]")
+    console.print("      [dim]Example: /collective council k=3 Compare PETG vs ABS[/dim]")
+
+    console.print("\n[bold]Fabrication:[/bold]")
     console.print("  [cyan]/cad <prompt>[/cyan]     - Generate CAD models")
     console.print("  [cyan]/generate <prompt>[/cyan] - Generate image with Stable Diffusion")
     console.print("  [cyan]/list[/cyan]             - Show cached artifacts")
     console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact to printer")
     console.print("  [cyan]/vision <query>[/cyan]   - Search & store reference images")
     console.print("  [cyan]/images[/cyan]           - List stored reference images")
-    console.print("  [cyan]/usage [seconds][/cyan]  - Show usage dashboard (auto-refresh optional)")
-    console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace (no args toggles)")
-    console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode (tool orchestration)")
-    console.print("  [cyan]/history [limit] [filter][/cyan] - Browse and resume earlier sessions")
-    console.print("  [cyan]/collective <pattern> <task>[/cyan] - Multi-agent collaboration")
-    console.print("      [dim]Patterns: council [k=N], debate, pipeline[/dim]")
-    console.print("      [dim]Example: /collective council k=3 Compare PETG vs ABS[/dim]")
+
+    console.print("\n[bold]Memory & Sessions:[/bold]")
     console.print("  [cyan]/remember <note>[/cyan]  - Store a long-term memory note")
     console.print("  [cyan]/memories [query][/cyan] - Search saved memories")
+    console.print("  [cyan]/history [limit] [filter][/cyan] - Browse and resume earlier sessions")
     console.print("  [cyan]/reset[/cyan]            - Start a new conversation session")
+    console.print("  [cyan]/usage [seconds][/cyan]  - Show usage dashboard (auto-refresh optional)")
     console.print("  [cyan]/help[/cyan]             - Show this help")
     console.print("  [cyan]/exit[/cyan]             - Exit shell")
 
@@ -1854,32 +2123,92 @@ def shell(
                 break
 
             if cmd == "help":
-                console.print("\n[bold]Available Commands:[/bold]")
+                console.print("\n[bold]Research Pipeline:[/bold]")
+                console.print("  [cyan]/research <query>[/cyan]   - Start autonomous research with real-time streaming")
+                console.print("  [cyan]/sessions [limit][/cyan]   - List all research sessions")
+                console.print("  [cyan]/session <id>[/cyan]       - View detailed session info and metrics")
+                console.print("  [cyan]/stream <id>[/cyan]        - Stream progress of active research session")
+
+                console.print("\n[bold]Conversational AI:[/bold]")
                 console.print("  [cyan]/verbosity <1-5>[/cyan]  - Set verbosity (1=terse, 5=exhaustive)")
                 console.print("  [cyan]/provider <name>[/cyan]  - Select LLM provider (openai, anthropic, mistral, gemini, local)")
                 console.print("  [cyan]/model <name>[/cyan]     - Select specific model (gpt-4o-mini, claude-3-5-haiku, etc)")
                 console.print("  [cyan]/providers[/cyan]        - List all available providers and status")
+                console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace view")
+                console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode")
+                console.print("  [cyan]/collective <pattern> <task>[/cyan] - Multi-agent collaboration")
+                console.print("      [dim]Patterns: council [k=3], debate, pipeline[/dim]")
+                console.print("      [dim]Example: /collective council k=3 Compare PETG vs ABS[/dim]")
+
+                console.print("\n[bold]Fabrication:[/bold]")
                 console.print("  [cyan]/cad <prompt>[/cyan]     - Generate CAD model from description")
                 console.print("  [cyan]/generate <prompt>[/cyan] - Generate image with Stable Diffusion")
                 console.print("  [cyan]/list[/cyan]             - List cached CAD artifacts")
                 console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact #idx to printer")
                 console.print("  [cyan]/vision <query>[/cyan]   - Search/select reference images")
                 console.print("  [cyan]/images[/cyan]           - Show stored reference images")
-                console.print(
-                    "  [cyan]/usage [seconds][/cyan]  - Show provider usage dashboard"
-                )
-                console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace view")
-                console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode")
-                console.print("  [cyan]/history [limit] [filter][/cyan] - Browse & resume sessions")
-                console.print("  [cyan]/collective <pattern> <task>[/cyan] - Multi-agent collaboration")
-                console.print("      [dim]Patterns: council [k=3], debate, pipeline[/dim]")
-                console.print("      [dim]Example: /collective council k=3 Compare PETG vs ABS[/dim]")
+
+                console.print("\n[bold]Memory & Sessions:[/bold]")
                 console.print("  [cyan]/remember <note>[/cyan]  - Store a long-term memory note")
                 console.print("  [cyan]/memories [query][/cyan] - Search saved memories")
+                console.print("  [cyan]/history [limit] [filter][/cyan] - Browse & resume sessions")
                 console.print("  [cyan]/reset[/cyan]            - Start a new conversation session")
+                console.print("  [cyan]/usage [seconds][/cyan]  - Show provider usage dashboard")
                 console.print("  [cyan]/help[/cyan]             - Show this help message")
                 console.print("  [cyan]/exit[/cyan]             - Exit interactive shell")
                 console.print("\n[dim]Type any message to chat with KITTY[/dim]\n")
+                continue
+
+            if cmd == "research":
+                if not args:
+                    console.print("[yellow]Usage: /research <query>")
+                    console.print("[dim]Example: /research latest advances in 3D printing materials[/dim]")
+                    continue
+
+                query = " ".join(args)
+                # Start research session
+                session_id = _start_research(query)
+                # Stream progress
+                _stream_research_progress(session_id, state.user_id, query)
+                # Show final results
+                console.print(f"\n[dim]View details with /session {session_id[:16]}[/dim]\n")
+                continue
+
+            if cmd == "sessions":
+                limit = 10
+                if args and args[0].isdigit():
+                    try:
+                        limit = int(args[0])
+                    except ValueError:
+                        pass
+                _list_research_sessions(limit=limit)
+                continue
+
+            if cmd == "session":
+                if not args:
+                    console.print("[yellow]Usage: /session <session_id>")
+                    console.print("[dim]List sessions with /sessions[/dim]")
+                    continue
+
+                session_id = args[0]
+                _display_session_detail(session_id)
+                continue
+
+            if cmd == "stream":
+                if not args:
+                    console.print("[yellow]Usage: /stream <session_id>")
+                    console.print("[dim]Stream real-time progress of an active research session[/dim]")
+                    continue
+
+                session_id = args[0]
+                # Need to get session info for query
+                try:
+                    data = _get_json(f"{API_BASE}/api/research/sessions/{session_id}")
+                    session = data.get("session", {})
+                    query = session.get("query", "Research session")
+                    _stream_research_progress(session_id, state.user_id, query)
+                except Exception as exc:
+                    console.print(f"[red]Failed to stream session: {exc}")
                 continue
 
             if cmd == "history":
