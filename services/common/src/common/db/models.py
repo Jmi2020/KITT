@@ -194,6 +194,9 @@ class InventoryStatus(enum.Enum):
 class QueueStatus(enum.Enum):
     """Phase 4: Print queue job status."""
     queued = "queued"
+    scheduled = "scheduled"  # P3: Assigned to printer, not yet started
+    slicing = "slicing"      # P3: Generating G-code
+    uploading = "uploading"  # P3: Uploading to printer
     printing = "printing"
     completed = "completed"
     failed = "failed"
@@ -723,22 +726,30 @@ class QueuedPrint(Base):
     """Phase 4: Print queue with optimization metadata.
 
     Tracks queued print jobs with priority scoring, deadline management,
-    and optimization reasoning.
+    and optimization reasoning. Enhanced in P3 #20 for multi-printer coordination.
     """
 
     __tablename__ = "print_queue"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
     job_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    job_name: Mapped[str] = mapped_column(String(255), nullable=False)  # P3: User-friendly name
+
+    # Files
     stl_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    gcode_path: Mapped[Optional[str]] = mapped_column(String(500))  # P3: Generated after slicing
 
     # Assignment
-    printer_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    printer_id: Mapped[Optional[str]] = mapped_column(String(100))  # P3: Assigned after scheduling (nullable)
     material_id: Mapped[str] = mapped_column(ForeignKey("materials.id"), nullable=False)
     spool_id: Mapped[Optional[str]] = mapped_column(ForeignKey("inventory.id"))
 
+    # Print Settings
+    print_settings: Mapped[dict] = mapped_column(JSONB, nullable=False)  # P3: {nozzle_temp, bed_temp, layer_height, infill, speed}
+
     # Scheduling
     status: Mapped[QueueStatus] = mapped_column(Enum(QueueStatus), nullable=False)
+    status_reason: Mapped[Optional[str]] = mapped_column(Text)  # P3: Error details if failed
     priority: Mapped[int] = mapped_column(Integer, nullable=False)  # 1-10
     deadline: Mapped[Optional[datetime]] = mapped_column(DateTime)
     scheduled_start: Mapped[Optional[datetime]] = mapped_column(DateTime)
@@ -753,14 +764,47 @@ class QueuedPrint(Base):
     priority_score: Mapped[Optional[float]] = mapped_column(Numeric(10, 4))
     optimization_reasoning: Mapped[Optional[str]] = mapped_column(Text)
 
+    # Retry Logic (P3)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_retries: Mapped[int] = mapped_column(Integer, default=2)
+
+    # Tracking
+    created_by: Mapped[Optional[str]] = mapped_column(String(100))  # P3: user_id or "autonomous"
+    goal_id: Mapped[Optional[str]] = mapped_column(ForeignKey("goals.id"))  # P3: autonomous goal linkage
+    outcome_id: Mapped[Optional[str]] = mapped_column(ForeignKey("print_outcomes.id"))  # P3: link to PrintOutcome
+
     # Timestamps
     queued_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     material: Mapped[Material] = relationship(back_populates="queued_prints")
     spool: Mapped[Optional[InventoryItem]] = relationship(back_populates="queued_prints")
+    goal: Mapped[Optional[Goal]] = relationship()
+    outcome: Mapped[Optional[PrintOutcome]] = relationship()
+    status_history: Mapped[List["JobStatusHistory"]] = relationship(back_populates="job", cascade="all, delete-orphan")
+
+
+class JobStatusHistory(Base):
+    """P3 #20: Audit trail for print job status changes.
+
+    Tracks all status transitions for debugging and analytics.
+    """
+
+    __tablename__ = "job_status_history"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("print_queue.id", ondelete="CASCADE"), nullable=False)
+    from_status: Mapped[Optional[str]] = mapped_column(String(20))
+    to_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(Text)
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    changed_by: Mapped[Optional[str]] = mapped_column(String(100))
+
+    # Relationships
+    job: Mapped[QueuedPrint] = relationship(back_populates="status_history")
 
 
 class DiscoveredDevice(Base):

@@ -31,6 +31,9 @@ from .launcher.slicer_launcher import SlicerLauncher
 from .intelligence.material_inventory import MaterialInventory, InventoryFilters
 from .monitoring.outcome_tracker import PrintOutcomeTracker, PrintOutcomeData
 from .monitoring.camera_capture import CameraCapture
+from .coordinator.queue_optimizer import QueueOptimizer
+from .coordinator.scheduler import ParallelJobScheduler
+from .coordinator.distributor import JobDistributor
 
 # Configure logging
 configure_logging()
@@ -101,11 +104,18 @@ outcome_tracker: Optional[PrintOutcomeTracker] = None
 camera_capture: Optional[CameraCapture] = None
 db_session: Optional[sessionmaker] = None
 
+# P3 #20: Multi-printer coordination components
+queue_optimizer: Optional[QueueOptimizer] = None
+job_scheduler: Optional[ParallelJobScheduler] = None
+job_distributor: Optional[JobDistributor] = None
+mq_client: Optional[object] = None  # MessageQueueClient
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for fabrication service startup/shutdown."""
     global analyzer, status_checker, selector, launcher, material_inventory, outcome_tracker, camera_capture, db_session
+    global queue_optimizer, job_scheduler, job_distributor, mq_client
 
     LOGGER.info("Starting fabrication service")
 
@@ -143,6 +153,46 @@ async def lifespan(app: FastAPI):
     )
     LOGGER.info("Print outcome tracker initialized", enabled=settings.enable_print_outcome_tracking)
 
+    # Initialize multi-printer coordination (P3 #20)
+    try:
+        from common.messaging.client import MessageQueueClient
+
+        # Initialize RabbitMQ client
+        rabbitmq_url = getattr(settings, 'rabbitmq_url', 'amqp://guest:guest@localhost:5672/')
+        mq_client = MessageQueueClient(
+            url=rabbitmq_url,
+            connection_name="fabrication-coordinator",
+        )
+        mq_client.connect()
+        LOGGER.info("RabbitMQ client connected", url=rabbitmq_url.split('@')[-1])
+
+        # Initialize coordinator components
+        queue_optimizer = QueueOptimizer(
+            db=db,
+            analyzer=analyzer,
+        )
+        LOGGER.info("Queue optimizer initialized")
+
+        job_scheduler = ParallelJobScheduler(
+            db=db,
+            status_checker=status_checker,
+            queue_optimizer=queue_optimizer,
+        )
+        LOGGER.info("Job scheduler initialized")
+
+        job_distributor = JobDistributor(
+            mq_client=mq_client,
+        )
+        LOGGER.info("Job distributor initialized")
+
+    except Exception as e:
+        LOGGER.error("Failed to initialize multi-printer coordination", error=str(e), exc_info=True)
+        # Non-fatal: Service can run without coordination (manual workflow still works)
+        queue_optimizer = None
+        job_scheduler = None
+        job_distributor = None
+        mq_client = None
+
     yield
 
     # Cleanup
@@ -154,6 +204,10 @@ async def lifespan(app: FastAPI):
 
     if outcome_tracker and outcome_tracker.db:
         outcome_tracker.db.close()
+
+    if mq_client and hasattr(mq_client, 'disconnect'):
+        mq_client.disconnect()
+        LOGGER.info("RabbitMQ client disconnected")
 
     # Note: camera_capture has no cleanup needed (no persistent resources)
 
@@ -1262,6 +1316,85 @@ class SnapshotGalleryResponse(BaseModel):
     snapshots: List[SnapshotGalleryItem] = Field(..., description="List of snapshots for this job")
 
 
+# ============================================================================
+# P3 #20: Multi-Printer Coordination Request/Response Models
+# ============================================================================
+
+class SubmitJobRequest(BaseModel):
+    """Request to submit print job to queue."""
+
+    job_name: str = Field(..., description="User-friendly job name", examples=["hex_box_v1"])
+    stl_path: str = Field(..., description="Absolute path to STL file")
+    material_id: str = Field(..., description="Material catalog ID", examples=["pla_black_esun"])
+    print_settings: Dict = Field(..., description="Print settings (nozzle_temp, bed_temp, layer_height, infill, speed)")
+    priority: int = Field(5, description="Priority 1-10 (1=highest)", ge=1, le=10)
+    deadline: Optional[datetime] = Field(None, description="Optional deadline")
+    force_printer: Optional[str] = Field(None, description="Force specific printer (bamboo_h2d, elegoo_giga, snapmaker_artisan)")
+    created_by: Optional[str] = Field("user", description="User ID or 'autonomous'")
+
+
+class SubmitJobResponse(BaseModel):
+    """Response from job submission."""
+
+    job_id: str
+    job_name: str
+    status: str
+    queue_position: int
+    estimated_start_time: Optional[datetime] = None
+    printer_id: Optional[str] = None
+
+
+class QueueJobResponse(BaseModel):
+    """Queue job information."""
+
+    job_id: str
+    job_name: str
+    status: str
+    priority: int
+    material_id: str
+    printer_id: Optional[str] = None
+    estimated_duration_hours: float
+    estimated_cost_usd: float
+    queued_at: datetime
+    scheduled_start: Optional[datetime] = None
+    deadline: Optional[datetime] = None
+    queue_position: Optional[int] = None
+
+
+class QueueStatusResponse(BaseModel):
+    """Queue status response."""
+
+    total_jobs: int
+    queued: int
+    scheduled: int
+    printing: int
+    jobs: List[QueueJobResponse]
+
+
+class ScheduleResponse(BaseModel):
+    """Response from manual scheduling trigger."""
+
+    scheduled_jobs: int
+    assignments: List[Dict]
+
+
+class UpdatePriorityRequest(BaseModel):
+    """Request to update job priority."""
+
+    priority: int = Field(..., description="New priority 1-10", ge=1, le=10)
+
+
+class QueueStatisticsResponse(BaseModel):
+    """Queue statistics response."""
+
+    total_jobs: int
+    by_status: Dict[str, int]
+    by_priority: Dict[str, int]
+    by_material: Dict[str, int]
+    upcoming_deadlines: int
+    overdue: int
+
+
 @app.get("/api/fabrication/cameras/status", response_model=List[CameraStatusResponse])
 async def get_camera_status():
     """Get status of all printer cameras.
@@ -1467,3 +1600,357 @@ async def get_recent_snapshots(limit: int = Query(10, ge=1, le=100)):
     except Exception as e:
         LOGGER.error("Failed to get recent snapshots", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get recent snapshots: {e}")
+
+
+# ============================================================================
+# P3 #20: Multi-Printer Coordination API Endpoints
+# ============================================================================
+
+@app.post("/api/fabrication/jobs", response_model=SubmitJobResponse, status_code=201)
+async def submit_print_job(request: SubmitJobRequest) -> SubmitJobResponse:
+    """
+    Submit print job to queue (P3 #20).
+
+    Workflow:
+    1. Analyze STL dimensions and estimate material/cost
+    2. Create job in database with status=queued
+    3. Job will be scheduled automatically by background scheduler
+    4. Return queue position and estimated start time
+
+    Args:
+        request: Job submission request
+
+    Returns:
+        Job submission response with queue position
+    """
+    if not queue_optimizer or not job_scheduler:
+        raise HTTPException(
+            status_code=503,
+            detail="Multi-printer coordination not available. Service running in manual mode."
+        )
+
+    if not analyzer or not material_inventory:
+        raise HTTPException(status_code=500, detail="Service not initialized")
+
+    try:
+        from uuid import uuid4
+        from pathlib import Path
+        from common.db.models import QueuedPrint, QueueStatus
+
+        # Validate STL file exists
+        stl_path = Path(request.stl_path)
+        if not stl_path.exists():
+            raise HTTPException(status_code=404, detail=f"STL file not found: {request.stl_path}")
+
+        # Analyze model dimensions
+        dimensions = analyzer.analyze(stl_path)
+
+        # Estimate material usage and cost
+        infill = request.print_settings.get("infill", 20)
+        supports = request.print_settings.get("supports_enabled", False)
+
+        usage_estimate = material_inventory.calculate_usage(
+            stl_volume_cm3=dimensions.volume / 1000.0,  # Convert mm³ to cm³
+            infill_percent=infill,
+            material_id=request.material_id,
+            supports_enabled=supports,
+        )
+
+        cost_estimate = material_inventory.estimate_print_cost(
+            material_id=request.material_id,
+            grams_used=usage_estimate.estimated_grams,
+        )
+
+        # Estimate print duration (rough formula: volume / 15 for typical speeds)
+        estimated_hours = dimensions.volume / (1000.0 * 15.0)  # Very rough estimate
+
+        # Create job in database
+        job_id = f"job_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:6]}"
+
+        job = QueuedPrint(
+            id=str(uuid4()),
+            job_id=job_id,
+            job_name=request.job_name,
+            stl_path=request.stl_path,
+            gcode_path=None,  # Will be set after slicing
+            printer_id=request.force_printer,  # Optional: force specific printer
+            material_id=request.material_id,
+            spool_id=None,  # TODO: Auto-select available spool
+            print_settings=request.print_settings,
+            status=QueueStatus.queued if not request.force_printer else QueueStatus.scheduled,
+            priority=request.priority,
+            deadline=request.deadline,
+            estimated_duration_hours=estimated_hours,
+            estimated_material_grams=usage_estimate.estimated_grams,
+            estimated_cost_usd=cost_estimate.material_cost_usd,
+            created_by=request.created_by,
+            queued_at=datetime.utcnow(),
+        )
+
+        db = db_session()
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+
+        LOGGER.info(
+            "Job submitted to queue",
+            job_id=job_id,
+            job_name=request.job_name,
+            material=request.material_id,
+            priority=request.priority,
+        )
+
+        # Get queue position
+        from sqlalchemy import select, func
+        stmt = (
+            select(func.count())
+            .select_from(QueuedPrint)
+            .where(
+                QueuedPrint.status == QueueStatus.queued,
+                QueuedPrint.queued_at < job.queued_at,
+            )
+        )
+        queue_position = db.execute(stmt).scalar() + 1
+
+        db.close()
+
+        return SubmitJobResponse(
+            job_id=job_id,
+            job_name=request.job_name,
+            status=job.status.value,
+            queue_position=queue_position,
+            printer_id=job.printer_id,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOGGER.error("Failed to submit job", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to submit job: {e}")
+
+
+@app.get("/api/fabrication/queue", response_model=QueueStatusResponse)
+async def get_queue_status(
+    status: Optional[str] = Query(None, description="Filter by status"),
+    printer_id: Optional[str] = Query(None, description="Filter by printer"),
+    limit: int = Query(100, description="Max results", ge=1, le=1000),
+) -> QueueStatusResponse:
+    """
+    Get print queue status (P3 #20).
+
+    Returns all queued, scheduled, and printing jobs with their status.
+    """
+    if not queue_optimizer:
+        raise HTTPException(status_code=503, detail="Multi-printer coordination not available")
+
+    try:
+        from sqlalchemy import select
+        from common.db.models import QueuedPrint, QueueStatus
+
+        db = db_session()
+
+        # Build query
+        stmt = select(QueuedPrint)
+
+        # Apply filters
+        if status:
+            try:
+                status_enum = QueueStatus(status)
+                stmt = stmt.where(QueuedPrint.status == status_enum)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+
+        if printer_id:
+            stmt = stmt.where(QueuedPrint.printer_id == printer_id)
+
+        # Order by priority and queue time
+        stmt = stmt.order_by(
+            QueuedPrint.priority.asc(),
+            QueuedPrint.queued_at.asc(),
+        ).limit(limit)
+
+        jobs = db.execute(stmt).scalars().all()
+
+        # Count by status
+        total_jobs = len(jobs)
+        queued_count = sum(1 for j in jobs if j.status == QueueStatus.queued)
+        scheduled_count = sum(1 for j in jobs if j.status == QueueStatus.scheduled)
+        printing_count = sum(1 for j in jobs if j.status == QueueStatus.printing)
+
+        # Build response
+        job_responses = []
+        for idx, job in enumerate(jobs):
+            job_responses.append(
+                QueueJobResponse(
+                    job_id=job.job_id,
+                    job_name=job.job_name,
+                    status=job.status.value,
+                    priority=job.priority,
+                    material_id=job.material_id,
+                    printer_id=job.printer_id,
+                    estimated_duration_hours=float(job.estimated_duration_hours),
+                    estimated_cost_usd=float(job.estimated_cost_usd),
+                    queued_at=job.queued_at,
+                    scheduled_start=job.scheduled_start,
+                    deadline=job.deadline,
+                    queue_position=idx + 1 if job.status == QueueStatus.queued else None,
+                )
+            )
+
+        db.close()
+
+        return QueueStatusResponse(
+            total_jobs=total_jobs,
+            queued=queued_count,
+            scheduled=scheduled_count,
+            printing=printing_count,
+            jobs=job_responses,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOGGER.error("Failed to get queue status", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get queue status: {e}")
+
+
+@app.post("/api/fabrication/schedule", response_model=ScheduleResponse)
+async def trigger_scheduling() -> ScheduleResponse:
+    """
+    Manually trigger job scheduling (P3 #20).
+
+    Schedules jobs for all idle printers and distributes to RabbitMQ.
+    Normally this runs automatically in background, but can be triggered manually.
+    """
+    if not job_scheduler or not job_distributor:
+        raise HTTPException(status_code=503, detail="Multi-printer coordination not available")
+
+    try:
+        # Schedule jobs for idle printers
+        assignments = await job_scheduler.schedule_next_jobs()
+
+        # Distribute assigned jobs to RabbitMQ
+        distributed = []
+        for assignment in assignments:
+            if assignment.status == "scheduled":
+                # Get job from database
+                from sqlalchemy import select
+                from common.db.models import QueuedPrint
+
+                db = db_session()
+                stmt = select(QueuedPrint).where(QueuedPrint.job_id == assignment.job_id)
+                job = db.execute(stmt).scalar_one_or_none()
+                db.close()
+
+                if job:
+                    # Distribute to RabbitMQ
+                    result = await job_distributor.distribute_job(job)
+                    if result.success:
+                        distributed.append({
+                            "job_id": assignment.job_id,
+                            "job_name": assignment.job_name,
+                            "printer_id": assignment.printer_id,
+                            "status": "scheduled",
+                        })
+
+        LOGGER.info("Manual scheduling complete", scheduled=len(distributed))
+
+        return ScheduleResponse(
+            scheduled_jobs=len(distributed),
+            assignments=distributed,
+        )
+
+    except Exception as e:
+        LOGGER.error("Failed to trigger scheduling", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to trigger scheduling: {e}")
+
+
+@app.delete("/api/fabrication/jobs/{job_id}")
+async def cancel_job(job_id: str):
+    """
+    Cancel a queued or scheduled job (P3 #20).
+
+    Args:
+        job_id: Job ID to cancel
+
+    Returns:
+        Cancellation confirmation
+    """
+    if not job_scheduler:
+        raise HTTPException(status_code=503, detail="Multi-printer coordination not available")
+
+    try:
+        success = await job_scheduler.cancel_job(job_id, reason="User requested", cancelled_by="api_user")
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Job not found or already completed: {job_id}")
+
+        LOGGER.info("Job cancelled", job_id=job_id)
+
+        return {"job_id": job_id, "status": "cancelled", "cancelled_at": datetime.utcnow()}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOGGER.error("Failed to cancel job", job_id=job_id, error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to cancel job: {e}")
+
+
+@app.patch("/api/fabrication/jobs/{job_id}/priority")
+async def update_job_priority(job_id: str, request: UpdatePriorityRequest):
+    """
+    Update job priority (P3 #20).
+
+    Args:
+        job_id: Job ID
+        request: New priority (1-10)
+
+    Returns:
+        Update confirmation
+    """
+    if not job_scheduler:
+        raise HTTPException(status_code=503, detail="Multi-printer coordination not available")
+
+    try:
+        success = await job_scheduler.update_job_priority(
+            job_id=job_id,
+            new_priority=request.priority,
+            updated_by="api_user",
+        )
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+        LOGGER.info("Job priority updated", job_id=job_id, priority=request.priority)
+
+        return {
+            "job_id": job_id,
+            "priority": request.priority,
+            "updated_at": datetime.utcnow(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOGGER.error("Failed to update priority", job_id=job_id, error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update priority: {e}")
+
+
+@app.get("/api/fabrication/queue/statistics", response_model=QueueStatisticsResponse)
+async def get_queue_statistics() -> QueueStatisticsResponse:
+    """
+    Get queue statistics (P3 #20).
+
+    Returns aggregated statistics about the print queue.
+    """
+    if not queue_optimizer:
+        raise HTTPException(status_code=503, detail="Multi-printer coordination not available")
+
+    try:
+        stats = await queue_optimizer.get_queue_statistics()
+
+        return QueueStatisticsResponse(**stats)
+
+    except Exception as e:
+        LOGGER.error("Failed to get queue statistics", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get queue statistics: {e}")
