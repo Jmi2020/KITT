@@ -1,0 +1,335 @@
+# Database Clustering - High Availability Setup
+#
+# This compose file provides PostgreSQL primary-replica replication and
+# Redis Sentinel for automatic failover and high availability.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.db-cluster.yml up -d
+#
+# Architecture:
+#   PostgreSQL: 1 primary + 2 read replicas with streaming replication
+#   Redis: 1 master + 2 replicas + 3 Sentinel nodes for failover
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # PostgreSQL High Availability Cluster
+  # ============================================================================
+
+  # Remove standalone postgres (replaced by postgres-primary)
+  postgres:
+    profiles:
+      - disabled
+
+  postgres-primary:
+    image: bitnami/postgresql:16
+    restart: unless-stopped
+    environment:
+      POSTGRESQL_REPLICATION_MODE: master
+      POSTGRESQL_REPLICATION_USER: replicator
+      POSTGRESQL_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD:-replicator_password}
+      POSTGRESQL_USERNAME: kitty
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRESQL_DATABASE: kitty
+      POSTGRESQL_SYNCHRONOUS_COMMIT_MODE: ${POSTGRES_SYNC_COMMIT:-on}  # on = sync, remote_write, local, or off
+      POSTGRESQL_NUM_SYNCHRONOUS_REPLICAS: ${POSTGRES_NUM_SYNC_REPLICAS:-1}  # How many replicas must ack before commit
+      POSTGRESQL_MAX_CONNECTIONS: 200
+      POSTGRESQL_SHARED_BUFFERS: 256MB
+      POSTGRESQL_EFFECTIVE_CACHE_SIZE: 1GB
+      POSTGRESQL_WAL_LEVEL: replica
+      POSTGRESQL_MAX_WAL_SENDERS: 10
+      POSTGRESQL_MAX_REPLICATION_SLOTS: 10
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_primary_data:/bitnami/postgresql
+      - ./postgres/init-scripts:/docker-entrypoint-initdb.d:ro
+    networks:
+      - kitty
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kitty -d kitty"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  postgres-replica-1:
+    image: bitnami/postgresql:16
+    restart: unless-stopped
+    environment:
+      POSTGRESQL_REPLICATION_MODE: slave
+      POSTGRESQL_REPLICATION_USER: replicator
+      POSTGRESQL_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD:-replicator_password}
+      POSTGRESQL_MASTER_HOST: postgres-primary
+      POSTGRESQL_MASTER_PORT_NUMBER: 5432
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRESQL_MAX_CONNECTIONS: 200
+      POSTGRESQL_SHARED_BUFFERS: 256MB
+      POSTGRESQL_EFFECTIVE_CACHE_SIZE: 1GB
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_replica_1_data:/bitnami/postgresql
+    networks:
+      - kitty
+    depends_on:
+      - postgres-primary
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kitty"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  postgres-replica-2:
+    image: bitnami/postgresql:16
+    restart: unless-stopped
+    environment:
+      POSTGRESQL_REPLICATION_MODE: slave
+      POSTGRESQL_REPLICATION_USER: replicator
+      POSTGRESQL_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD:-replicator_password}
+      POSTGRESQL_MASTER_HOST: postgres-primary
+      POSTGRESQL_MASTER_PORT_NUMBER: 5432
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRESQL_MAX_CONNECTIONS: 200
+      POSTGRESQL_SHARED_BUFFERS: 256MB
+      POSTGRESQL_EFFECTIVE_CACHE_SIZE: 1GB
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_replica_2_data:/bitnami/postgresql
+    networks:
+      - kitty
+    depends_on:
+      - postgres-primary
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kitty"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # PostgreSQL connection pooler (PgBouncer) for efficient connection management
+  pgbouncer:
+    image: bitnami/pgbouncer:1.22.1
+    restart: unless-stopped
+    environment:
+      POSTGRESQL_HOST: postgres-primary
+      POSTGRESQL_PORT: 5432
+      POSTGRESQL_USERNAME: kitty
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRESQL_DATABASE: kitty
+      PGBOUNCER_DATABASE: kitty
+      PGBOUNCER_PORT: 6432
+      PGBOUNCER_POOL_MODE: transaction  # session, transaction, or statement
+      PGBOUNCER_MAX_CLIENT_CONN: 1000
+      PGBOUNCER_DEFAULT_POOL_SIZE: 25
+      PGBOUNCER_MIN_POOL_SIZE: 5
+      PGBOUNCER_RESERVE_POOL_SIZE: 5
+      PGBOUNCER_SERVER_IDLE_TIMEOUT: 600
+      PGBOUNCER_STATS_USERS: kitty
+    ports:
+      - "6432:6432"
+    networks:
+      - kitty
+    depends_on:
+      - postgres-primary
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "localhost", "-p", "6432", "-U", "kitty"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # Redis High Availability Cluster (Redis Sentinel)
+  # ============================================================================
+
+  # Remove standalone redis (replaced by redis-master)
+  redis:
+    profiles:
+      - disabled
+
+  redis-master:
+    image: bitnami/redis:7.2
+    restart: unless-stopped
+    environment:
+      REDIS_REPLICATION_MODE: master
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}  # Empty = no auth (for development)
+      ALLOW_EMPTY_PASSWORD: "yes"
+      REDIS_MAXMEMORY: 2gb
+      REDIS_MAXMEMORY_POLICY: allkeys-lfu
+      REDIS_AOF_ENABLED: "yes"  # Enable append-only file for durability
+      REDIS_RDB_ENABLED: "yes"
+      REDIS_SAVE: "900 1 300 10 60 10000"  # Save snapshots
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_master_data:/bitnami/redis/data
+    networks:
+      - kitty
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis-replica-1:
+    image: bitnami/redis:7.2
+    restart: unless-stopped
+    environment:
+      REDIS_REPLICATION_MODE: slave
+      REDIS_MASTER_HOST: redis-master
+      REDIS_MASTER_PORT_NUMBER: 6379
+      REDIS_MASTER_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      ALLOW_EMPTY_PASSWORD: "yes"
+      REDIS_MAXMEMORY: 2gb
+      REDIS_MAXMEMORY_POLICY: allkeys-lfu
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_replica_1_data:/bitnami/redis/data
+    networks:
+      - kitty
+    depends_on:
+      - redis-master
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis-replica-2:
+    image: bitnami/redis:7.2
+    restart: unless-stopped
+    environment:
+      REDIS_REPLICATION_MODE: slave
+      REDIS_MASTER_HOST: redis-master
+      REDIS_MASTER_PORT_NUMBER: 6379
+      REDIS_MASTER_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      ALLOW_EMPTY_PASSWORD: "yes"
+      REDIS_MAXMEMORY: 2gb
+      REDIS_MAXMEMORY_POLICY: allkeys-lfu
+    ports:
+      - "6381:6379"
+    volumes:
+      - redis_replica_2_data:/bitnami/redis/data
+    networks:
+      - kitty
+    depends_on:
+      - redis-master
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Redis Sentinel nodes for automatic failover
+  redis-sentinel-1:
+    image: bitnami/redis-sentinel:7.2
+    restart: unless-stopped
+    environment:
+      REDIS_MASTER_HOST: redis-master
+      REDIS_MASTER_PORT_NUMBER: 6379
+      REDIS_MASTER_SET: mymaster
+      REDIS_MASTER_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_SENTINEL_DOWN_AFTER_MILLISECONDS: 5000
+      REDIS_SENTINEL_FAILOVER_TIMEOUT: 10000
+      REDIS_SENTINEL_QUORUM: 2  # Minimum 2 sentinels must agree to failover
+      REDIS_SENTINEL_PASSWORD: ${REDIS_SENTINEL_PASSWORD:-}
+      ALLOW_EMPTY_PASSWORD: "yes"
+    ports:
+      - "26379:26379"
+    networks:
+      - kitty
+    depends_on:
+      - redis-master
+      - redis-replica-1
+      - redis-replica-2
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-sentinel-2:
+    image: bitnami/redis-sentinel:7.2
+    restart: unless-stopped
+    environment:
+      REDIS_MASTER_HOST: redis-master
+      REDIS_MASTER_PORT_NUMBER: 6379
+      REDIS_MASTER_SET: mymaster
+      REDIS_MASTER_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_SENTINEL_DOWN_AFTER_MILLISECONDS: 5000
+      REDIS_SENTINEL_FAILOVER_TIMEOUT: 10000
+      REDIS_SENTINEL_QUORUM: 2
+      REDIS_SENTINEL_PASSWORD: ${REDIS_SENTINEL_PASSWORD:-}
+      ALLOW_EMPTY_PASSWORD: "yes"
+    ports:
+      - "26380:26379"
+    networks:
+      - kitty
+    depends_on:
+      - redis-master
+      - redis-replica-1
+      - redis-replica-2
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-sentinel-3:
+    image: bitnami/redis-sentinel:7.2
+    restart: unless-stopped
+    environment:
+      REDIS_MASTER_HOST: redis-master
+      REDIS_MASTER_PORT_NUMBER: 6379
+      REDIS_MASTER_SET: mymaster
+      REDIS_MASTER_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_SENTINEL_DOWN_AFTER_MILLISECONDS: 5000
+      REDIS_SENTINEL_FAILOVER_TIMEOUT: 10000
+      REDIS_SENTINEL_QUORUM: 2
+      REDIS_SENTINEL_PASSWORD: ${REDIS_SENTINEL_PASSWORD:-}
+      ALLOW_EMPTY_PASSWORD: "yes"
+    ports:
+      - "26381:26379"
+    networks:
+      - kitty
+    depends_on:
+      - redis-master
+      - redis-replica-1
+      - redis-replica-2
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Update redis-exporter to monitor clustered Redis
+  redis-exporter:
+    environment:
+      REDIS_ADDR: redis://redis-master:6379
+      REDIS_EXPORTER_IS_CLUSTER: "false"
+    depends_on:
+      - redis-master
+
+networks:
+  kitty:
+    external: true
+
+volumes:
+  # PostgreSQL cluster volumes
+  postgres_primary_data:
+  postgres_replica_1_data:
+  postgres_replica_2_data:
+
+  # Redis cluster volumes
+  redis_master_data:
+  redis_replica_1_data:
+  redis_replica_2_data:
