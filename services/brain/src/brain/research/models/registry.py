@@ -84,14 +84,14 @@ class ModelRegistry:
         """Initialize registry with default model set"""
 
         # ============================================================
-        # LOCAL MODELS (via Ollama)
+        # LOCAL MODELS (via llama.cpp servers)
         # ============================================================
 
         # Llama 3.1 8B Q4 - Fast general-purpose model
         self.register_model(ModelInfo(
             model_id="llama3.1:8b-q4",
             model_name="Llama 3.1 8B Q4",
-            provider="ollama",
+            provider="llama_cpp",
             tier=ModelTier.LOCAL_SMALL,
             capabilities={
                 ModelCapability.REASONING,
@@ -111,7 +111,7 @@ class ModelRegistry:
         self.register_model(ModelInfo(
             model_id="llama3.1:70b-f16",
             model_name="Llama 3.1 70B F16",
-            provider="ollama",
+            provider="llama_cpp",
             tier=ModelTier.LOCAL_LARGE,
             capabilities={
                 ModelCapability.REASONING,
@@ -134,7 +134,7 @@ class ModelRegistry:
         self.register_model(ModelInfo(
             model_id="gemma2:27b",
             model_name="Gemma 2 27B",
-            provider="ollama",
+            provider="llama_cpp",
             tier=ModelTier.LOCAL_MEDIUM,
             capabilities={
                 ModelCapability.REASONING,
@@ -155,7 +155,7 @@ class ModelRegistry:
         self.register_model(ModelInfo(
             model_id="hermes3:70b",
             model_name="Hermes 3 70B",
-            provider="ollama",
+            provider="llama_cpp",
             tier=ModelTier.LOCAL_LARGE,
             capabilities={
                 ModelCapability.REASONING,
@@ -202,10 +202,10 @@ class ModelRegistry:
             use_cases=["critical decisions", "complex synthesis", "high-stakes validation"]
         ))
 
-        # Claude 3.5 Sonnet - Anthropic's model
+        # Claude Sonnet 4.5 - Anthropic's latest model
         self.register_model(ModelInfo(
-            model_id="claude-3-5-sonnet-20241022",
-            model_name="Claude 3.5 Sonnet",
+            model_id="claude-sonnet-4-5-20250929",
+            model_name="Claude Sonnet 4.5",
             provider="anthropic",
             tier=ModelTier.EXTERNAL_PREMIUM,
             capabilities={
@@ -223,14 +223,14 @@ class ModelRegistry:
             cost_input_per_1k=Decimal("0.003"),   # $3 per 1M input tokens
             cost_output_per_1k=Decimal("0.015"),  # $15 per 1M output tokens
             requires_api_key=True,
-            description="Anthropic's Claude 3.5 Sonnet. Excellent reasoning and long context.",
+            description="Anthropic's Claude Sonnet 4.5. Excellent reasoning and long context.",
             use_cases=["long document analysis", "complex reasoning", "creative synthesis"]
         ))
 
-        # GPT-5 (preparatory) - Placeholder for future model
+        # GPT-5 - OpenAI's latest model
         self.register_model(ModelInfo(
             model_id="gpt-5",
-            model_name="GPT-5 (Future)",
+            model_name="GPT-5",
             provider="openai",
             tier=ModelTier.EXTERNAL_PREMIUM,
             capabilities={
@@ -246,12 +246,12 @@ class ModelRegistry:
             context_window=200000,
             max_tokens=32768,
             avg_latency_ms=2000.0,
-            cost_input_per_1k=Decimal("0.010"),   # Estimated
-            cost_output_per_1k=Decimal("0.030"),  # Estimated
-            is_available=False,  # Not yet available
+            cost_input_per_1k=Decimal("0.010"),
+            cost_output_per_1k=Decimal("0.030"),
+            is_available=True,
             requires_api_key=True,
-            description="OpenAI's next-generation model (not yet released).",
-            use_cases=["future: advanced reasoning", "future: complex multi-step tasks"]
+            description="OpenAI's next-generation model with advanced reasoning capabilities.",
+            use_cases=["advanced reasoning", "complex multi-step tasks", "critical decisions"]
         ))
 
         logger.info(f"Initialized model registry with {len(self.models)} models")
@@ -280,10 +280,10 @@ class ModelRegistry:
         ]
 
     def get_local_models(self) -> List[ModelInfo]:
-        """Get all local (Ollama) models"""
+        """Get all local (llama.cpp) models"""
         return [
             model for model in self.models.values()
-            if model.provider == "ollama" and model.is_available
+            if model.provider == "llama_cpp" and model.is_available
         ]
 
     def get_external_models(self) -> List[ModelInfo]:
@@ -315,7 +315,7 @@ class ModelRegistry:
 
         # If preferring local, return first local model
         if prefer_local:
-            local_candidates = [m for m in candidates if m.provider == "ollama"]
+            local_candidates = [m for m in candidates if m.provider == "llama_cpp"]
             if local_candidates:
                 # Sort by parameter size (smaller = faster)
                 local_candidates.sort(key=lambda m: m.context_window)
@@ -374,7 +374,7 @@ class ModelRegistry:
             score = 0.0
 
             # Local models get big boost
-            if model.provider == "ollama" and prefer_local:
+            if model.provider == "llama_cpp" and prefer_local:
                 score += 100.0
 
             # Prefer more capabilities
