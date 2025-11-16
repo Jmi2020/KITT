@@ -2126,3 +2126,190 @@ async def record_maintenance_completed(printer_id: str) -> dict[str, str]:
             exc_info=True,
         )
         raise HTTPException(status_code=500, detail=f"Failed to record maintenance: {e}")
+
+
+# ============================================================================
+# P3 #16 Print Success Prediction Request/Response Models
+# ============================================================================
+
+class PredictSuccessRequest(BaseModel):
+    """Request to predict print success probability."""
+
+    material_id: str = Field(..., description="Material catalog ID", examples=["pla_black_esun"])
+    printer_id: str = Field(..., description="Printer identifier", examples=["bamboo_h2d"])
+    nozzle_temp: float = Field(..., description="Nozzle temperature °C", examples=[210])
+    bed_temp: float = Field(..., description="Bed temperature °C", examples=[60])
+    print_speed: float = Field(..., description="Print speed mm/s", examples=[50])
+    layer_height: float = Field(..., description="Layer height mm", examples=[0.2])
+    infill_percent: float = Field(..., description="Infill percentage", examples=[20])
+    supports_enabled: bool = Field(..., description="Supports enabled", examples=[False])
+
+
+class PredictSuccessResponse(BaseModel):
+    """Print success prediction response."""
+
+    success_probability: float  # 0.0 - 1.0
+    success_percentage: float  # 0 - 100 (for display)
+    risk_level: str  # "low", "medium", "high"
+    confidence: float  # Model confidence 0.0 - 1.0
+    recommendations: List[str]
+    similar_prints_count: int
+    similar_success_rate: float
+    is_trained: bool
+
+
+class TrainingStatusResponse(BaseModel):
+    """Model training status response."""
+
+    is_trained: bool
+    model_exists: bool
+    total_outcomes: int
+    min_required: int
+    ready_to_train: bool
+    sklearn_available: bool
+
+
+# ============================================================================
+# P3 #16 Print Success Prediction Endpoints
+# ============================================================================
+
+@app.post("/api/fabrication/predict/success", response_model=PredictSuccessResponse)
+async def predict_print_success(request: PredictSuccessRequest) -> PredictSuccessResponse:
+    """
+    Predict print success probability based on settings (P3 #16).
+
+    Uses ML model trained on historical print outcomes to predict success/failure.
+    Provides recommendations for high-risk settings.
+
+    Args:
+        request: Print settings for prediction
+
+    Returns:
+        Success probability, risk level, and recommendations
+    """
+    from fabrication.intelligence import PrintSuccessPredictor, PrintFeatures
+
+    # Get database session
+    db = next(get_db())
+
+    try:
+        # Initialize predictor
+        predictor = PrintSuccessPredictor(db)
+
+        if not predictor.is_trained:
+            # Return fallback prediction
+            return PredictSuccessResponse(
+                success_probability=0.5,
+                success_percentage=50.0,
+                risk_level="medium",
+                confidence=0.3,
+                recommendations=[
+                    "⚠️ Model not trained yet - prediction unavailable",
+                    "Train model with /api/fabrication/predict/train",
+                    "Requires minimum 20 historical print outcomes",
+                ],
+                similar_prints_count=0,
+                similar_success_rate=0.0,
+                is_trained=False,
+            )
+
+        # Extract features
+        features = PrintFeatures(
+            material_id=request.material_id,
+            printer_id=request.printer_id,
+            nozzle_temp=request.nozzle_temp,
+            bed_temp=request.bed_temp,
+            print_speed=request.print_speed,
+            layer_height=request.layer_height,
+            infill_percent=request.infill_percent,
+            supports_enabled=request.supports_enabled,
+        )
+
+        # Predict
+        result = await predictor.predict(features)
+
+        return PredictSuccessResponse(
+            success_probability=result.success_probability,
+            success_percentage=result.success_probability * 100,
+            risk_level=result.risk_level,
+            confidence=result.confidence,
+            recommendations=result.recommendations,
+            similar_prints_count=result.similar_prints_count,
+            similar_success_rate=result.similar_success_rate,
+            is_trained=True,
+        )
+
+    except Exception as e:
+        LOGGER.error("Failed to predict success", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to predict success: {e}")
+
+
+@app.post("/api/fabrication/predict/train")
+async def train_prediction_model() -> dict:
+    """
+    Train print success prediction model (P3 #16).
+
+    Trains Random Forest classifier on historical print outcomes.
+    Requires minimum 20 outcomes for training.
+
+    Returns:
+        Training result with status
+    """
+    from fabrication.intelligence import PrintSuccessPredictor
+
+    # Get database session
+    db = next(get_db())
+
+    try:
+        predictor = PrintSuccessPredictor(db)
+
+        LOGGER.info("Starting model training")
+
+        # Train model
+        success = predictor.train()
+
+        if success:
+            return {
+                "status": "success",
+                "message": "Model trained successfully",
+                "model_path": str(predictor.model_path),
+            }
+        else:
+            # Get training status for details
+            status = predictor.get_training_status()
+            return {
+                "status": "failed",
+                "message": "Insufficient training data",
+                "total_outcomes": status["total_outcomes"],
+                "min_required": status["min_required"],
+            }
+
+    except Exception as e:
+        LOGGER.error("Failed to train model", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to train model: {e}")
+
+
+@app.get("/api/fabrication/predict/status", response_model=TrainingStatusResponse)
+async def get_prediction_status() -> TrainingStatusResponse:
+    """
+    Get model training status (P3 #16).
+
+    Returns information about whether model is trained and ready for predictions.
+
+    Returns:
+        Training status information
+    """
+    from fabrication.intelligence import PrintSuccessPredictor
+
+    # Get database session
+    db = next(get_db())
+
+    try:
+        predictor = PrintSuccessPredictor(db)
+        status = predictor.get_training_status()
+
+        return TrainingStatusResponse(**status)
+
+    except Exception as e:
+        LOGGER.error("Failed to get prediction status", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get prediction status: {e}")
