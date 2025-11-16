@@ -735,6 +735,224 @@ If you see `"Tool executor not available, using simulated execution"`, component
 
 ---
 
+## Testing Semantic Cache (TTL & Eviction)
+
+### Overview
+
+The semantic cache stores LLM prompt/response pairs in Redis Streams for reuse. It now includes TTL-based expiration and max entry limits to prevent unbounded growth.
+
+### Configuration
+
+Environment variables (optional - defaults shown):
+
+```bash
+export SEMANTIC_CACHE_TTL_SECONDS=43200     # 12 hours default
+export SEMANTIC_CACHE_MAX_ENTRIES=10000     # 10,000 entries default
+```
+
+### Testing Cache Behavior
+
+#### 1. Test Basic Cache Operations
+
+```python
+from common.cache import SemanticCache, CacheRecord
+
+# Initialize cache
+cache = SemanticCache()
+
+# Store entry
+record = CacheRecord(
+    key="test_key",
+    prompt="What is AI?",
+    response="Artificial Intelligence is...",
+    confidence=0.95
+)
+entry_id = cache.store(record)
+
+# Fetch entry (should hit)
+result = cache.fetch("test_key")
+assert result is not None
+assert result.response == "Artificial Intelligence is..."
+
+# Check stats
+stats = cache.get_stats()
+print(f"Entries: {stats.entry_count}")
+print(f"Hit rate: {stats.hit_rate:.2%}")
+print(f"Hits: {stats.hits}, Misses: {stats.misses}")
+```
+
+#### 2. Test TTL Expiration
+
+```python
+import time
+from common.cache import SemanticCache
+
+# Create cache with 5-second TTL
+cache = SemanticCache(ttl_seconds=5)
+
+# Store entry
+cache.store(record)
+
+# Fetch immediately (should hit)
+assert cache.fetch("test_key") is not None
+
+# Wait for TTL expiration
+time.sleep(6)
+
+# Fetch after TTL (should miss - stream expired)
+assert cache.fetch("test_key") is None
+```
+
+#### 3. Test Max Entries Trimming
+
+```python
+from common.cache import SemanticCache, CacheRecord
+
+# Create cache with small max
+cache = SemanticCache(max_entries=10)
+
+# Add 20 entries
+for i in range(20):
+    record = CacheRecord(
+        key=f"key_{i}",
+        prompt=f"Question {i}",
+        response=f"Answer {i}",
+        confidence=0.9
+    )
+    cache.store(record)
+
+# Check stats - should be trimmed to ~10 (approximate=True allows slight overage)
+stats = cache.get_stats()
+assert stats.entry_count <= 12  # Allow some approximation
+assert stats.max_entries == 10
+```
+
+#### 4. Test Hit/Miss Tracking
+
+```python
+cache = SemanticCache()
+
+# Initial stats
+stats = cache.get_stats()
+initial_hits = stats.hits
+initial_misses = stats.misses
+
+# Cache miss
+cache.fetch("nonexistent_key")
+stats = cache.get_stats()
+assert stats.misses == initial_misses + 1
+
+# Cache hit
+cache.store(CacheRecord(key="exists", prompt="Q", response="A", confidence=0.9))
+cache.fetch("exists")
+stats = cache.get_stats()
+assert stats.hits == initial_hits + 1
+
+# Check hit rate calculation
+hit_rate = stats.hit_rate
+expected = stats.hits / (stats.hits + stats.misses)
+assert abs(hit_rate - expected) < 0.01
+```
+
+#### 5. Test Manual Operations
+
+```python
+cache = SemanticCache()
+
+# Add entries
+for i in range(100):
+    cache.store(CacheRecord(key=f"k{i}", prompt="Q", response="A", confidence=0.9))
+
+# Manual trim to 50
+trimmed = cache.trim(max_entries=50)
+print(f"Trimmed {trimmed} entries")
+
+stats = cache.get_stats()
+assert stats.entry_count <= 55  # Approximate
+
+# Clear all
+deleted = cache.clear()
+assert deleted >= 1  # At least the stream was deleted
+
+stats = cache.get_stats()
+assert stats.entry_count == 0
+assert stats.hits == 0
+assert stats.misses == 0
+```
+
+### Monitoring Cache Health
+
+```python
+from common.cache import SemanticCache
+
+cache = SemanticCache()
+stats = cache.get_stats()
+
+print(f"""
+Semantic Cache Statistics:
+- Entries: {stats.entry_count:,} / {stats.max_entries:,}
+- Size: ~{stats.size_bytes / 1024 / 1024:.2f} MB
+- Hit Rate: {stats.hit_rate:.2%}
+- Hits: {stats.hits:,}
+- Misses: {stats.misses:,}
+- TTL: {stats.ttl_seconds / 3600:.1f} hours
+""")
+
+# Alert if cache is full
+if stats.entry_count >= stats.max_entries * 0.9:
+    print("⚠️  Cache is 90% full - consider increasing SEMANTIC_CACHE_MAX_ENTRIES")
+
+# Alert if hit rate is low
+if stats.hit_rate < 0.1 and (stats.hits + stats.misses) > 100:
+    print("⚠️  Cache hit rate below 10% - cache may not be effective")
+```
+
+### Troubleshooting
+
+#### Cache Not Evicting Old Entries
+
+Check Redis Streams directly:
+
+```bash
+# Connect to Redis
+redis-cli
+
+# Check stream length
+XLEN kitty:semantic-cache
+
+# Check stream TTL
+TTL kitty:semantic-cache
+# Should return seconds remaining (up to 43200 for 12 hours)
+
+# Check if TTL is set
+XINFO STREAM kitty:semantic-cache
+```
+
+If TTL is -1 (no expiration), the cache isn't setting TTL properly. Check:
+1. Redis version supports `EXPIRE` on streams (Redis 5.0+)
+2. Cache initialization isn't being overridden
+3. Environment variables are being loaded
+
+#### Cache Growing Beyond Max Entries
+
+The `approximate=True` flag allows Redis to trim slightly above the limit for performance. This is expected behavior. Actual size should stay within ~2% of max_entries.
+
+If cache grows significantly beyond limit:
+1. Check Redis version supports `MAXLEN` (Redis 5.0+)
+2. Verify `max_entries` parameter is being passed to `xadd()`
+3. Call `cache.trim()` manually to force exact trimming
+
+#### Hit Rate is 0% But Cache Has Entries
+
+This happens if:
+1. Keys are changing between store/fetch (check key generation logic)
+2. Stats were recently cleared (use `cache.get_stats()` to verify)
+3. Only storing, never fetching (expected - hit rate will rise as cache is used)
+
+The hit/miss tracking is persistent in Redis hash `kitty:semantic-cache:stats`.
+
+---
+
 ## References
 
 - **Permission System Architecture**: `Research/PermissionSystemArchitecture.md`
