@@ -162,43 +162,17 @@ async def execute_iteration(state: ResearchState) -> ResearchState:
             logger.warning("No tasks planned, skipping iteration")
             return state
 
-        # For Phase 5 initial implementation, simulate tool execution
-        # In full implementation, this would:
-        # 1. Use ToolDependencyGraph to organize tools
-        # 2. Execute tools via WaveExecutor
-        # 3. Validate results via ValidationPipeline
-        # 4. Consult models via ModelCoordinator
+        # Get components for real tool execution
+        from .components import get_global_components
+        components = get_global_components()
 
-        # Simulate some findings for now
-        for task in tasks[:3]:  # Execute up to 3 tasks
-            # Simulate finding
-            finding = {
-                "id": f"finding_{state['current_iteration']}_{task['task_id']}",
-                "content": f"Research finding for: {task['query']}",
-                "task_id": task["task_id"],
-                "iteration": state["current_iteration"],
-                "confidence": 0.75,
-            }
-
-            state = add_finding(state, finding)
-
-            # Simulate source
-            source = {
-                "url": f"https://example.com/source_{state['current_iteration']}",
-                "title": f"Source for {task['query'][:50]}",
-                "relevance": task["priority"],
-            }
-
-            state = add_source(state, source)
-
-            # Record tool execution
-            state = record_tool_execution(
-                state,
-                tool_name="web_search",
-                result={"findings": 1, "sources": 1},
-                cost=Decimal("0.0"),  # Local execution
-                success=True
-            )
+        # Execute tasks using real tool executor if available
+        if components and components.tool_executor:
+            logger.info(f"Executing {len(tasks)} tasks with real tool executor")
+            await _execute_tasks_real(state, tasks, components)
+        else:
+            logger.warning("Tool executor not available, using simulated execution")
+            await _execute_tasks_simulated(state, tasks)
 
         logger.info(
             f"Iteration {state['current_iteration']} executed: "
@@ -211,6 +185,193 @@ async def execute_iteration(state: ResearchState) -> ResearchState:
         state = record_error(state, str(e), {"node": "execute_iteration"})
 
     return state
+
+
+async def _execute_tasks_real(state: ResearchState, tasks: list, components):
+    """
+    Execute tasks using real ResearchToolExecutor.
+
+    Args:
+        state: Current research state
+        tasks: List of tasks to execute
+        components: ResearchComponents with tool_executor
+    """
+    from ..tools.mcp_integration import ToolExecutionContext, ToolType
+
+    for task in tasks[:3]:  # Execute up to 3 tasks per iteration
+        try:
+            # Build execution context from state
+            context = ToolExecutionContext(
+                session_id=state["session_id"],
+                user_id=state["user_id"],
+                iteration=state["current_iteration"],
+                budget_remaining=state["budget_remaining"],
+                external_calls_remaining=state["external_calls_remaining"],
+                perplexity_enabled=True,  # From I/O Control
+                offline_mode=False,  # From I/O Control
+                cloud_routing_enabled=True
+            )
+
+            # Determine tool type based on task priority and budget
+            # High priority or deep research: use research_deep (paid)
+            # Normal priority: use web_search (free)
+            if task["priority"] >= 0.7 and state["budget_remaining"] > Decimal("0.10"):
+                tool_name = ToolType.RESEARCH_DEEP
+                arguments = {
+                    "query": task["query"],
+                    "depth": task.get("depth", "medium")
+                }
+            else:
+                tool_name = ToolType.WEB_SEARCH
+                arguments = {"query": task["query"]}
+
+            # Execute tool
+            result = await components.tool_executor.execute(
+                tool_name=tool_name,
+                arguments=arguments,
+                context=context
+            )
+
+            # Process results
+            if result.success:
+                # Extract findings from tool result
+                if tool_name == ToolType.RESEARCH_DEEP:
+                    # Deep research returns comprehensive output
+                    finding = {
+                        "id": f"finding_{state['current_iteration']}_{task['task_id']}",
+                        "content": result.data.get("research", ""),
+                        "task_id": task["task_id"],
+                        "iteration": state["current_iteration"],
+                        "confidence": 0.85,  # Higher confidence for deep research
+                        "tool": "research_deep",
+                        "citations": result.data.get("citations", [])
+                    }
+
+                    # Add citations as sources
+                    for citation_url in result.data.get("citations", []):
+                        source = {
+                            "url": citation_url,
+                            "title": f"Citation from deep research",
+                            "relevance": task["priority"],
+                            "tool": "research_deep"
+                        }
+                        state = add_source(state, source)
+
+                elif tool_name == ToolType.WEB_SEARCH:
+                    # Web search returns multiple results
+                    search_results = result.data.get("results", [])
+
+                    if search_results:
+                        # Create finding from top results
+                        finding = {
+                            "id": f"finding_{state['current_iteration']}_{task['task_id']}",
+                            "content": f"Found {len(search_results)} results for: {task['query']}",
+                            "task_id": task["task_id"],
+                            "iteration": state["current_iteration"],
+                            "confidence": 0.70,
+                            "tool": "web_search",
+                            "result_count": len(search_results)
+                        }
+
+                        # Add search results as sources
+                        for search_result in search_results[:5]:  # Top 5 results
+                            source = {
+                                "url": search_result.get("url", ""),
+                                "title": search_result.get("title", ""),
+                                "snippet": search_result.get("description", ""),
+                                "relevance": task["priority"],
+                                "tool": "web_search"
+                            }
+                            state = add_source(state, source)
+                    else:
+                        # No results found
+                        finding = {
+                            "id": f"finding_{state['current_iteration']}_{task['task_id']}",
+                            "content": f"No results found for: {task['query']}",
+                            "task_id": task["task_id"],
+                            "iteration": state["current_iteration"],
+                            "confidence": 0.0,
+                            "tool": "web_search"
+                        }
+
+                state = add_finding(state, finding)
+
+                # Record tool execution success
+                state = record_tool_execution(
+                    state,
+                    tool_name=result.tool_name,
+                    result={"success": True},
+                    cost=result.cost_usd,
+                    success=True
+                )
+
+                # Update budget tracking
+                state["budget_remaining"] -= result.cost_usd
+                if result.is_external:
+                    state["external_calls_remaining"] -= 1
+
+                logger.info(
+                    f"Task {task['task_id']} executed with {result.tool_name}: "
+                    f"cost=${result.cost_usd}, budget remaining=${state['budget_remaining']}"
+                )
+
+            else:
+                # Tool execution failed
+                logger.warning(f"Task {task['task_id']} failed: {result.error}")
+                state = record_tool_execution(
+                    state,
+                    tool_name=result.tool_name,
+                    result={"error": result.error},
+                    cost=Decimal("0.0"),
+                    success=False
+                )
+
+        except Exception as e:
+            logger.error(f"Error executing task {task.get('task_id')}: {e}")
+            state = record_error(state, str(e), {"node": "execute_iteration", "task": task})
+
+
+async def _execute_tasks_simulated(state: ResearchState, tasks: list):
+    """
+    Execute tasks using simulated data (fallback).
+
+    Args:
+        state: Current research state
+        tasks: List of tasks to execute
+    """
+    logger.info("Using simulated task execution (tool executor not available)")
+
+    for task in tasks[:3]:  # Execute up to 3 tasks
+        # Simulate finding
+        finding = {
+            "id": f"finding_{state['current_iteration']}_{task['task_id']}",
+            "content": f"[SIMULATED] Research finding for: {task['query']}",
+            "task_id": task["task_id"],
+            "iteration": state["current_iteration"],
+            "confidence": 0.75,
+            "tool": "simulated"
+        }
+
+        state = add_finding(state, finding)
+
+        # Simulate source
+        source = {
+            "url": f"https://example.com/source_{state['current_iteration']}",
+            "title": f"Source for {task['query'][:50]}",
+            "relevance": task["priority"],
+            "tool": "simulated"
+        }
+
+        state = add_source(state, source)
+
+        # Record tool execution
+        state = record_tool_execution(
+            state,
+            tool_name="web_search_simulated",
+            result={"findings": 1, "sources": 1},
+            cost=Decimal("0.0"),  # Local execution
+            success=True
+        )
 
 
 async def validate_findings(state: ResearchState) -> ResearchState:
@@ -478,7 +639,7 @@ async def synthesize_results(state: ResearchState) -> ResearchState:
     Synthesize final research results.
 
     Creates:
-    - Final answer
+    - AI-generated final answer via ModelCoordinator
     - Summary of findings
     - Source attribution
     - Quality report
@@ -486,7 +647,7 @@ async def synthesize_results(state: ResearchState) -> ResearchState:
     logger.info("Synthesizing research results")
 
     try:
-        # Build synthesis
+        # Build synthesis metadata
         synthesis = {
             "query": state["query"],
             "total_iterations": state["current_iteration"],
@@ -519,14 +680,16 @@ async def synthesize_results(state: ResearchState) -> ResearchState:
             "knowledge_gaps": state["knowledge_gaps"],
         }
 
-        # Create final answer (simplified - would use model in full implementation)
-        final_answer = f"Research completed for query: '{state['query']}'\n\n"
-        final_answer += f"Found {len(state['findings'])} findings across {state['current_iteration']} iterations.\n\n"
+        # Generate AI synthesis using ModelCoordinator
+        from .components import get_global_components
+        components = get_global_components()
 
-        if state["findings"]:
-            final_answer += "Key Findings:\n"
-            for i, finding in enumerate(state["findings"][-5:], 1):
-                final_answer += f"{i}. {finding.get('content', '')[:200]}...\n"
+        if components and components.model_coordinator:
+            logger.info("Generating AI synthesis using ModelCoordinator")
+            final_answer = await _generate_ai_synthesis(state, components)
+        else:
+            logger.warning("ModelCoordinator not available, using basic synthesis")
+            final_answer = _generate_basic_synthesis(state)
 
         state["final_answer"] = final_answer
         state["synthesis"] = synthesis
@@ -542,6 +705,136 @@ async def synthesize_results(state: ResearchState) -> ResearchState:
         state = set_status(state, ResearchStatus.FAILED)
 
     return state
+
+
+async def _generate_ai_synthesis(state: ResearchState, components) -> str:
+    """
+    Generate AI synthesis using ModelCoordinator.
+
+    Args:
+        state: Research state with findings
+        components: ResearchComponents with model_coordinator
+
+    Returns:
+        AI-generated synthesis
+    """
+    from ..models.coordinator import ConsultationRequest, ConsultationTier
+
+    try:
+        # Build context from findings and sources
+        findings_text = "\n\n".join([
+            f"Finding {i+1} (confidence: {f.get('confidence', 0):.2f}):\n{f.get('content', '')}"
+            for i, f in enumerate(state["findings"])
+        ])
+
+        sources_text = "\n".join([
+            f"- {s.get('title', 'Untitled')}: {s.get('url', '')}"
+            for s in state["sources"][:20]  # Top 20 sources
+        ])
+
+        # Construct synthesis prompt
+        prompt = f"""Synthesize the following research findings into a comprehensive, well-structured answer.
+
+Original Query: {state["query"]}
+
+Research Findings:
+{findings_text}
+
+Sources Consulted:
+{sources_text}
+
+Please provide:
+1. A direct answer to the query
+2. Key insights and supporting evidence
+3. Important caveats or limitations
+4. Source citations where appropriate
+
+Format the response in a clear, professional manner."""
+
+        # Determine consultation tier based on quality and budget
+        avg_quality = sum(state["quality_scores"]) / len(state["quality_scores"]) if state["quality_scores"] else 0.0
+
+        if avg_quality >= 0.9:
+            # High quality research, use medium tier for synthesis
+            tier = ConsultationTier.MEDIUM
+        elif avg_quality >= 0.7:
+            # Good quality, use low tier
+            tier = ConsultationTier.LOW
+        else:
+            # Lower quality, might need critical tier review
+            tier = ConsultationTier.HIGH
+
+        # Create consultation request
+        request = ConsultationRequest(
+            prompt=prompt,
+            tier=tier,
+            max_cost=state["budget_remaining"],
+            prefer_local=state["budget_remaining"] < Decimal("0.50"),
+            context={
+                "query": state["query"],
+                "findings_count": len(state["findings"]),
+                "sources_count": len(state["sources"]),
+                "session_id": state["session_id"]
+            }
+        )
+
+        # Consult model
+        response = await components.model_coordinator.consult(request)
+
+        if response.success:
+            # Record model usage
+            state = record_model_call(
+                state,
+                model_id=response.model_used,
+                result={"synthesis": "success"},
+                cost=response.cost,
+                success=True
+            )
+
+            # Update budget
+            state["budget_remaining"] -= response.cost
+
+            logger.info(
+                f"AI synthesis generated using {response.model_used} "
+                f"(tier: {tier.value}, cost: ${response.cost})"
+            )
+
+            return response.response
+        else:
+            logger.warning(f"AI synthesis failed: {response.error}, using fallback")
+            return _generate_basic_synthesis(state)
+
+    except Exception as e:
+        logger.error(f"Error generating AI synthesis: {e}")
+        return _generate_basic_synthesis(state)
+
+
+def _generate_basic_synthesis(state: ResearchState) -> str:
+    """
+    Generate basic text synthesis (fallback).
+
+    Args:
+        state: Research state with findings
+
+    Returns:
+        Basic text synthesis
+    """
+    final_answer = f"Research completed for query: '{state['query']}'\n\n"
+    final_answer += f"Found {len(state['findings'])} findings across {state['current_iteration']} iterations.\n\n"
+
+    if state["findings"]:
+        final_answer += "Key Findings:\n"
+        for i, finding in enumerate(state["findings"][-5:], 1):
+            content = finding.get('content', '')
+            confidence = finding.get('confidence', 0.0)
+            final_answer += f"{i}. (Confidence: {confidence:.2f}) {content[:200]}...\n\n"
+
+    if state["sources"]:
+        final_answer += "\nTop Sources:\n"
+        for i, source in enumerate(state["sources"][:10], 1):
+            final_answer += f"{i}. {source.get('title', 'Untitled')}: {source.get('url', '')}\n"
+
+    return final_answer
 
 
 async def handle_error(state: ResearchState) -> ResearchState:

@@ -32,6 +32,13 @@ from .nodes import (
     handle_error,
 )
 
+from .components import (
+    ResearchComponents,
+    set_global_components,
+    get_global_components,
+    require_components,
+)
+
 __all__ = [
     # State
     "ResearchState",
@@ -49,4 +56,9 @@ __all__ = [
     "check_stopping",
     "synthesize_results",
     "handle_error",
+    # Components
+    "ResearchComponents",
+    "set_global_components",
+    "get_global_components",
+    "require_components",
 ]

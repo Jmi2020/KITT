@@ -699,9 +699,46 @@ pytest tests/ \
 
 ---
 
+## Testing Research Graph Wiring
+
+### Overview
+
+The research graph uses dependency injection to access infrastructure components. Test the wiring to ensure nodes use real execution instead of simulated data.
+
+### Test File
+
+```bash
+pytest tests/integration/test_research_graph_wiring.py -v -m integration
+```
+
+### What's Tested
+
+1. **Component Factory**: ResearchComponents dataclass creation
+2. **Global Registration**: set_global_components() / get_global_components()
+3. **Real Execution**: execute_iteration uses tool_executor
+4. **Fallback Behavior**: Simulated execution when components unavailable
+5. **Tool Selection**: High-priority tasks use research_deep
+
+### Verification
+
+Check brain service logs for component registration:
+
+```
+INFO: Research components registered: {'fully_wired': True, 'tool_executor': True, ...}
+INFO: Executing 3 tasks with real tool executor
+INFO: Task task_1 executed with web_search: cost=$0.00
+```
+
+If you see `"Tool executor not available, using simulated execution"`, components weren't properly registered.
+
+**See**: `Research/ResearchGraphWiring.md` for full wiring documentation.
+
+---
+
 ## References
 
 - **Permission System Architecture**: `Research/PermissionSystemArchitecture.md`
+- **Research Graph Wiring**: `Research/ResearchGraphWiring.md`
 - **Implementation Plan**: `Research/AutonomousResearchImplementationPlan.md`
 - **README**: `README.md` (Autonomous Research Pipeline section)
 - **Test Files**: `tests/unit/`, `tests/integration/`

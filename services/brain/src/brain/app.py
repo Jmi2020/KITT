@@ -164,6 +164,22 @@ async def lifespan(app: FastAPI):
             )
             logger.info("Model coordinator initialized")
 
+            # Register components for dependency injection into research graph
+            from brain.research.graph.components import ResearchComponents, set_global_components
+
+            components = ResearchComponents(
+                tool_executor=app.state.tool_executor,
+                permission_gate=app.state.permission_gate,
+                model_coordinator=app.state.model_coordinator,
+                budget_manager=app.state.budget_manager,
+                research_server=app.state.research_server,
+                memory_server=app.state.memory_server,
+                io_control=app.state.io_control
+            )
+
+            set_global_components(components)
+            logger.info(f"Research components registered for dependency injection: {components.get_status()}")
+
             # Build research graph (Phase 5)
             from brain.research.graph import build_research_graph
 
