@@ -35,7 +35,7 @@ class ValidationIssue:
     validator: str
     severity: ValidationSeverity
     message: str
-    field: Optional[str] = None
+    field_name: Optional[str] = None
     details: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -129,7 +129,7 @@ class SchemaValidator(BaseValidator):
                         validator=self.name,
                         severity=ValidationSeverity.ERROR,
                         message=error["msg"],
-                        field=".".join(str(loc) for loc in error["loc"]),
+                        field_name=".".join(str(loc) for loc in error["loc"]),
                         details={"type": error["type"]}
                     )
                 )
@@ -207,7 +207,7 @@ class FormatValidator(BaseValidator):
                         validator=self.name,
                         severity=ValidationSeverity.ERROR,
                         message=f"Required field '{field_name}' missing",
-                        field=field_name
+                        field_name=field_name
                     )
                 )
                 continue
@@ -226,7 +226,7 @@ class FormatValidator(BaseValidator):
                         validator=self.name,
                         severity=ValidationSeverity.ERROR,
                         message=f"Field '{field_name}' has wrong type. Expected {expected_type.__name__}, got {type(value).__name__}",
-                        field=field_name
+                        field_name=field_name
                     )
                 )
                 continue
@@ -240,7 +240,7 @@ class FormatValidator(BaseValidator):
                             validator=self.name,
                             severity=ValidationSeverity.WARNING,
                             message=f"Field '{field_name}' does not match expected pattern",
-                            field=field_name,
+                            field_name=field_name,
                             details={"pattern": pattern}
                         )
                     )
@@ -256,7 +256,7 @@ class FormatValidator(BaseValidator):
                             validator=self.name,
                             severity=ValidationSeverity.WARNING,
                             message=f"Field '{field_name}' is too short (min: {min_len}, got: {len(value)})",
-                            field=field_name
+                            field_name=field_name
                         )
                     )
 
@@ -266,7 +266,7 @@ class FormatValidator(BaseValidator):
                             validator=self.name,
                             severity=ValidationSeverity.WARNING,
                             message=f"Field '{field_name}' is too long (max: {max_len}, got: {len(value)})",
-                            field=field_name
+                            field_name=field_name
                         )
                     )
 
@@ -281,7 +281,7 @@ class FormatValidator(BaseValidator):
                             validator=self.name,
                             severity=ValidationSeverity.WARNING,
                             message=f"Field '{field_name}' is below minimum (min: {min_val}, got: {value})",
-                            field=field_name
+                            field_name=field_name
                         )
                     )
 
@@ -291,7 +291,7 @@ class FormatValidator(BaseValidator):
                             validator=self.name,
                             severity=ValidationSeverity.WARNING,
                             message=f"Field '{field_name}' exceeds maximum (max: {max_val}, got: {value})",
-                            field=field_name
+                            field_name=field_name
                         )
                     )
 

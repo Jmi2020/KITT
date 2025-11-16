@@ -63,7 +63,7 @@ class ResearchComponents:
 _components: Optional[ResearchComponents] = None
 
 
-def set_global_components(components: ResearchComponents):
+def set_global_components(components: Optional[ResearchComponents]):
     """
     Set global research components.
 
@@ -74,6 +74,10 @@ def set_global_components(components: ResearchComponents):
     """
     global _components
     _components = components
+
+    if components is None:
+        logger.info("Research components cleared")
+        return
 
     status = components.get_status()
     logger.info(f"Research components registered: {status}")
