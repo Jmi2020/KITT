@@ -33,7 +33,7 @@ def upgrade() -> None:
     op.create_table(
         'apscheduler_jobs',
         sa.Column('id', sa.String(191), primary_key=True, nullable=False),
-        sa.Column('next_run_time', sa.Float(25), nullable=True, index=True),
+        sa.Column('next_run_time', sa.Float(25), nullable=True),
         sa.Column('job_state', postgresql.BYTEA(), nullable=False),
     )
 
