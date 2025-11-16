@@ -6,11 +6,12 @@ import Shell from './pages/Shell';
 import WallTerminal from './pages/WallTerminal';
 import VisionGallery from './pages/VisionGallery';
 import ImageGenerator from './pages/ImageGenerator';
+import Research from './pages/Research';
 import useRemoteMode from './hooks/useRemoteMode';
 import { useTheme } from './contexts/ThemeContext';
 
 const App = () => {
-  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'shell' | 'wall' | 'vision' | 'images'>('shell');
+  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'shell' | 'wall' | 'vision' | 'images' | 'research'>('shell');
   const remoteMode = useRemoteMode();
   const { theme, toggleTheme } = useTheme();
 
@@ -28,6 +29,8 @@ const App = () => {
         return <VisionGallery />;
       case 'images':
         return <ImageGenerator />;
+      case 'research':
+        return <Research />;
       default:
         return <Dashboard remoteMode={remoteMode} />;
     }
@@ -42,6 +45,8 @@ const App = () => {
       setActiveView('images');
     } else if (viewParam === 'shell') {
       setActiveView('shell');
+    } else if (viewParam === 'research') {
+      setActiveView('research');
     }
   }, []);
 
@@ -51,6 +56,7 @@ const App = () => {
         <h1>KITTY Control Console</h1>
         <nav>
           <button onClick={() => setActiveView('shell')}>💬 Shell</button>
+          <button onClick={() => setActiveView('research')}>🔬 Research</button>
           <button onClick={() => setActiveView('dashboard')}>Dashboard</button>
           <button onClick={() => setActiveView('projects')}>Projects</button>
           <button onClick={() => setActiveView('console')}>Fabrication Console</button>
