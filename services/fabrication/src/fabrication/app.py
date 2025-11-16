@@ -1412,6 +1412,32 @@ class QueueStatisticsResponse(BaseModel):
     overdue: int
 
 
+# ============================================================================
+# P3 #17 Queue Optimization Request/Response Models
+# ============================================================================
+
+class QueueEstimateResponse(BaseModel):
+    """Queue completion time estimate response."""
+
+    printer_id: str
+    total_print_hours: float
+    total_material_changes: int
+    material_change_time_hours: float
+    maintenance_time_hours: float
+    total_time_hours: float
+    estimated_completion: datetime
+
+
+class MaintenanceStatusResponse(BaseModel):
+    """Printer maintenance status response."""
+
+    printer_id: str
+    hours_since_maintenance: float
+    maintenance_due: bool
+    maintenance_interval_hours: int
+    next_maintenance_hours: float
+
+
 @app.get("/api/fabrication/cameras/status", response_model=List[CameraStatusResponse])
 async def get_camera_status():
     """Get status of all printer cameras.
@@ -1971,3 +1997,132 @@ async def get_queue_statistics() -> QueueStatisticsResponse:
     except Exception as e:
         LOGGER.error("Failed to get queue statistics", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get queue statistics: {e}")
+
+
+# ============================================================================
+# P3 #17 Queue Optimization Endpoints
+# ============================================================================
+
+@app.get("/api/fabrication/queue/estimate/{printer_id}", response_model=QueueEstimateResponse)
+async def get_queue_estimate(
+    printer_id: str,
+    current_material: Optional[str] = Query(None, description="Currently loaded material ID"),
+) -> QueueEstimateResponse:
+    """
+    Get queue completion time estimate for a printer (P3 #17).
+
+    Accounts for:
+    - Print durations
+    - Material change penalties (15 min each)
+    - Maintenance windows (if due)
+
+    Args:
+        printer_id: Printer to estimate for (bamboo_h2d, elegoo_giga, snapmaker_artisan)
+        current_material: Currently loaded material (for change penalty calculation)
+
+    Returns:
+        Queue completion time estimate with breakdown
+    """
+    if not queue_optimizer:
+        raise HTTPException(status_code=503, detail="Multi-printer coordination not available")
+
+    try:
+        estimate = await queue_optimizer.estimate_queue_completion(
+            printer_id=printer_id,
+            current_material=current_material,
+        )
+
+        return QueueEstimateResponse(
+            printer_id=printer_id,
+            total_print_hours=estimate.total_print_hours,
+            total_material_changes=estimate.total_material_changes,
+            material_change_time_hours=estimate.material_change_time_hours,
+            maintenance_time_hours=estimate.maintenance_time_hours,
+            total_time_hours=estimate.total_time_hours,
+            estimated_completion=estimate.estimated_completion,
+        )
+
+    except Exception as e:
+        LOGGER.error(
+            "Failed to estimate queue completion",
+            printer_id=printer_id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail=f"Failed to estimate queue completion: {e}")
+
+
+@app.get("/api/fabrication/maintenance/{printer_id}/status", response_model=MaintenanceStatusResponse)
+async def get_maintenance_status(printer_id: str) -> MaintenanceStatusResponse:
+    """
+    Get printer maintenance status (P3 #17).
+
+    Tracks hours printed since last maintenance and indicates when maintenance is due.
+
+    Args:
+        printer_id: Printer to check (bamboo_h2d, elegoo_giga, snapmaker_artisan)
+
+    Returns:
+        Maintenance status with hours and due flag
+    """
+    if not queue_optimizer:
+        raise HTTPException(status_code=503, detail="Multi-printer coordination not available")
+
+    try:
+        is_due, hours_printed = queue_optimizer.check_maintenance_due(printer_id)
+
+        # Calculate hours until next maintenance
+        hours_until = queue_optimizer.maintenance_interval_hours - hours_printed
+
+        return MaintenanceStatusResponse(
+            printer_id=printer_id,
+            hours_since_maintenance=hours_printed,
+            maintenance_due=is_due,
+            maintenance_interval_hours=queue_optimizer.maintenance_interval_hours,
+            next_maintenance_hours=max(0, hours_until),
+        )
+
+    except Exception as e:
+        LOGGER.error(
+            "Failed to get maintenance status",
+            printer_id=printer_id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail=f"Failed to get maintenance status: {e}")
+
+
+@app.post("/api/fabrication/maintenance/{printer_id}/complete")
+async def record_maintenance_completed(printer_id: str) -> dict[str, str]:
+    """
+    Record maintenance completion for a printer (P3 #17).
+
+    Resets the maintenance counter to zero.
+
+    Args:
+        printer_id: Printer that was serviced (bamboo_h2d, elegoo_giga, snapmaker_artisan)
+
+    Returns:
+        Success message
+    """
+    if not queue_optimizer:
+        raise HTTPException(status_code=503, detail="Multi-printer coordination not available")
+
+    try:
+        queue_optimizer.record_maintenance_completed(printer_id)
+
+        LOGGER.info("Maintenance recorded", printer_id=printer_id)
+
+        return {
+            "status": "success",
+            "message": f"Maintenance recorded for {printer_id}, counter reset",
+        }
+
+    except Exception as e:
+        LOGGER.error(
+            "Failed to record maintenance",
+            printer_id=printer_id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail=f"Failed to record maintenance: {e}")

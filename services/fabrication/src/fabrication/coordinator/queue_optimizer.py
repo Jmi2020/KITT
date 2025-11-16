@@ -1,13 +1,19 @@
-"""Queue Optimizer - P3 #20 Multi-Printer Coordination.
+"""Queue Optimizer - P3 #17/#20 Enhanced Queue Optimization.
 
-Optimizes job queue with material batching, priority sorting, and build volume filtering.
+Optimizes job queue with:
+- Material batching (P3 #20)
+- Deadline prioritization (P3 #20)
+- Off-peak scheduling for long prints (P3 #17)
+- Material change penalty accounting (P3 #17)
+- Maintenance scheduling (P3 #17)
+- Intelligent reasoning generation (P3 #17)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import List, Optional
+from datetime import datetime, timedelta, time
+from typing import List, Optional, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -27,17 +33,32 @@ class OptimizationResult:
     job: QueuedPrint
     optimization_score: float
     reasoning: str
+    scheduled_start: Optional[datetime] = None
+    estimated_completion: Optional[datetime] = None
+
+
+@dataclass
+class QueueEstimate:
+    """Completion time estimate for queue."""
+    total_print_hours: float
+    total_material_changes: int
+    material_change_time_hours: float
+    maintenance_time_hours: float
+    total_time_hours: float
+    estimated_completion: datetime
 
 
 class QueueOptimizer:
     """Optimize job queue with intelligent sorting and material batching.
 
-    Optimization Goals:
+    Optimization Goals (P3 #20 + #17):
     1. Deadlines - Jobs with approaching deadlines prioritized
     2. Material Batching - Group same material to reduce filament swaps
-    3. User Priority - High-priority jobs first
-    4. Build Volume - Ensure job fits printer
-    5. FIFO - First-in-first-out for same priority
+    3. Off-Peak Scheduling - Long prints delayed to off-peak hours
+    4. User Priority - High-priority jobs first
+    5. Build Volume - Ensure job fits printer
+    6. FIFO - First-in-first-out for same priority
+    7. Maintenance Windows - Schedule printer maintenance
     """
 
     def __init__(
@@ -46,6 +67,11 @@ class QueueOptimizer:
         analyzer: STLAnalyzer,
         deadline_hours_threshold: int = 24,
         material_batch_bonus: float = 50.0,
+        off_peak_start_hour: int = 22,  # 10 PM
+        off_peak_end_hour: int = 6,     # 6 AM
+        long_print_threshold_hours: float = 8.0,
+        material_change_penalty_minutes: int = 15,
+        maintenance_interval_hours: int = 200,
     ):
         """Initialize queue optimizer.
 
@@ -54,11 +80,26 @@ class QueueOptimizer:
             analyzer: STL analyzer for dimension checks
             deadline_hours_threshold: Hours before deadline to boost priority (default: 24)
             material_batch_bonus: Score bonus for material matching (default: 50.0)
+            off_peak_start_hour: Hour when off-peak begins (default: 22 = 10 PM)
+            off_peak_end_hour: Hour when off-peak ends (default: 6 = 6 AM)
+            long_print_threshold_hours: Prints >=this duration eligible for off-peak (default: 8.0)
+            material_change_penalty_minutes: Time penalty for material swap (default: 15)
+            maintenance_interval_hours: Hours between maintenance cycles (default: 200)
         """
         self.db = db
         self.analyzer = analyzer
         self.deadline_hours_threshold = deadline_hours_threshold
         self.material_batch_bonus = material_batch_bonus
+
+        # P3 #17 enhancements
+        self.off_peak_start_hour = off_peak_start_hour
+        self.off_peak_end_hour = off_peak_end_hour
+        self.long_print_threshold_hours = long_print_threshold_hours
+        self.material_change_penalty_minutes = material_change_penalty_minutes
+        self.maintenance_interval_hours = maintenance_interval_hours
+
+        # Printer maintenance tracking (hours printed since last maintenance)
+        self._printer_hours: dict[str, float] = {}
 
     async def get_next_job(
         self,
@@ -99,7 +140,9 @@ class QueueOptimizer:
         max_dimension = min(printer_caps.build_volume)
 
         # Score and filter jobs
+        current_time = datetime.utcnow()
         scored_jobs: List[OptimizationResult] = []
+
         for job in queued_jobs:
             # Check if job fits printer's build volume
             try:
@@ -123,13 +166,33 @@ class QueueOptimizer:
                 )
                 continue
 
+            # P3 #17: Check if job should be delayed to off-peak
+            should_delay, delay_reason = self._should_delay_to_off_peak(job, current_time)
+
+            if should_delay:
+                # Skip this job for now - it should wait for off-peak
+                LOGGER.debug(
+                    "Delaying job to off-peak",
+                    job_id=job.job_id,
+                    job_name=job.job_name,
+                    reason=delay_reason,
+                )
+                continue
+
             # Calculate optimization score
             score, reasoning = self._calculate_score(job, current_material)
+
+            # Append delay_reason if applicable
+            if not should_delay and delay_reason:
+                reasoning += f"; {delay_reason}"
+
             scored_jobs.append(
                 OptimizationResult(
                     job=job,
                     optimization_score=score,
                     reasoning=reasoning,
+                    scheduled_start=current_time,
+                    estimated_completion=current_time + timedelta(hours=float(job.estimated_duration_hours)),
                 )
             )
 
@@ -281,3 +344,196 @@ class QueueOptimizer:
         )
 
         return matching_jobs
+
+    # ========================================================================
+    # P3 #17 Enhanced Optimization Features
+    # ========================================================================
+
+    def _is_off_peak(self, dt: datetime) -> bool:
+        """Check if datetime is during off-peak hours.
+
+        Args:
+            dt: Datetime to check
+
+        Returns:
+            True if during off-peak window (10 PM - 6 AM default)
+        """
+        hour = dt.hour
+
+        # Handle case where off-peak window crosses midnight
+        if self.off_peak_start_hour > self.off_peak_end_hour:
+            # e.g., 22:00 - 06:00 (crosses midnight)
+            return hour >= self.off_peak_start_hour or hour < self.off_peak_end_hour
+        else:
+            # e.g., 01:00 - 05:00 (doesn't cross midnight)
+            return self.off_peak_start_hour <= hour < self.off_peak_end_hour
+
+    def _next_off_peak_start(self, current_time: datetime) -> datetime:
+        """Calculate next off-peak window start time.
+
+        Args:
+            current_time: Current datetime
+
+        Returns:
+            Datetime when next off-peak window begins
+        """
+        # Create time object for off-peak start
+        off_peak_time = time(hour=self.off_peak_start_hour, minute=0, second=0)
+
+        # Check if today's off-peak window hasn't started yet
+        today_off_peak = datetime.combine(current_time.date(), off_peak_time)
+
+        if current_time.time() < off_peak_time:
+            # Today's off-peak window is in the future
+            return today_off_peak
+        else:
+            # Use tomorrow's off-peak window
+            tomorrow = current_time.date() + timedelta(days=1)
+            return datetime.combine(tomorrow, off_peak_time)
+
+    def _should_delay_to_off_peak(
+        self,
+        job: QueuedPrint,
+        current_time: datetime,
+    ) -> Tuple[bool, str]:
+        """Determine if job should be delayed to off-peak hours.
+
+        Args:
+            job: Print job to evaluate
+            current_time: Current datetime
+
+        Returns:
+            (should_delay, reasoning) tuple
+        """
+        # Only consider long prints
+        if job.estimated_duration_hours < self.long_print_threshold_hours:
+            return False, "Short print (< {:.1f}h)".format(self.long_print_threshold_hours)
+
+        # Already off-peak - no need to delay
+        if self._is_off_peak(current_time):
+            return False, "Already off-peak hours"
+
+        # Check if job has urgent deadline
+        if job.deadline:
+            hours_until_deadline = (job.deadline - current_time).total_seconds() / 3600
+
+            # Deadline within 24 hours - don't delay
+            if hours_until_deadline < 24:
+                return False, "Urgent deadline ({:.1f}h away)".format(hours_until_deadline)
+
+        # Long print during peak hours with no urgent deadline - delay
+        next_off_peak = self._next_off_peak_start(current_time)
+        hours_until_off_peak = (next_off_peak - current_time).total_seconds() / 3600
+
+        return True, "Long print ({:.1f}h) delayed to off-peak (in {:.1f}h)".format(
+            job.estimated_duration_hours,
+            hours_until_off_peak,
+        )
+
+    def check_maintenance_due(self, printer_id: str) -> Tuple[bool, float]:
+        """Check if printer maintenance is due.
+
+        Args:
+            printer_id: Printer to check
+
+        Returns:
+            (is_due, hours_since_maintenance) tuple
+        """
+        hours_printed = self._printer_hours.get(printer_id, 0.0)
+        is_due = hours_printed >= self.maintenance_interval_hours
+
+        return is_due, hours_printed
+
+    def record_print_completed(self, printer_id: str, print_duration_hours: float):
+        """Record completed print for maintenance tracking.
+
+        Args:
+            printer_id: Printer that completed the print
+            print_duration_hours: Duration of completed print
+        """
+        current_hours = self._printer_hours.get(printer_id, 0.0)
+        self._printer_hours[printer_id] = current_hours + print_duration_hours
+
+        LOGGER.info(
+            "Recorded print completion",
+            printer_id=printer_id,
+            print_hours=print_duration_hours,
+            total_hours=self._printer_hours[printer_id],
+        )
+
+    def record_maintenance_completed(self, printer_id: str):
+        """Reset maintenance counter after maintenance performed.
+
+        Args:
+            printer_id: Printer that was serviced
+        """
+        self._printer_hours[printer_id] = 0.0
+
+        LOGGER.info("Reset maintenance counter", printer_id=printer_id)
+
+    async def estimate_queue_completion(
+        self,
+        printer_id: str,
+        current_material: Optional[str] = None,
+    ) -> QueueEstimate:
+        """Estimate total completion time for queue.
+
+        Accounts for:
+        - Print durations
+        - Material change penalties
+        - Maintenance windows
+
+        Args:
+            printer_id: Target printer
+            current_material: Currently loaded material (None = unknown)
+
+        Returns:
+            QueueEstimate with timing breakdown
+        """
+        # Get all queued jobs for this printer
+        stmt = (
+            select(QueuedPrint)
+            .where(QueuedPrint.status == QueueStatus.queued)
+            .order_by(QueuedPrint.queued_at)
+        )
+        queued_jobs = self.db.execute(stmt).scalars().all()
+
+        total_print_hours = 0.0
+        material_changes = 0
+        last_material = current_material
+
+        for job in queued_jobs:
+            # Add print duration
+            total_print_hours += float(job.estimated_duration_hours)
+
+            # Count material changes
+            if last_material and job.material_id != last_material:
+                material_changes += 1
+
+            last_material = job.material_id
+
+        # Calculate material change time
+        material_change_hours = (material_changes * self.material_change_penalty_minutes) / 60.0
+
+        # Check if maintenance due
+        is_due, hours_printed = self.check_maintenance_due(printer_id)
+        maintenance_hours = 0.0
+
+        if is_due or (hours_printed + total_print_hours >= self.maintenance_interval_hours):
+            # Maintenance required during this queue
+            maintenance_hours = 2.0  # Assume 2 hours for maintenance
+
+        # Calculate total time
+        total_hours = total_print_hours + material_change_hours + maintenance_hours
+
+        # Estimate completion datetime
+        estimated_completion = datetime.utcnow() + timedelta(hours=total_hours)
+
+        return QueueEstimate(
+            total_print_hours=total_print_hours,
+            total_material_changes=material_changes,
+            material_change_time_hours=material_change_hours,
+            maintenance_time_hours=maintenance_hours,
+            total_time_hours=total_hours,
+            estimated_completion=estimated_completion,
+        )
