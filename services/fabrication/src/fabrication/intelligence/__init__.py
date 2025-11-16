@@ -1,8 +1,9 @@
-"""Fabrication intelligence package for Phase 4.
+"""Fabrication intelligence and ML features."""
 
-This package provides intelligent fabrication capabilities:
-- Material inventory tracking
-- Print outcome analysis
-- Success prediction
-- Queue optimization
-"""
+from .print_success_predictor import PrintSuccessPredictor, PredictionResult, PrintFeatures
+
+__all__ = [
+    "PrintSuccessPredictor",
+    "PredictionResult",
+    "PrintFeatures",
+]
