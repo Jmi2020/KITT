@@ -43,6 +43,7 @@ class BrainOrchestrator:
         safety_workflow: Any | None = None,
         memory_client: MemoryClient | None = None,
         langgraph_integration: Optional[LangGraphRoutingIntegration] = None,
+        state_manager: Any | None = None,
     ) -> None:
         self._context_store = context_store
         self._ha_skill = HomeAssistantSkill(ha_credentials)
@@ -52,7 +53,8 @@ class BrainOrchestrator:
         self._langgraph = langgraph_integration
 
         # Initialize conversation state manager for multi-turn workflows
-        self._state_manager = ConversationStateManager()
+        # Use provided manager (persistent) or fallback to in-memory
+        self._state_manager = state_manager or ConversationStateManager()
 
         # Initialize safety checker for confirmation phrase verification
         self._safety_checker = SafetyChecker()

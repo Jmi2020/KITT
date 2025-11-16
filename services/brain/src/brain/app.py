@@ -88,6 +88,16 @@ async def lifespan(app: FastAPI):
             app.state.checkpointer = await init_checkpointer(app.state.pg_pool, auto_setup=True)
             logger.info("PostgreSQL checkpointer initialized")
 
+            # Initialize persistent conversation state manager
+            from brain.conversation.persistent_state import PersistentConversationStateManager
+            from brain.conversation.auto_persist import AutoPersistStateManager
+            from brain.conversation.sync_wrapper import SyncPersistentStateManager
+
+            persistent_conv_manager = PersistentConversationStateManager(app.state.pg_pool)
+            async_manager = AutoPersistStateManager(persistent_conv_manager)
+            app.state.conversation_state_manager = SyncPersistentStateManager(async_manager)
+            logger.info("Persistent conversation state manager initialized (sync wrapper)")
+
             # Initialize I/O Control state manager (Redis)
             try:
                 redis_client = redis.Redis(
