@@ -1,0 +1,67 @@
+# Printer Driver Configuration
+#
+# Copy this file to printer_config.yaml and fill in your printer details.
+# DO NOT commit printer_config.yaml (contains credentials)
+
+printers:
+  # Bamboo H2D - MQTT-based control
+  bamboo_h2d:
+    driver: "bamboo_mqtt"
+    enabled: true
+    config:
+      mqtt_broker: "bamboo-h2d.local"  # Printer hostname or IP
+      mqtt_port: 1883
+      device_id: "01S00XXXXXXXXX"  # Get from printer screen: Settings → About
+      access_code: "12345678"  # 8-digit code from printer screen: Settings → LAN Mode
+      username: "bblp"  # Default username
+
+    # Printer capabilities (auto-detected but can override)
+    capabilities:
+      build_volume: [256, 256, 256]  # X, Y, Z in mm
+      materials: ["PLA", "PETG", "ABS", "TPU", "PA", "PC"]
+
+  # Elegoo OrangeStorm Giga - Moonraker/Klipper
+  elegoo_giga:
+    driver: "moonraker"
+    enabled: true
+    config:
+      base_url: "http://elegoo-giga.local:7125"  # Moonraker API URL
+      api_key: null  # Optional, if authentication enabled
+      timeout: 30  # Request timeout in seconds
+
+    capabilities:
+      build_volume: [800, 800, 1000]  # 800x800x1000mm
+      materials: ["PLA", "PETG", "ABS", "TPU"]
+
+  # Snapmaker Artisan - Moonraker/Klipper
+  snapmaker_artisan:
+    driver: "moonraker"
+    enabled: true
+    config:
+      base_url: "http://snapmaker-artisan.local:7125"
+      api_key: null
+      timeout: 30
+
+    capabilities:
+      build_volume: [400, 400, 400]  # 400x400x400mm
+      materials: ["PLA", "PETG", "ABS", "TPU"]
+
+# Feature flags
+features:
+  auto_start_prints: false  # Automatically start prints after upload
+  monitor_temperature: true  # Monitor and log temperatures
+  capture_snapshots: true  # Capture camera snapshots during print
+  auto_retry_failed: true  # Retry failed prints (up to max_retries)
+
+# Monitoring settings
+monitoring:
+  status_poll_interval: 30  # Seconds between status checks
+  snapshot_interval: 300  # Seconds between snapshots (5 min)
+  snapshot_milestones: ["first_layer", "25%", "50%", "75%", "complete"]
+
+# Error handling
+error_handling:
+  max_retries: 2  # Maximum print retries
+  retry_delay: 300  # Seconds to wait before retry (5 min)
+  connection_timeout: 60  # Seconds before connection timeout
+  reconnect_attempts: 3  # Reconnection attempts before marking offline
