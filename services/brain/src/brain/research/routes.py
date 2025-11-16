@@ -146,7 +146,16 @@ async def create_research_session(
         ```
     """
     try:
+        # Create session in database
         session_id = await manager.create_session(
+            user_id=request.user_id,
+            query=request.query,
+            config=request.config
+        )
+
+        # Start research execution in background
+        await manager.start_research(
+            session_id=session_id,
             user_id=request.user_id,
             query=request.query,
             config=request.config
@@ -158,7 +167,7 @@ async def create_research_session(
         return CreateSessionResponse(
             session_id=session_id,
             status=SessionStatus.ACTIVE.value,
-            message="Research session created successfully",
+            message="Research session created and started successfully",
             thread_id=session.thread_id if session else None
         )
 
@@ -459,30 +468,77 @@ async def stream_research_progress(
     """
     await websocket.accept()
 
-    try:
-        # TODO: Implement actual streaming from graph execution
-        # For now, send connection confirmation
-        await websocket.send_json({
-            "type": "connection",
-            "session_id": session_id,
-            "message": "Connected to research session stream"
-        })
+    # Send connection confirmation
+    await websocket.send_json({
+        "type": "connection",
+        "session_id": session_id,
+        "message": "Connected to research session stream"
+    })
 
-        # Keep connection alive and send periodic updates
-        # In production, this would stream actual graph execution events
-        import asyncio
-        while True:
-            await asyncio.sleep(5)
+    try:
+        # Get session manager
+        manager = websocket.app.state.session_manager
+
+        if not manager:
             await websocket.send_json({
-                "type": "heartbeat",
-                "timestamp": datetime.utcnow().isoformat()
+                "type": "error",
+                "error": "Research service not available"
             })
+            await websocket.close()
+            return
+
+        # Get session info
+        session = await manager.get_session(session_id)
+
+        if not session:
+            await websocket.send_json({
+                "type": "error",
+                "error": f"Session {session_id} not found"
+            })
+            await websocket.close()
+            return
+
+        # Stream research progress from graph
+        async for state_update in manager.stream_research(
+            session_id=session_id,
+            user_id=session.user_id,
+            query=session.query,
+            config=session.config
+        ):
+            # Extract node name and state from update
+            if isinstance(state_update, dict):
+                for node_name, node_state in state_update.items():
+                    # Send progress update
+                    await websocket.send_json({
+                        "type": "progress",
+                        "node": node_name,
+                        "iteration": node_state.get("current_iteration", 0),
+                        "status": node_state.get("status", "active"),
+                        "findings_count": len(node_state.get("findings", [])),
+                        "sources_count": len(node_state.get("sources", [])),
+                        "budget_remaining": float(node_state.get("budget_remaining", 0.0)),
+                        "saturation": node_state.get("saturation_status", {}),
+                        "stopping_decision": node_state.get("stopping_decision", {}),
+                        "timestamp": datetime.utcnow().isoformat()
+                    })
+
+        # Send completion message
+        await websocket.send_json({
+            "type": "complete",
+            "session_id": session_id,
+            "message": "Research completed",
+            "timestamp": datetime.utcnow().isoformat()
+        })
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for session {session_id}")
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         try:
+            await websocket.send_json({
+                "type": "error",
+                "error": str(e)
+            })
             await websocket.close()
         except:
             pass

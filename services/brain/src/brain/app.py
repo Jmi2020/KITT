@@ -81,15 +81,19 @@ async def lifespan(app: FastAPI):
             app.state.checkpointer = await init_checkpointer(app.state.pg_pool, auto_setup=True)
             logger.info("PostgreSQL checkpointer initialized")
 
-            # Initialize session manager (graph will be built in Phase 5)
-            # For now, pass None for graph - it will be updated when graph is ready
-            app.state.research_graph = None
+            # Build research graph (Phase 5)
+            from brain.research.graph import build_research_graph
+
+            app.state.research_graph = build_research_graph(checkpointer=app.state.checkpointer)
+            logger.info("Research graph built and compiled")
+
+            # Initialize session manager with graph
             app.state.session_manager = ResearchSessionManager(
                 graph=app.state.research_graph,
                 checkpointer=app.state.checkpointer,
                 connection_pool=app.state.pg_pool
             )
-            logger.info("Research session manager initialized")
+            logger.info("Research session manager initialized with graph")
 
         except Exception as e:
             logger.error(f"Failed to initialize research infrastructure: {e}")

@@ -400,6 +400,140 @@ class ResearchSessionManager:
             logger.error(f"Error resuming session {session_id}: {e}")
             return False
 
+    async def start_research(
+        self,
+        session_id: str,
+        user_id: str,
+        query: str,
+        config: Optional[Dict] = None
+    ) -> str:
+        """
+        Start autonomous research (creates session and begins execution).
+
+        Args:
+            session_id: Session ID
+            user_id: User ID
+            query: Research query
+            config: Optional configuration
+
+        Returns:
+            session_id
+        """
+        if not self.graph:
+            raise ValueError("Research graph not initialized")
+
+        logger.info(f"Starting research for session {session_id}")
+
+        # Start research in background
+        task = asyncio.create_task(self._run_research(session_id, user_id, query, config))
+        self.active_sessions[session_id] = task
+
+        return session_id
+
+    async def _run_research(
+        self,
+        session_id: str,
+        user_id: str,
+        query: str,
+        config: Optional[Dict] = None
+    ):
+        """
+        Run research graph (internal background task).
+
+        Args:
+            session_id: Session ID
+            user_id: User ID
+            query: Research query
+            config: Optional configuration
+        """
+        try:
+            logger.info(f"Running research graph for session {session_id}")
+
+            # Execute graph
+            final_state = await self.graph.run(
+                session_id=session_id,
+                user_id=user_id,
+                query=query,
+                config=config
+            )
+
+            # Update session with final results
+            await self.update_session_stats(
+                session_id=session_id,
+                total_iterations=final_state.get("current_iteration", 0),
+                total_findings=len(final_state.get("findings", [])),
+                total_sources=len(final_state.get("sources", [])),
+                total_cost_usd=float(final_state.get("total_cost_usd", 0.0)),
+                external_calls_used=final_state.get("external_calls_used", 0)
+            )
+
+            # Mark as completed
+            await self.mark_completed(
+                session_id=session_id,
+                completeness_score=final_state.get("quality_scores", [0.0])[-1] if final_state.get("quality_scores") else None,
+                confidence_score=final_state.get("confidence_scores", [{}])[-1].get("overall") if final_state.get("confidence_scores") else None
+            )
+
+            logger.info(f"Research completed for session {session_id}")
+
+        except Exception as e:
+            logger.error(f"Research failed for session {session_id}: {e}")
+
+            # Mark as failed
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        UPDATE research_sessions
+                        SET status = %s, updated_at = NOW(), completed_at = NOW()
+                        WHERE session_id = %s
+                        """,
+                        (SessionStatus.FAILED.value, session_id)
+                    )
+                    await conn.commit()
+
+        finally:
+            # Remove from active sessions
+            if session_id in self.active_sessions:
+                del self.active_sessions[session_id]
+
+    async def stream_research(
+        self,
+        session_id: str,
+        user_id: str,
+        query: str,
+        config: Optional[Dict] = None
+    ):
+        """
+        Stream research progress in real-time.
+
+        Args:
+            session_id: Session ID
+            user_id: User ID
+            query: Research query
+            config: Optional configuration
+
+        Yields:
+            State updates as research progresses
+        """
+        if not self.graph:
+            raise ValueError("Research graph not initialized")
+
+        logger.info(f"Streaming research for session {session_id}")
+
+        try:
+            async for state_update in self.graph.stream(
+                session_id=session_id,
+                user_id=user_id,
+                query=query,
+                config=config
+            ):
+                yield state_update
+
+        except Exception as e:
+            logger.error(f"Streaming failed for session {session_id}: {e}")
+            raise
+
     async def cancel_session(self, session_id: str) -> bool:
         """
         Cancel a research session.
