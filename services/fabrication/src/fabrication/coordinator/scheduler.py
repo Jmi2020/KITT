@@ -21,14 +21,14 @@ from common.logging import get_logger
 from ..status.printer_status import PrinterStatusChecker, PrinterStatus
 from .queue_optimizer import QueueOptimizer
 
+LOGGER = get_logger(__name__)
+
 try:
     from ..executor import PrintExecutor
     PRINT_EXECUTOR_AVAILABLE = True
 except ImportError:
     PRINT_EXECUTOR_AVAILABLE = False
     LOGGER.warning("PrintExecutor not available - automated execution disabled")
-
-LOGGER = get_logger(__name__)
 
 
 @dataclass

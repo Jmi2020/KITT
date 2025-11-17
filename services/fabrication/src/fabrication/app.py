@@ -17,6 +17,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from common.config import settings
+from common.db import get_db
 from common.db.models import (
     InventoryStatus,
     Material as MaterialModel,
