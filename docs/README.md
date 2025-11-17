@@ -113,6 +113,22 @@ Key configuration options for research sessions:
 - 2025-11-15: Source analysis and metadata tracking
 - 2025-11-14: Research pipeline Phase 6 completion
 
+## Documentation Maintenance
+
+**⚠️ IMPORTANT**: These docs must be kept up-to-date as features are finalized and implementation changes.
+
+See [TODO.md](TODO.md) for:
+- Pending documentation updates
+- Documentation sync checklist
+- Maintenance schedule
+- Standards and guidelines
+
+### When Implementing Features:
+1. ✅ Note what docs need updating
+2. ✅ Update docs during/after development
+3. ✅ Review and test all examples
+4. ✅ Check off items in TODO.md
+
 ## Contributing
 
 See [development/contributing.md](development/contributing.md) for contribution guidelines.
