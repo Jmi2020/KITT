@@ -3,9 +3,10 @@
                            GAP ANALYSIS SUMMARY
 ================================================================================
 
-Analysis Date: 2025-11-16
-Overall Coverage: 68% (15/35 features complete, 15 partial, 5 missing)
+Analysis Date: 2025-11-17 (Updated)
+Overall Coverage: 71% (16/35 features complete, 14 partial, 5 missing)
 Code Implemented: ~9,216 LOC across brain, fabrication, discovery services
+Routing: llama.cpp (Q4 + F16) + MCP + Frontier tiers COMPLETE
 
 ================================================================================
                         BY FEATURE AREA
@@ -86,12 +87,15 @@ Code Implemented: ~9,216 LOC across brain, fabrication, discovery services
 │  • Voice control integration                            MISSING ❌   │
 │  • Context persistence across devices                            ✅   │
 │                                                                          │
-│ US2: Confidence-Based Routing                            PARTIAL ⚠️   │
+│ US2: Confidence-Based Routing                      MOSTLY DONE ✅   │
 │  • Permission gates                                             ✅   │
-│  • Local LLM with Ollama                                        ✅   │
-│  • Cloud escalation (Perplexity)                                ✅   │
-│  • Actual confidence calculation                       MISSING ❌   │
-│  • Routing decision logging                            MISSING ❌   │
+│  • Local LLM with llama.cpp (Q4 + F16 servers)                  ✅   │
+│  • Cloud escalation (Perplexity + OpenAI)                       ✅   │
+│  • 3-tier routing with threshold escalation                     ✅   │
+│  • Routing decision logging (DB + JSONL + metrics)              ✅   │
+│  • Dynamic confidence calculation                      PARTIAL ⚠️   │
+│  • Token-based cost tracking                           PARTIAL ⚠️   │
+│  STATUS: 85% (confidence scoring simplified, needs enhancement)    │
 │                                                                          │
 │ US3: Fabrication Control & CV                           PARTIAL ⚠️   │
 │  • Multi-printer control                                        ✅   │
@@ -136,9 +140,9 @@ Code Implemented: ~9,216 LOC across brain, fabrication, discovery services
                        FEATURE COMPLETION SUMMARY
 ================================================================================
 
-COMPLETE (100%) - 15 Features:
+COMPLETE (100%) - 16 Features:
   1. Autonomous research Phase 1-5
-  2. Manual printer workflow  
+  2. Manual printer workflow
   3. Material inventory tracking
   4. Print outcome tracking
   5. Discovery scanners (5x)
@@ -152,16 +156,16 @@ COMPLETE (100%) - 15 Features:
  13. PostgreSQL persistence
  14. Session state management
  15. MQTT pub/sub architecture
+ 16. 3-tier routing infrastructure (llama.cpp + MCP + frontier)
 
-PARTIAL (50-75%) - 15 Features:
+PARTIAL (50-75%) - 14 Features:
   1. Automatic print workflow (50%)
   2. Print intelligence learning (60%)
   3. Queue optimization (20%)
   4. Device categorization (40%)
   5. Discovery APIs (60%)
   6. Scanning scheduler (40%)
-  7. Confidence routing (70%)
-  8. Routing observability (40%)
+  7. Routing observability (40%)
   9. Device orchestration (50%)
   10. Two-step confirmation (50%)
   11. Multi-device sync (60%)
@@ -187,11 +191,12 @@ MISSING (0%) - 5 Features:
    Affects: US4 (Multi-model CAD generation)
    Effort: 3-4 weeks
    Impact: Cannot generate designs or iterate via conversation
-   
-2. Confidence-Based Routing (Incomplete)
-   Affects: US2 (Model routing), Cost optimization
-   Effort: 2-3 weeks
-   Impact: All queries hit cloud, no cost savings, no local-first operation
+
+2. Dynamic Confidence Scoring (Enhancement Needed)
+   Affects: US2 (Model routing optimization)
+   Effort: 3-5 days
+   Impact: Currently uses fixed 0.85 confidence; needs sophisticated scorer integration
+   NOTE: Routing infrastructure is COMPLETE and functional
    
 3. Vision Service Integration (Blocked)
    Affects: Automatic print workflow Phase 2
@@ -224,9 +229,9 @@ MISSING (0%) - 5 Features:
                        EFFORT ESTIMATES
 ================================================================================
 
-P0 (Critical Path) - 7-10 weeks:
+P0 (Critical Path) - 6-8 weeks:
   • Vision integration                 2-3 weeks
-  • Confidence routing                 2-3 weeks
+  • Dynamic confidence scoring         3-5 days
   • CAD orchestration                  3-4 weeks
 
 P1 (Complete Spec) - 5-8 weeks:
@@ -239,7 +244,7 @@ P2 (Polish) - 4-6 weeks:
   • UniFi integration                  1-2 weeks
   • Smart lighting/power               1-2 weeks
 
-Total Remaining: 16-24 weeks (4-6 months)
+Total Remaining: 15-22 weeks (3.5-5.5 months)
 
 ================================================================================
                        OVERBUILT FEATURES
@@ -277,7 +282,7 @@ Main KITTY System:              ⚠️  INFRASTRUCTURE READY (60%)
 Ability to Start Prints:        ✅ YES
 Ability to Auto-Optimize:       ❌ NO (needs vision)
 Ability to Discover Devices:    ⚠️  YES (not integrated)
-Ability to Route Locally:       ❌ NO (routing incomplete)
+Ability to Route Locally:       ✅ YES (local-first with llama.cpp)
 Ability to Generate CAD:        ❌ NO (API missing)
 Ability to Access Multi-Device: ❌ NO (PWA missing)
 

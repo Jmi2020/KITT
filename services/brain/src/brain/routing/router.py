@@ -23,6 +23,7 @@ from ..prompts.unified import KittySystemPrompt
 from .audit_store import RoutingAuditStore
 from .cloud_clients import FrontierClient, MCPClient
 from .config import RoutingConfig, get_routing_config
+from .confidence_scorer import RoutingConfidenceScorer
 from .cost_tracker import CostTracker
 from .multi_server_client import MultiServerLlamaCppClient
 from .ml_local_client import MLXLocalClient
@@ -110,6 +111,7 @@ class BrainRouter:
         self._permission = permission_manager or PermissionManager()
         self._prompt_builder = KittySystemPrompt()
         self._summarizer = HermesSummarizer()
+        self._confidence_scorer = RoutingConfidenceScorer()
 
         # Initialize tool MCP client with Perplexity integration and ReAct agent
         self._tool_mcp = tool_mcp_client or ToolMCPClient(perplexity_client=self._mcp)
@@ -276,7 +278,8 @@ class BrainRouter:
             )
 
         latency = int((time.perf_counter() - start) * 1000)
-        confidence = 0.85 if output else 0.0
+
+        # Calculate dynamic confidence score
         metadata = {
             "provider": "llamacpp",
             "model": model_alias
@@ -284,11 +287,54 @@ class BrainRouter:
             or self._config.local_models[0],
             "host": self._config.llamacpp.host,
             "tools_used": len(tool_calls) if tool_calls else 0,
+            "stop_reason": response.get("stop_type"),
+            "truncated": response.get("truncated", False),
+            "raw": response.get("raw", {}),
         }
-        if response.get("stop_type"):
-            metadata["stop_reason"] = response.get("stop_type")
-        if response.get("truncated"):
-            metadata["truncated"] = True
+
+        # Use confidence scorer to calculate dynamic confidence
+        confidence_result = self._confidence_scorer.score_response(
+            response_text=output,
+            tool_calls=tool_calls,
+            metadata=metadata,
+            prompt=request.prompt,
+        )
+        confidence = confidence_result.overall
+
+        # Log confidence analysis if warnings exist
+        if confidence_result.warnings:
+            log_confidence_analysis(
+                logger=logger,
+                confidence=confidence,
+                factors=confidence_result.factors.to_dict(),
+                explanation=confidence_result.explanation,
+                warnings=confidence_result.warnings,
+            )
+
+        # Extract token usage from response
+        raw_response = response.get("raw", {})
+        usage = raw_response.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+
+        # Calculate actual cost based on tokens (if available)
+        if prompt_tokens > 0 or completion_tokens > 0:
+            actual_cost = self._cost_tracker.record_tokens(
+                tier=RoutingTier.local,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                usage_data=usage,
+            )
+            metadata["token_usage"] = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+                "cost": actual_cost,
+            }
+        else:
+            # Fallback to fixed cost if no token data
+            actual_cost = _COST_BY_TIER[RoutingTier.local]
+            self._cost_tracker.record(RoutingTier.local, actual_cost)
 
         # Log routing decision
         log_routing_decision(
@@ -296,7 +342,7 @@ class BrainRouter:
             tier="local",
             model=metadata["model"],
             confidence=confidence,
-            cost=_COST_BY_TIER[RoutingTier.local],
+            cost=actual_cost,
             prompt=request.prompt,
             response=output,
             metadata=metadata,
@@ -321,13 +367,37 @@ class BrainRouter:
             return None
         metadata = {"provider": "perplexity_mcp"}
 
+        # Extract token usage if available
+        usage = response.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+
+        # Calculate actual cost based on tokens (if available)
+        if prompt_tokens > 0 or completion_tokens > 0:
+            actual_cost = self._cost_tracker.record_tokens(
+                tier=RoutingTier.mcp,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                usage_data=usage,
+            )
+            metadata["token_usage"] = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+                "cost": actual_cost,
+            }
+        else:
+            # Fallback to fixed cost
+            actual_cost = _COST_BY_TIER[RoutingTier.mcp]
+            self._cost_tracker.record(RoutingTier.mcp, actual_cost)
+
         # Log routing decision
         log_routing_decision(
             logger=logger,
             tier="mcp",
             model="perplexity",
             confidence=0.6,
-            cost=_COST_BY_TIER[RoutingTier.mcp],
+            cost=actual_cost,
             prompt=request.prompt,
             response=output,
             metadata=metadata,
@@ -353,13 +423,37 @@ class BrainRouter:
         output = choices[0]["message"]["content"]
         metadata = {"provider": "frontier_llm", "model": settings.openai_model}
 
+        # Extract token usage from OpenAI response
+        usage = response.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+
+        # Calculate actual cost based on tokens (if available)
+        if prompt_tokens > 0 or completion_tokens > 0:
+            actual_cost = self._cost_tracker.record_tokens(
+                tier=RoutingTier.frontier,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                usage_data=usage,
+            )
+            metadata["token_usage"] = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+                "cost": actual_cost,
+            }
+        else:
+            # Fallback to fixed cost
+            actual_cost = _COST_BY_TIER[RoutingTier.frontier]
+            self._cost_tracker.record(RoutingTier.frontier, actual_cost)
+
         # Log routing decision
         log_routing_decision(
             logger=logger,
             tier="frontier",
             model=settings.openai_model,
             confidence=0.9,
-            cost=_COST_BY_TIER[RoutingTier.frontier],
+            cost=actual_cost,
             prompt=request.prompt,
             response=output,
             metadata=metadata,

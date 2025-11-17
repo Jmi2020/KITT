@@ -1,8 +1,8 @@
 # KITT Specification vs Implementation Gap Analysis
 
-**Analysis Date:** 2025-11-16  
-**Repository:** `/home/user/KITT`  
-**Current Branch:** `claude/debug-research-pipeline-01TG5VrtVjMtV2X9avnNk5VB`
+**Analysis Date:** 2025-11-17 (Updated)
+**Repository:** `/home/user/KITT`
+**Current Branch:** `claude/analyze-gap-planning-01MCgpfdkurUmDyk6YKgC9up`
 
 ---
 
@@ -11,11 +11,12 @@
 | Metric | Status |
 |--------|--------|
 | **Total Lines of Code (Implementation)** | ~9,216 LOC |
-| **Overall Implementation Coverage** | **68%** |
-| **Fully Implemented Features** | 15/35 (43%) |
-| **Partially Implemented** | 15/35 (43%) |
+| **Overall Implementation Coverage** | **71%** |
+| **Fully Implemented Features** | 16/35 (46%) |
+| **Partially Implemented** | 14/35 (40%) |
 | **Not Implemented** | 5/35 (14%) |
 | **Specifications Coverage** | 4/4 specs analyzed |
+| **Routing Infrastructure** | llama.cpp (Q4+F16) + MCP + Frontier ✅ |
 
 ---
 
@@ -137,12 +138,14 @@
 | Context persistence | ✓ | ✓ | **COMPLETE** | MQTT topics for state, session management ready |
 | Voice sync across devices | ✓ | ✗ | **MISSING** | Voice service basic, no conversation sync |
 | Hand-off to UI | ✓ | ✗ | **MISSING** | No UI hand-off mechanism |
-| **US2: Confidence-Based Model Routing** | ✓ | ⚠️ | **70%** | Router logic exists, not fully wired to LLM calls |
+| **US2: Confidence-Based Model Routing** | ✓ | ✓ | **85%** | 3-tier routing fully functional, confidence scoring simplified |
 | Router thresholds configurable | ✓ | ✓ | **COMPLETE** | Configuration in place |
-| Local LLM escalation | ✓ | ✓ | **COMPLETE** | Ollama integration ready |
+| Local LLM escalation | ✓ | ✓ | **COMPLETE** | llama.cpp integration (Q4 + F16 servers) |
 | Perplexity MCP escalation | ✓ | ✓ | **COMPLETE** | MCP server integrated |
-| Audit logging | ✓ | ⚠️ | **PARTIAL** | Database structure ready, logging incomplete |
-| `/api/routing/logs` endpoint | ✓ | ✗ | **MISSING** | Not implemented |
+| OpenAI Frontier escalation | ✓ | ✓ | **COMPLETE** | Fallback tier implemented |
+| Audit logging | ✓ | ✓ | **COMPLETE** | Database + JSONL + Prometheus metrics |
+| `/api/routing/logs` endpoint | ✓ | ✓ | **COMPLETE** | Implemented in gateway/routes/routing.py |
+| Dynamic confidence scoring | ✓ | ⚠️ | **PARTIAL** | Fixed 0.85, needs research scorer integration |
 | **US3: Fabrication Control & CV** | ✓ | ⚠️ | **50%** | Multi-printer control complete, CV incomplete |
 | Printer control via MQTT | ✓ | ✓ | **COMPLETE** | OctoPrint, Moonraker, MQTT integration |
 | CV first-layer failure detection | ✓ | ✗ | **MISSING** | Structure exists, inference not integrated |
@@ -199,7 +202,7 @@
 | 13 | Network Discovery | Approval Workflow | ✓ | ✗ | **MISSING** | 0% |
 | 14 | Network Discovery | MCP Tool Integration | ✓ | ✗ | **MISSING** | 0% |
 | 15 | Device Orchestration | Conversational Control | ✓ | ⚠️ | **PARTIAL** | 40% |
-| 16 | Model Routing | Confidence-Based Routing | ✓ | ⚠️ | **PARTIAL** | 70% |
+| 16 | Model Routing | Confidence-Based Routing | ✓ | ✓ | **COMPLETE** | 85% |
 | 17 | Model Routing | Routing Observability | ✓ | ⚠️ | **PARTIAL** | 40% |
 | 18 | CAD Integration | Zoo Parametric CAD | ✓ | ✗ | **MISSING** | 0% |
 | 19 | CAD Integration | Tripo Organic CAD | ✓ | ✗ | **MISSING** | 0% |
@@ -221,8 +224,8 @@
 | 35 | Infrastructure | PostgreSQL Persistence | ✓ | ✓ | **COMPLETE** | 100% |
 
 **Summary:**
-- ✓ Complete: 15 features (43%)
-- ⚠️ Partial: 15 features (43%)
+- ✓ Complete: 16 features (46%)
+- ⚠️ Partial: 14 features (40%)
 - ✗ Missing: 5 features (14%)
 
 ---
@@ -277,11 +280,12 @@
    - **Gap:** Machine learning classification missing
    - **Impact:** May mis-categorize devices
 
-5. **Confidence-Based Routing**
-   - Permission gates complete, but routing logic incomplete
-   - Models should escalate based on confidence
-   - **Gap:** No actual confidence calculation or threshold routing
-   - **Impact:** All queries default to cloud instead of local-first
+5. **Dynamic Confidence Scoring** (Enhancement Needed)
+   - 3-tier routing (local/MCP/frontier) fully implemented
+   - Threshold-based escalation working with llama.cpp servers
+   - **Gap:** Confidence calculation simplified (fixed 0.85 vs dynamic)
+   - **Impact:** Routing works but could be more intelligent
+   - **Note:** Sophisticated 6-factor scorer exists in research module, needs integration
 
 6. **CAD AI Cycling** (Zero Implementation)
    - Zoo.dev integration: Not started
@@ -338,10 +342,11 @@
    - Blocks: Parametric design cycling, organic modeling
    - Workaround: Manual Zoo.dev website usage
 
-3. **Confidence Routing Not Complete**
-   - Affects: US2 (Model selection)
-   - Blocks: Local-first operation with smart escalation
-   - Workaround: Manual model selection via environment
+3. **Dynamic Confidence Scoring Not Sophisticated**
+   - Affects: US2 (Model routing optimization)
+   - Blocks: Intelligent escalation based on actual uncertainty
+   - Workaround: Fixed 0.85 confidence works but could be smarter
+   - Note: Infrastructure is complete, only enhancement needed
 
 4. **No PWA for Multi-Device Access**
    - Affects: US7 (Unified UX)
@@ -377,11 +382,11 @@
    - Implement support detection
    - **Impact:** US3 and Phase 2 workflow becomes functional
 
-2. **Complete Confidence Routing** (2-3 weeks)
-   - Wire up local LLM calls with confidence scores
-   - Implement threshold-based escalation
-   - Add logging for routing decisions
-   - **Impact:** Local-first operation, 50%+ cost savings
+2. **Enhance Confidence Scoring** (3-5 days)
+   - Integrate research confidence scorer (484 LOC) into routing
+   - Add model uncertainty metrics (e.g., perplexity, token probability)
+   - Implement token-based cost tracking
+   - **Impact:** More intelligent routing decisions, better cost optimization
 
 3. **Implement CAD AI Orchestration** (3-4 weeks)
    - Integrate Zoo.dev REST API
@@ -448,7 +453,7 @@
 | Work Item | Effort | Priority |
 |-----------|--------|----------|
 | Vision integration | 2-3 weeks | **P0** |
-| Confidence routing | 2-3 weeks | **P0** |
+| Dynamic confidence scoring | 3-5 days | **P0** |
 | CAD orchestration | 3-4 weeks | **P0** |
 | Print intelligence | 2-3 weeks | **P1** |
 | Queue optimizer | 2-3 weeks | **P1** |
@@ -457,16 +462,17 @@
 | UniFi integration | 1-2 weeks | **P2** |
 | Smart lighting/power | 1-2 weeks | **P2** |
 
-**Total Remaining Effort:** ~17-27 weeks (4-7 months at full capacity)
+**Total Remaining Effort:** ~15-22 weeks (3.5-5.5 months at full capacity)
 
 ---
 
 ## Conclusion
 
-KITT has achieved **68% implementation coverage** across specifications, with:
+KITT has achieved **71% implementation coverage** across specifications, with:
 
 ✅ **Strengths:**
 - Autonomous research pipeline fully implemented (100%)
+- 3-tier routing infrastructure complete with llama.cpp integration (85%)
 - Multi-printer control Phase 1 fully functional
 - Fabrication intelligence foundation solid
 - Network discovery scanners complete
@@ -474,13 +480,13 @@ KITT has achieved **68% implementation coverage** across specifications, with:
 
 ⚠️ **Weaknesses:**
 - CAD AI cycling completely missing (would unlock creative workflows)
-- Confidence-based routing incomplete (can't achieve local-first operation)
+- Confidence scoring simplified (works but could be more intelligent)
 - Print intelligence not learning from outcomes
 - No PWA or multi-device UX
 - Discovery not integrated into broader system
 
 **To reach 100% specification compliance, priority should focus on:**
 1. Vision service integration (unblocks Phase 2 automatic workflow)
-2. Confidence routing implementation (enables local-first operation)
+2. Enhanced confidence scoring (optimize routing intelligence)
 3. CAD orchestration (flagship feature for design iteration)
 
