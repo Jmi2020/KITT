@@ -49,6 +49,51 @@ from ..metrics import (
 logger = logging.getLogger(__name__)
 
 
+async def invoke_model(model_id: str, prompt: str, context: Dict[str, Any]) -> str:
+    """
+    Invoke a model with the given prompt.
+
+    This is a simple wrapper that calls the brain's model routing system.
+
+    Args:
+        model_id: Model identifier (e.g., "kitty-primary", "claude-sonnet-4")
+        prompt: The prompt to send to the model
+        context: Additional context (session_id, task, etc.)
+
+    Returns:
+        str: The model's response text
+    """
+    from brain.orchestrator import BrainOrchestrator
+    from fastapi import Request
+
+    # Get orchestrator from app state (set during brain startup)
+    # For now, use a simple HTTP call to the local brain API
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                "http://localhost:8000/v1/chat/completions",
+                json={
+                    "model": model_id,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": False
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # Extract content from response
+            if "choices" in data and len(data["choices"]) > 0:
+                return data["choices"][0]["message"]["content"]
+            else:
+                return data.get("content", str(data))
+
+    except Exception as e:
+        logger.error(f"Model invocation failed for {model_id}: {e}")
+        raise
+
+
 async def initialize_research(state: ResearchState) -> ResearchState:
     """
     Initialize research session.
@@ -189,7 +234,12 @@ Provide ONLY the JSON response, no additional text.
     logger.info(f"Decomposing question: {state['query']}")
 
     try:
-        response = await components.model_coordinator.consult(request)
+        response = await components.model_coordinator.consult(
+            request,
+            budget_remaining=state["budget_remaining"],
+            external_calls_remaining=state["external_calls_remaining"],
+            invoke_model_func=invoke_model
+        )
 
         if response.success:
             try:
@@ -1059,7 +1109,12 @@ Structure your response clearly with:
     )
 
     try:
-        response = await components.model_coordinator.consult(request)
+        response = await components.model_coordinator.consult(
+            request,
+            budget_remaining=state["budget_remaining"],
+            external_calls_remaining=state["external_calls_remaining"],
+            invoke_model_func=invoke_model
+        )
 
         if response.success:
             # Store synthesis
@@ -1475,7 +1530,12 @@ Provide a well-structured answer with:
             }
         )
 
-        response = await components.model_coordinator.consult(request)
+        response = await components.model_coordinator.consult(
+            request,
+            budget_remaining=state["budget_remaining"],
+            external_calls_remaining=state["external_calls_remaining"],
+            invoke_model_func=invoke_model
+        )
 
         if response.success:
             state["final_answer"] = response.result
@@ -1662,7 +1722,12 @@ Keep items concise (2-4 words max). Return ONLY the JSON, no other text."""
         )
 
         # Consult model
-        response = await components.model_coordinator.consult(request)
+        response = await components.model_coordinator.consult(
+            request,
+            budget_remaining=state["budget_remaining"],
+            external_calls_remaining=state["external_calls_remaining"],
+            invoke_model_func=invoke_model
+        )
 
         if response.success and response.result:
             # Parse JSON response
@@ -1780,7 +1845,12 @@ Format the response in a clear, professional manner with proper source attributi
         )
 
         # Consult model
-        response = await components.model_coordinator.consult(request)
+        response = await components.model_coordinator.consult(
+            request,
+            budget_remaining=state["budget_remaining"],
+            external_calls_remaining=state["external_calls_remaining"],
+            invoke_model_func=invoke_model
+        )
 
         if response.success:
             # Record model usage

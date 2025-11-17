@@ -461,23 +461,12 @@ class ModelCoordinator:
         if external_calls_remaining is None:
             external_calls_remaining = 10 if request.allow_external else 0
 
-        # If no invoke function provided, create a simple fallback
+        # If no invoke function provided, raise clear error
         if invoke_model_func is None:
-            # Import here to avoid circular dependencies
-            from brain.orchestrator import get_orchestrator
-            orchestrator = get_orchestrator()
-
-            async def default_invoke(model_id: str, prompt: str, context: dict):
-                """Default model invocation using orchestrator"""
-                response = await orchestrator.generate_response(
-                    conversation_id="research",
-                    request_id=context.get("session_id", "unknown"),
-                    prompt=prompt,
-                    model=model_id
-                )
-                return response.get("output", response.get("content", str(response)))
-
-            invoke_model_func = default_invoke
+            raise ValueError(
+                "invoke_model_func is required for ModelCoordinator.consult(). "
+                "This should be provided by the caller to actually invoke models."
+            )
 
         # Select model
         selection = self.select_model(request, budget_remaining, external_calls_remaining)
