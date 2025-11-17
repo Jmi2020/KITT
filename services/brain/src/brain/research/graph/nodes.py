@@ -160,8 +160,16 @@ async def execute_iteration(state: ResearchState) -> ResearchState:
         tasks = state["strategy_context"].get("current_tasks", [])
 
         if not tasks:
-            logger.warning("No tasks planned, skipping iteration")
+            logger.warning(
+                f"No tasks planned for iteration {state['current_iteration']}. "
+                f"Strategy context: {state.get('strategy_context', {}).keys()}"
+            )
             return state
+
+        logger.info(
+            f"Found {len(tasks)} tasks to execute: "
+            f"{[t.get('query', 'unknown')[:50] for t in tasks[:3]]}"
+        )
 
         # Get components for real tool execution
         from .components import get_global_components
@@ -169,20 +177,27 @@ async def execute_iteration(state: ResearchState) -> ResearchState:
 
         # Execute tasks using real tool executor if available
         if components and components.tool_executor:
-            logger.info(f"Executing {len(tasks)} tasks with real tool executor")
+            logger.info(
+                f"Executing {len(tasks)} tasks with real tool executor "
+                f"(type: {type(components.tool_executor).__name__})"
+            )
             await _execute_tasks_real(state, tasks, components)
         else:
-            logger.warning("Tool executor not available, using simulated execution")
+            logger.warning(
+                f"Tool executor not available (components={components}), "
+                f"using simulated execution"
+            )
             await _execute_tasks_simulated(state, tasks)
 
         logger.info(
             f"Iteration {state['current_iteration']} executed: "
             f"{len(state['findings'])} total findings, "
-            f"{len(state['sources'])} total sources"
+            f"{len(state['sources'])} total sources, "
+            f"{state.get('external_calls_used', 0)} external calls used"
         )
 
     except Exception as e:
-        logger.error(f"Failed to execute iteration: {e}")
+        logger.error(f"Failed to execute iteration: {e}", exc_info=True)
         state = record_error(state, str(e), {"node": "execute_iteration"})
 
     return state
@@ -199,8 +214,15 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
     """
     from ..tools.mcp_integration import ToolExecutionContext, ToolType
 
-    for task in tasks[:3]:  # Execute up to 3 tasks per iteration
+    logger.info(f"Starting _execute_tasks_real with {len(tasks)} tasks")
+
+    for idx, task in enumerate(tasks[:3]):  # Execute up to 3 tasks per iteration
         try:
+            logger.info(
+                f"Task {idx+1}/3: query='{task.get('query', 'unknown')[:100]}', "
+                f"priority={task.get('priority', 0.0)}"
+            )
+
             # Build execution context from state
             context = ToolExecutionContext(
                 session_id=state["session_id"],
@@ -226,14 +248,26 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                 tool_name = ToolType.WEB_SEARCH
                 arguments = {"query": task["query"]}
 
+            logger.info(f"Executing tool: {tool_name} with args: {arguments}")
+
             # Execute tool
-            result = await components.tool_executor.execute(
-                tool_name=tool_name,
-                arguments=arguments,
-                context=context
-            )
+            try:
+                result = await components.tool_executor.execute(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    context=context
+                )
+                logger.info(f"✅ Tool execution completed: success={result.success}")
+            except Exception as tool_exc:
+                logger.error(f"❌ Tool execution FAILED: {tool_exc}", exc_info=True)
+                raise
 
             # Process results
+            logger.info(
+                f"Tool execution result: success={result.success}, "
+                f"data_keys={list(result.data.keys()) if hasattr(result, 'data') and result.data else 'none'}"
+            )
+
             if result.success:
                 # Extract findings from tool result
                 if tool_name == ToolType.RESEARCH_DEEP:
@@ -262,6 +296,12 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                     # Web search returns multiple results
                     search_results = result.data.get("results", [])
 
+                    logger.info(
+                        f"WEB_SEARCH returned {len(search_results)} results, "
+                        f"total_results={result.data.get('total_results')}, "
+                        f"filtered_count={result.data.get('filtered_count')}"
+                    )
+
                     if search_results:
                         # Create finding from top results
                         finding = {
@@ -284,6 +324,7 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                                 "tool": "web_search"
                             }
                             state = add_source(state, source)
+                            logger.info(f"Added source: {source.get('title', 'untitled')}")
                     else:
                         # No results found
                         finding = {
@@ -295,7 +336,9 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                             "tool": "web_search"
                         }
 
+                logger.info(f"📝 Adding finding: {finding['id']}, content_length={len(finding.get('content', ''))}")
                 state = add_finding(state, finding)
+                logger.info(f"✅ Finding added! Total findings now: {len(state.get('findings', []))}")
 
                 # Record tool execution success
                 state = record_tool_execution(
@@ -328,7 +371,15 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                 )
 
         except Exception as e:
-            logger.error(f"Error executing task {task.get('task_id')}: {e}")
+            logger.error(
+                f"Error executing task {task.get('task_id')}: {e}",
+                exc_info=True,
+                extra={
+                    "task_id": task.get("task_id"),
+                    "query": task.get("query", "")[:100],
+                    "iteration": state.get("current_iteration")
+                }
+            )
             state = record_error(state, str(e), {"node": "execute_iteration", "task": task})
 
 
@@ -631,6 +682,19 @@ async def check_stopping(state: ResearchState) -> ResearchState:
     except Exception as e:
         logger.error(f"Failed to check stopping criteria: {e}")
         state = record_error(state, str(e), {"node": "check_stopping"})
+
+        # CRITICAL: Always set a stopping_decision, even on error
+        # This prevents infinite loops if check_stopping fails
+        from ..metrics.stopping_criteria import StoppingDecision, StoppingReason
+        state["stopping_decision"] = StoppingDecision(
+            should_stop=True,
+            reasons=[StoppingReason.ERROR],
+            confidence=1.0,
+            current_iteration=state.get("current_iteration", 0),
+            explanation=f"Stopping due to error in check_stopping: {str(e)}"
+        ).to_dict()
+
+        logger.warning("Set emergency stopping decision due to error")
 
     return state
 

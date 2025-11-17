@@ -109,6 +109,17 @@ class ResearchGraph:
             "synthesize" - Stop and synthesize
             "error" - Handle error
         """
+        # Safety check: Force stop if iteration exceeds max_iterations
+        # This prevents infinite loops if stopping criteria fail to trigger
+        current_iteration = state.get("current_iteration", 0)
+        max_iterations = state.get("config", {}).get("max_iterations", 15)
+
+        if current_iteration >= max_iterations:
+            logger.warning(
+                f"Max iterations ({max_iterations}) reached, forcing synthesis"
+            )
+            return "synthesize"
+
         # Check for errors
         if state.get("last_error"):
             logger.warning("Error detected, routing to error handler")
@@ -119,6 +130,10 @@ class ResearchGraph:
 
         if not stopping_decision:
             # No decision yet, continue
+            # Log this as it may indicate check_stopping node failed
+            logger.warning(
+                f"No stopping decision at iteration {current_iteration}, continuing"
+            )
             return "continue"
 
         should_stop = stopping_decision.get("should_stop", False)
@@ -172,26 +187,33 @@ class ResearchGraph:
         )
 
         # Prepare config for LangGraph
+        # Set recursion_limit to prevent infinite loops (default is 25)
         graph_config = {
             "configurable": {
                 "thread_id": f"research_{session_id}"
-            }
+            },
+            "recursion_limit": 50  # Allow deeper research while catching runaway loops
         }
 
-        logger.info(f"Starting research for session {session_id}")
+        logger.info(f"Starting research for session {session_id} (recursion_limit=50)")
 
-        # Run graph
-        final_state = None
-        async for state in self.compiled_graph.astream(initial_state, config=graph_config):
-            final_state = state
+        # Run graph and accumulate state
+        # astream yields {node_name: partial_state} for each node
+        # We need to accumulate to get the full final state
+        full_state = initial_state.copy()
+        async for state_update in self.compiled_graph.astream(initial_state, config=graph_config):
             # Log progress
-            if isinstance(state, dict):
-                for node_name, node_state in state.items():
+            if isinstance(state_update, dict):
+                for node_name, node_state in state_update.items():
                     logger.debug(f"Node '{node_name}' completed")
+                    # Merge node state into full state
+                    if isinstance(node_state, dict):
+                        full_state.update(node_state)
 
         logger.info(f"Research completed for session {session_id}")
+        logger.info(f"Final state has {len(full_state.get('findings', []))} findings, {len(full_state.get('sources', []))} sources")
 
-        return final_state
+        return full_state
 
     async def stream(
         self,
@@ -229,10 +251,11 @@ class ResearchGraph:
         graph_config = {
             "configurable": {
                 "thread_id": f"research_{session_id}"
-            }
+            },
+            "recursion_limit": 50
         }
 
-        logger.info(f"Starting streaming research for session {session_id}")
+        logger.info(f"Starting streaming research for session {session_id} (recursion_limit=50)")
 
         # Stream graph execution
         async for state in self.compiled_graph.astream(initial_state, config=graph_config):
@@ -265,10 +288,11 @@ class ResearchGraph:
         graph_config = {
             "configurable": {
                 "thread_id": f"research_{session_id}"
-            }
+            },
+            "recursion_limit": 50
         }
 
-        logger.info(f"Resuming research for session {session_id}")
+        logger.info(f"Resuming research for session {session_id} (recursion_limit=50)")
 
         # Get latest checkpoint
         checkpoint = await self.checkpointer.aget(graph_config)

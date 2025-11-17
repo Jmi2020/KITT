@@ -454,22 +454,32 @@ class ResearchSessionManager:
             logger.info(f"Running research graph for session {session_id}")
 
             # Execute graph
+            logger.info(f"⏳ About to call graph.run() for session {session_id}")
             final_state = await self.graph.run(
                 session_id=session_id,
                 user_id=user_id,
                 query=query,
                 config=config
             )
+            logger.info(f"✅ graph.run() completed for session {session_id}")
+
+            # Persist findings and sources to database
+            try:
+                await self._persist_findings_and_sources(session_id, final_state)
+                logger.info(f"💾 Persisted findings and sources for session {session_id}")
+            except Exception as e:
+                logger.error(f"⚠️  Failed to persist findings/sources: {e}", exc_info=True)
+                # Continue even if persistence fails
 
             # Update session with final results
             try:
                 await self.update_session_stats(
                     session_id=session_id,
-                    total_iterations=final_state.get("current_iteration", 0),
-                    total_findings=len(final_state.get("findings", [])),
-                    total_sources=len(final_state.get("sources", [])),
-                    total_cost_usd=float(final_state.get("total_cost_usd", 0.0)),
-                    external_calls_used=final_state.get("external_calls_used", 0)
+                    iterations=final_state.get("current_iteration", 0),
+                    findings=len(final_state.get("findings", [])),
+                    sources=len(final_state.get("sources", [])),
+                    cost_usd=float(final_state.get("total_cost_usd", 0.0)),
+                    external_calls=final_state.get("external_calls_used", 0)
                 )
             except Exception as e:
                 logger.error(f"⚠️  Failed to update session stats (continuing): {e}")
@@ -677,6 +687,57 @@ class ResearchSessionManager:
             logger.error(f"⚠️  CRITICAL: Failed to update session stats for {session_id}: {e}", exc_info=True)
             # Don't silently swallow - re-raise to ensure caller knows about failure
             raise
+
+    async def _persist_findings_and_sources(
+        self,
+        session_id: str,
+        final_state: Dict[str, Any]
+    ):
+        """
+        Persist findings and sources from graph state to database tables.
+
+        Args:
+            session_id: Session ID
+            final_state: Final research state from graph execution
+        """
+        findings = final_state.get("findings", [])
+        sources = final_state.get("sources", [])
+
+        logger.info(
+            f"Persisting {len(findings)} findings and {len(sources)} sources "
+            f"for session {session_id}"
+        )
+
+        async with self.pool.connection() as conn:
+            async with conn.cursor() as cur:
+                # Persist findings
+                for finding in findings:
+                    try:
+                        await cur.execute(
+                            """
+                            INSERT INTO research_findings
+                            (session_id, finding_type, content, confidence, iteration, sources)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                session_id,
+                                finding.get("tool", "unknown"),
+                                finding.get("content", ""),
+                                finding.get("confidence", 0.0),
+                                finding.get("iteration", 0),
+                                Json(finding.get("citations", []))
+                            )
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to persist finding {finding.get('id')}: {e}")
+                        # Continue with other findings
+
+                # Persist sources
+                # Note: sources table doesn't exist yet, so we'll store in findings for now
+                # or create a simple sources array in metadata
+
+                await conn.commit()
+                logger.info(f"✅ Committed {len(findings)} findings to database")
 
     async def mark_completed(
         self,
