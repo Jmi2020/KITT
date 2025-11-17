@@ -57,6 +57,13 @@ class ResearchConfig(TypedDict, total=False):
     # Stopping criteria
     require_critical_gaps_resolved: bool
 
+    # Hierarchical decomposition
+    enable_hierarchical: bool
+    min_sub_questions: int
+    max_sub_questions: int
+    sub_question_min_iterations: int
+    sub_question_max_iterations: int
+
 
 class ResearchState(TypedDict):
     """
@@ -117,6 +124,14 @@ class ResearchState(TypedDict):
     final_answer: Optional[str]
     synthesis: Optional[Dict[str, Any]]
 
+    # Hierarchical decomposition
+    sub_questions: List[Dict[str, Any]]
+    sub_question_findings: Dict[str, List[Dict[str, Any]]]
+    sub_question_syntheses: Dict[str, str]
+    current_sub_question_id: Optional[str]
+    hierarchical_synthesis: Optional[str]
+    decomposition_tree: Optional[Dict[str, Any]]
+
     # Error handling
     errors: List[Dict[str, Any]]
     last_error: Optional[str]
@@ -144,6 +159,11 @@ DEFAULT_RESEARCH_CONFIG: ResearchConfig = {
     "allow_external": True,
     "enable_debate": True,
     "require_critical_gaps_resolved": True,
+    "enable_hierarchical": False,  # Opt-in feature
+    "min_sub_questions": 2,
+    "max_sub_questions": 5,
+    "sub_question_min_iterations": 2,
+    "sub_question_max_iterations": 5,
 }
 
 
@@ -225,6 +245,14 @@ def create_initial_state(
         # Final synthesis
         final_answer=None,
         synthesis=None,
+
+        # Hierarchical decomposition
+        sub_questions=[],
+        sub_question_findings={},
+        sub_question_syntheses={},
+        current_sub_question_id=None,
+        hierarchical_synthesis=None,
+        decomposition_tree=None,
 
         # Error handling
         errors=[],

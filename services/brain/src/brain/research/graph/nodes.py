@@ -84,16 +84,215 @@ async def initialize_research(state: ResearchState) -> ResearchState:
     return state
 
 
+async def decompose_question(state: ResearchState) -> ResearchState:
+    """
+    Decompose main question into hierarchical sub-questions using LLM.
+
+    Uses ModelCoordinator (MEDIUM tier) to analyze query and create 2-5
+    meaningful sub-questions that comprehensively cover all aspects.
+
+    Args:
+        state: Research state
+
+    Returns:
+        Updated state with sub_questions populated
+    """
+    import json
+    from datetime import datetime
+
+    # Skip if not enabled or already decomposed
+    if not state["config"].get("enable_hierarchical", False):
+        logger.info("Hierarchical mode disabled, skipping decomposition")
+        return state
+
+    if state.get("sub_questions"):
+        logger.info("Question already decomposed, skipping")
+        return state
+
+    # Get components
+    from .components import get_global_components
+    components = get_global_components()
+
+    if not components or not components.model_coordinator:
+        logger.warning("Model coordinator not available, disabling hierarchical mode")
+        state["config"]["enable_hierarchical"] = False
+        return state
+
+    # Build decomposition prompt
+    min_sq = state["config"]["min_sub_questions"]
+    max_sq = state["config"]["max_sub_questions"]
+
+    prompt = f"""Analyze the following research question and decompose it into {min_sq}-{max_sq} meaningful sub-questions.
+
+**Main Question**: {state["query"]}
+
+**Your Task**:
+1. Identify the distinct aspects or components of this question
+2. Create specific, researchable sub-questions that together comprehensively answer the main question
+3. Assign priority (0.0-1.0) based on importance to answering the main question
+4. Provide rationale for why each sub-question is important
+
+**Requirements**:
+- Each sub-question should be focused and independently researchable
+- Sub-questions should not significantly overlap
+- Cover all important aspects of the main question
+- Prioritize sub-questions that are critical to the answer
+- Aim for {min_sq}-{max_sq} sub-questions total
+
+**Output Format** (JSON):
+{{
+  "decomposition_strategy": "comparison | multi-faceted | causal | temporal | evaluative | ...",
+  "sub_questions": [
+    {{
+      "question": "Specific sub-question here?",
+      "priority": 0.9,
+      "rationale": "Why this sub-question is important"
+    }},
+    ...
+  ]
+}}
+
+**Examples**:
+
+Main: "Compare React vs Vue.js"
+Strategy: comparison
+Sub-questions:
+1. What are React's key features and strengths? (priority: 0.9)
+2. What are Vue.js's key features and strengths? (priority: 0.9)
+3. What are the performance differences? (priority: 0.8)
+
+Main: "Explain the causes, effects, and solutions to climate change"
+Strategy: multi-faceted
+Sub-questions:
+1. What are the primary causes of climate change? (priority: 1.0)
+2. What are the observable effects of climate change? (priority: 0.9)
+3. What solutions have been proposed or implemented? (priority: 0.8)
+
+Provide ONLY the JSON response, no additional text.
+"""
+
+    # Consult model
+    request = ConsultationRequest(
+        prompt=prompt,
+        tier=ConsultationTier.MEDIUM,
+        max_cost=Decimal("0.05"),
+        prefer_local=state["config"]["prefer_local"],
+        context={
+            "task": "question_decomposition",
+            "query": state["query"],
+            "session_id": state["session_id"]
+        }
+    )
+
+    logger.info(f"Decomposing question: {state['query']}")
+
+    try:
+        response = await components.model_coordinator.consult(request)
+
+        if response.success:
+            try:
+                # Parse JSON response
+                decomposition = json.loads(response.result)
+
+                # Validate structure
+                if "sub_questions" not in decomposition:
+                    raise ValueError("Missing 'sub_questions' in response")
+
+                sub_questions_data = decomposition["sub_questions"]
+
+                # Enforce limits
+                if len(sub_questions_data) < min_sq:
+                    logger.warning(f"Only {len(sub_questions_data)} sub-questions generated, minimum is {min_sq}")
+                if len(sub_questions_data) > max_sq:
+                    logger.warning(f"Truncating {len(sub_questions_data)} sub-questions to max {max_sq}")
+                    sub_questions_data = sub_questions_data[:max_sq]
+
+                # Create sub-question objects
+                sub_questions = []
+                for i, sq_data in enumerate(sub_questions_data):
+                    sub_question = {
+                        "sub_question_id": f"sq_{i+1:03d}",
+                        "parent_question_id": None,
+                        "question_text": sq_data["question"],
+                        "depth_level": 0,
+                        "priority": float(sq_data.get("priority", 0.5)),
+                        "rationale": sq_data.get("rationale", ""),
+                        "status": "pending",
+                        "iteration_count": 0,
+                        "findings": [],
+                        "synthesis": None,
+                        "quality_score": 0.0,
+                        "created_at": datetime.now().isoformat()
+                    }
+                    sub_questions.append(sub_question)
+
+                # Update state
+                state["sub_questions"] = sub_questions
+                state["decomposition_tree"] = {
+                    "strategy": decomposition.get("decomposition_strategy", "unknown"),
+                    "total_sub_questions": len(sub_questions),
+                    "created_at": datetime.now().isoformat()
+                }
+
+                logger.info(
+                    f"✅ Decomposed query into {len(sub_questions)} sub-questions "
+                    f"(strategy: {state['decomposition_tree']['strategy']})"
+                )
+
+                for sq in sub_questions:
+                    logger.info(f"  - [{sq['priority']:.2f}] {sq['question_text']}")
+
+                # Record model usage
+                state = record_model_call(
+                    state,
+                    model_id=response.model_used,
+                    cost=response.cost,
+                    latency_ms=response.latency_ms,
+                    success=True
+                )
+
+            except (json.JSONDecodeError, ValueError, KeyError) as e:
+                logger.error(f"Failed to parse decomposition response: {e}")
+                logger.error(f"Response was: {response.result[:500]}")
+                # Fall back to non-hierarchical mode
+                state["config"]["enable_hierarchical"] = False
+        else:
+            logger.error(f"Decomposition failed: {response.error}")
+            # Fall back to non-hierarchical mode
+            state["config"]["enable_hierarchical"] = False
+
+    except Exception as e:
+        logger.error(f"Exception during decomposition: {e}", exc_info=True)
+        state = record_error(state, str(e), {"node": "decompose_question"})
+        # Fall back to non-hierarchical mode
+        state["config"]["enable_hierarchical"] = False
+
+    return state
+
+
 async def select_strategy(state: ResearchState) -> ResearchState:
     """
     Select and configure research strategy for this iteration.
+
+    Routes to hierarchical or flat strategy selection based on configuration.
+    """
+    # Check if we're in hierarchical mode
+    if state.get("sub_questions") and state["config"].get("enable_hierarchical"):
+        return await _select_strategy_hierarchical(state)
+    else:
+        return await _select_strategy_flat(state)
+
+
+async def _select_strategy_flat(state: ResearchState) -> ResearchState:
+    """
+    Original flat strategy selection.
 
     Determines:
     - Which tools to use
     - Search parameters
     - Exploration vs exploitation
     """
-    logger.info(f"Selecting strategy for iteration {state['current_iteration']}")
+    logger.info(f"Selecting strategy for iteration {state['current_iteration']} (flat mode)")
 
     try:
         # Get strategy
@@ -137,6 +336,117 @@ async def select_strategy(state: ResearchState) -> ResearchState:
     except Exception as e:
         logger.error(f"Failed to select strategy: {e}")
         state = record_error(state, str(e), {"node": "select_strategy"})
+
+    return state
+
+
+async def _select_strategy_hierarchical(state: ResearchState) -> ResearchState:
+    """
+    Plan tasks for hierarchical research.
+
+    Selects next sub-question to research and creates targeted tasks.
+    """
+    logger.info("Selecting strategy in hierarchical mode")
+
+    try:
+        # Get current sub-question
+        current_sq_id = state.get("current_sub_question_id")
+
+        if not current_sq_id:
+            # Select next sub-question to research
+            pending = [sq for sq in state["sub_questions"] if sq["status"] == "pending"]
+
+            if not pending:
+                # All sub-questions complete, proceed to final synthesis
+                logger.info("All sub-questions completed, no tasks to plan")
+                state["strategy_context"]["current_tasks"] = []
+                return state
+
+            # Sort by priority (highest first)
+            pending.sort(key=lambda x: x["priority"], reverse=True)
+            next_sq = pending[0]
+
+            # Set as current
+            state["current_sub_question_id"] = next_sq["sub_question_id"]
+            next_sq["status"] = "researching"
+
+            logger.info(
+                f"Starting research on sub-question {next_sq['sub_question_id']}: "
+                f"{next_sq['question_text']} (priority: {next_sq['priority']:.2f})"
+            )
+        else:
+            # Continue with current sub-question
+            next_sq = next(
+                sq for sq in state["sub_questions"]
+                if sq["sub_question_id"] == current_sq_id
+            )
+            logger.info(f"Continuing research on {current_sq_id}")
+
+        # Calculate iteration budget for this sub-question
+        total_iterations = state["config"]["max_iterations"]
+        num_sub_questions = len(state["sub_questions"])
+
+        # Reserve iterations for decomposition (1) and synthesis (1 per sq + 1 final)
+        reserved = 1 + num_sub_questions + 1
+        research_iterations = total_iterations - reserved
+
+        # Divide fairly, weighted by priority
+        total_priority = sum(sq["priority"] for sq in state["sub_questions"])
+        sq_budget = int((next_sq["priority"] / total_priority) * research_iterations)
+        sq_budget = max(
+            state["config"]["sub_question_min_iterations"],
+            min(sq_budget, state["config"]["sub_question_max_iterations"])
+        )
+
+        logger.info(f"Sub-question iteration budget: {sq_budget}")
+
+        # Create strategy for this sub-question
+        strategy_type = ResearchStrategy.BREADTH_FIRST  # Use breadth-first for most sub-questions
+        strategy = create_strategy(strategy_type)
+
+        # Build context specific to this sub-question
+        from ..orchestration.strategies import StrategyContext as OrchestrationType
+
+        sq_context = OrchestrationType(
+            session_id=state["session_id"],
+            original_query=next_sq["question_text"],  # Use sub-question as query
+            max_depth=state["config"]["max_depth"],
+            max_breadth=state["config"]["max_breadth"],
+            max_iterations=sq_budget,
+            min_sources=3,  # Fewer sources needed per sub-question
+            budget_remaining=float(state["budget_remaining"]),
+            external_calls_remaining=state["external_calls_remaining"],
+            nodes_explored=next_sq["iteration_count"],
+            findings=next_sq["findings"],  # Sub-question specific findings
+            sources=set(s.get("url", "") for s in state["sources"] if s.get("sub_question_id") == next_sq["sub_question_id"])
+        )
+
+        # Plan tasks for this sub-question
+        tasks = await strategy.plan(next_sq["question_text"], sq_context)
+
+        # Tag all tasks with sub-question ID
+        for task in tasks:
+            task.context = task.context or {}
+            task.context["sub_question_id"] = next_sq["sub_question_id"]
+            task.context["sub_question_text"] = next_sq["question_text"]
+
+        # Store in strategy context
+        state["strategy_context"]["current_tasks"] = [
+            {
+                "task_id": task.task_id,
+                "query": task.query,
+                "priority": task.priority,
+                "depth": task.depth,
+                "context": task.context
+            }
+            for task in tasks
+        ]
+
+        logger.info(f"Planned {len(tasks)} tasks for sub-question {next_sq['sub_question_id']}")
+
+    except Exception as e:
+        logger.error(f"Failed to select hierarchical strategy: {e}", exc_info=True)
+        state = record_error(state, str(e), {"node": "select_strategy_hierarchical"})
 
     return state
 
@@ -269,6 +579,9 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
             )
 
             if result.success:
+                # Get sub-question ID from task context (if hierarchical mode)
+                sq_id = task.get("context", {}).get("sub_question_id")
+
                 # Extract findings from tool result
                 if tool_name == ToolType.RESEARCH_DEEP:
                     # Deep research returns comprehensive output
@@ -282,6 +595,10 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                         "citations": result.data.get("citations", [])
                     }
 
+                    # Tag with sub-question if hierarchical
+                    if sq_id:
+                        finding["sub_question_id"] = sq_id
+
                     # Add citations as sources
                     for citation_url in result.data.get("citations", []):
                         source = {
@@ -290,6 +607,9 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                             "relevance": task["priority"],
                             "tool": "research_deep"
                         }
+                        # Tag source with sub-question
+                        if sq_id:
+                            source["sub_question_id"] = sq_id
                         state = add_source(state, source)
 
                 elif tool_name == ToolType.WEB_SEARCH:
@@ -314,6 +634,10 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                             "result_count": len(search_results)
                         }
 
+                        # Tag with sub-question if hierarchical
+                        if sq_id:
+                            finding["sub_question_id"] = sq_id
+
                         # Add search results as sources
                         for search_result in search_results[:5]:  # Top 5 results
                             source = {
@@ -323,6 +647,9 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                                 "relevance": task["priority"],
                                 "tool": "web_search"
                             }
+                            # Tag source with sub-question
+                            if sq_id:
+                                source["sub_question_id"] = sq_id
                             state = add_source(state, source)
                             logger.info(f"Added source: {source.get('title', 'untitled')}")
                     else:
@@ -336,7 +663,55 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                             "tool": "web_search"
                         }
 
-                logger.info(f"📝 Adding finding: {finding['id']}, content_length={len(finding.get('content', ''))}")
+                        # Tag with sub-question if hierarchical
+                        if sq_id:
+                            finding["sub_question_id"] = sq_id
+
+                # Extract topics and entities from finding content
+                content_for_extraction = finding.get("content", "")
+
+                # For web_search, also include top result snippets for richer extraction
+                if tool_name == ToolType.WEB_SEARCH and 'result_count' in finding:
+                    search_results = result.data.get("results", [])
+                    snippets = [r.get("description", "") for r in search_results[:3]]
+                    content_for_extraction = f"{content_for_extraction}\n\n{' '.join(snippets)}"
+
+                extraction = await _extract_topics_from_content(
+                    content=content_for_extraction,
+                    query=state["query"],
+                    components=components
+                )
+
+                # Add extracted topics/entities to finding
+                finding["topics"] = extraction.get("topics", [])
+                finding["entities"] = extraction.get("entities", [])
+                finding["depth"] = task.get("depth", 0)  # Also add depth for strategy planning
+
+                logger.info(
+                    f"📝 Adding finding: {finding['id']}, content_length={len(finding.get('content', ''))}, "
+                    f"topics={len(finding.get('topics', []))}, entities={len(finding.get('entities', []))}"
+                )
+
+                # Associate finding with sub-question if hierarchical
+                if sq_id:
+                    # Add to sub_question_findings dict
+                    if "sub_question_findings" not in state:
+                        state["sub_question_findings"] = {}
+                    if sq_id not in state["sub_question_findings"]:
+                        state["sub_question_findings"][sq_id] = []
+                    state["sub_question_findings"][sq_id].append(finding)
+
+                    # Update sub-question object
+                    for sq in state.get("sub_questions", []):
+                        if sq["sub_question_id"] == sq_id:
+                            sq["findings"].append(finding)
+                            sq["iteration_count"] += 1
+                            logger.info(
+                                f"Added finding to sub-question {sq_id}: {finding.get('content', '')[:100]}"
+                            )
+                            break
+
+                # Also add to global findings
                 state = add_finding(state, finding)
                 logger.info(f"✅ Finding added! Total findings now: {len(state.get('findings', []))}")
 
@@ -564,9 +939,185 @@ async def score_quality(state: ResearchState) -> ResearchState:
     return state
 
 
+async def synthesize_sub_question(state: ResearchState) -> ResearchState:
+    """
+    Synthesize findings for the current sub-question.
+
+    Creates a focused answer that addresses the sub-question specifically,
+    which will later be integrated into the final meta-synthesis.
+
+    Args:
+        state: Research state
+
+    Returns:
+        Updated state with sub-question synthesis added
+    """
+    sq_id = state.get("current_sub_question_id")
+    if not sq_id:
+        logger.warning("No current sub-question to synthesize")
+        return state
+
+    # Get sub-question data
+    sub_question = next(
+        (sq for sq in state["sub_questions"] if sq["sub_question_id"] == sq_id),
+        None
+    )
+
+    if not sub_question:
+        logger.error(f"Sub-question {sq_id} not found")
+        return state
+
+    # Get findings for this sub-question
+    sq_findings = state.get("sub_question_findings", {}).get(sq_id, [])
+
+    if not sq_findings:
+        logger.warning(f"No findings for sub-question {sq_id}, using empty synthesis")
+        sub_question["synthesis"] = "No findings available for this sub-question."
+        sub_question["status"] = "completed"
+        state["current_sub_question_id"] = None
+        return state
+
+    # Build synthesis prompt
+    findings_text = "\n\n".join([
+        f"Finding {i+1} (confidence: {f.get('confidence', 0):.2f}):\n{f.get('content', '')}"
+        for i, f in enumerate(sq_findings)
+    ])
+
+    # Get relevant sources (sources tagged with this sub-question)
+    sq_sources = [s for s in state["sources"] if s.get("sub_question_id") == sq_id]
+    sources_text = "\n\n".join([
+        f"{i+1}. **{s.get('title', 'Untitled')}**\n"
+        f"   URL: {s.get('url', 'N/A')}\n"
+        + (f"   Content: {s.get('snippet', '')[:200]}\n" if s.get('snippet') else "")
+        + (f"   Relevance: {s.get('relevance', 0):.2f}" if s.get('relevance') else "")
+        for i, s in enumerate(sq_sources[:10])
+    ])
+
+    if not sources_text:
+        sources_text = "No specific sources tagged for this sub-question"
+
+    prompt = f"""Synthesize the research findings to answer this specific sub-question.
+
+**Sub-Question**: {sub_question["question_text"]}
+
+**Context**: This is part of answering the broader question: "{state["query"]}"
+
+**Research Findings**:
+{findings_text}
+
+**Sources Consulted**:
+{sources_text}
+
+**Your Task**:
+Provide a clear, focused answer to the sub-question based on the findings and sources.
+
+**Requirements**:
+1. Direct answer to the sub-question (not the main question)
+2. Key supporting evidence from the findings
+3. Reference specific sources where appropriate
+4. Acknowledge important caveats or limitations
+5. State your confidence level (high/medium/low) and reasoning
+6. Keep it focused and concise (this will be integrated into a larger synthesis)
+
+**Format**:
+Structure your response clearly with:
+- Direct answer statement
+- Supporting evidence
+- Source citations
+- Caveats (if any)
+- Confidence assessment
+"""
+
+    logger.info(f"Synthesizing sub-question {sq_id}: {sub_question['question_text']}")
+
+    # Get components
+    from .components import get_global_components
+    components = get_global_components()
+
+    if not components or not components.model_coordinator:
+        logger.error("Model coordinator not available")
+        sub_question["synthesis"] = "Synthesis failed: Model coordinator not available"
+        sub_question["status"] = "completed"
+        state["current_sub_question_id"] = None
+        return state
+
+    # Consult model (MEDIUM tier for sub-question synthesis)
+    request = ConsultationRequest(
+        prompt=prompt,
+        tier=ConsultationTier.MEDIUM,
+        max_cost=Decimal("0.10"),
+        prefer_local=state["config"]["prefer_local"],
+        context={
+            "task": "sub_question_synthesis",
+            "sub_question_id": sq_id,
+            "sub_question": sub_question["question_text"],
+            "findings_count": len(sq_findings)
+        }
+    )
+
+    try:
+        response = await components.model_coordinator.consult(request)
+
+        if response.success:
+            # Store synthesis
+            synthesis = response.result
+            sub_question["synthesis"] = synthesis
+            sub_question["status"] = "completed"
+
+            # Add to syntheses dict
+            if "sub_question_syntheses" not in state:
+                state["sub_question_syntheses"] = {}
+            state["sub_question_syntheses"][sq_id] = synthesis
+
+            logger.info(
+                f"✅ Synthesized sub-question {sq_id} "
+                f"({len(synthesis)} chars, model: {response.model_used})"
+            )
+
+            # Clear current sub-question to move to next
+            state["current_sub_question_id"] = None
+
+            # Record model usage
+            state = record_model_call(
+                state,
+                model_id=response.model_used,
+                cost=response.cost,
+                latency_ms=response.latency_ms,
+                success=True
+            )
+        else:
+            logger.error(f"Sub-question synthesis failed: {response.error}")
+            # Mark as completed anyway to avoid blocking
+            sub_question["synthesis"] = f"Synthesis failed: {response.error}"
+            sub_question["status"] = "completed"
+            state["current_sub_question_id"] = None
+
+    except Exception as e:
+        logger.error(f"Exception during sub-question synthesis: {e}", exc_info=True)
+        state = record_error(state, str(e), {"node": "synthesize_sub_question", "sub_question_id": sq_id})
+        sub_question["synthesis"] = f"Synthesis failed: {str(e)}"
+        sub_question["status"] = "completed"
+        state["current_sub_question_id"] = None
+
+    return state
+
+
 async def check_stopping(state: ResearchState) -> ResearchState:
     """
     Check if research should stop.
+
+    Routes to hierarchical or flat stopping logic based on configuration.
+    """
+    # Check if we're in hierarchical mode
+    if state.get("sub_questions") and state["config"].get("enable_hierarchical"):
+        return await _check_stopping_hierarchical(state)
+    else:
+        return await _check_stopping_flat(state)
+
+
+async def _check_stopping_flat(state: ResearchState) -> ResearchState:
+    """
+    Original flat stopping logic.
 
     Evaluates:
     - Iteration limits
@@ -575,7 +1126,7 @@ async def check_stopping(state: ResearchState) -> ResearchState:
     - Budget constraints
     - Knowledge gaps
     """
-    logger.info("Checking stopping criteria")
+    logger.info("Checking stopping criteria (flat mode)")
 
     try:
         # Initialize stopping criteria
@@ -699,9 +1250,288 @@ async def check_stopping(state: ResearchState) -> ResearchState:
     return state
 
 
+async def _check_stopping_hierarchical(state: ResearchState) -> ResearchState:
+    """
+    Check stopping criteria in hierarchical mode.
+
+    Determines:
+    1. Should we continue researching current sub-question?
+    2. Should we synthesize current sub-question?
+    3. Are all sub-questions complete?
+    """
+    logger.info("Checking stopping criteria (hierarchical mode)")
+
+    try:
+        from ..metrics.stopping_criteria import StoppingDecision, StoppingReason
+
+        current_sq_id = state.get("current_sub_question_id")
+
+        # Check global stopping criteria (budget, time, errors)
+        if state["current_iteration"] >= state["config"]["max_iterations"]:
+            logger.info("Max iterations reached")
+            state["stopping_decision"] = StoppingDecision(
+                should_stop=True,
+                reasons=[StoppingReason.MAX_ITERATIONS],
+                confidence=1.0,
+                current_iteration=state["current_iteration"],
+                explanation="Maximum iterations reached"
+            ).to_dict()
+            return state
+
+        if state["budget_remaining"] <= Decimal("0.0"):
+            logger.info("Budget exhausted")
+            state["stopping_decision"] = StoppingDecision(
+                should_stop=True,
+                reasons=[StoppingReason.BUDGET_EXHAUSTED],
+                confidence=1.0,
+                current_iteration=state["current_iteration"],
+                explanation="Research budget exhausted"
+            ).to_dict()
+            return state
+
+        if state["external_calls_remaining"] <= 0:
+            logger.info("External calls exhausted")
+            state["stopping_decision"] = StoppingDecision(
+                should_stop=True,
+                reasons=[StoppingReason.BUDGET_EXHAUSTED],
+                confidence=1.0,
+                current_iteration=state["current_iteration"],
+                explanation="External API calls exhausted"
+            ).to_dict()
+            return state
+
+        # If we're currently researching a sub-question
+        if current_sq_id:
+            sub_question = next(
+                (sq for sq in state["sub_questions"] if sq["sub_question_id"] == current_sq_id),
+                None
+            )
+
+            if sub_question:
+                sq_iteration_count = sub_question.get("iteration_count", 0)
+                sq_findings_count = len(sub_question.get("findings", []))
+                max_sq_iterations = state["config"]["sub_question_max_iterations"]
+                min_sq_iterations = state["config"]["sub_question_min_iterations"]
+
+                # Check if sub-question research is complete
+                should_synthesize = False
+
+                if sq_iteration_count >= max_sq_iterations:
+                    logger.info(f"Sub-question {current_sq_id} reached max iterations ({max_sq_iterations})")
+                    should_synthesize = True
+                elif sq_iteration_count >= min_sq_iterations and sq_findings_count >= 2:
+                    logger.info(f"Sub-question {current_sq_id} has sufficient findings ({sq_findings_count})")
+                    should_synthesize = True
+
+                if should_synthesize:
+                    # Don't stop the overall research, but signal to synthesize this sub-question
+                    state["stopping_decision"] = StoppingDecision(
+                        should_stop=False,  # Continue to synthesis
+                        reasons=[StoppingReason.QUALITY_THRESHOLD_MET],
+                        confidence=0.8,
+                        current_iteration=state["current_iteration"],
+                        explanation=f"Sub-question {current_sq_id} ready for synthesis"
+                    ).to_dict()
+                    return state
+
+        # Check if all sub-questions are completed
+        all_completed = all(
+            sq.get("status") == "completed"
+            for sq in state.get("sub_questions", [])
+        )
+
+        if all_completed:
+            logger.info("All sub-questions completed, ready for final synthesis")
+            state["stopping_decision"] = StoppingDecision(
+                should_stop=True,  # Stop iteration, move to final synthesis
+                reasons=[StoppingReason.QUALITY_THRESHOLD_MET],
+                confidence=1.0,
+                current_iteration=state["current_iteration"],
+                explanation="All sub-questions completed and synthesized"
+            ).to_dict()
+            return state
+
+        # Continue researching
+        state["stopping_decision"] = StoppingDecision(
+            should_stop=False,
+            reasons=[],
+            confidence=0.5,
+            current_iteration=state["current_iteration"],
+            explanation="Continuing hierarchical research"
+        ).to_dict()
+
+    except Exception as e:
+        logger.error(f"Failed to check hierarchical stopping criteria: {e}", exc_info=True)
+        state = record_error(state, str(e), {"node": "check_stopping_hierarchical"})
+
+        # Emergency stop on error
+        from ..metrics.stopping_criteria import StoppingDecision, StoppingReason
+        state["stopping_decision"] = StoppingDecision(
+            should_stop=True,
+            reasons=[StoppingReason.ERROR],
+            confidence=1.0,
+            current_iteration=state.get("current_iteration", 0),
+            explanation=f"Stopping due to error: {str(e)}"
+        ).to_dict()
+
+    return state
+
+
 async def synthesize_results(state: ResearchState) -> ResearchState:
     """
     Synthesize final research results.
+
+    Routes to hierarchical or flat synthesis based on configuration.
+    """
+    # Check if we're in hierarchical mode
+    if state.get("sub_questions") and state["config"].get("enable_hierarchical"):
+        return await _synthesize_results_hierarchical(state)
+    else:
+        return await _synthesize_results_flat(state)
+
+
+async def _synthesize_results_hierarchical(state: ResearchState) -> ResearchState:
+    """
+    Hierarchical meta-synthesis.
+
+    Combines all sub-question syntheses into a comprehensive final answer.
+    """
+    logger.info("Synthesizing results (hierarchical mode)")
+
+    try:
+        # Get all sub-question syntheses
+        sub_syntheses = []
+        for sq in state.get("sub_questions", []):
+            if sq.get("synthesis"):
+                sub_syntheses.append({
+                    "question": sq["question_text"],
+                    "synthesis": sq["synthesis"],
+                    "priority": sq.get("priority", 0.5),
+                    "findings_count": len(sq.get("findings", []))
+                })
+
+        if not sub_syntheses:
+            logger.warning("No sub-question syntheses available")
+            state["final_answer"] = "No synthesis available - no sub-questions were completed."
+            return state
+
+        # Build meta-synthesis prompt
+        sub_syntheses_text = "\n\n---\n\n".join([
+            f"**Sub-Question {i+1}** (Priority: {s['priority']:.2f}, Findings: {s['findings_count']})\n"
+            f"Q: {s['question']}\n\n"
+            f"A: {s['synthesis']}"
+            for i, s in enumerate(sub_syntheses)
+        ])
+
+        prompt = f"""You are synthesizing the final comprehensive answer to a research question by integrating answers from multiple sub-questions.
+
+**Original Question**: {state["query"]}
+
+**Sub-Question Analyses**:
+{sub_syntheses_text}
+
+**Your Task**:
+Create a comprehensive, cohesive answer to the original question by synthesizing the sub-question answers above.
+
+**Requirements**:
+1. Directly answer the original question (not just summarize sub-answers)
+2. Integrate insights from all sub-questions into a unified narrative
+3. Highlight key points, agreements, and contradictions
+4. Maintain logical flow and coherence
+5. Preserve important evidence and source references from sub-answers
+6. Be comprehensive but concise
+
+**Format**:
+Provide a well-structured answer with:
+- Clear introduction addressing the main question
+- Integrated analysis drawing from all sub-questions
+- Key findings and conclusions
+- Important caveats or limitations (if any)
+"""
+
+        # Get components
+        from .components import get_global_components
+        components = get_global_components()
+
+        if not components or not components.model_coordinator:
+            logger.error("Model coordinator not available for meta-synthesis")
+            state["final_answer"] = "Meta-synthesis failed: Model coordinator unavailable"
+            return state
+
+        # Consult model (HIGH tier for final synthesis)
+        request = ConsultationRequest(
+            prompt=prompt,
+            tier=ConsultationTier.HIGH,
+            max_cost=Decimal("0.20"),
+            prefer_local=state["config"]["prefer_local"],
+            context={
+                "task": "hierarchical_meta_synthesis",
+                "query": state["query"],
+                "sub_questions_count": len(sub_syntheses)
+            }
+        )
+
+        response = await components.model_coordinator.consult(request)
+
+        if response.success:
+            state["final_answer"] = response.result
+            state["hierarchical_synthesis"] = response.result
+
+            logger.info(
+                f"✅ Meta-synthesis complete ({len(response.result)} chars, "
+                f"model: {response.model_used})"
+            )
+
+            # Record model usage
+            state = record_model_call(
+                state,
+                model_id=response.model_used,
+                cost=response.cost,
+                latency_ms=response.latency_ms,
+                success=True
+            )
+        else:
+            logger.error(f"Meta-synthesis failed: {response.error}")
+            state["final_answer"] = f"Meta-synthesis failed: {response.error}"
+
+        # Build hierarchical synthesis metadata
+        state["synthesis"] = {
+            "query": state["query"],
+            "decomposition_strategy": state.get("decomposition_tree", {}).get("strategy", "unknown"),
+            "total_sub_questions": len(state.get("sub_questions", [])),
+            "sub_questions_completed": len([sq for sq in state.get("sub_questions", []) if sq.get("status") == "completed"]),
+            "total_iterations": state["current_iteration"],
+            "total_findings": len(state["findings"]),
+            "total_sources": len(state["sources"]),
+            "sub_question_details": [
+                {
+                    "question": sq["question_text"],
+                    "priority": sq.get("priority", 0.5),
+                    "findings_count": len(sq.get("findings", [])),
+                    "iteration_count": sq.get("iteration_count", 0),
+                    "status": sq.get("status", "unknown"),
+                    "synthesis_length": len(sq.get("synthesis", ""))
+                }
+                for sq in state.get("sub_questions", [])
+            ],
+            "budget_usage": {
+                "total_cost_usd": float(state["total_cost_usd"]),
+                "external_calls_used": state["external_calls_used"],
+                "models_used": state["models_used"]
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to synthesize hierarchical results: {e}", exc_info=True)
+        state = record_error(state, str(e), {"node": "synthesize_results_hierarchical"})
+        state["final_answer"] = f"Synthesis failed: {str(e)}"
+
+    return state
+
+
+async def _synthesize_results_flat(state: ResearchState) -> ResearchState:
+    """
+    Original flat synthesis logic.
 
     Creates:
     - AI-generated final answer via ModelCoordinator
@@ -709,7 +1539,7 @@ async def synthesize_results(state: ResearchState) -> ResearchState:
     - Source attribution
     - Quality report
     """
-    logger.info("Synthesizing research results")
+    logger.info("Synthesizing research results (flat mode)")
 
     try:
         # Build synthesis metadata
@@ -772,6 +1602,94 @@ async def synthesize_results(state: ResearchState) -> ResearchState:
     return state
 
 
+async def _extract_topics_from_content(content: str, query: str, components) -> Dict[str, Any]:
+    """
+    Extract topics and entities from finding content using LLM.
+
+    Args:
+        content: Finding content to analyze
+        query: Original research query for context
+        components: ResearchComponents with model_coordinator
+
+    Returns:
+        Dict with "topics" and "entities" lists
+    """
+    from ..models.coordinator import ConsultationRequest, ConsultationTier
+    import json
+
+    # Skip extraction if no model coordinator or content too short
+    if not components or not components.model_coordinator:
+        return {"topics": [], "entities": []}
+
+    if len(content.strip()) < 20:
+        return {"topics": [], "entities": []}
+
+    try:
+        # Construct extraction prompt
+        prompt = f"""Extract key topics and named entities from the following research finding.
+
+Original Query: {query}
+
+Finding Content:
+{content[:800]}
+
+Please respond with ONLY a JSON object in this exact format:
+{{
+  "topics": ["topic1", "topic2", "topic3"],
+  "entities": ["entity1", "entity2"]
+}}
+
+Topics: 3-5 key concepts, themes, or subject areas mentioned
+Entities: Specific names (people, places, organizations, products, technologies)
+
+Keep items concise (2-4 words max). Return ONLY the JSON, no other text."""
+
+        # Create consultation request (LOW tier for quick extraction)
+        request = ConsultationRequest(
+            prompt=prompt,
+            tier=ConsultationTier.LOW,
+            max_cost=Decimal("0.01"),  # Very cheap extraction
+            prefer_local=True,  # Prefer local models for speed
+            context={
+                "query": query,
+                "task": "topic_extraction"
+            }
+        )
+
+        # Consult model
+        response = await components.model_coordinator.consult(request)
+
+        if response.success and response.result:
+            # Parse JSON response
+            try:
+                result_text = response.result.strip()
+                # Remove markdown code blocks if present
+                if result_text.startswith("```"):
+                    result_text = result_text.split("```")[1]
+                    if result_text.startswith("json"):
+                        result_text = result_text[4:]
+
+                extracted = json.loads(result_text)
+
+                # Validate structure
+                topics = extracted.get("topics", [])[:5]  # Max 5 topics
+                entities = extracted.get("entities", [])[:5]  # Max 5 entities
+
+                logger.info(f"Extracted {len(topics)} topics and {len(entities)} entities from content")
+                return {"topics": topics, "entities": entities}
+
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse topic extraction JSON: {e}")
+                return {"topics": [], "entities": []}
+        else:
+            logger.warning("Topic extraction failed or returned no result")
+            return {"topics": [], "entities": []}
+
+    except Exception as e:
+        logger.error(f"Error in topic extraction: {e}", exc_info=True)
+        return {"topics": [], "entities": []}
+
+
 async def _generate_ai_synthesis(state: ResearchState, components) -> str:
     """
     Generate AI synthesis using ModelCoordinator.
@@ -792,10 +1710,19 @@ async def _generate_ai_synthesis(state: ResearchState, components) -> str:
             for i, f in enumerate(state["findings"])
         ])
 
-        sources_text = "\n".join([
-            f"- {s.get('title', 'Untitled')}: {s.get('url', '')}"
-            for s in state["sources"][:20]  # Top 20 sources
-        ])
+        # Format sources with snippets and relevance for LLM analysis
+        sources_with_content = []
+        for i, s in enumerate(state["sources"][:20], 1):  # Top 20 sources
+            source_entry = f"{i}. **{s.get('title', 'Untitled')}**"
+            source_entry += f"\n   URL: {s.get('url', 'N/A')}"
+            if s.get('snippet'):
+                source_entry += f"\n   Content: {s.get('snippet')[:300]}"  # Limit snippet length
+            if s.get('relevance'):
+                source_entry += f"\n   Relevance: {s.get('relevance'):.2f}"
+            source_entry += f"\n   Tool: {s.get('tool', 'unknown')}"
+            sources_with_content.append(source_entry)
+
+        sources_text = "\n\n".join(sources_with_content) if sources_with_content else "No sources available"
 
         # Construct synthesis prompt
         prompt = f"""Synthesize the following research findings into a comprehensive, well-structured answer.
@@ -805,16 +1732,19 @@ Original Query: {state["query"]}
 Research Findings:
 {findings_text}
 
-Sources Consulted:
+Sources Consulted (with content excerpts):
 {sources_text}
 
-Please provide:
-1. A direct answer to the query
-2. Key insights and supporting evidence
-3. Important caveats or limitations
-4. Source citations where appropriate
+IMPORTANT: Analyze the actual source content provided above. Reference specific information, quotes, and evidence from the source snippets when constructing your synthesis. Evaluate source quality, relevance, and consistency.
 
-Format the response in a clear, professional manner."""
+Please provide:
+1. A direct answer to the query based on source analysis
+2. Key insights with specific evidence from sources (cite by title or URL)
+3. Analysis of source quality and consistency
+4. Important caveats, limitations, or conflicting evidence
+5. Properly attributed citations and quotes where appropriate
+
+Format the response in a clear, professional manner with proper source attribution."""
 
         # Determine consultation tier based on quality and budget
         avg_quality = sum(state["quality_scores"]) / len(state["quality_scores"]) if state["quality_scores"] else 0.0

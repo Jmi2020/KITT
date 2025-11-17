@@ -12,11 +12,13 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from .state import ResearchState, create_initial_state
 from .nodes import (
     initialize_research,
+    decompose_question,
     select_strategy,
     execute_iteration,
     validate_findings,
     score_quality,
     check_stopping,
+    synthesize_sub_question,
     synthesize_results,
     handle_error,
 )
@@ -52,11 +54,13 @@ class ResearchGraph:
 
         # Add nodes
         graph.add_node("initialize", initialize_research)
+        graph.add_node("decompose", decompose_question)
         graph.add_node("select_strategy", select_strategy)
         graph.add_node("execute_iteration", execute_iteration)
         graph.add_node("validate", validate_findings)
         graph.add_node("score_quality", score_quality)
         graph.add_node("check_stopping", check_stopping)
+        graph.add_node("synthesize_sub_question", synthesize_sub_question)
         graph.add_node("synthesize", synthesize_results)
         graph.add_node("handle_error", handle_error)
 
@@ -64,36 +68,43 @@ class ResearchGraph:
         # 1. Start with initialization
         graph.set_entry_point("initialize")
 
-        # 2. After initialization, select strategy
-        graph.add_edge("initialize", "select_strategy")
+        # 2. After initialization, decompose question (hierarchical mode will handle it)
+        graph.add_edge("initialize", "decompose")
 
-        # 3. After strategy selection, execute iteration
+        # 3. After decomposition, select strategy
+        graph.add_edge("decompose", "select_strategy")
+
+        # 4. After strategy selection, execute iteration
         graph.add_edge("select_strategy", "execute_iteration")
 
-        # 4. After execution, validate findings
+        # 5. After execution, validate findings
         graph.add_edge("execute_iteration", "validate")
 
-        # 5. After validation, score quality
+        # 6. After validation, score quality
         graph.add_edge("validate", "score_quality")
 
-        # 6. After scoring, check stopping criteria
+        # 7. After scoring, check stopping criteria
         graph.add_edge("score_quality", "check_stopping")
 
-        # 7. Conditional routing from stopping check
+        # 8. Conditional routing from stopping check
         graph.add_conditional_edges(
             "check_stopping",
             self._should_continue,
             {
-                "continue": "select_strategy",  # Loop back for next iteration
-                "synthesize": "synthesize",      # Move to synthesis
-                "error": "handle_error"          # Handle error
+                "continue": "select_strategy",           # Loop back for next iteration
+                "synthesize_sub_question": "synthesize_sub_question",  # Synthesize current sub-question
+                "synthesize": "synthesize",              # Move to final synthesis
+                "error": "handle_error"                  # Handle error
             }
         )
 
-        # 8. After synthesis, end
+        # 9. After sub-question synthesis, go back to select next sub-question
+        graph.add_edge("synthesize_sub_question", "select_strategy")
+
+        # 10. After final synthesis, end
         graph.add_edge("synthesize", END)
 
-        # 9. After error handling, end
+        # 11. After error handling, end
         graph.add_edge("handle_error", END)
 
         logger.info("Research graph built successfully")
@@ -106,7 +117,8 @@ class ResearchGraph:
 
         Returns:
             "continue" - Continue research
-            "synthesize" - Stop and synthesize
+            "synthesize_sub_question" - Synthesize current sub-question (hierarchical mode)
+            "synthesize" - Stop and synthesize final result
             "error" - Handle error
         """
         # Safety check: Force stop if iteration exceeds max_iterations
@@ -137,7 +149,41 @@ class ResearchGraph:
             return "continue"
 
         should_stop = stopping_decision.get("should_stop", False)
+        explanation = stopping_decision.get("explanation", "")
 
+        # Check if in hierarchical mode
+        is_hierarchical = (
+            state.get("sub_questions") and
+            state.get("config", {}).get("enable_hierarchical", False)
+        )
+
+        if is_hierarchical:
+            # Check if current sub-question is ready for synthesis
+            current_sq_id = state.get("current_sub_question_id")
+
+            if current_sq_id and not should_stop:
+                # Sub-question research continuing
+                # Check explanation for synthesis signal
+                if "ready for synthesis" in explanation.lower():
+                    logger.info(f"Sub-question {current_sq_id} ready for synthesis")
+                    return "synthesize_sub_question"
+
+            if should_stop:
+                # Check if all sub-questions are done
+                all_completed = all(
+                    sq.get("status") == "completed"
+                    for sq in state.get("sub_questions", [])
+                )
+
+                if all_completed:
+                    logger.info("All sub-questions complete, moving to final synthesis")
+                    return "synthesize"
+                else:
+                    # Some sub-questions still pending, continue
+                    logger.info("Some sub-questions pending, continuing")
+                    return "continue"
+
+        # Standard flat mode or hierarchical final synthesis
         if should_stop:
             logger.info("Stopping criteria met, moving to synthesis")
             return "synthesize"
@@ -187,15 +233,24 @@ class ResearchGraph:
         )
 
         # Prepare config for LangGraph
-        # Set recursion_limit to prevent infinite loops (default is 25)
+        # Calculate recursion_limit dynamically based on max_iterations
+        # Formula: (max_iterations + buffer) × nodes_per_iteration
+        # Each iteration uses ~5-6 nodes (select_strategy, execute, validate, score, check_stopping)
+        # Add buffer for initialization, synthesis, and error handling
+        max_iterations = config.get("max_iterations", 15) if config else 15
+        recursion_limit = (max_iterations + 3) * 6  # 3-iteration buffer for safety
+
         graph_config = {
             "configurable": {
                 "thread_id": f"research_{session_id}"
             },
-            "recursion_limit": 50  # Allow deeper research while catching runaway loops
+            "recursion_limit": recursion_limit
         }
 
-        logger.info(f"Starting research for session {session_id} (recursion_limit=50)")
+        logger.info(
+            f"Starting research for session {session_id} "
+            f"(max_iterations={max_iterations}, recursion_limit={recursion_limit})"
+        )
 
         # Run graph and accumulate state
         # astream yields {node_name: partial_state} for each node
@@ -248,14 +303,21 @@ class ResearchGraph:
         )
 
         # Prepare config for LangGraph
+        # Calculate recursion_limit dynamically based on max_iterations
+        max_iterations = config.get("max_iterations", 15) if config else 15
+        recursion_limit = (max_iterations + 3) * 6  # 3-iteration buffer for safety
+
         graph_config = {
             "configurable": {
                 "thread_id": f"research_{session_id}"
             },
-            "recursion_limit": 50
+            "recursion_limit": recursion_limit
         }
 
-        logger.info(f"Starting streaming research for session {session_id} (recursion_limit=50)")
+        logger.info(
+            f"Starting streaming research for session {session_id} "
+            f"(max_iterations={max_iterations}, recursion_limit={recursion_limit})"
+        )
 
         # Stream graph execution
         async for state in self.compiled_graph.astream(initial_state, config=graph_config):
@@ -284,21 +346,34 @@ class ResearchGraph:
         if not self.checkpointer:
             raise ValueError("Cannot resume without checkpointer")
 
-        # Prepare config
+        # Get latest checkpoint first to extract config
+        temp_config = {
+            "configurable": {
+                "thread_id": f"research_{session_id}"
+            }
+        }
+        checkpoint = await self.checkpointer.aget(temp_config)
+
+        if not checkpoint:
+            raise ValueError(f"No checkpoint found for session {session_id}")
+
+        # Extract max_iterations from checkpoint state to calculate recursion limit
+        checkpoint_state = checkpoint.get("channel_values", {})
+        max_iterations = checkpoint_state.get("config", {}).get("max_iterations", 15)
+        recursion_limit = (max_iterations + 3) * 6  # 3-iteration buffer for safety
+
+        # Prepare final config with calculated recursion limit
         graph_config = {
             "configurable": {
                 "thread_id": f"research_{session_id}"
             },
-            "recursion_limit": 50
+            "recursion_limit": recursion_limit
         }
 
-        logger.info(f"Resuming research for session {session_id} (recursion_limit=50)")
-
-        # Get latest checkpoint
-        checkpoint = await self.checkpointer.aget(graph_config)
-
-        if not checkpoint:
-            raise ValueError(f"No checkpoint found for session {session_id}")
+        logger.info(
+            f"Resuming research for session {session_id} "
+            f"(max_iterations={max_iterations}, recursion_limit={recursion_limit})"
+        )
 
         # Resume from checkpoint
         resume_input = additional_input or {}
