@@ -99,6 +99,51 @@ class StatusResponse(BaseModel):
     message: str
 
 
+class FindingDetail(BaseModel):
+    """Detailed finding information"""
+    id: int
+    finding_type: str
+    content: str
+    confidence: float
+    sources: list
+    iteration: int
+    created_at: datetime
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
+
+class SessionResults(BaseModel):
+    """Complete session results"""
+    session_id: str
+    query: str
+    status: str
+    final_synthesis: Optional[str]
+    synthesis_model: Optional[str]
+    findings: List[FindingDetail]
+    total_findings: int
+    total_sources: int
+    total_cost_usd: float
+    completeness_score: Optional[float]
+    confidence_score: Optional[float]
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
+
+class SynthesisResponse(BaseModel):
+    """Response for synthesis generation"""
+    success: bool
+    synthesis: Optional[str]
+    model_used: Optional[str]
+    cost_usd: float
+    message: str
+
+
 # ============================================================================
 # Dependency Injection
 # ============================================================================
@@ -614,3 +659,441 @@ async def list_research_templates():
             for template_type, template in TEMPLATES.items()
         ]
     }
+
+
+@router.get("/sessions/{session_id}/results", response_model=SessionResults)
+async def get_session_results(
+    session_id: str,
+    manager: ResearchSessionManager = Depends(get_session_manager)
+):
+    """
+    Get complete results for a research session.
+
+    Returns synthesis, findings, sources, and quality metrics.
+
+    Args:
+        session_id: Session ID
+
+    Returns:
+        Complete session results
+
+    Raises:
+        404: Session not found
+    """
+    try:
+        # Get session info
+        session = await manager.get_session(session_id)
+
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id} not found"
+            )
+
+        # Get findings from database
+        async with manager.pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT id, finding_type, content, confidence, sources, iteration, created_at
+                    FROM research_findings
+                    WHERE session_id = %s
+                    ORDER BY iteration, id
+                    """,
+                    (session_id,)
+                )
+
+                findings_rows = await cur.fetchall()
+                findings = [
+                    FindingDetail(
+                        id=row[0],
+                        finding_type=row[1],
+                        content=row[2],
+                        confidence=float(row[3]),
+                        sources=row[4] if row[4] else [],
+                        iteration=row[5],
+                        created_at=row[6]
+                    )
+                    for row in findings_rows
+                ]
+
+        # Get synthesis
+        synthesis = await manager.get_session_synthesis(session_id)
+
+        return SessionResults(
+            session_id=session.session_id,
+            query=session.query,
+            status=session.status.value,
+            final_synthesis=synthesis,
+            synthesis_model=None,  # TODO: Get from session
+            findings=findings,
+            total_findings=session.total_findings,
+            total_sources=session.total_sources,
+            total_cost_usd=session.total_cost_usd,
+            completeness_score=session.completeness_score,
+            confidence_score=session.confidence_score
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting session results: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sessions/{session_id}/findings")
+async def get_session_findings(
+    session_id: str,
+    page: int = Query(0, ge=0, description="Page number (0-indexed)"),
+    limit: int = Query(20, ge=1, le=100, description="Results per page"),
+    manager: ResearchSessionManager = Depends(get_session_manager)
+):
+    """
+    Get paginated findings for a session.
+
+    Args:
+        session_id: Session ID
+        page: Page number (0-indexed)
+        limit: Results per page (1-100)
+
+    Returns:
+        Paginated list of findings
+
+    Raises:
+        404: Session not found
+    """
+    try:
+        # Verify session exists
+        session = await manager.get_session(session_id)
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id} not found"
+            )
+
+        offset = page * limit
+
+        async with manager.pool.connection() as conn:
+            async with conn.cursor() as cur:
+                # Get total count
+                await cur.execute(
+                    "SELECT COUNT(*) FROM research_findings WHERE session_id = %s",
+                    (session_id,)
+                )
+                total = (await cur.fetchone())[0]
+
+                # Get paginated findings
+                await cur.execute(
+                    """
+                    SELECT id, finding_type, content, confidence, sources, iteration, created_at
+                    FROM research_findings
+                    WHERE session_id = %s
+                    ORDER BY iteration, id
+                    LIMIT %s OFFSET %s
+                    """,
+                    (session_id, limit, offset)
+                )
+
+                findings_rows = await cur.fetchall()
+                findings = [
+                    {
+                        "id": row[0],
+                        "finding_type": row[1],
+                        "content": row[2],
+                        "confidence": float(row[3]),
+                        "sources": row[4] if row[4] else [],
+                        "iteration": row[5],
+                        "created_at": row[6].isoformat() if row[6] else None
+                    }
+                    for row in findings_rows
+                ]
+
+        return {
+            "session_id": session_id,
+            "findings": findings,
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "pages": (total + limit - 1) // limit
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting findings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sessions/{session_id}/followup", response_model=CreateSessionResponse, status_code=201)
+async def create_followup_session(
+    session_id: str,
+    followup_query: str = Query(..., min_length=10, description="Follow-up question"),
+    use_context: bool = Query(True, description="Include parent session findings as context"),
+    manager: ResearchSessionManager = Depends(get_session_manager)
+):
+    """
+    Create a follow-up research session based on a previous session.
+
+    The follow-up inherits findings from the parent session as context,
+    allowing for iterative refinement and additional questions.
+
+    Args:
+        session_id: Parent session ID
+        followup_query: Follow-up question
+        use_context: Whether to inject parent findings as context
+
+    Returns:
+        New session ID and status
+
+    Raises:
+        404: Parent session not found
+    """
+    try:
+        # Get parent session
+        parent_session = await manager.get_session(session_id)
+
+        if not parent_session:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Parent session {session_id} not found"
+            )
+
+        # Use same user_id and config as parent
+        user_id = parent_session.user_id
+        config = parent_session.config or {}
+
+        # Create new session with parent reference
+        new_session_id = await manager.create_session(
+            user_id=user_id,
+            query=followup_query,
+            config=config
+        )
+
+        # Update parent_session_id in database
+        async with manager.pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    UPDATE research_sessions
+                    SET parent_session_id = %s
+                    WHERE session_id = %s
+                    """,
+                    (session_id, new_session_id)
+                )
+                await conn.commit()
+
+        # TODO: If use_context=True, inject parent findings into initial state
+        # This requires modifications to start_research to accept initial findings
+
+        # Start research
+        await manager.start_research(
+            session_id=new_session_id,
+            user_id=user_id,
+            query=followup_query,
+            config=config
+        )
+
+        return CreateSessionResponse(
+            session_id=new_session_id,
+            status=SessionStatus.ACTIVE.value,
+            message=f"Follow-up session created based on {session_id}",
+            thread_id=f"research_{new_session_id}"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating follow-up session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SynthesisResponse(BaseModel):
+    """Response from synthesis generation"""
+    session_id: str
+    synthesis: str
+    model: str
+    cost_usd: float
+
+
+@router.post("/sessions/{session_id}/generate-synthesis", response_model=SynthesisResponse)
+async def generate_synthesis(
+    session_id: str,
+    force: bool = Query(False, description="Regenerate even if synthesis already exists"),
+    manager: ResearchSessionManager = Depends(get_session_manager)
+):
+    """
+    Generate a cohesive synthesis from existing research findings.
+
+    This endpoint:
+    1. Retrieves all findings for the session
+    2. Uses an LLM to create a unified analysis
+    3. Saves the synthesis to the database
+    4. Returns the generated synthesis
+
+    Useful for:
+    - Sessions completed before synthesis persistence was added
+    - Regenerating synthesis with improved prompts
+    - Creating synthesis for manually imported findings
+
+    Args:
+        session_id: Session ID
+        force: Regenerate even if synthesis exists (default: False)
+
+    Returns:
+        Generated synthesis with metadata
+
+    Raises:
+        404: Session not found
+        400: No findings to synthesize
+    """
+    try:
+        from brain.llm_client import chat_async
+
+        # Get session info
+        session = await manager.get_session(session_id)
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id} not found"
+            )
+
+        # Check if synthesis already exists
+        if session.final_synthesis and not force:
+            return SynthesisResponse(
+                session_id=session_id,
+                synthesis=session.final_synthesis,
+                model=session.synthesis_model or "existing",
+                cost_usd=session.synthesis_cost_usd or 0.0
+            )
+
+        # Get all findings
+        async with manager.pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT id, finding_type, content, confidence, sources, iteration
+                    FROM research_findings
+                    WHERE session_id = %s
+                    ORDER BY iteration, id
+                    """,
+                    (session_id,)
+                )
+                findings_rows = await cur.fetchall()
+
+        if not findings_rows:
+            raise HTTPException(
+                status_code=400,
+                detail="No findings available to synthesize"
+            )
+
+        # Format findings for synthesis
+        findings_text = []
+        all_sources = []
+        seen_urls = set()
+
+        for row in findings_rows:
+            finding_type, content, confidence, sources = row[1], row[2], row[3], row[4]
+            findings_text.append(
+                f"[{finding_type.upper()} - {confidence*100:.0f}% confidence]\n{content}"
+            )
+
+            # Collect unique sources from all findings
+            if sources:
+                for source in sources:
+                    url = source.get("url")
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        all_sources.append(source)
+
+        # Format sources with content for LLM analysis
+        sources_with_content = []
+        for i, s in enumerate(all_sources[:20], 1):  # Limit to top 20 sources
+            source_entry = f"{i}. **{s.get('title', 'Untitled')}**"
+            source_entry += f"\n   URL: {s.get('url', 'N/A')}"
+            if s.get('snippet'):
+                source_entry += f"\n   Content: {s.get('snippet')[:300]}"
+            if s.get('relevance'):
+                source_entry += f"\n   Relevance: {s.get('relevance'):.2f}"
+            source_entry += f"\n   Tool: {s.get('tool', 'unknown')}"
+            sources_with_content.append(source_entry)
+
+        sources_text = "\n\n".join(sources_with_content) if sources_with_content else "No source metadata available (old session)"
+
+        # Create synthesis prompt with source analysis
+        synthesis_prompt = f"""You are analyzing research findings to create a comprehensive answer.
+
+**Original Question:**
+{session.query}
+
+**Research Findings:**
+{chr(10).join(findings_text)}
+
+**Sources Consulted (with content excerpts):**
+{sources_text}
+
+IMPORTANT: If sources with content are available, analyze the actual source content provided above. Reference specific information, quotes, and evidence from the source snippets when constructing your synthesis. Evaluate source quality, relevance, and consistency.
+
+**Task:**
+Create a cohesive, well-structured answer to the original question based on the findings and source analysis.
+
+Requirements:
+- Synthesize information from all findings into a unified response
+- If sources are available, cite specific evidence from source content
+- Maintain factual accuracy and cite confidence levels where relevant
+- Structure the response logically with clear sections if needed
+- Address the question directly and comprehensively
+- Acknowledge uncertainties or conflicting information if present
+- Properly attribute information to sources when available
+
+Provide ONLY the synthesis (no meta-commentary about the task)."""
+
+        # Generate synthesis using F16 model for higher quality
+        messages = [{"role": "user", "content": synthesis_prompt}]
+        synthesis_text, metadata = await chat_async(
+            messages=messages,
+            which="F16",  # Use F16 for quality synthesis
+            temperature=0.3,  # Lower temperature for factual synthesis
+            max_tokens=2000
+        )
+
+        # Extract model and cost from metadata
+        model_used = metadata.get("model", "kitty-primary")
+        tokens_input = metadata.get("usage", {}).get("prompt_tokens", 0)
+        tokens_output = metadata.get("usage", {}).get("completion_tokens", 0)
+
+        # Rough cost estimate (local models are effectively free, but track tokens)
+        cost_usd = 0.0  # Local models
+
+        # Save synthesis to database
+        async with manager.pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    UPDATE research_sessions
+                    SET final_synthesis = %s,
+                        synthesis_model = %s,
+                        synthesis_cost_usd = %s,
+                        updated_at = NOW()
+                    WHERE session_id = %s
+                    """,
+                    (synthesis_text, model_used, cost_usd, session_id)
+                )
+                await conn.commit()
+
+        logger.info(
+            f"Generated synthesis for session {session_id}: "
+            f"{len(synthesis_text)} chars, model={model_used}"
+        )
+
+        return SynthesisResponse(
+            session_id=session_id,
+            synthesis=synthesis_text,
+            model=model_used,
+            cost_usd=cost_usd
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating synthesis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

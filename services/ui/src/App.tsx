@@ -7,6 +7,7 @@ import WallTerminal from './pages/WallTerminal';
 import VisionGallery from './pages/VisionGallery';
 import ImageGenerator from './pages/ImageGenerator';
 import Research from './pages/Research';
+import Results from './pages/Results';
 import IOControl from './pages/IOControl';
 import MaterialInventory from './pages/MaterialInventory';
 import PrintIntelligence from './pages/PrintIntelligence';
@@ -15,7 +16,7 @@ import useRemoteMode from './hooks/useRemoteMode';
 import { useTheme } from './contexts/ThemeContext';
 
 const App = () => {
-  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'shell' | 'wall' | 'vision' | 'images' | 'research' | 'iocontrol' | 'inventory' | 'intelligence' | 'cameras'>('shell');
+  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'shell' | 'wall' | 'vision' | 'images' | 'research' | 'results' | 'iocontrol' | 'inventory' | 'intelligence' | 'cameras'>('shell');
   const remoteMode = useRemoteMode();
   const { theme, toggleTheme } = useTheme();
 
@@ -35,6 +36,8 @@ const App = () => {
         return <ImageGenerator />;
       case 'research':
         return <Research />;
+      case 'results':
+        return <Results />;
       case 'iocontrol':
         return <IOControl />;
       case 'inventory':
@@ -59,6 +62,8 @@ const App = () => {
       setActiveView('shell');
     } else if (viewParam === 'research') {
       setActiveView('research');
+    } else if (viewParam === 'results') {
+      setActiveView('results');
     } else if (viewParam === 'iocontrol') {
       setActiveView('iocontrol');
     } else if (viewParam === 'inventory') {
@@ -77,6 +82,7 @@ const App = () => {
         <nav>
           <button onClick={() => setActiveView('shell')}>💬 Shell</button>
           <button onClick={() => setActiveView('research')}>🔬 Research</button>
+          <button onClick={() => setActiveView('results')}>📊 Results</button>
           <button onClick={() => setActiveView('iocontrol')}>⚙️ I/O Control</button>
           <button onClick={() => setActiveView('inventory')}>📦 Inventory</button>
           <button onClick={() => setActiveView('intelligence')}>📊 Intelligence</button>

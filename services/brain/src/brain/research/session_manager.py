@@ -60,6 +60,12 @@ class SessionInfo:
     confidence_score: Optional[float] = None
     saturation_status: Optional[Dict] = None
 
+    # Synthesis
+    final_synthesis: Optional[str] = None
+    synthesis_model: Optional[str] = None
+    synthesis_cost_usd: Optional[float] = None
+    parent_session_id: Optional[str] = None
+
 
 class ResearchSessionManager:
     """
@@ -193,7 +199,8 @@ class ResearchSessionManager:
                             thread_id, config, metadata,
                             total_iterations, total_findings, total_sources,
                             total_cost_usd, external_calls_used,
-                            completeness_score, confidence_score, saturation_status
+                            completeness_score, confidence_score, saturation_status,
+                            final_synthesis, synthesis_model, synthesis_cost_usd, parent_session_id
                         FROM research_sessions
                         WHERE session_id = %s
                         """,
@@ -221,7 +228,11 @@ class ResearchSessionManager:
                             external_calls_used=row[14] or 0,
                             completeness_score=float(row[15]) if row[15] else None,
                             confidence_score=float(row[16]) if row[16] else None,
-                            saturation_status=row[17]
+                            saturation_status=row[17],
+                            final_synthesis=row[18],
+                            synthesis_model=row[19],
+                            synthesis_cost_usd=float(row[20]) if row[20] else None,
+                            parent_session_id=row[21]
                         )
 
                     return None
@@ -471,6 +482,14 @@ class ResearchSessionManager:
                 logger.error(f"⚠️  Failed to persist findings/sources: {e}", exc_info=True)
                 # Continue even if persistence fails
 
+            # Persist synthesis to database
+            try:
+                await self._persist_synthesis(session_id, final_state)
+                logger.info(f"💾 Persisted synthesis for session {session_id}")
+            except Exception as e:
+                logger.error(f"⚠️  Failed to persist synthesis: {e}", exc_info=True)
+                # Continue even if synthesis persistence fails
+
             # Update session with final results
             try:
                 await self.update_session_stats(
@@ -708,11 +727,34 @@ class ResearchSessionManager:
             f"for session {session_id}"
         )
 
+        # Create URL -> source mapping for efficient lookup
+        source_map = {s.get("url"): s for s in sources if s.get("url")}
+
         async with self.pool.connection() as conn:
             async with conn.cursor() as cur:
-                # Persist findings
+                # Persist findings with full source metadata
                 for finding in findings:
                     try:
+                        # Get citation URLs from finding
+                        citation_urls = finding.get("citations", [])
+
+                        # Look up full source metadata for each citation
+                        full_sources = []
+                        for url in citation_urls:
+                            if url in source_map:
+                                source = source_map[url]
+                                # Include full source metadata
+                                full_sources.append({
+                                    "url": source.get("url", ""),
+                                    "title": source.get("title", ""),
+                                    "snippet": source.get("snippet", ""),
+                                    "relevance": source.get("relevance", 0.0),
+                                    "tool": source.get("tool", "unknown")
+                                })
+                            else:
+                                # Fallback: store just the URL if full metadata not found
+                                full_sources.append({"url": url})
+
                         await cur.execute(
                             """
                             INSERT INTO research_findings
@@ -725,19 +767,96 @@ class ResearchSessionManager:
                                 finding.get("content", ""),
                                 finding.get("confidence", 0.0),
                                 finding.get("iteration", 0),
-                                Json(finding.get("citations", []))
+                                Json(full_sources)  # Store full source objects, not just URLs
                             )
                         )
                     except Exception as e:
                         logger.error(f"Failed to persist finding {finding.get('id')}: {e}")
                         # Continue with other findings
 
-                # Persist sources
-                # Note: sources table doesn't exist yet, so we'll store in findings for now
-                # or create a simple sources array in metadata
-
                 await conn.commit()
-                logger.info(f"✅ Committed {len(findings)} findings to database")
+                logger.info(
+                    f"✅ Committed {len(findings)} findings with full source metadata to database"
+                )
+
+    async def _persist_synthesis(
+        self,
+        session_id: str,
+        final_state: Dict[str, Any]
+    ):
+        """
+        Persist final synthesis from graph state to database.
+
+        Args:
+            session_id: Session ID
+            final_state: Final research state from graph execution
+        """
+        # Extract synthesis from final state
+        final_synthesis = final_state.get("final_answer")
+        synthesis_model = final_state.get("synthesis_model")
+        synthesis_cost = final_state.get("synthesis_cost_usd", 0.0)
+
+        if not final_synthesis:
+            logger.warning(f"No synthesis found in final state for session {session_id}")
+            return
+
+        logger.info(
+            f"Persisting synthesis for session {session_id} "
+            f"(length={len(final_synthesis)}, model={synthesis_model})"
+        )
+
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        UPDATE research_sessions
+                        SET
+                            final_synthesis = %s,
+                            synthesis_model = %s,
+                            synthesis_cost_usd = %s,
+                            updated_at = NOW()
+                        WHERE session_id = %s
+                        """,
+                        (
+                            final_synthesis,
+                            synthesis_model,
+                            synthesis_cost,
+                            session_id
+                        )
+                    )
+                    await conn.commit()
+                    logger.info(f"✅ Synthesis persisted for session {session_id}")
+        except Exception as e:
+            logger.error(f"Failed to persist synthesis for session {session_id}: {e}")
+            # Don't raise - synthesis persistence failure shouldn't fail the whole research
+
+    async def get_session_synthesis(self, session_id: str) -> Optional[str]:
+        """
+        Get final synthesis for a session.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            Final synthesis text or None if not available
+        """
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        SELECT final_synthesis
+                        FROM research_sessions
+                        WHERE session_id = %s
+                        """,
+                        (session_id,)
+                    )
+                    result = await cur.fetchone()
+                    return result[0] if result else None
+        except Exception as e:
+            logger.error(f"Failed to get synthesis for session {session_id}: {e}")
+            return None
 
     async def mark_completed(
         self,

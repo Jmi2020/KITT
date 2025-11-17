@@ -19,6 +19,7 @@ from .routes.coding import router as coding_router
 from .routes.collective import router as collective_router
 from .routes.io_control import router as io_control_router
 from .routes.providers import router as providers_router
+from .routes.research import router as research_router
 
 app = FastAPI(title="KITTY Gateway")
 
@@ -43,6 +44,7 @@ app.include_router(coding_router)
 app.include_router(collective_router)
 app.include_router(io_control_router)  # I/O Control Dashboard API
 app.include_router(providers_router)  # Provider information
+app.include_router(research_router)  # Research sessions and results
 
 storage_root = Path(os.getenv("KITTY_STORAGE_ROOT", "storage"))
 storage_root.mkdir(parents=True, exist_ok=True)
