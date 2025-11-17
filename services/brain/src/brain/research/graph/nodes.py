@@ -29,6 +29,7 @@ from ..orchestration import (
 from ..models import (
     get_model_registry,
     ModelCoordinator,
+    ModelCapability,
     ConsultationTier,
     ConsultationRequest,
     BudgetManager,
@@ -173,7 +174,8 @@ Provide ONLY the JSON response, no additional text.
 
     # Consult model
     request = ConsultationRequest(
-        prompt=prompt,
+        task_description=prompt,
+        required_capabilities={ModelCapability.REASONING, ModelCapability.CREATIVITY},
         tier=ConsultationTier.MEDIUM,
         max_cost=Decimal("0.05"),
         prefer_local=state["config"]["prefer_local"],
@@ -1043,7 +1045,8 @@ Structure your response clearly with:
 
     # Consult model (MEDIUM tier for sub-question synthesis)
     request = ConsultationRequest(
-        prompt=prompt,
+        task_description=prompt,
+        required_capabilities={ModelCapability.SYNTHESIS, ModelCapability.REASONING},
         tier=ConsultationTier.MEDIUM,
         max_cost=Decimal("0.10"),
         prefer_local=state["config"]["prefer_local"],
@@ -1460,7 +1463,8 @@ Provide a well-structured answer with:
 
         # Consult model (HIGH tier for final synthesis)
         request = ConsultationRequest(
-            prompt=prompt,
+            task_description=prompt,
+            required_capabilities={ModelCapability.SYNTHESIS, ModelCapability.REASONING},
             tier=ConsultationTier.HIGH,
             max_cost=Decimal("0.20"),
             prefer_local=state["config"]["prefer_local"],
@@ -1646,7 +1650,8 @@ Keep items concise (2-4 words max). Return ONLY the JSON, no other text."""
 
         # Create consultation request (LOW tier for quick extraction)
         request = ConsultationRequest(
-            prompt=prompt,
+            task_description=prompt,
+            required_capabilities={ModelCapability.EXTRACTION},
             tier=ConsultationTier.LOW,
             max_cost=Decimal("0.01"),  # Very cheap extraction
             prefer_local=True,  # Prefer local models for speed
@@ -1761,7 +1766,8 @@ Format the response in a clear, professional manner with proper source attributi
 
         # Create consultation request
         request = ConsultationRequest(
-            prompt=prompt,
+            task_description=prompt,
+            required_capabilities={ModelCapability.SYNTHESIS, ModelCapability.REASONING},
             tier=tier,
             max_cost=state["budget_remaining"],
             prefer_local=state["budget_remaining"] < Decimal("0.50"),
