@@ -19,6 +19,11 @@ from brain.research.session_manager import (
     SessionStatus,
     SessionInfo
 )
+from brain.research.templates import (
+    ResearchTemplateType,
+    apply_template,
+    TEMPLATES
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +38,13 @@ class CreateSessionRequest(BaseModel):
     """Request to create a new research session"""
     query: str = Field(..., description="Research query/question", min_length=10)
     user_id: str = Field(..., description="User ID creating the session")
+    template: Optional[str] = Field(
+        default=None,
+        description="Optional research template (auto-detected if not provided). Options: technical_docs, comparison, troubleshooting, product_research, academic, quick_fact, deep_dive, general"
+    )
     config: Optional[dict] = Field(
         default=None,
-        description="Optional configuration (max_iterations, max_cost_usd, etc.)"
+        description="Optional configuration (max_iterations, max_cost_usd, etc.). Overrides template settings."
     )
 
 
@@ -146,11 +155,27 @@ async def create_research_session(
         ```
     """
     try:
+        # Apply research template
+        if request.template:
+            # User specified a template
+            try:
+                template_type = ResearchTemplateType(request.template)
+                config = apply_template(request.query, request.config)
+                logger.info(f"Applied template '{request.template}' to query")
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid template: {request.template}. Valid options: {[t.value for t in ResearchTemplateType]}"
+                )
+        else:
+            # Auto-detect template
+            config = apply_template(request.query, request.config)
+
         # Create session in database
         session_id = await manager.create_session(
             user_id=request.user_id,
             query=request.query,
-            config=request.config
+            config=config
         )
 
         # Start research execution in background
@@ -560,4 +585,32 @@ async def research_health_check():
         "service": "autonomous_research",
         "status": "healthy",
         "version": "0.1.0"
+    }
+
+
+@router.get("/templates")
+async def list_research_templates():
+    """
+    List all available research templates.
+
+    Research templates provide pre-configured settings optimized for
+    different types of queries (technical docs, comparisons, troubleshooting, etc.).
+
+    Returns:
+        List of available templates with descriptions and settings
+    """
+    return {
+        "templates": [
+            {
+                "type": template_type.value,
+                "name": template.name,
+                "description": template.description,
+                "strategy": template.strategy,
+                "max_iterations": template.max_iterations,
+                "min_sources": template.min_sources,
+                "min_confidence": template.min_confidence,
+                "use_debate": template.use_debate,
+            }
+            for template_type, template in TEMPLATES.items()
+        ]
     }

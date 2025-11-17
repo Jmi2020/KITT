@@ -436,7 +436,7 @@ async def score_quality(state: ResearchState) -> ResearchState:
 
     try:
         # Initialize evaluators
-        ragas_eval = RAGASEvaluator(use_full_ragas=False)
+        ragas_eval = RAGASEvaluator(use_full_ragas=True)
         confidence_scorer = ConfidenceScorer(
             min_confidence=state["config"]["min_confidence"]
         )

@@ -162,11 +162,60 @@ class RAGASEvaluator:
         ground_truth: Optional[str]
     ) -> RAGASMetrics:
         """Evaluate using actual RAGAS library"""
-        # This would use the real RAGAS library
-        # For now, fallback to heuristics
-        return await self._evaluate_heuristic(
-            question, answer, contexts, ground_truth
-        )
+        try:
+            from ragas import evaluate
+            from ragas.metrics import (
+                faithfulness,
+                answer_relevancy,
+                context_precision,
+                context_recall
+            )
+            from datasets import Dataset
+
+            # Prepare data in RAGAS format
+            data = {
+                "question": [question],
+                "answer": [answer],
+                "contexts": [contexts],
+            }
+
+            # Add ground truth if available (needed for context_recall)
+            if ground_truth:
+                data["ground_truth"] = [ground_truth]
+
+            # Create dataset
+            dataset = Dataset.from_dict(data)
+
+            # Define metrics to evaluate
+            metrics_to_use = [
+                faithfulness,
+                answer_relevancy,
+                context_precision,
+            ]
+
+            # Add context_recall only if we have ground truth
+            if ground_truth:
+                metrics_to_use.append(context_recall)
+
+            # Run evaluation (synchronously, RAGAS doesn't support async yet)
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: evaluate(dataset, metrics=metrics_to_use)
+            )
+
+            # Extract scores
+            return RAGASMetrics(
+                faithfulness=float(result.get("faithfulness", 0.0)),
+                answer_relevancy=float(result.get("answer_relevancy", 0.0)),
+                context_precision=float(result.get("context_precision", 0.0)),
+                context_recall=float(result.get("context_recall", 0.8) if ground_truth else 0.8)
+            )
+
+        except Exception as e:
+            logger.warning(f"RAGAS evaluation failed, falling back to heuristics: {e}")
+            return await self._evaluate_heuristic(
+                question, answer, contexts, ground_truth
+            )
 
     async def _evaluate_heuristic(
         self,

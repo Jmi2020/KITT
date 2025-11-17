@@ -60,10 +60,23 @@ interface ProgressUpdate {
   timestamp?: string;
 }
 
+interface ResearchTemplate {
+  type: string;
+  name: string;
+  description: string;
+  strategy: string;
+  max_iterations: number;
+  min_sources: number;
+  min_confidence: number;
+  use_debate: boolean;
+}
+
 const Research = () => {
   // State
   const [query, setQuery] = useState('');
   const [userId, setUserId] = useState('demo-user');
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
+  const [templates, setTemplates] = useState<ResearchTemplate[]>([]);
   const [maxIterations, setMaxIterations] = useState(10);
   const [maxCost, setMaxCost] = useState(2.0);
   const [activeSession, setActiveSession] = useState<ResearchSession | null>(null);
@@ -83,8 +96,9 @@ const Research = () => {
   // WebSocket ref
   const wsRef = useRef<WebSocket | null>(null);
 
-  // Load sessions on mount
+  // Load templates and sessions on mount
   useEffect(() => {
+    loadTemplates();
     loadSessions();
   }, [userId]);
 
@@ -96,6 +110,17 @@ const Research = () => {
       }
     };
   }, []);
+
+  const loadTemplates = async () => {
+    try {
+      const response = await fetch('/api/research/templates');
+      if (!response.ok) throw new Error('Failed to load templates');
+      const data = await response.json();
+      setTemplates(data.templates || []);
+    } catch (err: any) {
+      console.error('Error loading templates:', err);
+    }
+  };
 
   const loadSessions = async () => {
     try {
@@ -121,17 +146,24 @@ const Research = () => {
     setError(null);
 
     try {
+      const requestBody: any = {
+        query: query.trim(),
+        user_id: userId,
+        config: {
+          max_iterations: maxIterations,
+          max_cost_usd: maxCost,
+        },
+      };
+
+      // Include template if selected
+      if (selectedTemplate) {
+        requestBody.template = selectedTemplate;
+      }
+
       const response = await fetch('/api/research/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: query.trim(),
-          user_id: userId,
-          config: {
-            max_iterations: maxIterations,
-            max_cost_usd: maxCost,
-          },
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -311,6 +343,17 @@ const Research = () => {
     }
   };
 
+  const selectTemplateHandler = (templateType: string) => {
+    setSelectedTemplate(templateType);
+
+    // Auto-fill settings based on template
+    const template = templates.find(t => t.type === templateType);
+    if (template) {
+      setMaxIterations(template.max_iterations);
+      // Keep max cost user-defined, just update iterations
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'active': return 'status-active';
@@ -343,6 +386,28 @@ const Research = () => {
           {!activeSession ? (
             <div className="research-form">
               <h2>Start New Research</h2>
+
+              <div className="form-group">
+                <label htmlFor="template">Research Template</label>
+                <select
+                  id="template"
+                  value={selectedTemplate}
+                  onChange={(e) => selectTemplateHandler(e.target.value)}
+                  disabled={loading}
+                >
+                  <option value="">Auto-detect (recommended)</option>
+                  {templates.map((template) => (
+                    <option key={template.type} value={template.type}>
+                      {template.name} - {template.description}
+                    </option>
+                  ))}
+                </select>
+                <small>
+                  {selectedTemplate
+                    ? `Using ${templates.find(t => t.type === selectedTemplate)?.name} template`
+                    : 'Template will be auto-detected from your query'}
+                </small>
+              </div>
 
               <div className="form-group">
                 <label htmlFor="query">Research Query</label>
