@@ -81,6 +81,8 @@ const Research = () => {
   const [maxCost, setMaxCost] = useState(2.0);
   const [strategy, setStrategy] = useState('hybrid');
   const [enablePaidTools, setEnablePaidTools] = useState(false);
+  const [enableHierarchical, setEnableHierarchical] = useState(false);
+  const [maxSubQuestions, setMaxSubQuestions] = useState(5);
   const [activeSession, setActiveSession] = useState<ResearchSession | null>(null);
   const [sessions, setSessions] = useState<ResearchSession[]>([]);
   const [loading, setLoading] = useState(false);
@@ -161,6 +163,15 @@ const Research = () => {
       // Add base_priority if paid tools enabled (triggers Perplexity usage)
       if (enablePaidTools) {
         requestBody.config.base_priority = 0.7;
+      }
+
+      // Add hierarchical config if enabled
+      if (enableHierarchical) {
+        requestBody.config.enable_hierarchical = true;
+        requestBody.config.max_sub_questions = maxSubQuestions;
+        requestBody.config.min_sub_questions = 2;
+        requestBody.config.sub_question_min_iterations = 2;
+        requestBody.config.sub_question_max_iterations = 5;
       }
 
       // Include template if selected
@@ -494,6 +505,44 @@ const Research = () => {
                     : 'Using free tools only (Brave Search, SearXNG, Jina Reader)'}
                 </small>
               </div>
+
+              <div className="form-group checkbox-group">
+                <label htmlFor="enableHierarchical">
+                  <input
+                    type="checkbox"
+                    id="enableHierarchical"
+                    checked={enableHierarchical}
+                    onChange={(e) => setEnableHierarchical(e.target.checked)}
+                    disabled={loading}
+                  />
+                  <span>Enable hierarchical research (multi-stage synthesis)</span>
+                </label>
+                <small>
+                  {enableHierarchical
+                    ? '✓ Will decompose complex questions into sub-questions, research each independently, and synthesize into comprehensive answer'
+                    : 'Standard single-stage research and synthesis'}
+                </small>
+              </div>
+
+              {enableHierarchical && (
+                <div className="form-group">
+                  <label htmlFor="maxSubQuestions">
+                    Max Sub-Questions (2-5)
+                    <input
+                      type="number"
+                      id="maxSubQuestions"
+                      min="2"
+                      max="5"
+                      value={maxSubQuestions}
+                      onChange={(e) => setMaxSubQuestions(Math.min(5, Math.max(2, parseInt(e.target.value) || 5)))}
+                      disabled={loading}
+                    />
+                  </label>
+                  <small>
+                    Number of sub-questions to break down the query into (higher = more detailed analysis, more iterations needed)
+                  </small>
+                </div>
+              )}
 
               <button
                 className="btn-primary"

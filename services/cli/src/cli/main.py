@@ -2078,6 +2078,28 @@ def research(
         )
         enable_paid = enable_paid_input.lower() in ['y', 'yes']
 
+        # Enable hierarchical research
+        enable_hierarchical_input = typer.prompt(
+            "Enable hierarchical research (multi-stage synthesis)? (y/n)",
+            default="n",
+            show_default=True
+        )
+        enable_hierarchical = enable_hierarchical_input.lower() in ['y', 'yes']
+
+        # If hierarchical, prompt for sub-question limits
+        max_sub_questions = 5
+        if enable_hierarchical:
+            max_sub_input = typer.prompt(
+                "Max sub-questions (2-5)",
+                default="5",
+                show_default=True
+            )
+            try:
+                max_sub_questions = min(5, max(2, int(max_sub_input)))
+            except ValueError:
+                console.print("[yellow]Invalid input, using default: 5[/yellow]")
+                max_sub_questions = 5
+
         console.print()
     else:
         # Use defaults
@@ -2085,6 +2107,8 @@ def research(
         max_iterations = 10
         max_cost = 2.0
         enable_paid = False
+        enable_hierarchical = False
+        max_sub_questions = 5
 
     # Build config
     config = {
@@ -2097,6 +2121,15 @@ def research(
     if enable_paid:
         config["base_priority"] = 0.7
         console.print("[yellow]✓ Paid tools enabled - research will use Perplexity when beneficial[/yellow]")
+
+    # Add hierarchical config if enabled
+    if enable_hierarchical:
+        config["enable_hierarchical"] = True
+        config["max_sub_questions"] = max_sub_questions
+        config["min_sub_questions"] = 2
+        config["sub_question_min_iterations"] = 2
+        config["sub_question_max_iterations"] = 5
+        console.print(f"[cyan]✓ Hierarchical research enabled - will decompose into {max_sub_questions} sub-questions[/cyan]")
 
     session_id = _start_research(query, config)
 
