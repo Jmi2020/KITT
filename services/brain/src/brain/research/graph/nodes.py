@@ -68,7 +68,7 @@ async def invoke_model(model_id: str, prompt: str, context: Dict[str, Any]) -> s
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                "http://localhost:8000/query",
+                "http://localhost:8000/api/query",
                 json={
                     "conversationId": context.get("session_id", "research"),
                     "prompt": prompt,
