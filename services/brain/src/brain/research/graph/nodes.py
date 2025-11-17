@@ -71,6 +71,7 @@ async def invoke_model(model_id: str, prompt: str, context: Dict[str, Any]) -> s
                 "http://localhost:8000/api/query",
                 json={
                     "conversationId": context.get("session_id", "research"),
+                    "userId": "research-system",
                     "prompt": prompt,
                     "model": model_id,
                     "intent": "query.general",
