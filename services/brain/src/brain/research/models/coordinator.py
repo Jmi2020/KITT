@@ -436,9 +436,9 @@ class ModelCoordinator:
     async def consult(
         self,
         request: ConsultationRequest,
-        budget_remaining: Decimal,
-        external_calls_remaining: int,
-        invoke_model_func: Any  # Callable to actually invoke the model
+        budget_remaining: Optional[Decimal] = None,
+        external_calls_remaining: Optional[int] = None,
+        invoke_model_func: Optional[Any] = None  # Callable to actually invoke the model
     ) -> ConsultationResponse:
         """
         Perform model consultation.
@@ -454,6 +454,30 @@ class ModelCoordinator:
             ConsultationResponse with result
         """
         import time
+
+        # Set defaults if not provided
+        if budget_remaining is None:
+            budget_remaining = request.max_cost or Decimal("1.0")
+        if external_calls_remaining is None:
+            external_calls_remaining = 10 if request.allow_external else 0
+
+        # If no invoke function provided, create a simple fallback
+        if invoke_model_func is None:
+            # Import here to avoid circular dependencies
+            from brain.orchestrator import get_orchestrator
+            orchestrator = get_orchestrator()
+
+            async def default_invoke(model_id: str, prompt: str, context: dict):
+                """Default model invocation using orchestrator"""
+                response = await orchestrator.generate_response(
+                    conversation_id="research",
+                    request_id=context.get("session_id", "unknown"),
+                    prompt=prompt,
+                    model=model_id
+                )
+                return response.get("output", response.get("content", str(response)))
+
+            invoke_model_func = default_invoke
 
         # Select model
         selection = self.select_model(request, budget_remaining, external_calls_remaining)
