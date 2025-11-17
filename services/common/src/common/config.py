@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # Redis / cache
     redis_url: str = "redis://localhost:6379/0"
 
+    # RabbitMQ / message queue
+    rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
+
     # Database
     postgres_host: str = "localhost"
     postgres_port: int = 5432
