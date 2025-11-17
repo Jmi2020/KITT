@@ -1652,8 +1652,8 @@ def _display_session_detail(session_id: str) -> None:
         console.print(f"[red]Failed to fetch session: {exc}")
         raise typer.Exit(1) from exc
 
-    session = data.get("session", {})
-    if not session:
+    session = data
+    if not session or not session.get("session_id"):
         console.print(f"[red]Session {session_id} not found")
         raise typer.Exit(1)
 
@@ -2024,6 +2024,132 @@ def autonomy(
 
 
 @app.command()
+def research(
+    query: str = typer.Argument(..., help="Research query to investigate"),
+    no_config: bool = typer.Option(False, "--no-config", help="Skip configuration prompts, use defaults"),
+) -> None:
+    """Start an autonomous research session with interactive configuration.
+
+    Examples:
+        kitty-cli research "What are the latest advances in 3D printing?"
+        kitty-cli research "Compare PETG vs ABS materials" --no-config
+    """
+    # Show configuration prompts unless --no-config is specified
+    if not no_config:
+        console.print("\n[bold cyan]Configure Research Session[/bold cyan]")
+        console.print("[dim](Press Enter to use defaults)[/dim]\n")
+
+        # Strategy selection
+        strategy_input = typer.prompt(
+            "Strategy (hybrid/breadth_first/depth_first/task_decomposition)",
+            default="hybrid",
+            show_default=True
+        )
+
+        # Max iterations
+        max_iterations_input = typer.prompt(
+            "Max iterations",
+            default="10",
+            show_default=True
+        )
+        try:
+            max_iterations = int(max_iterations_input)
+        except ValueError:
+            console.print("[yellow]Invalid input, using default: 10[/yellow]")
+            max_iterations = 10
+
+        # Max cost
+        max_cost_input = typer.prompt(
+            "Max cost USD",
+            default="2.0",
+            show_default=True
+        )
+        try:
+            max_cost = float(max_cost_input)
+        except ValueError:
+            console.print("[yellow]Invalid input, using default: 2.0[/yellow]")
+            max_cost = 2.0
+
+        # Enable paid tools
+        enable_paid_input = typer.prompt(
+            "Enable paid tools (Perplexity)? (y/n)",
+            default="n",
+            show_default=True
+        )
+        enable_paid = enable_paid_input.lower() in ['y', 'yes']
+
+        console.print()
+    else:
+        # Use defaults
+        strategy_input = "hybrid"
+        max_iterations = 10
+        max_cost = 2.0
+        enable_paid = False
+
+    # Build config
+    config = {
+        "strategy": strategy_input,
+        "max_iterations": max_iterations,
+        "max_cost_usd": max_cost,
+    }
+
+    # Add base_priority if paid tools enabled (sets priority >= 0.7 to use Perplexity)
+    if enable_paid:
+        config["base_priority"] = 0.7
+        console.print("[yellow]✓ Paid tools enabled - research will use Perplexity when beneficial[/yellow]")
+
+    session_id = _start_research(query, config)
+
+    # Always stream by default
+    _stream_research_progress(session_id, state.user_id, query)
+    console.print(f"\n[dim]View details: kitty-cli research-session {session_id}[/dim]\n")
+
+
+@app.command(name="research-sessions")
+def research_sessions(
+    limit: int = typer.Option(10, "--limit", "-l", help="Number of sessions to show"),
+) -> None:
+    """List recent research sessions.
+
+    Examples:
+        kitty-cli research-sessions
+        kitty-cli research-sessions --limit 20
+    """
+    _list_research_sessions(limit=limit)
+
+
+@app.command(name="research-session")
+def research_session(
+    session_id: str = typer.Argument(..., help="Research session ID"),
+) -> None:
+    """View detailed information about a research session.
+
+    Examples:
+        kitty-cli research-session d99a3593-5710-4297-baf3-9e4c017adf56
+    """
+    _display_session_detail(session_id)
+
+
+@app.command(name="research-stream")
+def research_stream(
+    session_id: str = typer.Argument(..., help="Research session ID to stream"),
+) -> None:
+    """Stream real-time progress of an active research session.
+
+    Examples:
+        kitty-cli research-stream d99a3593-5710-4297-baf3-9e4c017adf56
+    """
+    try:
+        data = _get_json(f"{API_BASE}/api/research/sessions/{session_id}")
+        session = data
+        query = session.get("query", "Research session")
+        _stream_research_progress(session_id, state.user_id, query)
+    except Exception as exc:
+        console.print(f"[red]Failed to stream session: {exc}")
+        raise typer.Exit(1) from exc
+
+
+@app.command()
 def shell(
     conversation: Optional[str] = typer.Option(
         None, "--conversation", "-c", help="Conversation ID override"
@@ -2166,8 +2292,51 @@ def shell(
                     continue
 
                 query = " ".join(args)
+
+                # Prompt for configuration
+                console.print("\n[bold cyan]Configure Research Session[/bold cyan]")
+                console.print("[dim](Press Enter to use defaults)[/dim]\n")
+
+                # Strategy
+                strategy_input = console.input("[cyan]Strategy[/] [dim](hybrid/breadth_first/depth_first/task_decomposition)[/] [[dim]hybrid[/dim]]: ").strip()
+                strategy = strategy_input if strategy_input else "hybrid"
+
+                # Max iterations
+                max_iterations_input = console.input("[cyan]Max iterations[/] [[dim]10[/dim]]: ").strip()
+                try:
+                    max_iterations = int(max_iterations_input) if max_iterations_input else 10
+                except ValueError:
+                    console.print("[yellow]Invalid input, using default: 10[/yellow]")
+                    max_iterations = 10
+
+                # Max cost
+                max_cost_input = console.input("[cyan]Max cost USD[/] [[dim]2.0[/dim]]: ").strip()
+                try:
+                    max_cost = float(max_cost_input) if max_cost_input else 2.0
+                except ValueError:
+                    console.print("[yellow]Invalid input, using default: 2.0[/yellow]")
+                    max_cost = 2.0
+
+                # Enable paid tools
+                enable_paid_input = console.input("[cyan]Enable paid tools (Perplexity)?[/] [dim](y/n)[/] [[dim]n[/dim]]: ").strip().lower()
+                enable_paid = enable_paid_input in ['y', 'yes']
+
+                # Build config
+                config = {
+                    "strategy": strategy,
+                    "max_iterations": max_iterations,
+                    "max_cost_usd": max_cost,
+                }
+
+                # Add base_priority if paid tools enabled
+                if enable_paid:
+                    config["base_priority"] = 0.7
+                    console.print("\n[yellow]✓ Paid tools enabled - research will use Perplexity when beneficial[/yellow]\n")
+                else:
+                    console.print()
+
                 # Start research session
-                session_id = _start_research(query)
+                session_id = _start_research(query, config)
                 # Stream progress
                 _stream_research_progress(session_id, state.user_id, query)
                 # Show final results
@@ -2204,7 +2373,7 @@ def shell(
                 # Need to get session info for query
                 try:
                     data = _get_json(f"{API_BASE}/api/research/sessions/{session_id}")
-                    session = data.get("session", {})
+                    session = data
                     query = session.get("query", "Research session")
                     _stream_research_progress(session_id, state.user_id, query)
                 except Exception as exc:

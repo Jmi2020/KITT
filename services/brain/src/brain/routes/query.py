@@ -243,7 +243,7 @@ async def post_query(
 
         # If confirmation is required, set it in the orchestrator state
         if requires_confirmation and pending_tool and confirmation_phrase:
-            orchestrator.set_pending_confirmation(
+            await orchestrator.set_pending_confirmation(
                 conversation_id=body.conversation_id,
                 user_id=body.user_id,
                 tool_name=pending_tool,

@@ -31,7 +31,7 @@ class ResearchTask:
     """A research task/subtask"""
     task_id: str
     query: str
-    priority: float = 1.0
+    priority: float = 0.5  # Default to free tools (web_search); use >= 0.7 for paid tools (research_deep)
     depth: int = 0
     parent_task_id: Optional[str] = None
     context: Dict[str, Any] = field(default_factory=dict)
@@ -66,6 +66,9 @@ class StrategyContext:
     min_sources: int = 5
     budget_remaining: float = 2.0
     external_calls_remaining: int = 10
+
+    # Priority override for enabling paid tools
+    base_priority: Optional[float] = None  # If set, overrides default task priorities
 
     # Accumulated state
     nodes_explored: int = 0
@@ -140,11 +143,13 @@ class BreadthFirstStrategy(BaseResearchStrategy):
 
         # Level 0: Broad search
         if context.nodes_explored == 0:
+            # Use base_priority if provided (enables paid tools), otherwise default to 0.6
+            priority = context.base_priority if context.base_priority is not None else 0.6
             tasks.append(
                 ResearchTask(
                     task_id=f"{context.session_id}_search_0",
                     query=query,
-                    priority=1.0,
+                    priority=priority,
                     depth=0,
                     context={"search_type": "broad", "max_results": context.max_breadth}
                 )
@@ -161,11 +166,13 @@ class BreadthFirstStrategy(BaseResearchStrategy):
 
             for i, topic in enumerate(topics[:context.max_breadth]):
                 if topic not in [f.get("topic") for f in context.findings]:
+                    # Use base_priority if provided (enables paid tools), otherwise default to 0.5
+                    priority = context.base_priority if context.base_priority is not None else 0.5
                     tasks.append(
                         ResearchTask(
                             task_id=f"{context.session_id}_topic_{current_depth+1}_{i}",
                             query=f"{query} {topic}",
-                            priority=0.8,
+                            priority=priority,
                             depth=current_depth + 1,
                             context={"topic": topic, "search_type": "focused"}
                         )
@@ -240,11 +247,13 @@ class DepthFirstStrategy(BaseResearchStrategy):
 
         # Level 0: Initial search
         if context.nodes_explored == 0:
+            # Use base_priority if provided (enables paid tools), otherwise default to 0.6
+            priority = context.base_priority if context.base_priority is not None else 0.6
             tasks.append(
                 ResearchTask(
                     task_id=f"{context.session_id}_search_0",
                     query=query,
-                    priority=1.0,
+                    priority=priority,
                     depth=0,
                     context={"search_type": "initial"}
                 )
@@ -347,11 +356,17 @@ class TaskDecompositionStrategy(BaseResearchStrategy):
             subtasks = await self._decompose_query(query)
 
             for i, subtask_query in enumerate(subtasks):
+                # Use base_priority if provided, otherwise default with slight decay
+                if context.base_priority is not None:
+                    priority = context.base_priority
+                else:
+                    priority = 0.6 - (i * 0.05)  # Earlier tasks slightly higher priority (0.6, 0.55, 0.5, ...)
+
                 tasks.append(
                     ResearchTask(
                         task_id=f"{context.session_id}_subtask_{i}",
                         query=subtask_query,
-                        priority=1.0 - (i * 0.1),  # Earlier tasks slightly higher priority
+                        priority=priority,
                         depth=0,
                         context={"subtask_index": i, "total_subtasks": len(subtasks)}
                     )
@@ -457,11 +472,13 @@ class TaskDecompositionStrategy(BaseResearchStrategy):
 
         # If not enough sources, create broad search task
         if len(context.sources) < context.min_sources:
+            # Use base_priority if provided (enables paid tools), otherwise default to 0.5
+            priority = context.base_priority if context.base_priority is not None else 0.5
             tasks.append(
                 ResearchTask(
                     task_id=f"{context.session_id}_gap_sources",
                     query=f"{query} additional sources",
-                    priority=0.8,
+                    priority=priority,
                     depth=1,
                     context={"gap_type": "sources"}
                 )

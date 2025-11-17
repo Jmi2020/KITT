@@ -113,6 +113,9 @@ class BrainOrchestrator:
     ) -> RoutingResult:
         # Get or create conversation state
         conv_state = self._state_manager.get_or_create(conversation_id, user_id or "unknown")
+        # Handle case where sync wrapper returns a Task in async context
+        if hasattr(conv_state, '__await__'):
+            conv_state = await conv_state
 
         # Check for expired confirmations
         if conv_state.is_confirmation_expired():
@@ -264,7 +267,7 @@ class BrainOrchestrator:
 
         return result
 
-    def set_pending_confirmation(
+    async def set_pending_confirmation(
         self,
         conversation_id: str,
         user_id: str,
@@ -286,6 +289,9 @@ class BrainOrchestrator:
             reason: Reason for confirmation requirement
         """
         conv_state = self._state_manager.get_or_create(conversation_id, user_id)
+        # Handle case where sync wrapper returns a Task in async context
+        if hasattr(conv_state, '__await__'):
+            conv_state = await conv_state
         conv_state.set_pending_confirmation(
             tool_name=tool_name,
             tool_args=tool_args,

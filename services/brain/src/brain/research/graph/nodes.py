@@ -112,6 +112,7 @@ async def select_strategy(state: ResearchState) -> ResearchState:
             min_sources=5,
             budget_remaining=float(state["budget_remaining"]),
             external_calls_remaining=state["external_calls_remaining"],
+            base_priority=state["config"].get("base_priority"),  # Pass priority override if set
             nodes_explored=state["current_iteration"],
             findings=[f for f in state["findings"]],
             sources=set(s.get("url", "") for s in state["sources"])

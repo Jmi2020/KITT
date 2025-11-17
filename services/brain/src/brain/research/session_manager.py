@@ -479,8 +479,7 @@ class ResearchSessionManager:
             try:
                 await self.mark_completed(
                     session_id=session_id,
-                    completeness_score=final_state.get("quality_scores", [0.0])[-1] if final_state.get("quality_scores") else None,
-                    confidence_score=final_state.get("confidence_scores", [{}])[-1].get("overall") if final_state.get("confidence_scores") else None
+                    success=True
                 )
                 logger.info(f"✅ Research completed successfully for session {session_id}")
             except Exception as e:

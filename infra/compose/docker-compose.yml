@@ -108,21 +108,6 @@ services:
       - kitty
     restart: unless-stopped
 
-  vision-gallery:
-    build:
-      context: ../..
-      dockerfile: services/ui/Dockerfile
-      args:
-        VITE_API_BASE: ${VISION_GALLERY_API_BASE:-http://localhost:8080}
-        VITE_MQTT_URL: ${VISION_GALLERY_MQTT_URL:-ws://localhost:9001}
-    depends_on:
-      - gateway
-      - mosquitto
-    ports:
-      - "${VISION_GALLERY_PORT:-5173}:4173"
-    networks:
-      - kitty
-
   searxng:
     image: searxng/searxng:latest
     restart: unless-stopped

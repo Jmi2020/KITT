@@ -79,6 +79,8 @@ const Research = () => {
   const [templates, setTemplates] = useState<ResearchTemplate[]>([]);
   const [maxIterations, setMaxIterations] = useState(10);
   const [maxCost, setMaxCost] = useState(2.0);
+  const [strategy, setStrategy] = useState('hybrid');
+  const [enablePaidTools, setEnablePaidTools] = useState(false);
   const [activeSession, setActiveSession] = useState<ResearchSession | null>(null);
   const [sessions, setSessions] = useState<ResearchSession[]>([]);
   const [loading, setLoading] = useState(false);
@@ -150,10 +152,16 @@ const Research = () => {
         query: query.trim(),
         user_id: userId,
         config: {
+          strategy: strategy,
           max_iterations: maxIterations,
           max_cost_usd: maxCost,
         },
       };
+
+      // Add base_priority if paid tools enabled (triggers Perplexity usage)
+      if (enablePaidTools) {
+        requestBody.config.base_priority = 0.7;
+      }
 
       // Include template if selected
       if (selectedTemplate) {
@@ -422,6 +430,22 @@ const Research = () => {
                 <small>{query.length}/10 characters minimum</small>
               </div>
 
+              <div className="form-group">
+                <label htmlFor="strategy">Research Strategy</label>
+                <select
+                  id="strategy"
+                  value={strategy}
+                  onChange={(e) => setStrategy(e.target.value)}
+                  disabled={loading}
+                >
+                  <option value="hybrid">Hybrid (Recommended)</option>
+                  <option value="breadth_first">Breadth First - Wide coverage</option>
+                  <option value="depth_first">Depth First - Deep dive</option>
+                  <option value="task_decomposition">Task Decomposition - Break down complex queries</option>
+                </select>
+                <small>Strategy determines how research is conducted</small>
+              </div>
+
               <div className="form-row">
                 <div className="form-group">
                   <label htmlFor="maxIterations">Max Iterations</label>
@@ -451,6 +475,24 @@ const Research = () => {
                   />
                   <small>Budget limit ($0.10-$10.00)</small>
                 </div>
+              </div>
+
+              <div className="form-group checkbox-group">
+                <label htmlFor="enablePaidTools">
+                  <input
+                    type="checkbox"
+                    id="enablePaidTools"
+                    checked={enablePaidTools}
+                    onChange={(e) => setEnablePaidTools(e.target.checked)}
+                    disabled={loading}
+                  />
+                  <span>Enable paid tools (Perplexity for deep research)</span>
+                </label>
+                <small>
+                  {enablePaidTools
+                    ? '⚠️ Research will use Perplexity API when beneficial (higher cost but better quality)'
+                    : 'Using free tools only (Brave Search, SearXNG, Jina Reader)'}
+                </small>
               </div>
 
               <button
