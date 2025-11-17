@@ -8,6 +8,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from common.config import settings
 from common.logging import configure_logging
@@ -381,6 +382,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="KITTY Brain API", lifespan=lifespan)
+
+# Add CORS middleware to allow web UI access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:4173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(query_router)
 app.include_router(conversations_router)
 app.include_router(projects_router)

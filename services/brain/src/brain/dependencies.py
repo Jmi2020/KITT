@@ -11,7 +11,7 @@ from pydantic import SecretStr
 
 from common.config import settings
 from common.credentials import HomeAssistantCredentials
-from common.messaging import MQTTClient
+from common.mqtt import MQTTClient
 
 from .orchestrator import BrainOrchestrator
 from .routing.audit_store import RoutingAuditStore

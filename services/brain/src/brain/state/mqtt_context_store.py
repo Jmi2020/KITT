@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 from common.logging import get_logger
-from common.messaging import MQTTClient, PublishOptions
+from common.mqtt import MQTTClient, PublishOptions
 
 from ..models.context import ConversationContext
 

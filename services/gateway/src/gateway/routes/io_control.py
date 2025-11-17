@@ -47,8 +47,8 @@ class FeatureResponse(BaseModel):
     description: str
     category: str
     env_var: str
-    default_value: bool | str
-    current_value: bool | str
+    default_value: bool | str | int | float
+    current_value: bool | str | int | float
     restart_scope: str
     requires: List[str]
     enables: List[str]
@@ -67,7 +67,7 @@ class FeatureUpdateRequest(BaseModel):
     """Request to update a feature."""
 
     feature_id: str
-    value: bool | str
+    value: bool | str | int | float
     persist: bool = True
     trigger_restart: bool = True
 
@@ -75,14 +75,14 @@ class FeatureUpdateRequest(BaseModel):
 class BulkUpdateRequest(BaseModel):
     """Request to update multiple features."""
 
-    changes: Dict[str, bool | str]
+    changes: Dict[str, bool | str | int | float]
     persist: bool = True
 
 
 class PreviewChangesRequest(BaseModel):
     """Request to preview changes."""
 
-    changes: Dict[str, bool | str]
+    changes: Dict[str, bool | str | int | float]
 
 
 class PreviewChangesResponse(BaseModel):
@@ -118,7 +118,7 @@ class PresetResponse(BaseModel):
     id: str
     name: str
     description: str
-    features: Dict[str, bool | str]
+    features: Dict[str, bool | str | int | float]
     cost_estimate: Dict
 
 
@@ -126,7 +126,7 @@ class DashboardStateResponse(BaseModel):
     """Complete dashboard state."""
 
     features_by_category: Dict[str, List[FeatureResponse]]
-    current_state: Dict[str, bool | str]
+    current_state: Dict[str, bool | str | int | float]
     restart_pending: bool = False
     restart_services: List[str] = []
 

@@ -7,7 +7,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Path
 from pydantic import BaseModel, Field
 
-from common.messaging import MQTTClient, PublishOptions
+from common.mqtt import MQTTClient, PublishOptions
 
 router = APIRouter(prefix="/api/device", tags=["devices"])
 

@@ -37,7 +37,7 @@ const ProviderSelector: React.FC<ProviderSelectorProps> = ({
   selectedProvider,
   selectedModel,
   onProviderChange,
-  apiBase = 'http://localhost:8000',
+  apiBase = '',
 }) => {
   const [providers, setProviders] = useState<ProvidersResponse | null>(null);
   const [isOpen, setIsOpen] = useState(false);

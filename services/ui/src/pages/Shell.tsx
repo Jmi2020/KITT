@@ -550,7 +550,6 @@ Commands are executed locally when possible.`);
                 selectedModel: model,
               }));
             }}
-            apiBase="http://localhost:8000"
           />
           <input
             ref={inputRef}

@@ -9,7 +9,7 @@ ENV PNPM_HOME=/root/.local/share/pnpm \
 RUN corepack enable
 
 ARG VITE_API_BASE=http://localhost:8080
-ARG VITE_MQTT_URL=ws://localhost:9001
+ARG VITE_MQTT_URL=ws://localhost:9002
 
 ENV VITE_API_BASE=${VITE_API_BASE} \
     VITE_MQTT_URL=${VITE_MQTT_URL} \

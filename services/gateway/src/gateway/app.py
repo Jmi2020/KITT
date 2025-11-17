@@ -5,11 +5,12 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 from .middleware.remote_mode import RemoteModeMiddleware
 from .routes.routing import router as routing_router
 from .routes.token import router as token_router
-from .routes.devices import router as devices_router
+# from .routes.devices import router as devices_router  # Temporarily disabled due to import conflict
 from .routes.remote import router as remote_router
 from .routes.vision import router as vision_router
 from .routes.images import router as images_router
@@ -17,12 +18,23 @@ from .routes.fabrication import router as fabrication_router
 from .routes.coding import router as coding_router
 from .routes.collective import router as collective_router
 from .routes.io_control import router as io_control_router
+from .routes.providers import router as providers_router
 
 app = FastAPI(title="KITTY Gateway")
+
+# Add CORS middleware to allow web UI access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:4173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.add_middleware(RemoteModeMiddleware)
 app.include_router(token_router)
 app.include_router(routing_router)
-app.include_router(devices_router)
+# app.include_router(devices_router)  # Temporarily disabled due to import conflict
 app.include_router(remote_router)
 app.include_router(vision_router)
 app.include_router(images_router)
@@ -30,6 +42,7 @@ app.include_router(fabrication_router)
 app.include_router(coding_router)
 app.include_router(collective_router)
 app.include_router(io_control_router)  # I/O Control Dashboard API
+app.include_router(providers_router)  # Provider information
 
 storage_root = Path(os.getenv("KITTY_STORAGE_ROOT", "storage"))
 storage_root.mkdir(parents=True, exist_ok=True)

@@ -8,7 +8,7 @@ from string import Formatter
 
 from common.cache import SemanticCache
 from common.config import settings
-from common.messaging import MQTTClient
+from common.mqtt import MQTTClient
 from brain.dependencies import get_orchestrator
 
 from .parser import VoiceParser

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict
 
-from common.messaging import MQTTClient, PublishOptions
+from common.mqtt import MQTTClient, PublishOptions
 from brain.orchestrator import BrainOrchestrator
 from brain.routing.router import RoutingResult
 from common.cache import SemanticCache

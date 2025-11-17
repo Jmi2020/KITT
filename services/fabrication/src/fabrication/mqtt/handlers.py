@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
-from common.messaging import MQTTClient, PublishOptions
+from common.mqtt import MQTTClient, PublishOptions
 
 from ..jobs.manager import PrintJobManager, PrintJobRequest
 
