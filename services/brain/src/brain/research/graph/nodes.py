@@ -53,7 +53,7 @@ async def invoke_model(model_id: str, prompt: str, context: Dict[str, Any]) -> s
     """
     Invoke a model with the given prompt.
 
-    This is a simple wrapper that calls the brain's model routing system.
+    This is a simple wrapper that calls the brain's query endpoint.
 
     Args:
         model_id: Model identifier (e.g., "kitty-primary", "claude-sonnet-4")
@@ -63,31 +63,29 @@ async def invoke_model(model_id: str, prompt: str, context: Dict[str, Any]) -> s
     Returns:
         str: The model's response text
     """
-    from brain.orchestrator import BrainOrchestrator
-    from fastapi import Request
-
-    # Get orchestrator from app state (set during brain startup)
-    # For now, use a simple HTTP call to the local brain API
     import httpx
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                "http://localhost:8000/v1/chat/completions",
+                "http://localhost:8000/query",
                 json={
+                    "conversationId": context.get("session_id", "research"),
+                    "prompt": prompt,
                     "model": model_id,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "stream": False
+                    "intent": "query.general",
+                    "toolMode": "enabled"
                 }
             )
             response.raise_for_status()
             data = response.json()
 
             # Extract content from response
-            if "choices" in data and len(data["choices"]) > 0:
-                return data["choices"][0]["message"]["content"]
+            result = data.get("result", {})
+            if isinstance(result, dict):
+                return result.get("output", result.get("content", str(result)))
             else:
-                return data.get("content", str(data))
+                return str(result)
 
     except Exception as e:
         logger.error(f"Model invocation failed for {model_id}: {e}")
