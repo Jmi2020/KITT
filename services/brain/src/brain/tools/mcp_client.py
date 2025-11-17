@@ -24,6 +24,7 @@ try:  # noqa: WPS229
     from mcp import (  # noqa: E402
         BrokerMCPServer,
         CADMCPServer,
+        DiscoveryMCPServer,
         HomeAssistantMCPServer,
         MemoryMCPServer,
         ResearchMCPServer,
@@ -33,6 +34,8 @@ try:  # noqa: WPS229
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     BrokerMCPServer = (
         CADMCPServer
+    ) = (
+        DiscoveryMCPServer
     ) = (
         HomeAssistantMCPServer
     ) = (
@@ -104,6 +107,12 @@ class MCPClient:
 
             if callable(VisionMCPServer):
                 self._servers["vision"] = VisionMCPServer()
+
+            # Discovery server
+            if callable(DiscoveryMCPServer):
+                self._servers["discovery"] = DiscoveryMCPServer(
+                    discovery_service_url=os.getenv("DISCOVERY_SERVICE_URL", "http://discovery:8500")
+                )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Disabling MCP tools: %s", exc)
             self._servers.clear()

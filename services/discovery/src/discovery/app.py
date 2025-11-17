@@ -36,6 +36,8 @@ from .models import (
     ApproveDeviceResponse,
     DeviceListResponse,
     DeviceResponse,
+    RejectDeviceRequest,
+    RejectDeviceResponse,
     ScanRequest,
     ScanStatusResponse,
 )
@@ -380,6 +382,47 @@ async def approve_device(
         raise
     except Exception as e:
         logger.error(f"Failed to approve device: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/discovery/devices/{device_id}/reject", response_model=RejectDeviceResponse)
+async def reject_device(
+    device_id: UUID,
+    request: RejectDeviceRequest
+) -> RejectDeviceResponse:
+    """
+    Reject/unapprove a device.
+
+    Args:
+        device_id: Device UUID
+        request: Rejection notes
+
+    Returns:
+        Updated device status
+    """
+    try:
+        # For now, use "admin" as rejector (TODO: integrate with auth)
+        rejected_by = "admin"
+
+        device = await device_store.reject_device(
+            device_id=device_id,
+            rejected_by=rejected_by,
+            notes=request.notes
+        )
+
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+
+        return RejectDeviceResponse(
+            id=device.id,
+            approved=device.approved,
+            notes=device.notes
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to reject device: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

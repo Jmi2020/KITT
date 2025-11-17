@@ -10,6 +10,7 @@ from .server import (
 from .servers import (
     BrokerMCPServer,
     CADMCPServer,
+    DiscoveryMCPServer,
     HomeAssistantMCPServer,
     MemoryMCPServer,
     ResearchMCPServer,
@@ -24,6 +25,7 @@ __all__ = [
     "ToolResult",
     "BrokerMCPServer",
     "CADMCPServer",
+    "DiscoveryMCPServer",
     "HomeAssistantMCPServer",
     "MemoryMCPServer",
     "ResearchMCPServer",

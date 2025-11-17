@@ -138,3 +138,15 @@ class ApproveDeviceResponse(BaseModel):
     approved: bool
     approved_at: datetime
     approved_by: str
+
+
+class RejectDeviceRequest(BaseModel):
+    """Device rejection request."""
+    notes: Optional[str] = None
+
+
+class RejectDeviceResponse(BaseModel):
+    """Device rejection response."""
+    id: UUID
+    approved: bool
+    notes: Optional[str] = None

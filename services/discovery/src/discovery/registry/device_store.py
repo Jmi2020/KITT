@@ -301,6 +301,41 @@ class DeviceStore:
 
             return device
 
+    async def reject_device(
+        self, device_id: UUID, rejected_by: str, notes: Optional[str] = None
+    ) -> Optional[DeviceRecord]:
+        """
+        Reject/unapprove a device.
+
+        Args:
+            device_id: Device UUID
+            rejected_by: User rejecting the device
+            notes: Optional rejection notes
+
+        Returns:
+            Updated DeviceRecord or None
+        """
+        async with self.async_session_maker() as session:
+            stmt = select(DeviceRecord).where(DeviceRecord.id == device_id)
+            result = await session.execute(stmt)
+            device = result.scalar_one_or_none()
+
+            if not device:
+                return None
+
+            device.approved = False
+            device.approved_at = None
+            device.approved_by = None
+            if notes:
+                device.notes = notes
+
+            await session.commit()
+            await session.refresh(device)
+
+            logger.info(f"Device rejected: {device.ip_address} by {rejected_by}")
+
+            return device
+
     async def delete_device(self, device_id: UUID) -> bool:
         """
         Delete a device from registry.

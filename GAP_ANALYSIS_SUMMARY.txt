@@ -54,7 +54,7 @@ Routing: llama.cpp (Q4 + F16) + MCP + Frontier tiers COMPLETE
 └─────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ NETWORK DISCOVERY                                          ⚠️  65% DONE │
+│ NETWORK DISCOVERY                                    ✅ MOSTLY DONE │
 ├─────────────────────────────────────────────────────────────────────────┤
 │ Discovery Scanners (5/5)                                          ✅   │
 │  • mDNS/Bonjour                                                   ✅   │
@@ -69,14 +69,26 @@ Routing: llama.cpp (Q4 + F16) + MCP + Frontier tiers COMPLETE
 │  • Periodic scanning                                    PARTIAL ⚠️   │
 │                                                                          │
 │ API Endpoints                                                          │
-│  • Trigger scan                                         PARTIAL ⚠️   │
-│  • List devices                                         PARTIAL ⚠️   │
-│  • Device details                                       PARTIAL ⚠️   │
-│  • Approve device                                       MISSING ❌   │
-│  • MCP tool integration                                 MISSING ❌   │
+│  • Trigger scan                                                   ✅   │
+│  • List devices                                                   ✅   │
+│  • Device details                                                 ✅   │
+│  • Approve device                                                 ✅   │
+│  • Reject device                                                  ✅   │
+│  • Search devices                                                 ✅   │
+│  • List printers                                                  ✅   │
 │                                                                          │
-│ Code: ~2,979 LOC                                                       │
-│ Impact: Can discover devices, but not integrated for use                │
+│ MCP Tool Integration                                              ✅   │
+│  • discover_devices (trigger scan)                                ✅   │
+│  • list_devices (with filters)                                    ✅   │
+│  • search_devices (search query)                                  ✅   │
+│  • get_device_status (device details)                             ✅   │
+│  • approve_device (approve for use)                               ✅   │
+│  • reject_device (unapprove)                                      ✅   │
+│  • list_printers (fabrication devices)                            ✅   │
+│  STATUS: 7 MCP tools registered and accessible to LLM                │
+│                                                                          │
+│ Code: ~3,600 LOC (+621 LOC from MCP server)                           │
+│ Impact: LLM can now discover and manage devices conversationally       │
 └─────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────┐
