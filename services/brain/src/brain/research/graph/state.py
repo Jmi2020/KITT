@@ -10,6 +10,9 @@ from enum import Enum
 from decimal import Decimal
 from datetime import datetime
 
+# Import structured claim types
+from ..types import Claim
+
 logger = logging.getLogger(__name__)
 
 
@@ -90,6 +93,7 @@ class ResearchState(TypedDict):
     # Findings and sources
     findings: List[Dict[str, Any]]  # List of research findings
     sources: List[Dict[str, Any]]   # List of sources used
+    claims: List[Claim]              # Structured claims with evidence attribution
 
     # Tool execution
     tool_executions: List[Dict[str, Any]]  # History of tool calls
@@ -212,6 +216,7 @@ def create_initial_state(
         # Findings and sources
         findings=[],
         sources=[],
+        claims=[],
 
         # Tool execution
         tool_executions=[],
@@ -289,6 +294,15 @@ def add_source(
 ) -> ResearchState:
     """Add a source to state"""
     state["sources"].append(source)
+    return update_state_timestamp(state)
+
+
+def add_claim(
+    state: ResearchState,
+    claim: Claim
+) -> ResearchState:
+    """Add a structured claim to state"""
+    state["claims"].append(claim)
     return update_state_timestamp(state)
 
 

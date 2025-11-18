@@ -22,6 +22,7 @@ from psycopg.types.json import Json
 from psycopg_pool import AsyncConnectionPool
 
 from brain.research.checkpoint import CheckpointManager
+from brain.research.types import Claim, EvidenceSpan
 
 logger = logging.getLogger(__name__)
 
@@ -482,6 +483,14 @@ class ResearchSessionManager:
                 logger.error(f"⚠️  Failed to persist findings/sources: {e}", exc_info=True)
                 # Continue even if persistence fails
 
+            # Persist structured claims and evidence to database
+            try:
+                await self._persist_claims(session_id, final_state)
+                logger.info(f"💾 Persisted claims and evidence for session {session_id}")
+            except Exception as e:
+                logger.error(f"⚠️  Failed to persist claims: {e}", exc_info=True)
+                # Continue even if claim persistence fails
+
             # Persist synthesis to database
             try:
                 await self._persist_synthesis(session_id, final_state)
@@ -777,6 +786,101 @@ class ResearchSessionManager:
                 await conn.commit()
                 logger.info(
                     f"✅ Committed {len(findings)} findings with full source metadata to database"
+                )
+
+    async def _persist_claims(
+        self,
+        session_id: str,
+        final_state: Dict[str, Any]
+    ):
+        """
+        Persist structured claims and evidence from graph state to database.
+
+        Args:
+            session_id: Session ID
+            final_state: Final research state from graph execution
+        """
+        claims = final_state.get("claims", [])
+
+        if not claims:
+            logger.debug(f"No claims to persist for session {session_id}")
+            return
+
+        logger.info(
+            f"Persisting {len(claims)} structured claims for session {session_id}"
+        )
+
+        async with self.pool.connection() as conn:
+            async with conn.cursor() as cur:
+                claims_persisted = 0
+                evidence_persisted = 0
+
+                for claim in claims:
+                    try:
+                        # Insert claim
+                        await cur.execute(
+                            """
+                            INSERT INTO research_claims
+                            (id, session_id, sub_question_id, claim_text, entailment_score,
+                             provenance_score, dedupe_fingerprint, confidence, iteration)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (id) DO UPDATE SET
+                                entailment_score = EXCLUDED.entailment_score,
+                                provenance_score = EXCLUDED.provenance_score,
+                                confidence = EXCLUDED.confidence
+                            """,
+                            (
+                                claim.id,
+                                claim.session_id,
+                                claim.sub_question_id,
+                                claim.text,
+                                claim.entailment_score,
+                                claim.provenance_score,
+                                claim.dedupe_fingerprint,
+                                claim.confidence,
+                                0  # iteration - could be tracked in state if needed
+                            )
+                        )
+                        claims_persisted += 1
+
+                        # Insert evidence for this claim
+                        for evidence in claim.evidence:
+                            try:
+                                evidence_id = str(uuid.uuid4())
+                                await cur.execute(
+                                    """
+                                    INSERT INTO research_evidence
+                                    (id, claim_id, source_id, url, title, quote, char_start, char_end)
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                                    """,
+                                    (
+                                        evidence_id,
+                                        claim.id,
+                                        evidence.source_id,
+                                        evidence.url,
+                                        evidence.title,
+                                        evidence.quote,
+                                        evidence.char_start,
+                                        evidence.char_end
+                                    )
+                                )
+                                evidence_persisted += 1
+                            except Exception as e:
+                                logger.error(
+                                    f"Failed to persist evidence for claim {claim.id}: {e}"
+                                )
+                                # Continue with other evidence
+
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to persist claim {claim.id}: {e}"
+                        )
+                        # Continue with other claims
+
+                await conn.commit()
+                logger.info(
+                    f"✅ Committed {claims_persisted} claims and {evidence_persisted} "
+                    f"evidence spans to database"
                 )
 
     async def _persist_synthesis(
