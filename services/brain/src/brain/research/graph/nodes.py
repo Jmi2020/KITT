@@ -16,6 +16,7 @@ from .state import (
     record_error,
     add_finding,
     add_source,
+    add_claim,
     record_tool_execution,
     record_model_call,
 )
@@ -44,6 +45,11 @@ from ..metrics import (
     SaturationDetector,
     GapDetector,
     StoppingCriteria,
+)
+from ..extraction import (
+    extract_claims_from_content,
+    deduplicate_and_merge_claims,
+    get_claim_summary,
 )
 
 logger = logging.getLogger(__name__)
@@ -674,10 +680,77 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                     )
 
                     if search_results:
-                        # Create finding from top results
+                        # Fetch full webpage content for top results
+                        logger.info(f"🌐 Fetching full content from top {min(3, len(search_results))} search results")
+
+                        full_contents = []
+                        for idx, sr in enumerate(search_results[:3], 1):  # Top 3 results
+                            url = sr.get("url", "")
+                            title = sr.get("title", "")
+
+                            if not url:
+                                continue
+
+                            try:
+                                # Fetch full webpage content
+                                fetch_result = await components.tool_executor.execute(
+                                    tool_name=ToolType.FETCH_WEBPAGE,
+                                    arguments={"url": url},
+                                    context=context
+                                )
+
+                                if fetch_result.success:
+                                    page_content = fetch_result.data.get("content", "")
+                                    if page_content:
+                                        # Limit content length to avoid token limits
+                                        max_content_per_page = 3000
+                                        if len(page_content) > max_content_per_page:
+                                            page_content = page_content[:max_content_per_page] + "\n\n[...content truncated...]"
+
+                                        full_contents.append({
+                                            "index": idx,
+                                            "url": url,
+                                            "title": title,
+                                            "content": page_content
+                                        })
+                                        logger.info(f"✅ Fetched {len(page_content)} chars from: {title[:60]}")
+                                    else:
+                                        logger.warning(f"⚠️  Empty content from: {url}")
+                                else:
+                                    logger.warning(f"⚠️  Failed to fetch {url}: {fetch_result.error}")
+
+                            except Exception as e:
+                                logger.error(f"Error fetching webpage {url}: {e}")
+                                # Continue with next URL
+
+                        # Create finding from fetched content
+                        if full_contents:
+                            # Combine full webpage content for claim extraction
+                            content_parts = []
+                            for fc in full_contents:
+                                content_parts.append(
+                                    f"## Source {fc['index']}: {fc['title']}\n"
+                                    f"URL: {fc['url']}\n\n"
+                                    f"{fc['content']}"
+                                )
+                            content = "\n\n---\n\n".join(content_parts)
+                            logger.info(f"📄 Combined {len(full_contents)} full webpages, total {len(content)} chars")
+                        else:
+                            # Fallback to snippets if fetching failed
+                            logger.warning("No full content fetched, falling back to snippets")
+                            result_texts = []
+                            for idx, sr in enumerate(search_results[:5], 1):
+                                title = sr.get("title", "")
+                                desc = sr.get("description", "")
+                                if title and desc:
+                                    result_texts.append(f"{idx}. {title}\n{desc}")
+                                elif desc:
+                                    result_texts.append(f"{idx}. {desc}")
+                            content = "\n\n".join(result_texts) if result_texts else f"Found {len(search_results)} results for: {task['query']}"
+
                         finding = {
                             "id": f"finding_{state['current_iteration']}_{task['task_id']}",
-                            "content": f"Found {len(search_results)} results for: {task['query']}",
+                            "content": content,
                             "task_id": task["task_id"],
                             "iteration": state["current_iteration"],
                             "confidence": 0.70,
@@ -765,6 +838,56 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                 # Also add to global findings
                 state = add_finding(state, finding)
                 logger.info(f"✅ Finding added! Total findings now: {len(state.get('findings', []))}")
+
+                # Extract structured claims with evidence from content
+                try:
+                    logger.info(f"🔬 Starting claim extraction for finding {finding.get('id')}")
+
+                    # Get source info from the first source added for this task
+                    source_id = finding.get("id", f"source_{state['current_iteration']}")
+                    source_url = "unknown"
+                    source_title = "Research Finding"
+
+                    # Try to get source info from the sources we added
+                    recent_sources = [s for s in state.get("sources", []) if s.get("tool") == tool_name]
+                    if recent_sources:
+                        source_url = recent_sources[-1].get("url", source_url)
+                        source_title = recent_sources[-1].get("title", source_title)
+
+                    logger.info(f"📄 Content length for extraction: {len(content_for_extraction)} chars")
+
+                    # Extract claims
+                    claims = await extract_claims_from_content(
+                        content=content_for_extraction,
+                        source_id=source_id,
+                        source_url=source_url,
+                        source_title=source_title,
+                        session_id=state["session_id"],
+                        query=state["query"],
+                        sub_question_id=sq_id,
+                        model_coordinator=components.model_coordinator,
+                        current_iteration=state["current_iteration"]
+                    )
+
+                    # Deduplicate and add claims to state
+                    if claims:
+                        # Deduplicate against existing claims
+                        all_claims = state.get("claims", []) + claims
+                        all_claims = deduplicate_and_merge_claims(all_claims)
+                        state["claims"] = all_claims
+
+                        summary = get_claim_summary(claims)
+                        logger.info(
+                            f"🔍 Extracted {summary['total_claims']} claims with "
+                            f"{summary['total_evidence']} evidence spans, "
+                            f"avg_provenance={summary['avg_provenance']:.2f}"
+                        )
+                    else:
+                        logger.debug("No claims extracted from content")
+
+                except Exception as e:
+                    logger.error(f"Error extracting claims: {e}", exc_info=True)
+                    # Continue execution even if claim extraction fails
 
                 # Record tool execution success
                 state = record_tool_execution(
@@ -1018,36 +1141,105 @@ async def synthesize_sub_question(state: ResearchState) -> ResearchState:
         logger.error(f"Sub-question {sq_id} not found")
         return state
 
-    # Get findings for this sub-question
+    # Get findings for this sub-question (legacy)
     sq_findings = state.get("sub_question_findings", {}).get(sq_id, [])
 
-    if not sq_findings:
-        logger.warning(f"No findings for sub-question {sq_id}, using empty synthesis")
-        sub_question["synthesis"] = "No findings available for this sub-question."
-        sub_question["status"] = "completed"
-        state["current_sub_question_id"] = None
-        return state
+    # Get claims for this sub-question (new evidence-first approach)
+    sq_claims = [c for c in state.get("claims", []) if c.sub_question_id == sq_id]
 
-    # Build synthesis prompt
-    findings_text = "\n\n".join([
-        f"Finding {i+1} (confidence: {f.get('confidence', 0):.2f}):\n{f.get('content', '')}"
-        for i, f in enumerate(sq_findings)
-    ])
+    # Use claims if available, otherwise fall back to findings
+    if sq_claims:
+        logger.info(f"Synthesizing with {len(sq_claims)} structured claims")
 
-    # Get relevant sources (sources tagged with this sub-question)
-    sq_sources = [s for s in state["sources"] if s.get("sub_question_id") == sq_id]
-    sources_text = "\n\n".join([
-        f"{i+1}. **{s.get('title', 'Untitled')}**\n"
-        f"   URL: {s.get('url', 'N/A')}\n"
-        + (f"   Content: {s.get('snippet', '')[:200]}\n" if s.get('snippet') else "")
-        + (f"   Relevance: {s.get('relevance', 0):.2f}" if s.get('relevance') else "")
-        for i, s in enumerate(sq_sources[:10])
-    ])
+        # Build claims text with evidence
+        claims_json = []
+        for claim in sq_claims:
+            claim_obj = {
+                "claim": claim.text,
+                "confidence": round(claim.confidence, 2),
+                "provenance_score": round(claim.provenance_score, 2),
+                "quotes": [
+                    {
+                        "text": ev.quote,
+                        "source_url": ev.url,
+                        "source_title": ev.title
+                    }
+                    for ev in claim.evidence
+                ]
+            }
+            claims_json.append(claim_obj)
 
-    if not sources_text:
-        sources_text = "No specific sources tagged for this sub-question"
+        import json
+        claims_text = json.dumps(claims_json, indent=2)
 
-    prompt = f"""Synthesize the research findings to answer this specific sub-question.
+        # Build unique sources list
+        source_urls = set()
+        for claim in sq_claims:
+            for ev in claim.evidence:
+                source_urls.add((ev.url, ev.title))
+
+        sources_list = [{"url": url, "title": title} for url, title in sorted(source_urls)]
+        sources_text = "\n".join([
+            f"[{i+1}] {s['title']}\n    {s['url']}"
+            for i, s in enumerate(sources_list)
+        ])
+
+        prompt = f"""Synthesize verified claims to answer this specific sub-question.
+
+**Sub-Question**: {sub_question["question_text"]}
+
+**Context**: This is part of answering the broader question: "{state["query"]}"
+
+**VERIFIED CLAIMS** (with evidence):
+{claims_text}
+
+**SOURCES TABLE**:
+{sources_text}
+
+**Your Task**:
+Create a structured, citation-rich answer using ONLY the verified claims above.
+
+**Requirements**:
+1. Each claim becomes a bullet point with [citation_number]
+2. Include ONE short verbatim quote per bullet (max 1 sentence)
+3. Map citations to the SOURCES TABLE indices above
+4. NO claims without quote support
+5. Add a "Knowledge Gaps" section if claims don't fully answer the sub-question
+
+**Output Format**:
+## Answer
+
+- **Claim 1** [1,2]: "verbatim quote..."
+- **Claim 2** [3]: "verbatim quote..."
+
+## Knowledge Gaps
+- [Gap 1 if any]
+
+## Confidence
+[High/Medium/Low] because [reasoning based on provenance scores and coverage]
+"""
+
+    elif sq_findings:
+        logger.info(f"No claims available, falling back to {len(sq_findings)} findings")
+
+        findings_text = "\n\n".join([
+            f"Finding {i+1} (confidence: {f.get('confidence', 0):.2f}):\n{f.get('content', '')}"
+            for i, f in enumerate(sq_findings)
+        ])
+
+        sq_sources = [s for s in state["sources"] if s.get("sub_question_id") == sq_id]
+        sources_text = "\n\n".join([
+            f"{i+1}. **{s.get('title', 'Untitled')}**\n"
+            f"   URL: {s.get('url', 'N/A')}\n"
+            + (f"   Content: {s.get('snippet', '')[:200]}\n" if s.get('snippet') else "")
+            + (f"   Relevance: {s.get('relevance', 0):.2f}" if s.get('relevance') else "")
+            for i, s in enumerate(sq_sources[:10])
+        ])
+
+        if not sources_text:
+            sources_text = "No specific sources tagged for this sub-question"
+
+        prompt = f"""Synthesize the research findings to answer this specific sub-question.
 
 **Sub-Question**: {sub_question["question_text"]}
 
@@ -1078,6 +1270,13 @@ Structure your response clearly with:
 - Caveats (if any)
 - Confidence assessment
 """
+
+    else:
+        logger.warning(f"No findings or claims for sub-question {sq_id}, using empty synthesis")
+        sub_question["synthesis"] = "No findings or claims available for this sub-question."
+        sub_question["status"] = "completed"
+        state["current_sub_question_id"] = None
+        return state
 
     logger.info(f"Synthesizing sub-question {sq_id}: {sub_question['question_text']}")
 
@@ -1720,11 +1919,11 @@ Keep items concise (2-4 words max). Return ONLY the JSON, no other text."""
             }
         )
 
-        # Consult model
+        # Consult model (use generous defaults for quick topic extraction)
         response = await components.model_coordinator.consult(
             request,
-            budget_remaining=state["budget_remaining"],
-            external_calls_remaining=state["external_calls_remaining"],
+            budget_remaining=Decimal("10.0"),  # Generous budget for extraction
+            external_calls_remaining=100,
             invoke_model_func=invoke_model
         )
 
@@ -1773,28 +1972,106 @@ async def _generate_ai_synthesis(state: ResearchState, components) -> str:
     from ..models.coordinator import ConsultationRequest, ConsultationTier
 
     try:
-        # Build context from findings and sources
-        findings_text = "\n\n".join([
-            f"Finding {i+1} (confidence: {f.get('confidence', 0):.2f}):\n{f.get('content', '')}"
-            for i, f in enumerate(state["findings"])
-        ])
+        # Check if we have structured claims (new evidence-first approach)
+        claims = state.get("claims", [])
 
-        # Format sources with snippets and relevance for LLM analysis
-        sources_with_content = []
-        for i, s in enumerate(state["sources"][:20], 1):  # Top 20 sources
-            source_entry = f"{i}. **{s.get('title', 'Untitled')}**"
-            source_entry += f"\n   URL: {s.get('url', 'N/A')}"
-            if s.get('snippet'):
-                source_entry += f"\n   Content: {s.get('snippet')[:300]}"  # Limit snippet length
-            if s.get('relevance'):
-                source_entry += f"\n   Relevance: {s.get('relevance'):.2f}"
-            source_entry += f"\n   Tool: {s.get('tool', 'unknown')}"
-            sources_with_content.append(source_entry)
+        if claims:
+            logger.info(f"Synthesizing with {len(claims)} structured claims")
 
-        sources_text = "\n\n".join(sources_with_content) if sources_with_content else "No sources available"
+            # Build claims JSON with evidence
+            import json
+            claims_json = []
+            for claim in claims:
+                claim_obj = {
+                    "claim": claim.text,
+                    "confidence": round(claim.confidence, 2),
+                    "provenance_score": round(claim.provenance_score, 2),
+                    "quotes": [
+                        {
+                            "text": ev.quote,
+                            "source_url": ev.url,
+                            "source_title": ev.title
+                        }
+                        for ev in claim.evidence
+                    ]
+                }
+                claims_json.append(claim_obj)
 
-        # Construct synthesis prompt
-        prompt = f"""Synthesize the following research findings into a comprehensive, well-structured answer.
+            claims_text = json.dumps(claims_json, indent=2)
+
+            # Build unique sources list
+            source_urls = set()
+            for claim in claims:
+                for ev in claim.evidence:
+                    source_urls.add((ev.url, ev.title))
+
+            sources_list = [{"url": url, "title": title} for url, title in sorted(source_urls)]
+            sources_text = "\n".join([
+                f"[{i+1}] {s['title']}\n    {s['url']}"
+                for i, s in enumerate(sources_list)
+            ])
+
+            # Construct evidence-first synthesis prompt
+            prompt = f"""Synthesize verified claims into a comprehensive answer to the research query.
+
+**Original Query**: {state["query"]}
+
+**VERIFIED CLAIMS** (with evidence):
+{claims_text}
+
+**SOURCES TABLE**:
+{sources_text}
+
+**Your Task**:
+Create a structured, citation-rich answer using ONLY the verified claims above.
+
+**Requirements**:
+1. Each major point becomes a bullet with [citation_number(s)]
+2. Include ONE short verbatim quote per point (max 1 sentence)
+3. Map citations to the SOURCES TABLE indices above
+4. NO claims without quote support
+5. Add a "Knowledge Gaps" section for limitations or missing information
+
+**Output Format**:
+## Direct Answer
+[One paragraph summarizing the key finding]
+
+## Key Insights
+- **Insight 1** [1,2]: "verbatim quote..."
+- **Insight 2** [3]: "verbatim quote..."
+
+## Knowledge Gaps
+- [Any significant gaps or limitations]
+
+## Confidence Assessment
+[High/Medium/Low] because [reasoning based on provenance scores, coverage, and source quality]
+"""
+
+        else:
+            logger.info("No claims available, falling back to findings-based synthesis")
+
+            # Build context from findings and sources (legacy approach)
+            findings_text = "\n\n".join([
+                f"Finding {i+1} (confidence: {f.get('confidence', 0):.2f}):\n{f.get('content', '')}"
+                for i, f in enumerate(state["findings"])
+            ])
+
+            # Format sources with snippets and relevance for LLM analysis
+            sources_with_content = []
+            for i, s in enumerate(state["sources"][:20], 1):  # Top 20 sources
+                source_entry = f"{i}. **{s.get('title', 'Untitled')}**"
+                source_entry += f"\n   URL: {s.get('url', 'N/A')}"
+                if s.get('snippet'):
+                    source_entry += f"\n   Content: {s.get('snippet')[:300]}"  # Limit snippet length
+                if s.get('relevance'):
+                    source_entry += f"\n   Relevance: {s.get('relevance'):.2f}"
+                source_entry += f"\n   Tool: {s.get('tool', 'unknown')}"
+                sources_with_content.append(source_entry)
+
+            sources_text = "\n\n".join(sources_with_content) if sources_with_content else "No sources available"
+
+            # Construct synthesis prompt
+            prompt = f"""Synthesize the following research findings into a comprehensive, well-structured answer.
 
 Original Query: {state["query"]}
 
