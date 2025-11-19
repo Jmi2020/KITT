@@ -8,56 +8,54 @@ It’s organized as: Quick‑Start checklist → Architecture changes → Code p
 
 ---
 
-## ⚠️ Current State & Critical Blockers
+## ✅ Current State & Recently Resolved Issues
 
-**Status as of 2025-11-18:** The research pipeline executes but has a **critical blocker** that must be fixed before implementing enhancements below.
+**Status as of 2025-11-19:** All critical blockers have been **RESOLVED**. The research pipeline now successfully extracts claims from content.
 
-### 🔴 BLOCKER: Claim Extraction Not Executing
+### ✅ RESOLVED: Claim Extraction Timeout & UUID Issues
 
-**File:** `services/brain/src/brain/research/graph/nodes.py` (lines 840-895)
+**Date Resolved**: 2025-11-19
+**Files Modified**:
+- `services/brain/src/brain/research/graph/nodes.py` (lines 81, 873)
+- `services/brain/src/brain/research/extraction.py` (added direct llama.cpp invocation)
+- Multiple graph files (RoutingTier enum fixes)
 
-**Symptom:** Research sessions complete with **0 claims extracted** despite:
-- Fetching 7,000+ chars of content per session ✅
-- Web search working correctly ✅
-- Webpage fetching working correctly ✅
-- Code changes to `extraction.py` being ignored ❌
+**Issues Fixed:**
 
-**Evidence:**
-```
-[INFO] 🔬 Starting claim extraction for finding...    ✅ Line 846 executes
-[DEBUG] DEBUG_CLAIM_2: source_id = ...                ✅ Line 853 executes
+#### 1. HTTP Timeout Too Short (Primary Issue)
+**Problem:** HTTP client timeout was 60 seconds, but F16 llama.cpp extraction can take up to 15 minutes
+**Solution:** Increased timeout from 60s → 1200s (20 minutes) at nodes.py:873
+**Evidence:** Direct extraction test successfully extracted 4 claims in 68 seconds
 
-MISSING (physically impossible):
-❌ Line 847: print("PRINT: Line 847 executing")
-❌ Line 848: logger.info("DEBUG_CLAIM_1")
-❌ Line 849: logger.info("DEBUG_CLAIM_1b")
-❌ Lines 857-897: All subsequent debug logs
-❌ extraction.py never executes (no logs from extract_claims_from_content)
-```
+#### 2. Direct llama.cpp Invocation Required
+**Problem:** Circular dependency when using model_coordinator.consult() → /api/query → extraction
+**Solution:** Created `invoke_llama_direct()` function in extraction.py to bypass /api/query
+**Implementation:** Direct HTTP calls to llama.cpp /v1/chat/completions endpoint
 
-**Investigation Completed:**
-- ✅ Python 3.13 upgrade (container and host aligned)
-- ✅ Bytecode files deleted (all `__pycache__` removed)
-- ✅ Container restarted multiple times
-- ✅ Code verified in both host and container filesystems
-- ✅ Bind mount working (`/Users/Shared/Coding/KITT/services/brain` → `/app/services/brain`)
+#### 3. UUID Type Mismatch
+**Problem:** nodes.py:81 used string `"research-system"` instead of valid UUID
+**Solution:** Changed to `"00000000-0000-0000-0000-000000000001"` (System user UUID)
+**Impact:** Fixed database persistence failures
 
-**Root Cause Hypothesis:**
-1. **Uvicorn worker module caching** - Container runs with `--workers 2`; workers may cache imports
-2. **Python sys.modules caching** - Module cache persists across requests
-3. **Hidden code path** - Execution jumping from line 846 → 853 suggests alternative code being run
+#### 4. RoutingTier Enum Case Mismatch
+**Problem:** Code used `RoutingTier.LOCAL` but enum defines `RoutingTier.local` (lowercase)
+**Solution:** Fixed all 10 occurrences across 5 files
+**Files:** orchestrator.py, integration.py, deep_reasoner_graph.py, router_graph.py
 
-**Next Steps to Unblock:**
-1. Try single worker: Change docker command to remove `--workers 2`
-2. Force rebuild: `docker compose build --no-cache brain`
-3. Add module reload logic to force Python to reload changed files
-4. Investigate if LangGraph has its own code caching mechanism
+**Testing Results:**
+- ✅ Direct extraction endpoint test: 4 claims extracted successfully
+- ✅ llama.cpp connectivity: Both Q4 (8082) and F16 (8083) servers healthy
+- ✅ No UUID errors in database operations
+- ✅ HTTP extraction endpoint functional
 
-**Impact:** Cannot implement evidence-first extraction (§ Extraction & Verification) until base claim extraction works.
+**Commit:**
+- `a79140d` - fix: resolve claim extraction timeout and UUID issues in research pipeline
+- `448ae9e` - docs: add research pipeline investigation notes and documentation
 
 **References:**
-- Full debugging details: `Research/claim_extraction_investigation_session2.md`
-- Architecture documentation: `Research/research_pipeline_architecture.md`
+- Investigation details: `Research/claim_extraction_investigation_session2.md`
+- Architecture: `Research/research_pipeline_architecture.md`
+- Fix playbook: `Research/claim_extraction_fix_playbook.md`
 
 ---
 

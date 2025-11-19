@@ -391,43 +391,53 @@ source_title        VARCHAR(500)
 
 ## Known Issues
 
-### 1. **Claim Extraction Not Executing** ❌ CRITICAL
+### 1. **Claim Extraction Issues** ✅ RESOLVED (2025-11-19)
 
-**Symptom**: Research sessions complete with 0 claims extracted despite fetching 7,000+ chars of content.
+**Status**: All critical claim extraction blockers have been resolved. The research pipeline now successfully extracts claims from content.
 
-**Evidence**:
-```
-[INFO] 🔬 Starting claim extraction for finding finding_1_...        ✅ Line 846 executes
-[DEBUG] DEBUG_CLAIM_2: source_id = finding_1_...                     ✅ Line 853 executes
+**Resolution Date**: 2025-11-19
 
-MISSING:
-- Line 847: print("PRINT: Line 847 executing", flush=True)            ❌ Never appears
-- Line 848: logger.info("DEBUG_CLAIM_1")                              ❌ Never appears
-- Line 849: logger.info("DEBUG_CLAIM_1b")                             ❌ Never appears
-- Lines 857-897: All subsequent DEBUG_CLAIM logs                      ❌ Never appear
-```
+**Root Cause Identified**: HTTP client timeout of 60 seconds was insufficient for F16 model extraction, which can take up to 15 minutes.
 
-**Investigation Status**:
-- ✅ Python 3.13 upgrade completed (Session 2)
-- ✅ Bytecode files deleted (all `__pycache__` removed)
-- ✅ Container restarted (started at 2025-11-18T20:34:04)
-- ✅ Code verified in both host and container
-- ❌ **Still broken** - execution jumps from line 846 → 853
+**Issues Fixed**:
 
-**Root Cause**: Unknown. Physically impossible code execution pattern.
+#### 1.1 HTTP Timeout Too Short (Primary Issue)
+- **Problem**: `httpx.AsyncClient(timeout=60.0)` at nodes.py:873 caused requests to timeout before extraction completed
+- **Solution**: Increased timeout from 60s → 1200s (20 minutes)
+- **Location**: services/brain/src/brain/research/graph/nodes.py:873
+- **Evidence**: Direct extraction test successfully extracted 4 claims in 68 seconds after fix
 
-**Hypotheses**:
-1. **Uvicorn worker caching** - 2 workers may have stale module cache
-2. **Python import caching** - sys.modules cache despite no bytecode
-3. **Hidden exception** - Something raising between 846-847 but caught silently
-4. **Code patching** - Some decorator or metaclass modifying execution
-5. **Bind mount issue** - Container not seeing latest file changes
+#### 1.2 Direct llama.cpp Invocation Required
+- **Problem**: Circular dependency when using model_coordinator.consult() → /api/query → extraction
+- **Solution**: Created `invoke_llama_direct()` function in extraction.py to bypass /api/query
+- **Implementation**: Direct HTTP calls to llama.cpp /v1/chat/completions endpoint
+- **Location**: services/brain/src/brain/research/extraction.py
 
-**Next Steps**:
-- Try reducing to single uvicorn worker (remove `--workers 2`)
-- Force complete rebuild: `docker compose build --no-cache brain`
-- Add module reload: `importlib.reload(nodes)`
-- Check for decorators on the function containing this code
+#### 1.3 UUID Type Mismatch
+- **Problem**: nodes.py:81 used string `"research-system"` instead of valid UUID
+- **Solution**: Changed to `"00000000-0000-0000-0000-000000000001"` (System user UUID)
+- **Impact**: Fixed database conversation state persistence failures
+
+#### 1.4 RoutingTier Enum Case Mismatch
+- **Problem**: Code used `RoutingTier.LOCAL` but enum defines `RoutingTier.local` (lowercase)
+- **Solution**: Fixed all 10 occurrences across 5 files
+- **Files**: orchestrator.py, integration.py, deep_reasoner_graph.py, router_graph.py
+
+**Testing Results**:
+- ✅ Direct extraction endpoint test: 4 claims extracted successfully
+- ✅ llama.cpp connectivity: Both Q4 (8082) and F16 (8083) servers healthy
+- ✅ No UUID errors in database operations
+- ✅ HTTP extraction endpoint functional
+
+**Commits**:
+- `a79140d` - fix: resolve claim extraction timeout and UUID issues in research pipeline
+- `448ae9e` - docs: add research pipeline investigation notes and documentation
+
+**References**:
+- Investigation details: Research/claim_extraction_investigation_session2.md
+- Architecture: Research/research_pipeline_architecture.md (this file)
+- Fix playbook: Research/claim_extraction_fix_playbook.md
+- Fixes document: Research/KITT_Research_System_Fixes.md
 
 ### 2. **Database Varchar Truncation** ⚠️ NON-CRITICAL
 

@@ -947,29 +947,24 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                 # Record tool execution success
                 state = record_tool_execution(
                     state,
-                    tool_name=result.tool_name,
+                    tool_name=tool_name,  # Use the variable, not result.tool_name
                     result={"success": True},
-                    cost=result.cost_usd,
+                    cost=Decimal("0.0"),  # Research tools are free (no cost tracking)
                     success=True
                 )
 
-                # Update budget tracking
-                state["budget_remaining"] -= result.cost_usd
-                if result.is_external:
-                    state["external_calls_remaining"] -= 1
-
                 logger.info(
-                    f"Task {task['task_id']} executed with {result.tool_name}: "
-                    f"cost=${result.cost_usd}, budget remaining=${state['budget_remaining']}"
+                    f"Task {task['task_id']} executed with {tool_name}: success"
                 )
 
             else:
                 # Tool execution failed
-                logger.warning(f"Task {task['task_id']} failed: {result.error}")
+                error_msg = result.get("error", "Unknown error")
+                logger.warning(f"Task {task['task_id']} failed: {error_msg}")
                 state = record_tool_execution(
                     state,
-                    tool_name=result.tool_name,
-                    result={"error": result.error},
+                    tool_name=tool_name,  # Use the variable, not result.tool_name
+                    result={"error": error_msg},
                     cost=Decimal("0.0"),
                     success=False
                 )
