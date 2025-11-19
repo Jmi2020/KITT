@@ -8,7 +8,7 @@ Provides REST API for:
 """
 
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends, Query, Request
@@ -24,6 +24,9 @@ from brain.research.templates import (
     apply_template,
     TEMPLATES
 )
+from brain.research.extraction import extract_claims_from_content
+from brain.research.types import Claim, EvidenceSpan
+from brain.research.graph.nodes import invoke_model
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +147,48 @@ class SynthesisResponse(BaseModel):
     message: str
 
 
+class EvidenceSpanResponse(BaseModel):
+    """Evidence span within a claim"""
+    source_id: str
+    url: str
+    title: str
+    quote: str
+    char_start: Optional[int] = None
+    char_end: Optional[int] = None
+
+
+class ClaimResponse(BaseModel):
+    """Extracted claim with evidence"""
+    id: str
+    session_id: str
+    sub_question_id: Optional[str]
+    text: str
+    evidence: List[EvidenceSpanResponse]
+    entailment_score: float
+    provenance_score: float
+    dedupe_fingerprint: str
+    confidence: float
+
+
+class ExtractClaimsRequest(BaseModel):
+    """Request to extract claims from content"""
+    content: str = Field(..., description="Text content to extract claims from", min_length=1)
+    source_id: str = Field(..., description="Unique identifier for the source")
+    source_url: str = Field(..., description="URL of the source")
+    source_title: str = Field(..., description="Title of the source")
+    session_id: str = Field(..., description="Research session ID")
+    query: str = Field(..., description="Research query for context")
+    sub_question_id: Optional[str] = Field(default=None, description="Sub-question ID if hierarchical")
+    current_iteration: int = Field(default=0, description="Current research iteration")
+
+
+class ExtractClaimsResponse(BaseModel):
+    """Response with extracted claims"""
+    claims: List[ClaimResponse]
+    count: int
+    message: str
+
+
 # ============================================================================
 # Dependency Injection
 # ============================================================================
@@ -156,6 +201,16 @@ async def get_session_manager(request: Request) -> ResearchSessionManager:
             detail="Research service not available (DATABASE_URL not configured)"
         )
     return request.app.state.session_manager
+
+
+async def get_model_coordinator(request: Request):
+    """Get model coordinator from app state"""
+    if not hasattr(request.app.state, 'model_coordinator') or request.app.state.model_coordinator is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Model coordinator not available"
+        )
+    return request.app.state.model_coordinator
 
 
 # ============================================================================
@@ -1097,3 +1152,82 @@ Provide ONLY the synthesis (no meta-commentary about the task)."""
     except Exception as e:
         logger.error(f"Error generating synthesis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/extract-claims", response_model=ExtractClaimsResponse, status_code=200)
+async def extract_claims_endpoint(
+    request: ExtractClaimsRequest,
+    model_coordinator=Depends(get_model_coordinator)
+):
+    """
+    Extract atomic claims with evidence from research content.
+
+    This endpoint bypasses any module caching issues by providing
+    direct HTTP access to the claim extraction functionality.
+
+    Args:
+        request: Extraction request with content and metadata
+        model_coordinator: Model coordinator from app state
+
+    Returns:
+        ExtractClaimsResponse with list of extracted claims
+    """
+    try:
+        logger.info(f"🔬 HTTP Extraction endpoint called for session {request.session_id}")
+
+        # Call the extraction function directly using imported invoke_model
+        claims: List[Claim] = await extract_claims_from_content(
+            content=request.content,
+            source_id=request.source_id,
+            source_url=request.source_url,
+            source_title=request.source_title,
+            session_id=request.session_id,
+            query=request.query,
+            sub_question_id=request.sub_question_id,
+            model_coordinator=model_coordinator,
+            current_iteration=request.current_iteration,
+            invoke_model_func=invoke_model
+        )
+
+        logger.info(f"✅ Extracted {len(claims)} claims via HTTP endpoint")
+
+        # Convert Claim objects to response models
+        claim_responses = []
+        for claim in claims:
+            evidence_responses = [
+                EvidenceSpanResponse(
+                    source_id=ev.source_id,
+                    url=ev.url,
+                    title=ev.title,
+                    quote=ev.quote,
+                    char_start=ev.char_start,
+                    char_end=ev.char_end
+                )
+                for ev in claim.evidence
+            ]
+
+            claim_responses.append(
+                ClaimResponse(
+                    id=claim.id,
+                    session_id=claim.session_id,
+                    sub_question_id=claim.sub_question_id,
+                    text=claim.text,
+                    evidence=evidence_responses,
+                    entailment_score=claim.entailment_score,
+                    provenance_score=claim.provenance_score,
+                    dedupe_fingerprint=claim.dedupe_fingerprint,
+                    confidence=claim.confidence
+                )
+            )
+
+        return ExtractClaimsResponse(
+            claims=claim_responses,
+            count=len(claim_responses),
+            message=f"Successfully extracted {len(claim_responses)} claims"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error in HTTP extraction endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")

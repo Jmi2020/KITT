@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.6
-FROM python:3.11-slim AS base
+FROM python:3.13-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -35,4 +35,4 @@ RUN pip install --upgrade pip && \
     fi
 
 EXPOSE 8000
-CMD ["python", "-m", "uvicorn", "brain.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["python", "-m", "uvicorn", "brain.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

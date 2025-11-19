@@ -8,6 +8,59 @@ It’s organized as: Quick‑Start checklist → Architecture changes → Code p
 
 ---
 
+## ⚠️ Current State & Critical Blockers
+
+**Status as of 2025-11-18:** The research pipeline executes but has a **critical blocker** that must be fixed before implementing enhancements below.
+
+### 🔴 BLOCKER: Claim Extraction Not Executing
+
+**File:** `services/brain/src/brain/research/graph/nodes.py` (lines 840-895)
+
+**Symptom:** Research sessions complete with **0 claims extracted** despite:
+- Fetching 7,000+ chars of content per session ✅
+- Web search working correctly ✅
+- Webpage fetching working correctly ✅
+- Code changes to `extraction.py` being ignored ❌
+
+**Evidence:**
+```
+[INFO] 🔬 Starting claim extraction for finding...    ✅ Line 846 executes
+[DEBUG] DEBUG_CLAIM_2: source_id = ...                ✅ Line 853 executes
+
+MISSING (physically impossible):
+❌ Line 847: print("PRINT: Line 847 executing")
+❌ Line 848: logger.info("DEBUG_CLAIM_1")
+❌ Line 849: logger.info("DEBUG_CLAIM_1b")
+❌ Lines 857-897: All subsequent debug logs
+❌ extraction.py never executes (no logs from extract_claims_from_content)
+```
+
+**Investigation Completed:**
+- ✅ Python 3.13 upgrade (container and host aligned)
+- ✅ Bytecode files deleted (all `__pycache__` removed)
+- ✅ Container restarted multiple times
+- ✅ Code verified in both host and container filesystems
+- ✅ Bind mount working (`/Users/Shared/Coding/KITT/services/brain` → `/app/services/brain`)
+
+**Root Cause Hypothesis:**
+1. **Uvicorn worker module caching** - Container runs with `--workers 2`; workers may cache imports
+2. **Python sys.modules caching** - Module cache persists across requests
+3. **Hidden code path** - Execution jumping from line 846 → 853 suggests alternative code being run
+
+**Next Steps to Unblock:**
+1. Try single worker: Change docker command to remove `--workers 2`
+2. Force rebuild: `docker compose build --no-cache brain`
+3. Add module reload logic to force Python to reload changed files
+4. Investigate if LangGraph has its own code caching mechanism
+
+**Impact:** Cannot implement evidence-first extraction (§ Extraction & Verification) until base claim extraction works.
+
+**References:**
+- Full debugging details: `Research/claim_extraction_investigation_session2.md`
+- Architecture documentation: `Research/research_pipeline_architecture.md`
+
+---
+
 ## 🔌 Quick‑Start PR Checklist
 
 Apply changes in the following order (each item links to a section with code):
