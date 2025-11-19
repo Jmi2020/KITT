@@ -25,10 +25,11 @@ async def invoke_llama_direct(model_id: str, prompt: str, context: dict) -> str:
     import httpx
 
     # Determine which llama.cpp server based on model_id
+    # Port 8082 = F16 (Llama-3.3-70B), Port 8083 = Q4 (Athene-V2)
     if "f16" in model_id.lower():
-        llama_url = "http://host.docker.internal:8083/v1/chat/completions"
-    else:
         llama_url = "http://host.docker.internal:8082/v1/chat/completions"
+    else:
+        llama_url = "http://host.docker.internal:8083/v1/chat/completions"
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
