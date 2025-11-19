@@ -12,8 +12,52 @@ from typing import List, Dict, Any, Optional
 from decimal import Decimal
 
 from .types import Claim, EvidenceSpan, fingerprint, compute_provenance_score, merge_duplicate_claims
+from .models.coordinator import ConsultationRequest, ConsultationTier, ModelCapability
 
 logger = logging.getLogger(__name__)
+
+
+async def invoke_llama_direct(model_id: str, prompt: str, context: dict) -> str:
+    """
+    Directly invoke llama.cpp server without going through /api/query.
+    This avoids circular dependencies in the research extraction flow.
+    """
+    import httpx
+
+    # Determine which llama.cpp server based on model_id
+    if "f16" in model_id.lower():
+        llama_url = "http://host.docker.internal:8083/v1/chat/completions"
+    else:
+        llama_url = "http://host.docker.internal:8082/v1/chat/completions"
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                llama_url,
+                json={
+                    "messages": [
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": context.get("temperature", 0.1),
+                    "max_tokens": 2000,
+                    "stream": False
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # Extract content from llama.cpp response
+            if "choices" in data and len(data["choices"]) > 0:
+                content = data["choices"][0].get("message", {}).get("content", "")
+                logger.debug(f"LLM returned {len(content)} chars")
+                return content
+            else:
+                logger.warning(f"Unexpected llama.cpp response format: {data}")
+                return ""
+
+    except Exception as e:
+        logger.error(f"Direct llama.cpp invocation failed: {e}", exc_info=True)
+        return ""
 
 
 # Extraction prompt for atomic claims with quotes
@@ -31,20 +75,20 @@ RULES:
 
 OUTPUT FORMAT (strict JSON):
 ```json
-{
+{{
   "claims": [
-    {
+    {{
       "claim": "The exact claim text",
       "quotes": [
-        {
+        {{
           "text": "The exact verbatim quote from passage",
           "char_start": 0,
           "char_end": 42
-        }
+        }}
       ]
-    }
+    }}
   ]
-}
+}}
 ```
 
 PASSAGE:
@@ -64,7 +108,8 @@ async def extract_claims_from_content(
     query: str,
     sub_question_id: Optional[str],
     model_coordinator,
-    current_iteration: int = 0
+    current_iteration: int = 0,
+    invoke_model_func: Optional[Any] = None
 ) -> List[Claim]:
     """
     Extract atomic claims with evidence from research content.
@@ -100,41 +145,68 @@ async def extract_claims_from_content(
             query=query
         )
 
-        # Call model with low temperature for extraction
-        logger.info(f"Extracting claims from content (length: {len(content)} chars)")
+        # Call llama.cpp directly to avoid /api/query circular dependency
+        logger.info(f"🔍 Extracting claims from content (length: {len(content)} chars)")
+        logger.info(f"🔍 Calling llama.cpp directly for extraction...")
 
-        # Use model coordinator to get a suitable model
-        response = await model_coordinator.consult(
-            task_description=prompt,
-            required_capabilities=["reasoning"],
+        # Call llama.cpp directly
+        response_text = await invoke_llama_direct(
+            model_id="kitty-q4",
+            prompt=prompt,
             context={"task": "extraction", "temperature": 0.1}
         )
 
-        if not response or not response.content:
-            logger.warning("No response from model for claim extraction")
+        logger.info(f"🔍 LLM returned: {len(response_text)} chars")
+
+        if not response_text or not response_text.strip():
+            logger.warning("⚠️  No response from LLM for claim extraction")
             return []
 
         # Parse the response
-        response_text = response.content.strip()
+        response_text = response_text.strip()
+
+        # DEBUG: Log the raw response
+        logger.debug(f"Raw LLM response (first 500 chars): {response_text[:500]}")
 
         # Extract JSON from response (handle markdown code blocks)
+        json_str = None
+
+        # Try extracting from code blocks first
         json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
         if json_match:
-            json_str = json_match.group(1)
+            json_str = json_match.group(1).strip()
         else:
-            # Try to find JSON directly
-            json_match = re.search(r'\{.*"claims".*\}', response_text, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(0)
+            # Try to find JSON directly - look for outermost braces
+            # Find the first { and last } to get the JSON object
+            start_idx = response_text.find('{')
+            end_idx = response_text.rfind('}')
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                json_str = response_text[start_idx:end_idx + 1]
             else:
                 logger.warning(f"Could not find JSON in extraction response: {response_text[:200]}")
                 return []
 
+        # Clean the JSON string - remove any leading/trailing whitespace from lines
+        json_str = '\n'.join(line.strip() for line in json_str.split('\n'))
+
+        # DEBUG: Log the extracted JSON string
+        logger.debug(f"Extracted JSON string (first 500 chars): {json_str[:500]}")
+
         try:
             extraction_result = json.loads(json_str)
+            logger.debug(f"Successfully parsed JSON. Keys: {list(extraction_result.keys())}")
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse extraction JSON: {e}, text: {json_str[:200]}")
-            return []
+            logger.error(f"Failed to parse extraction JSON: {e}")
+            logger.error(f"JSON string (first 500 chars): {json_str[:500]}")
+            # Try one more time with aggressive cleaning
+            try:
+                # Remove all newlines and extra spaces from the JSON
+                cleaned = ' '.join(json_str.split())
+                extraction_result = json.loads(cleaned)
+                logger.info("Successfully parsed JSON after aggressive cleaning")
+            except json.JSONDecodeError as e2:
+                logger.error(f"Failed even after cleaning: {e2}")
+                return []
 
         claims_data = extraction_result.get("claims", [])
         if not claims_data:
@@ -198,7 +270,8 @@ async def extract_claims_from_content(
         return claims
 
     except Exception as e:
-        logger.error(f"Error during claim extraction: {e}", exc_info=True)
+        logger.error(f"Error during claim extraction: {type(e).__name__}: {e}", exc_info=True)
+        logger.error(f"Exception type: {type(e)}, Exception repr: {repr(e)}")
         return []
 
 

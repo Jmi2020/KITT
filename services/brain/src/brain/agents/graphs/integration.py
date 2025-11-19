@@ -129,7 +129,7 @@ class LangGraphRoutingIntegration:
             return RoutingResult(
                 output=f"Routing error: {exc}",
                 confidence=0.0,
-                tier=RoutingTier.LOCAL,
+                tier=RoutingTier.local,
                 request_id=request.request_id,
                 conversation_id=request.conversation_id,
                 cost_usd=0.0,
@@ -154,12 +154,12 @@ class LangGraphRoutingIntegration:
         return RoutingResult(
             output=state.get("response", "No response generated"),
             confidence=state.get("confidence", 0.5),
-            tier=state.get("tier_used", RoutingTier.LOCAL),
+            tier=state.get("tier_used", RoutingTier.local),
             request_id=request.request_id,
             conversation_id=request.conversation_id,
             cost_usd=state.get("cost_usd", 0.0),
             latency_ms=state.get("latency_ms", 0),
-            model_used=state.get("tier_used", RoutingTier.LOCAL).value,
+            model_used=state.get("tier_used", RoutingTier.local).value,
             # Additional metadata from graph execution
             metadata={
                 "langgraph": True,

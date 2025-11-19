@@ -189,7 +189,7 @@ class DeepReasonerGraph:
                 **initial_state,
                 "response": f"Deep reasoning error: {exc}",
                 "confidence": 0.0,
-                "tier_used": RoutingTier.LOCAL,
+                "tier_used": RoutingTier.local,
             }
 
     async def _context_synthesis_node(self, state: DeepReasonerState) -> Dict:
@@ -564,7 +564,7 @@ The response should:
             logger.error(f"Response crafting failed: {exc}")
             return {
                 "response": f"Failed to craft response: {exc}",
-                "tier_used": RoutingTier.LOCAL,
+                "tier_used": RoutingTier.local,
                 "nodes_executed": state.get("nodes_executed", []) + ["response_crafting"],
             }
 

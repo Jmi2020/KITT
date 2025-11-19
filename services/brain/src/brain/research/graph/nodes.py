@@ -5,7 +5,8 @@ Each node represents a step in the autonomous research workflow.
 """
 
 import logging
-from typing import Dict, Any
+import httpx
+from typing import Dict, Any, List
 from decimal import Decimal
 
 from .state import (
@@ -77,7 +78,7 @@ async def invoke_model(model_id: str, prompt: str, context: Dict[str, Any]) -> s
                 "http://localhost:8000/api/query",
                 json={
                     "conversationId": context.get("session_id", "research"),
-                    "userId": "research-system",
+                    "userId": "00000000-0000-0000-0000-000000000001",  # System user UUID
                     "prompt": prompt,
                     "model": model_id,
                     "intent": "query.general",
@@ -679,6 +680,8 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                         f"filtered_count={result.data.get('filtered_count')}"
                     )
 
+                    logger.info(f"🔍 DEBUG: About to check search_results, type={type(search_results)}, len={len(search_results)}, bool={bool(search_results)}")
+
                     if search_results:
                         # Fetch full webpage content for top results
                         logger.info(f"🌐 Fetching full content from top {min(3, len(search_results))} search results")
@@ -842,32 +845,82 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                 # Extract structured claims with evidence from content
                 try:
                     logger.info(f"🔬 Starting claim extraction for finding {finding.get('id')}")
+                    print("PRINT: Line 847 executing", flush=True)
+                    logger.info("DEBUG_CLAIM_1")
+                    logger.info("DEBUG_CLAIM_1b")
 
                     # Get source info from the first source added for this task
                     source_id = finding.get("id", f"source_{state['current_iteration']}")
+                    logger.debug(f"DEBUG_CLAIM_2: source_id = {source_id}")
                     source_url = "unknown"
                     source_title = "Research Finding"
 
                     # Try to get source info from the sources we added
+                    logger.info(f"DEBUG_CLAIM_3: About to get recent sources")
                     recent_sources = [s for s in state.get("sources", []) if s.get("tool") == tool_name]
+                    logger.info(f"DEBUG_CLAIM_4: Found {len(recent_sources)} recent sources")
                     if recent_sources:
                         source_url = recent_sources[-1].get("url", source_url)
                         source_title = recent_sources[-1].get("title", source_title)
+                        logger.info(f"DEBUG_CLAIM_5: Got source_url")
 
+                    logger.info(f"DEBUG_CLAIM_6: About to log content length")
                     logger.info(f"📄 Content length for extraction: {len(content_for_extraction)} chars")
 
-                    # Extract claims
-                    claims = await extract_claims_from_content(
-                        content=content_for_extraction,
-                        source_id=source_id,
-                        source_url=source_url,
-                        source_title=source_title,
-                        session_id=state["session_id"],
-                        query=state["query"],
-                        sub_question_id=sq_id,
-                        model_coordinator=components.model_coordinator,
-                        current_iteration=state["current_iteration"]
-                    )
+                    # Extract claims via HTTP endpoint (bypasses module caching)
+                    logger.info(f"DEBUG_CLAIM_7: About to call HTTP extraction endpoint")
+                    try:
+                        # Long timeout for F16 model extraction (can take up to 15 minutes)
+                        async with httpx.AsyncClient(timeout=1200.0) as client:
+                            response = await client.post(
+                                "http://localhost:8000/api/research/extract-claims",
+                                json={
+                                    "content": content_for_extraction,
+                                    "source_id": source_id,
+                                    "source_url": source_url,
+                                    "source_title": source_title,
+                                    "session_id": state["session_id"],
+                                    "query": state["query"],
+                                    "sub_question_id": sq_id,
+                                    "current_iteration": state["current_iteration"]
+                                }
+                            )
+                            response.raise_for_status()
+                            result = response.json()
+
+                            # Convert response back to Claim objects
+                            from brain.research.types import Claim, EvidenceSpan
+                            claims: List[Claim] = []
+                            for claim_data in result.get("claims", []):
+                                # Convert evidence spans
+                                evidence = [
+                                    EvidenceSpan(
+                                        source_id=ev["source_id"],
+                                        url=ev["url"],
+                                        title=ev["title"],
+                                        quote=ev["quote"],
+                                        char_start=ev.get("char_start"),
+                                        char_end=ev.get("char_end")
+                                    )
+                                    for ev in claim_data.get("evidence", [])
+                                ]
+
+                                claims.append(Claim(
+                                    id=claim_data["id"],
+                                    session_id=claim_data["session_id"],
+                                    sub_question_id=claim_data.get("sub_question_id"),
+                                    text=claim_data["text"],
+                                    evidence=evidence,
+                                    entailment_score=claim_data.get("entailment_score", 0.0),
+                                    provenance_score=claim_data.get("provenance_score", 0.0),
+                                    dedupe_fingerprint=claim_data.get("dedupe_fingerprint", ""),
+                                    confidence=claim_data.get("confidence", 0.0)
+                                ))
+
+                            logger.info(f"DEBUG_CLAIM_8: HTTP endpoint returned {len(claims)} claims")
+                    except Exception as http_error:
+                        logger.error(f"❌ HTTP extraction endpoint failed: {http_error}", exc_info=True)
+                        claims = []
 
                     # Deduplicate and add claims to state
                     if claims:
@@ -884,9 +937,11 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                         )
                     else:
                         logger.debug("No claims extracted from content")
+                        logger.info(f"DEBUG_CLAIM_9: claims variable is empty/None")
 
                 except Exception as e:
-                    logger.error(f"Error extracting claims: {e}", exc_info=True)
+                    logger.error(f"❌ ERROR extracting claims: {type(e).__name__}: {e}", exc_info=True)
+                    logger.error(f"DEBUG_CLAIM_ERROR: Exception type={type(e)}, repr={repr(e)}")
                     # Continue execution even if claim extraction fails
 
                 # Record tool execution success

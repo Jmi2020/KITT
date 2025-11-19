@@ -209,7 +209,7 @@ class RouterGraph:
                 **initial_state,
                 "response": f"Error in routing workflow: {exc}",
                 "confidence": 0.0,
-                "tier_used": RoutingTier.LOCAL,
+                "tier_used": RoutingTier.local,
             }
 
     async def _intake_node(self, state: RouterState) -> Dict:
@@ -493,7 +493,7 @@ class RouterGraph:
             return {
                 "response": response,
                 "confidence": confidence,
-                "tier_used": RoutingTier.LOCAL,
+                "tier_used": RoutingTier.local,
                 "nodes_executed": state.get("nodes_executed", []) + ["response_generation"],
             }
 
@@ -502,7 +502,7 @@ class RouterGraph:
             return {
                 "response": f"Failed to generate response: {exc}",
                 "confidence": 0.0,
-                "tier_used": RoutingTier.LOCAL,
+                "tier_used": RoutingTier.local,
                 "nodes_executed": state.get("nodes_executed", []) + ["response_generation"],
             }
 

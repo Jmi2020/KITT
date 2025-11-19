@@ -147,7 +147,7 @@ class BrainOrchestrator:
                 return RoutingResult(
                     output=f"Action cancelled: {pending['tool_name']} was not executed.",
                     confidence=1.0,
-                    tier=RoutingTier.LOCAL,
+                    tier=RoutingTier.local,
                     request_id=request_id,
                     conversation_id=conversation_id,
                     cost_usd=0.0,
@@ -167,7 +167,7 @@ class BrainOrchestrator:
                 return RoutingResult(
                     output=f"{confirmation_msg}\n\n(Or say 'cancel' to abort)",
                     confidence=1.0,
-                    tier=RoutingTier.LOCAL,
+                    tier=RoutingTier.local,
                     request_id=request_id,
                     conversation_id=conversation_id,
                     cost_usd=0.0,
