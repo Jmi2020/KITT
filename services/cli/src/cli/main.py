@@ -1615,9 +1615,12 @@ def _format_research_sessions_table(sessions: List[Dict[str, Any]]) -> Table:
         session_id = session.get("session_id", "")[:12] + "..."
         query = session.get("query", "")[:40]
         status = session.get("status", "unknown")
-        strategy = session.get("strategy", "N/A")
-        iterations = str(session.get("current_iteration", 0))
-        findings_count = str(len(session.get("findings", [])))
+        # Get strategy from config object
+        config = session.get("config", {})
+        strategy = config.get("strategy", "N/A") if config else "N/A"
+        # Use total_iterations and total_findings from API
+        iterations = str(session.get("total_iterations", 0))
+        findings_count = str(session.get("total_findings", 0))
         budget_used = f"${float(session.get('total_cost_usd', 0)):.2f}"
         created = _format_history_time(session.get("created_at"))
 
@@ -1659,7 +1662,7 @@ def _display_session_detail(session_id: str) -> None:
 
     # Header
     console.print(Panel.fit(
-        f"[bold cyan]Research Session: {session_id[:16]}...[/bold cyan]\n"
+        f"[bold cyan]Research Session: {session_id}[/bold cyan]\n"
         f"[dim]{session.get('query', 'No query')}[/dim]",
         border_style="cyan"
     ))
@@ -1827,15 +1830,15 @@ def _start_research(query: str, config: Optional[Dict[str, Any]] = None) -> str:
             console.print("[red]Failed to create research session")
             raise typer.Exit(1)
 
-        console.print(f"[green]Created session: {session_id[:16]}...[/green]")
+        console.print(f"[green]Created session: {session_id}[/green]")
         return session_id
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]Failed to start research: {exc}")
         raise typer.Exit(1) from exc
 
 
-def _list_research_sessions(limit: int = 10) -> None:
-    """List recent research sessions."""
+def _list_research_sessions(limit: int = 10) -> List[Dict[str, Any]]:
+    """List recent research sessions and return the list."""
     try:
         data = _get_json(f"{API_BASE}/api/research/sessions?limit={limit}&user_id={state.user_id}")
         sessions = data.get("sessions", [])
@@ -1843,12 +1846,15 @@ def _list_research_sessions(limit: int = 10) -> None:
         if not sessions:
             console.print("[yellow]No research sessions found[/yellow]")
             console.print("[dim]Start one with /research <query>[/dim]\n")
-            return
+            return []
 
         table = _format_research_sessions_table(sessions)
         console.print(table)
         console.print(f"\n[dim]View details with /session <id>[/dim]")
-        console.print(f"[dim]Stream progress with /stream <id>[/dim]\n")
+        console.print(f"[dim]Stream progress with /stream <id>[/dim]")
+        console.print(f"[dim]Or type the row number to view that session[/dim]\n")
+
+        return sessions
 
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]Failed to list sessions: {exc}")
@@ -2264,6 +2270,9 @@ def shell(
     # Create prompt_toolkit session with command completion
     session = PromptSession(completer=CommandCompleter())
 
+    # Track last displayed research sessions for numbered selection
+    last_research_sessions: List[Dict[str, Any]] = []
+
     while True:
         try:
             line = session.prompt(HTML("<ansimagenta>you</ansimagenta>> "))
@@ -2273,6 +2282,18 @@ def shell(
 
         if not line:
             continue
+
+        # Check if user typed a number to select from last sessions list
+        if line.strip().isdigit() and last_research_sessions:
+            idx = int(line.strip())
+            if 1 <= idx <= len(last_research_sessions):
+                session_id = last_research_sessions[idx - 1].get("session_id")
+                if session_id:
+                    _display_session_detail(session_id)
+                    continue
+            else:
+                console.print(f"[yellow]Invalid session number. Please enter a number between 1 and {len(last_research_sessions)}[/yellow]")
+                continue
 
         if line.startswith("/"):
             parts = line[1:].split()
@@ -2375,7 +2396,7 @@ def shell(
                 # Stream progress
                 _stream_research_progress(session_id, state.user_id, query)
                 # Show final results
-                console.print(f"\n[dim]View details with /session {session_id[:16]}[/dim]\n")
+                console.print(f"\n[dim]View details with /session {session_id}[/dim]\n")
                 continue
 
             if cmd == "sessions":
@@ -2385,7 +2406,8 @@ def shell(
                         limit = int(args[0])
                     except ValueError:
                         pass
-                _list_research_sessions(limit=limit)
+                # Store returned sessions for numbered selection
+                last_research_sessions = _list_research_sessions(limit=limit)
                 continue
 
             if cmd == "session":
