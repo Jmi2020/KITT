@@ -1674,28 +1674,26 @@ def _display_session_detail(session_id: str) -> None:
     status_table.add_column()
 
     status_table.add_row("Status:", session.get("status", "unknown"))
-    status_table.add_row("Strategy:", session.get("strategy", "N/A"))
-    status_table.add_row("Iteration:", f"{session.get('current_iteration', 0)}/{session.get('config', {}).get('max_iterations', 15)}")
+    # Get strategy from config object, matching the list table format
+    config = session.get("config", {})
+    strategy = config.get("strategy", "N/A") if config else "N/A"
+    status_table.add_row("Strategy:", strategy)
+    # Use total_iterations instead of current_iteration
+    total_iters = session.get('total_iterations', 0)
+    max_iters = config.get('max_iterations', 15) if config else 15
+    status_table.add_row("Iteration:", f"{total_iters}/{max_iters}")
     status_table.add_row("Budget:", f"${float(session.get('total_cost_usd', 0)):.2f} / ${float(session.get('budget_remaining', 0)):.2f} remaining")
     status_table.add_row("Ext. Calls:", f"{session.get('external_calls_used', 0)}/{session.get('external_calls_remaining', 0) + session.get('external_calls_used', 0)}")
 
     console.print(Panel(status_table, title="[bold]Session Info", border_style="green"))
 
-    # Findings
-    findings = session.get("findings", [])
-    if findings:
-        findings_table = Table(title=f"Findings ({len(findings)})", show_lines=True, header_style="bold cyan")
-        findings_table.add_column("Content", overflow="fold")
-        findings_table.add_column("Confidence", justify="right")
-
-        for finding in findings[:10]:  # Show first 10
-            content = finding.get("content", "")[:100]
-            confidence = finding.get("confidence", 0)
-            findings_table.add_row(content, f"{confidence:.2f}")
-
-        console.print(findings_table)
-        if len(findings) > 10:
-            console.print(f"[dim]...and {len(findings) - 10} more findings[/dim]\n")
+    # Findings summary (API only returns counts, not detailed findings)
+    total_findings = session.get("total_findings", 0)
+    total_sources = session.get("total_sources", 0)
+    if total_findings > 0 or total_sources > 0:
+        console.print(f"\n[bold cyan]Research Results:[/bold cyan]")
+        console.print(f"  Findings: {total_findings}")
+        console.print(f"  Sources: {total_sources}\n")
     else:
         console.print("[yellow]No findings yet[/yellow]\n")
 
