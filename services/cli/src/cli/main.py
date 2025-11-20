@@ -19,7 +19,6 @@ from dotenv import load_dotenv
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.shortcuts import radiolist_dialog
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
@@ -1613,7 +1612,8 @@ def _format_research_sessions_table(sessions: List[Dict[str, Any]]) -> Table:
     table.add_column("Created")
 
     for idx, session in enumerate(sessions, 1):
-        session_id = session.get("session_id", "")[:12] + "..."
+        # Show full session ID for clarity and uniqueness
+        session_id = session.get("session_id", "")
         query = session.get("query", "")[:40]
         status = session.get("status", "unknown")
         # Get strategy from config object
@@ -1860,41 +1860,6 @@ def _list_research_sessions(limit: int = 10) -> List[Dict[str, Any]]:
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]Failed to list sessions: {exc}")
         raise typer.Exit(1) from exc
-
-
-def _interactive_session_picker(sessions: List[Dict[str, Any]]) -> Optional[str]:
-    """Show an interactive arrow-key picker for selecting a session.
-
-    Args:
-        sessions: List of session dictionaries
-
-    Returns:
-        Selected session_id or None if cancelled
-    """
-    if not sessions:
-        return None
-
-    # Format sessions as radio list options
-    values = []
-    for idx, session in enumerate(sessions, 1):
-        session_id = session.get("session_id", "")
-        query = session.get("query", "")[:50]
-        status = session.get("status", "unknown")
-        findings_count = session.get("total_findings", 0)
-        iterations = session.get("total_iterations", 0)
-
-        # Create a descriptive label
-        label = f"{idx}. {query} | {status} | {findings_count} findings, {iterations} iterations"
-        values.append((session_id, label))
-
-    # Show the dialog
-    result = radiolist_dialog(
-        title="Select Research Session",
-        text="Use arrow keys to navigate, Enter to select, Esc to cancel:",
-        values=values,
-    ).run()
-
-    return result
 
 
 @app.command()
