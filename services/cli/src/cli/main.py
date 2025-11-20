@@ -1748,7 +1748,9 @@ def _stream_research_progress(session_id: str, user_id: str, query: str) -> None
         ws_url = f"ws://{API_BASE.replace('http://', '').replace('https://', '')}/api/research/sessions/{session_id}/stream"
 
         try:
-            async with websockets.connect(ws_url, timeout=CLI_TIMEOUT) as websocket:
+            # Use open_timeout for connection establishment (websockets 12.0+ API)
+            # The stream itself can run indefinitely
+            async with websockets.connect(ws_url, open_timeout=30) as websocket:
                 with Live(console=console, refresh_per_second=2) as live:
                     current_iteration = 0
                     findings_count = 0
