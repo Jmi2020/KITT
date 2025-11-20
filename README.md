@@ -604,6 +604,85 @@ kitty-model-manager scan               # Scan for available models
 kitty-model-manager switch <model>     # Switch to different model
 ```
 
+### Ollama Setup (GPT-OSS 120B with Thinking Mode)
+
+KITTY supports **Ollama** as an alternative to llama.cpp for deep reasoning tasks. This allows you to use **GPT-OSS:120B** with built-in thinking mode for enhanced reasoning capabilities.
+
+#### Installation
+
+```bash
+# Install Ollama
+brew install ollama
+
+# Start Ollama daemon
+ollama serve &
+
+# Pull GPT-OSS 120B model (~65 GB MXFP4)
+ollama pull gpt-oss:120b
+```
+
+#### Configuration
+
+1. **Set Ollama as the reasoner provider in `.env`:**
+
+```bash
+# Enable Ollama for F16 reasoning engine
+LOCAL_REASONER_PROVIDER=ollama       # Use Ollama instead of llama.cpp F16
+
+# Ollama configuration
+OLLAMA_HOST=http://host.docker.internal:11434
+OLLAMA_MODEL=gpt-oss:120b
+OLLAMA_THINK=medium                  # Thinking effort: low | medium | high
+OLLAMA_TIMEOUT_S=120
+OLLAMA_KEEP_ALIVE=5m
+```
+
+2. **Start KITTY with Ollama:**
+
+```bash
+# Ollama will start automatically when using start-all.sh
+./ops/scripts/start-all.sh
+
+# Or start Ollama separately
+./ops/scripts/ollama/start.sh
+```
+
+#### Thinking Modes
+
+GPT-OSS supports three thinking effort levels:
+
+- **`low`**: Fast, minimal reasoning trace (for simple queries)
+- **`medium`**: Balanced reasoning depth (recommended default)
+- **`high`**: Maximum reasoning effort for complex problems
+
+#### Rollback to llama.cpp
+
+To switch back to llama.cpp F16:
+
+```bash
+# Update .env
+LOCAL_REASONER_PROVIDER=llamacpp
+
+# Restart KITTY
+./ops/scripts/stop-all.sh
+./ops/scripts/start-all.sh
+```
+
+#### Benefits
+
+- **Easy Thinking Mode**: Ollama provides a simple `--think` flag for GPT-OSS reasoning traces
+- **No Multi-File Models**: Single model file instead of llama.cpp's multi-shard F16 files
+- **Same Interface**: Q4 tool orchestrator continues to delegate to F16 via `reason_with_f16` tool
+- **Telemetry**: Thinking traces are captured separately for analysis (not shown to users)
+
+#### Architecture Notes
+
+- Q4 (llama.cpp port 8083): Tool orchestrator for ReAct workflows
+- **Ollama (port 11434)**: Deep reasoning engine (replaces llama.cpp F16 on port 8082)
+- Vision (llama.cpp port 8086): Image understanding
+- Summary (llama.cpp port 8084): Text summarization
+- Coder (llama.cpp port 8085): Code generation
+
 ### Web Interfaces
 
 ```bash

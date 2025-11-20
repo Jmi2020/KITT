@@ -133,6 +133,14 @@ class Settings(BaseSettings):
     semantic_cache_enabled: bool = True
     agentic_mode_enabled: bool = False
 
+    # Ollama reasoner configuration (GPT-OSS 120B with thinking mode)
+    ollama_host: str = "http://localhost:11434"
+    ollama_model: str = "gpt-oss:120b"
+    ollama_think: str = "medium"  # low | medium | high
+    ollama_timeout_s: int = 120
+    ollama_keep_alive: str = "5m"
+    local_reasoner_provider: str = "llamacpp"  # ollama | llamacpp
+
     # Vision / image search providers
     searxng_base_url: Optional[str] = None
     image_search_safesearch: str = "moderate"

@@ -130,10 +130,24 @@ cleanup() {
 trap cleanup INT TERM
 
 # ========================================
-# Phase 1: Start llama.cpp Servers
+# Phase 1: Start LLM Servers
 # ========================================
 
-log "Phase 1: Starting llama.cpp servers"
+# Determine if we should start Ollama instead of llama.cpp F16
+LOCAL_REASONER_PROVIDER="${LOCAL_REASONER_PROVIDER:-llamacpp}"
+
+if [ "$LOCAL_REASONER_PROVIDER" == "ollama" ]; then
+    log "Phase 1a: Starting Ollama (GPT-OSS reasoner)"
+
+    if ! "$SCRIPT_DIR/ollama/start.sh"; then
+        error "Failed to start Ollama"
+        exit 1
+    fi
+
+    success "Ollama started"
+fi
+
+log "Phase 1b: Starting llama.cpp servers"
 
 if ! "$SCRIPT_DIR/llama/start.sh"; then
     error "Failed to start llama.cpp servers"
@@ -143,10 +157,10 @@ fi
 success "llama.cpp servers started"
 
 # ========================================
-# Phase 2: Wait for llama.cpp Health
+# Phase 2: Wait for LLM Server Health
 # ========================================
 
-log "Phase 2: Waiting for llama.cpp servers to be ready"
+log "Phase 2: Waiting for LLM servers to be ready"
 
 MAX_WAIT=600  # 10 minutes for model loading
 ELAPSED=0
@@ -154,8 +168,22 @@ INTERVAL=10
 
 PORTS_TO_CHECK=("$Q4_PORT")
 PORT_LABELS=("$Q4_ALIAS (Q4)")
-PORTS_TO_CHECK+=("$F16_PORT")
-PORT_LABELS+=("$F16_ALIAS (F16)")
+HEALTH_ENDPOINTS=("/health")
+
+# Add F16 or Ollama depending on LOCAL_REASONER_PROVIDER
+if [ "$LOCAL_REASONER_PROVIDER" == "ollama" ]; then
+    # Ollama health check uses /api/tags endpoint
+    OLLAMA_PORT="${OLLAMA_HOST##*:}"
+    OLLAMA_PORT="${OLLAMA_PORT:-11434}"
+    PORTS_TO_CHECK+=("$OLLAMA_PORT")
+    PORT_LABELS+=("Ollama (GPT-OSS reasoner)")
+    HEALTH_ENDPOINTS+=("/api/tags")
+else
+    # llama.cpp F16 health check
+    PORTS_TO_CHECK+=("$F16_PORT")
+    PORT_LABELS+=("$F16_ALIAS (F16)")
+    HEALTH_ENDPOINTS+=("/health")
+fi
 
 SUMMARY_ENABLED="${LLAMACPP_SUMMARY_ENABLED:-1}"
 VISION_ENABLED="${LLAMACPP_VISION_ENABLED:-1}"
@@ -163,11 +191,13 @@ VISION_ENABLED="${LLAMACPP_VISION_ENABLED:-1}"
 if is_enabled "$SUMMARY_ENABLED"; then
     PORTS_TO_CHECK+=("$SUMMARY_PORT")
     PORT_LABELS+=("$SUMMARY_ALIAS (summary)")
+    HEALTH_ENDPOINTS+=("/health")
 fi
 
 if is_enabled "$VISION_ENABLED"; then
     PORTS_TO_CHECK+=("$VISION_PORT")
     PORT_LABELS+=("$VISION_ALIAS (vision)")
+    HEALTH_ENDPOINTS+=("/health")
 fi
 
 while [ $ELAPSED -lt $MAX_WAIT ]; do
@@ -175,18 +205,29 @@ while [ $ELAPSED -lt $MAX_WAIT ]; do
     for idx in "${!PORTS_TO_CHECK[@]}"; do
         port="${PORTS_TO_CHECK[$idx]}"
         label="${PORT_LABELS[$idx]}"
-        if ! curl -s "http://localhost:${port}/health" 2>/dev/null | grep -q '"status":"ok"'; then
-            missing+=("${label}:${port}")
+        endpoint="${HEALTH_ENDPOINTS[$idx]}"
+
+        # Different health check for Ollama vs llama.cpp
+        if [[ "$endpoint" == "/api/tags" ]]; then
+            # Ollama health check: verify /api/tags returns JSON with models
+            if ! curl -s "http://localhost:${port}${endpoint}" 2>/dev/null | grep -q '"models"'; then
+                missing+=("${label}:${port}")
+            fi
+        else
+            # llama.cpp health check: verify /health returns status:ok
+            if ! curl -s "http://localhost:${port}${endpoint}" 2>/dev/null | grep -q '"status":"ok"'; then
+                missing+=("${label}:${port}")
+            fi
         fi
     done
 
     if [ ${#missing[@]} -eq 0 ]; then
-        success "All llama.cpp servers healthy"
+        success "All LLM servers healthy"
         break
     fi
 
     if [ $((ELAPSED % 30)) -eq 0 ]; then
-        log "Still waiting for llama.cpp servers... missing: ${missing[*]} (${ELAPSED}s elapsed)"
+        log "Still waiting for LLM servers... missing: ${missing[*]} (${ELAPSED}s elapsed)"
     fi
 
     sleep $INTERVAL
@@ -194,9 +235,13 @@ while [ $ELAPSED -lt $MAX_WAIT ]; do
 done
 
 if [ ${#missing[@]} -ne 0 ]; then
-    error "llama.cpp servers failed to become healthy within ${MAX_WAIT}s"
+    error "LLM servers failed to become healthy within ${MAX_WAIT}s"
     error "Still waiting on: ${missing[*]}"
-    error "Check logs: $LOG_DIR/llamacpp-*.log"
+    if [ "$LOCAL_REASONER_PROVIDER" == "ollama" ]; then
+        error "Check logs: $LOG_DIR/llamacpp-*.log and $LOG_DIR/ollama.log"
+    else
+        error "Check logs: $LOG_DIR/llamacpp-*.log"
+    fi
     exit 1
 fi
 

@@ -29,6 +29,15 @@ class LlamaCppConfig(BaseModel):
     model_alias: Optional[str] = None
 
 
+class OllamaConfig(BaseModel):
+    """Configuration for Ollama reasoning client (GPT-OSS with thinking mode)."""
+    host: str = Field(default="http://localhost:11434")
+    model: str = Field(default="gpt-oss:120b")
+    think: str = Field(default="medium")  # low | medium | high
+    timeout_seconds: float = Field(default=120.0, ge=1.0)
+    keep_alive: str = Field(default="5m")
+
+
 class Thresholds(BaseModel):
     local_confidence: float = Field(_performance.local_confidence, ge=0.0, le=1.0)
     frontier_confidence: float = Field(_performance.frontier_confidence, ge=0.0, le=1.0)
@@ -38,6 +47,8 @@ class RoutingConfig(BaseModel):
     thresholds: Thresholds = Thresholds()
     local_models: List[str] = Field(default_factory=lambda: settings.local_models)
     llamacpp: LlamaCppConfig = Field(default_factory=LlamaCppConfig)
+    ollama: OllamaConfig = Field(default_factory=OllamaConfig)
+    local_reasoner_provider: str = Field(default="llamacpp")  # ollama | llamacpp
     mlx_endpoint: str = Field(default="http://localhost:8081")
     semantic_cache_enabled: bool = _performance.semantic_cache_enabled
 
@@ -62,12 +73,29 @@ def get_routing_config() -> RoutingConfig:
     if alias:
         llama_cfg.model_alias = alias
 
+    # Ollama configuration (GPT-OSS with thinking mode)
+    ollama_cfg = OllamaConfig(
+        host=os.getenv("OLLAMA_HOST", settings.ollama_host),
+        model=os.getenv("OLLAMA_MODEL", settings.ollama_model),
+        think=os.getenv("OLLAMA_THINK", settings.ollama_think),
+        timeout_seconds=float(os.getenv("OLLAMA_TIMEOUT_S", str(settings.ollama_timeout_s))),
+        keep_alive=os.getenv("OLLAMA_KEEP_ALIVE", settings.ollama_keep_alive),
+    )
+
     primary = os.getenv("LOCAL_MODEL_PRIMARY")
     secondary = os.getenv("LOCAL_MODEL_CODER")
     overrides = [value for value in (primary, secondary) if value]
     local_models = overrides or settings.local_models
 
-    return RoutingConfig(local_models=local_models, llamacpp=llama_cfg)
+    # Router provider selection
+    local_reasoner_provider = os.getenv("LOCAL_REASONER_PROVIDER", settings.local_reasoner_provider)
+
+    return RoutingConfig(
+        local_models=local_models,
+        llamacpp=llama_cfg,
+        ollama=ollama_cfg,
+        local_reasoner_provider=local_reasoner_provider
+    )
 
 
 __all__ = ["RoutingConfig", "get_routing_config", "Thresholds"]

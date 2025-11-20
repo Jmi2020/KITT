@@ -112,28 +112,35 @@ else
     log "  Logs: $Q4_LOG"
 fi
 
-if check_running $F16_PORT; then
-    log "F16 server already running on port $F16_PORT"
+# Skip F16 if using Ollama as the reasoner provider
+LOCAL_REASONER_PROVIDER="${LOCAL_REASONER_PROVIDER:-llamacpp}"
+
+if [ "$LOCAL_REASONER_PROVIDER" == "ollama" ]; then
+    log "Skipping F16 server (using Ollama as reasoner provider)"
 else
-    log "Starting F16 server (Deep Reasoner) on port $F16_PORT"
+    if check_running $F16_PORT; then
+        log "F16 server already running on port $F16_PORT"
+    else
+        log "Starting F16 server (Deep Reasoner) on port $F16_PORT"
 
-    llama-server \
-        --model "$MODEL_BASE/$F16_MODEL" \
-        --host 0.0.0.0 \
-        --port $F16_PORT \
-        --n-gpu-layers 999 \
-        --ctx-size $F16_CTX_SIZE \
-        -np $F16_N_PARALLEL \
-        --batch-size 512 \
-        --threads 12 \
-        --alias "$F16_ALIAS" \
-        --jinja \
-        --flash-attn on \
-        > "$F16_LOG" 2>&1 &
+        llama-server \
+            --model "$MODEL_BASE/$F16_MODEL" \
+            --host 0.0.0.0 \
+            --port $F16_PORT \
+            --n-gpu-layers 999 \
+            --ctx-size $F16_CTX_SIZE \
+            -np $F16_N_PARALLEL \
+            --batch-size 512 \
+            --threads 12 \
+            --alias "$F16_ALIAS" \
+            --jinja \
+            --flash-attn on \
+            > "$F16_LOG" 2>&1 &
 
-    echo $! > "$F16_PID"
-    success "F16 server starting (PID $(cat $F16_PID))"
-    log "  Logs: $F16_LOG"
+        echo $! > "$F16_PID"
+        success "F16 server starting (PID $(cat $F16_PID))"
+        log "  Logs: $F16_LOG"
+    fi
 fi
 
 if check_running $SUMMARY_PORT; then
