@@ -12,7 +12,7 @@ from __future__ import annotations
 import httpx
 import json
 import logging
-from typing import Iterable, Optional, Dict, Any, Generator
+from typing import Iterable, Optional, Dict, Any, Generator, List
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,8 @@ class OllamaReasonerClient:
         self,
         messages: Iterable[Dict[str, str]],
         think: Optional[str] = None,
-        stream: bool = True
+        stream: bool = True,
+        tools: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Build Ollama chat API request payload.
@@ -64,6 +65,7 @@ class OllamaReasonerClient:
             messages: Chat messages in OpenAI format
             think: Thinking effort level (low|medium|high) for GPT-OSS
             stream: Enable streaming mode
+            tools: Optional tool definitions (OpenAI format)
 
         Returns:
             Request payload dictionary
@@ -81,27 +83,35 @@ class OllamaReasonerClient:
             payload["think"] = think
             logger.debug(f"Thinking mode enabled: {think}")
 
+        # Add tools if provided (Ollama supports OpenAI tool format)
+        if tools is not None and len(tools) > 0:
+            payload["tools"] = tools
+            logger.debug(f"Added {len(tools)} tools to payload")
+
         return payload
 
     def chat(
         self,
         messages: Iterable[Dict[str, str]],
         think: Optional[str] = None,
-        stream: bool = False
+        stream: bool = False,
+        tools: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
-        Non-streaming chat completion.
+        Non-streaming chat completion with optional tool calling.
 
         Args:
             messages: Chat messages in OpenAI format
             think: Thinking effort level (low|medium|high)
             stream: Must be False for this method
+            tools: Optional tool definitions (OpenAI format)
 
         Returns:
             Dictionary with:
                 - content: Response text
                 - role: Assistant role
                 - thinking: Optional thinking trace (if enabled)
+                - tool_calls: List of tool calls (if model requested tools)
                 - raw: Full API response
         """
         logger.debug(f"Sending non-streaming request to {self.base_url}/api/chat")
@@ -109,7 +119,7 @@ class OllamaReasonerClient:
         with httpx.Client(timeout=self.timeout) as client:
             resp = client.post(
                 f"{self.base_url}/api/chat",
-                json=self._make_payload(messages, think, stream=False)
+                json=self._make_payload(messages, think, stream=False, tools=tools)
             )
             resp.raise_for_status()
             data = resp.json()
@@ -117,36 +127,44 @@ class OllamaReasonerClient:
         # Normalize shape across Ollama API versions
         msg = data.get("message", {})
         thinking = msg.get("thinking") or data.get("thinking")
+        tool_calls = msg.get("tool_calls", [])
 
         if thinking:
             logger.info(f"Thinking trace captured ({len(thinking)} chars)")
+
+        if tool_calls:
+            logger.info(f"Model requested {len(tool_calls)} tool calls")
 
         return {
             "content": msg.get("content", ""),
             "role": msg.get("role", "assistant"),
             "thinking": thinking,
+            "tool_calls": tool_calls,
             "raw": data,
         }
 
     def stream_chat(
         self,
         messages: Iterable[Dict[str, str]],
-        think: Optional[str] = None
+        think: Optional[str] = None,
+        tools: Optional[List[Dict[str, Any]]] = None
     ) -> Generator[Dict[str, Any], None, None]:
         """
-        Streaming chat completion.
+        Streaming chat completion with optional tool calling.
 
         Yields incremental deltas for both content and thinking traces.
-        Consumer should buffer 'delta' field and optionally log 'delta_thinking'.
+        Tool calls typically arrive in the final chunk (when done=True).
 
         Args:
             messages: Chat messages in OpenAI format
             think: Thinking effort level (low|medium|high)
+            tools: Optional tool definitions (OpenAI format)
 
         Yields:
             Dictionary with:
                 - delta: Content delta
                 - delta_thinking: Thinking trace delta (optional)
+                - tool_calls: Tool calls (typically in final chunk)
                 - done: True on final chunk
         """
         logger.debug(f"Starting streaming request to {self.base_url}/api/chat")
@@ -154,7 +172,7 @@ class OllamaReasonerClient:
         with httpx.stream(
             "POST",
             f"{self.base_url}/api/chat",
-            json=self._make_payload(messages, think, stream=True),
+            json=self._make_payload(messages, think, stream=True, tools=tools),
             timeout=self.timeout
         ) as r:
             r.raise_for_status()
@@ -174,11 +192,21 @@ class OllamaReasonerClient:
                     continue
 
                 msg = chunk.get("message", {})
-                yield {
+                tool_calls = msg.get("tool_calls", [])
+
+                result = {
                     "delta": msg.get("content", ""),
                     "delta_thinking": msg.get("thinking"),
                     "done": chunk.get("done", False),
                 }
+
+                # Include tool_calls if present
+                if tool_calls:
+                    result["tool_calls"] = tool_calls
+                    if chunk.get("done"):
+                        logger.info(f"Model requested {len(tool_calls)} tool calls")
+
+                yield result
 
     def health_check(self) -> bool:
         """

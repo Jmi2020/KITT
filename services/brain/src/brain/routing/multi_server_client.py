@@ -137,16 +137,16 @@ class MultiServerLlamaCppClient:
     async def _generate_ollama(
         self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
-        """Generate response using Ollama with thinking mode.
+        """Generate response using Ollama with thinking mode and tool calling.
 
         Adapts Ollama's response format to match llama.cpp client expectations.
 
         Args:
             prompt: The input prompt text
-            tools: Optional tool definitions (ignored by Ollama for now)
+            tools: Optional tool definitions (OpenAI format)
 
         Returns:
-            Dict with keys: response, thinking (optional), metadata
+            Dict with keys: response, thinking (optional), tool_calls, metadata
         """
         # Get thinking level from config
         routing_config = get_routing_config()
@@ -155,9 +155,14 @@ class MultiServerLlamaCppClient:
         # Build messages in OpenAI format
         messages = [{"role": "user", "content": prompt}]
 
-        # Call Ollama (non-streaming for now)
-        logger.debug(f"Calling Ollama with thinking mode: {think_level}")
-        result = self._ollama_client.chat(messages, think=think_level, stream=False)
+        # Call Ollama with tools and thinking mode
+        logger.debug(
+            f"Calling Ollama with thinking mode: {think_level}, "
+            f"tools: {len(tools) if tools else 0}"
+        )
+        result = self._ollama_client.chat(
+            messages, think=think_level, stream=False, tools=tools
+        )
 
         # Log thinking trace if present (but don't include in user response)
         if result.get("thinking"):
@@ -169,18 +174,21 @@ class MultiServerLlamaCppClient:
         return {
             "response": result["content"],
             "thinking": result.get("thinking"),
-            "tool_calls": [],  # Ollama doesn't support tool calling in this integration
+            "tool_calls": result.get("tool_calls", []),
             "provider": "ollama",
             "model": routing_config.ollama.model,
         }
 
-    async def generate_stream(self, prompt: str, model: Optional[str] = None):
-        """Stream generation request with real-time thinking traces.
+    async def generate_stream(
+        self, prompt: str, model: Optional[str] = None, tools: Optional[List[Dict[str, Any]]] = None
+    ):
+        """Stream generation request with real-time thinking traces and optional tool calling.
 
         Yields chunks in format:
         {
             "delta": str,              # Content delta
             "delta_thinking": str,     # Thinking trace delta (optional)
+            "tool_calls": List,        # Tool calls (typically in final chunk)
             "done": bool,              # Whether stream is complete
         }
 
@@ -190,9 +198,10 @@ class MultiServerLlamaCppClient:
         Args:
             prompt: The input prompt text
             model: Model alias (e.g., "kitty-f16" for Ollama reasoner)
+            tools: Optional tool definitions (OpenAI format)
 
         Yields:
-            Dict containing delta, delta_thinking, and done flag
+            Dict containing delta, delta_thinking, tool_calls, and done flag
 
         Raises:
             ValueError: If model alias is unknown
@@ -217,10 +226,13 @@ class MultiServerLlamaCppClient:
             # Build messages in OpenAI format
             messages = [{"role": "user", "content": prompt}]
 
-            logger.debug(f"Streaming from Ollama with thinking mode: {think_level}")
+            logger.debug(
+                f"Streaming from Ollama with thinking mode: {think_level}, "
+                f"tools: {len(tools) if tools else 0}"
+            )
 
-            # Stream from Ollama
-            for chunk in self._ollama_client.stream_chat(messages, think=think_level):
+            # Stream from Ollama with tools
+            for chunk in self._ollama_client.stream_chat(messages, think=think_level, tools=tools):
                 yield chunk
             return
 

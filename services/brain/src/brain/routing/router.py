@@ -37,6 +37,7 @@ from ..usage_stats import UsageStats
 # Import ReAct agent and tool MCP client
 from ..agents import ReActAgent
 from ..tools.mcp_client import MCPClient as ToolMCPClient
+from ..conversation.safety import SafetyChecker
 
 logger = logging.getLogger("brain.routing")
 
@@ -115,6 +116,10 @@ class BrainRouter:
 
         # Initialize tool MCP client with Perplexity integration and ReAct agent
         self._tool_mcp = tool_mcp_client or ToolMCPClient(perplexity_client=self._mcp)
+
+        # Initialize safety checker for tool execution validation
+        self._safety_checker = SafetyChecker()
+
         # Agent uses Q4 orchestrator for tool calling
         self._agent = ReActAgent(
             llm_client=self._llama,
@@ -380,7 +385,9 @@ class BrainRouter:
         tool_calls = response.get("tool_calls", [])
         if tool_calls:
             logger.info(f"Model requested {len(tool_calls)} tool calls")
-            output = await self._execute_tools(tool_calls, request.prompt, model_alias)
+            output = await self._execute_tools(
+                tool_calls, request.prompt, model_alias, allow_paid=request.allow_paid
+            )
         else:
             output = (
                 response.get("response") or response.get("output") or response.get("completion") or ""
@@ -577,17 +584,22 @@ class BrainRouter:
         )
 
     async def _execute_tools(
-        self, tool_calls: list, original_prompt: str, model_alias: Optional[str]
+        self,
+        tool_calls: list,
+        original_prompt: str,
+        model_alias: Optional[str],
+        allow_paid: bool = False
     ) -> str:
-        """Execute tool calls and return formatted response.
+        """Execute tool calls with safety checks and return formatted response.
 
         Args:
             tool_calls: List of tool call objects from model
             original_prompt: Original user prompt
             model_alias: Model alias for follow-up call
+            allow_paid: Whether paid/premium tools are authorized
 
         Returns:
-            Final response after tool execution
+            Final response after tool execution, or error if safety check fails
         """
         tool_results = []
 
@@ -613,6 +625,54 @@ class BrainRouter:
 
                 if not function_name:
                     logger.warning("Received tool call without function name: %s", tool_call)
+                    continue
+
+                # Safety check before execution
+                safety_result = self._safety_checker.check_tool_execution(
+                    tool_name=function_name,
+                    tool_args=arguments,
+                    override_provided=allow_paid
+                )
+
+                if not safety_result.approved:
+                    # Tool execution blocked by safety policy
+                    error_msg = f"Tool '{function_name}' blocked by safety policy: {safety_result.reason}"
+
+                    if safety_result.requires_confirmation:
+                        error_msg = (
+                            f"⚠️  {function_name} requires confirmation.\n"
+                            f"Hazard class: {safety_result.hazard_class}\n"
+                            f"Please confirm with phrase: '{safety_result.confirmation_phrase}'"
+                        )
+                        logger.warning(error_msg)
+                        tool_results.append({
+                            "tool": function_name,
+                            "error": "Confirmation required",
+                            "message": error_msg
+                        })
+                        continue
+
+                    if safety_result.requires_override:
+                        error_msg = (
+                            f"⚠️  {function_name} requires budget override.\n"
+                            f"Reason: {safety_result.reason}\n"
+                            f"This tool has restricted access."
+                        )
+                        logger.warning(error_msg)
+                        tool_results.append({
+                            "tool": function_name,
+                            "error": "Budget override required",
+                            "message": error_msg
+                        })
+                        continue
+
+                    # Other safety failures
+                    logger.warning(error_msg)
+                    tool_results.append({
+                        "tool": function_name,
+                        "error": "Safety check failed",
+                        "message": error_msg
+                    })
                     continue
 
                 logger.info(f"Executing tool: {function_name} with args: {arguments}")
