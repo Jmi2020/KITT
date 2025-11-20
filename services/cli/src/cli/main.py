@@ -1687,13 +1687,42 @@ def _display_session_detail(session_id: str) -> None:
 
     console.print(Panel(status_table, title="[bold]Session Info", border_style="green"))
 
-    # Findings summary (API only returns counts, not detailed findings)
+    # Fetch and display detailed findings
     total_findings = session.get("total_findings", 0)
     total_sources = session.get("total_sources", 0)
-    if total_findings > 0 or total_sources > 0:
-        console.print(f"\n[bold cyan]Research Results:[/bold cyan]")
-        console.print(f"  Findings: {total_findings}")
-        console.print(f"  Sources: {total_sources}\n")
+
+    if total_findings > 0:
+        try:
+            findings_data = _get_json(f"{API_BASE}/api/research/sessions/{session_id}/findings")
+            findings = findings_data.get("findings", [])
+
+            console.print(f"\n[bold cyan]Research Findings ({len(findings)}):[/bold cyan]\n")
+
+            for idx, finding in enumerate(findings, 1):
+                content = finding.get("content", "")
+                confidence = finding.get("confidence", 0)
+                iteration = finding.get("iteration", 0)
+                finding_type = finding.get("finding_type", "unknown")
+
+                # Create a panel for each finding
+                finding_header = f"Finding #{idx} | Type: {finding_type} | Confidence: {confidence:.2f} | Iteration: {iteration}"
+
+                # Truncate very long content for display
+                display_content = content
+                if len(content) > 1500:
+                    display_content = content[:1500] + "\n\n[dim]... (content truncated, see full details in web interface)[/dim]"
+
+                console.print(Panel(
+                    display_content,
+                    title=finding_header,
+                    border_style="green",
+                    expand=False
+                ))
+                console.print()  # Add spacing between findings
+
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[yellow]Could not load detailed findings: {exc}[/yellow]")
+            console.print(f"[dim]Summary: {total_findings} findings, {total_sources} sources[/dim]\n")
     else:
         console.print("[yellow]No findings yet[/yellow]\n")
 
