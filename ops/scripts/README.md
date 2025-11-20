@@ -127,7 +127,7 @@ pkill -9 -f llama-server  # Nuclear option
 
 **Servers Started**:
 1. **Q4 (Port 8083)**: Tool orchestrator - Athene-V2-Agent Q4_K_M
-2. **F16 (Port 8082)**: Deep reasoner - Llama-3.3-70B-Instruct F16
+2. **F16 / Ollama**: Deep reasoner - GPT-OSS 120B via Ollama (when LOCAL_REASONER_PROVIDER=ollama) or Llama-3.3-70B F16 via llama.cpp (Port 8082)
 3. **Summary (Port 8084)**: Text summarization - Llama-3.2-3B Q4_K_M
 4. **Vision (Port 8085)**: Multimodal - Llama-3.2-11B-Vision Q4_K_M
 
@@ -153,9 +153,18 @@ curl http://localhost:8082/health  # F16
 
 **Customization** (via .env):
 ```bash
-# Model paths
+# Reasoner provider selection
+LOCAL_REASONER_PROVIDER=ollama     # Use Ollama for F16 reasoner (default)
+                                   # Set to "llamacpp" to use llama.cpp F16 server instead
+
+# Ollama configuration (when LOCAL_REASONER_PROVIDER=ollama)
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_MODEL=gpt-oss:120b          # GPT-OSS 120B with thinking mode
+OLLAMA_THINK=high                  # Thinking effort level (low/medium/high)
+
+# Model paths (llama.cpp)
 LLAMACPP_Q4_MODEL=athene-v2-agent/Athene-V2-Agent-Q4_K_M.gguf
-LLAMACPP_F16_MODEL=llama-3.3-70b/Llama-3.3-70B-Instruct-F16.gguf
+LLAMACPP_F16_MODEL=llama-3.3-70b/Llama-3.3-70B-Instruct-F16.gguf  # Fallback when LOCAL_REASONER_PROVIDER=llamacpp
 
 # Performance tuning
 LLAMACPP_Q4_N_PARALLEL=4          # Concurrent requests

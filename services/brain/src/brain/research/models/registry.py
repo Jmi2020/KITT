@@ -108,11 +108,12 @@ class ModelRegistry:
             use_cases=["tool calling", "web search", "CAD generation", "device control", "fast workflows"]
         ))
 
-        # Llama 3.3 70B F16 - Deep reasoning engine (port 8082)
+        # GPT-OSS 120B (Ollama) or Llama 3.3 70B F16 (llama.cpp fallback) - Deep reasoning engine
+        # Routes to Ollama when LOCAL_REASONER_PROVIDER=ollama (default), otherwise port 8082
         self.register_model(ModelInfo(
             model_id="kitty-f16",
-            model_name="Llama 3.3 70B F16",
-            provider="llama_cpp",
+            model_name="GPT-OSS 120B (Ollama Reasoner)",
+            provider="ollama",  # "llama_cpp" when LOCAL_REASONER_PROVIDER=llamacpp
             tier=ModelTier.LOCAL_LARGE,
             capabilities={
                 ModelCapability.REASONING,
@@ -123,13 +124,13 @@ class ModelRegistry:
                 ModelCapability.CODING,
                 ModelCapability.LONG_CONTEXT,
             },
-            context_window=65536,
+            context_window=8192,
             max_tokens=8192,
-            avg_latency_ms=3000.0,
+            avg_latency_ms=3500.0,
             cost_input_per_1k=Decimal("0.0"),
             cost_output_per_1k=Decimal("0.0"),
-            description="Full precision 70B parameter model. Comprehensive analysis, nuanced responses, complex reasoning. 65K context window.",
-            use_cases=["complex reasoning", "deep synthesis", "validation", "code analysis", "long documents"]
+            description="120B parameter open-source reasoning model with thinking mode. Provides detailed reasoning traces, comprehensive analysis, and complex problem-solving. Supports real-time thinking traces via Ollama.",
+            use_cases=["complex reasoning", "deep synthesis", "validation", "code analysis", "thinking traces", "research"]
         ))
 
         # Gemma 3 27B Q4_K_M with mmproj - Vision/multimodal (port 8086)
