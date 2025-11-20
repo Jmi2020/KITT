@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.shortcuts import radiolist_dialog
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
@@ -1861,6 +1862,41 @@ def _list_research_sessions(limit: int = 10) -> List[Dict[str, Any]]:
         raise typer.Exit(1) from exc
 
 
+def _interactive_session_picker(sessions: List[Dict[str, Any]]) -> Optional[str]:
+    """Show an interactive arrow-key picker for selecting a session.
+
+    Args:
+        sessions: List of session dictionaries
+
+    Returns:
+        Selected session_id or None if cancelled
+    """
+    if not sessions:
+        return None
+
+    # Format sessions as radio list options
+    values = []
+    for idx, session in enumerate(sessions, 1):
+        session_id = session.get("session_id", "")
+        query = session.get("query", "")[:50]
+        status = session.get("status", "unknown")
+        findings_count = session.get("total_findings", 0)
+        iterations = session.get("total_iterations", 0)
+
+        # Create a descriptive label
+        label = f"{idx}. {query} | {status} | {findings_count} findings, {iterations} iterations"
+        values.append((session_id, label))
+
+    # Show the dialog
+    result = radiolist_dialog(
+        title="Select Research Session",
+        text="Use arrow keys to navigate, Enter to select, Esc to cancel:",
+        values=values,
+    ).run()
+
+    return result
+
+
 @app.command()
 def autonomy(
     action: str = typer.Argument(..., help="Action: list, approve, reject, status"),
@@ -2307,7 +2343,9 @@ def shell(
             if cmd == "help":
                 console.print("\n[bold]Research Pipeline:[/bold]")
                 console.print("  [cyan]/research <query>[/cyan]   - Start autonomous research with real-time streaming")
-                console.print("  [cyan]/sessions [limit][/cyan]   - List all research sessions")
+                console.print("  [cyan]/sessions [limit] [-i][/cyan] - List all research sessions")
+                console.print("      [dim]-i, --interactive: Use arrow-key picker to select session[/dim]")
+                console.print("      [dim]Or type row number after listing to view that session[/dim]")
                 console.print("  [cyan]/session <id>[/cyan]       - View detailed session info and metrics")
                 console.print("  [cyan]/stream <id>[/cyan]        - Stream progress of active research session")
 
@@ -2400,14 +2438,29 @@ def shell(
                 continue
 
             if cmd == "sessions":
+                # Check for interactive flag
+                interactive = False
                 limit = 10
-                if args and args[0].isdigit():
-                    try:
-                        limit = int(args[0])
-                    except ValueError:
-                        pass
+
+                # Parse args for flags and limit
+                for arg in args:
+                    if arg in ["-i", "--interactive"]:
+                        interactive = True
+                    elif arg.isdigit():
+                        try:
+                            limit = int(arg)
+                        except ValueError:
+                            pass
+
                 # Store returned sessions for numbered selection
                 last_research_sessions = _list_research_sessions(limit=limit)
+
+                # If interactive mode requested, show picker
+                if interactive and last_research_sessions:
+                    selected_id = _interactive_session_picker(last_research_sessions)
+                    if selected_id:
+                        _display_session_detail(selected_id)
+
                 continue
 
             if cmd == "session":
