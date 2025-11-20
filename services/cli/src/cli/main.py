@@ -282,6 +282,7 @@ class SessionState:
     stored_images: List[Dict[str, Any]] = field(default_factory=list)
     show_trace: bool = True
     agent_enabled: bool = True
+    stream_enabled: bool = False  # Enable streaming mode with real-time thinking traces
     provider: Optional[str] = None  # Multi-provider collective: selected provider
     model: Optional[str] = None  # Multi-provider collective: selected model
 
@@ -598,6 +599,120 @@ def _request_with_continuation(
         console.print("[dim]Tip: Increase LLAMACPP_N_PREDICT in .env for longer responses in a single generation.[/dim]\n")
 
     return full_output, final_metadata
+
+
+def _request_with_streaming(
+    url: str,
+    payload: Dict[str, Any],
+    status_text: str = "KITTY is thinking",
+) -> tuple[str, Dict[str, Any]]:
+    """Make streaming API call with real-time thinking traces.
+
+    Displays thinking traces and response content as they stream in.
+
+    Returns:
+        Tuple of (full_output, final_metadata)
+    """
+    import json
+
+    full_content = ""
+    full_thinking = ""
+    final_metadata = {}
+
+    # Create dual-panel display: thinking (dim cyan) + response (green)
+    thinking_text = Text()
+    response_text = Text()
+
+    thinking_panel = Panel(
+        thinking_text,
+        title="[bold dim cyan]Thinking",
+        border_style="dim cyan",
+        padding=(0, 1),
+    )
+    response_panel = Panel(
+        response_text,
+        title="[bold green]KITTY",
+        border_style="green",
+        padding=(0, 1),
+    )
+
+    # Use table to display panels side-by-side (or stacked on narrow terminals)
+    from rich.columns import Columns
+
+    display = Columns([thinking_panel, response_panel], expand=True, equal=True)
+
+    with Live(display, console=console, refresh_per_second=10) as live:
+        with httpx.stream("POST", url, json=payload, timeout=CLI_TIMEOUT) as response:
+            response.raise_for_status()
+
+            for line in response.iter_lines():
+                if not line.strip():
+                    continue
+
+                # Parse SSE format: "data: {json}"
+                if line.startswith("data:"):
+                    line = line[5:].strip()
+                else:
+                    continue
+
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                chunk_type = chunk.get("type", "chunk")
+
+                if chunk_type == "chunk":
+                    # Accumulate deltas
+                    delta = chunk.get("delta", "")
+                    delta_thinking = chunk.get("delta_thinking")
+
+                    if delta:
+                        full_content += delta
+                        response_text = Text(full_content)
+
+                    if delta_thinking:
+                        full_thinking += delta_thinking
+                        thinking_text = Text(full_thinking, style="dim cyan")
+
+                    # Update display
+                    thinking_panel = Panel(
+                        thinking_text,
+                        title="[bold dim cyan]Thinking",
+                        border_style="dim cyan",
+                        padding=(0, 1),
+                    )
+                    response_panel = Panel(
+                        response_text,
+                        title="[bold green]KITTY",
+                        border_style="green",
+                        padding=(0, 1),
+                    )
+                    display = Columns([thinking_panel, response_panel], expand=True, equal=True)
+                    live.update(display)
+
+                elif chunk_type == "complete":
+                    # Final metadata
+                    final_metadata = chunk.get("routing", {})
+                    break
+
+                elif chunk_type == "error":
+                    error_msg = chunk.get("error", "Unknown error")
+                    console.print(f"[red]Streaming error: {error_msg}")
+                    break
+
+    # If no thinking was shown, just print the response in a single panel
+    if not full_thinking:
+        console.print(
+            Panel(
+                Text(full_content),
+                title="[bold green]KITTY",
+                border_style="green",
+                padding=(0, 1),
+            )
+        )
+
+    return full_content, final_metadata
 
 
 def _post_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1158,6 +1273,11 @@ def say(
         "--trace/--no-trace",
         help="Show agent reasoning trace and tool calls (forces verbosity≥4, enabled by default).",
     ),
+    stream: Optional[bool] = typer.Option(
+        None,
+        "--stream/--no-stream",
+        help="Enable streaming mode with real-time thinking traces (requires Ollama reasoner).",
+    ),
 ) -> None:
     """Send a conversational message with intelligent agent reasoning.
 
@@ -1201,13 +1321,25 @@ def say(
         state.verbosity = effective_verbosity
         payload["verbosity"] = effective_verbosity
 
+    # Determine if streaming should be used
+    use_streaming = stream if stream is not None else False
+
     try:
-        full_output, routing_metadata = _request_with_continuation(
-            f"{API_BASE}/api/query",
-            payload,
-            "KITTY is thinking",
-            max_continuations=5
-        )
+        if use_streaming:
+            # Use streaming endpoint with real-time thinking traces
+            full_output, routing_metadata = _request_with_streaming(
+                f"{API_BASE}/api/query/stream",
+                payload,
+                "KITTY is thinking",
+            )
+        else:
+            # Use traditional non-streaming endpoint with continuation support
+            full_output, routing_metadata = _request_with_continuation(
+                f"{API_BASE}/api/query",
+                payload,
+                "KITTY is thinking",
+                max_continuations=5
+            )
     except httpx.TimeoutException:
         console.print("[red]Request timed out - check if KITTY services are running")
         raise typer.Exit(1)
@@ -2265,6 +2397,7 @@ def shell(
     console.print("  [cyan]/providers[/cyan]        - List available providers and their status")
     console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace (no args toggles)")
     console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode (tool orchestration)")
+    console.print("  [cyan]/stream [on|off][/cyan]   - Toggle real-time streaming with thinking traces")
     console.print("  [cyan]/collective <pattern> <task>[/cyan] - Multi-agent collaboration")
     console.print("      [dim]Patterns: council [k=N], debate, pipeline[/dim]")
     console.print("      [dim]Example: /collective council k=3 Compare PETG vs ABS[/dim]")
@@ -2293,6 +2426,8 @@ def shell(
     console.print(f"[dim]Agent mode: {agent_status} (use /agent to toggle)[/dim]")
     trace_status = "ON" if state.show_trace else "OFF"
     console.print(f"[dim]Trace mode: {trace_status} (use /trace to toggle)[/dim]")
+    stream_status = "ON" if state.stream_enabled else "OFF"
+    console.print(f"[dim]Streaming: {stream_status} (use /stream to toggle - auto-selects GPT-OSS 120B)[/dim]")
     console.print("[dim]Type '/' and press Tab to see available commands[/dim]\n")
 
     # Create prompt_toolkit session with command completion
@@ -2348,6 +2483,7 @@ def shell(
                 console.print("  [cyan]/providers[/cyan]        - List all available providers and status")
                 console.print("  [cyan]/trace [on|off][/cyan]    - Toggle agent reasoning trace view")
                 console.print("  [cyan]/agent [on|off][/cyan]    - Toggle ReAct agent mode")
+                console.print("  [cyan]/stream [on|off][/cyan]   - Toggle real-time streaming (GPT-OSS 120B with thinking)")
                 console.print("  [cyan]/collective <pattern> <task>[/cyan] - Multi-agent collaboration")
                 console.print("      [dim]Patterns: council [k=3], debate, pipeline[/dim]")
                 console.print("      [dim]Example: /collective council k=3 Compare PETG vs ABS[/dim]")
@@ -2655,6 +2791,29 @@ def shell(
                         console.print("[red]Usage: /agent on|off")
                 continue
 
+            if cmd == "stream":
+                if not args:
+                    state.stream_enabled = not state.stream_enabled
+                else:
+                    setting = args[0].lower()
+                    if setting in {"on", "true", "1"}:
+                        state.stream_enabled = True
+                    elif setting in {"off", "false", "0"}:
+                        state.stream_enabled = False
+                    else:
+                        console.print("[red]Usage: /stream on|off")
+                        continue
+
+                # When enabling streaming, automatically switch to GPT-OSS 120B (Ollama)
+                if state.stream_enabled:
+                    console.print(
+                        "[green]Streaming mode enabled[/green]\n"
+                        "[dim]→ Real-time thinking traces with GPT-OSS 120B[/dim]"
+                    )
+                else:
+                    console.print("[green]Streaming mode disabled (using standard responses)")
+                continue
+
             if cmd == "provider":
                 if not args:
                     if state.provider:
@@ -2861,7 +3020,7 @@ def shell(
 
         # Default to conversation
         try:
-            say([line], verbosity=None)
+            say([line], verbosity=None, stream=state.stream_enabled if state.stream_enabled else None)
         except typer.Exit:
             continue
 

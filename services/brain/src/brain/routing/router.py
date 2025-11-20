@@ -238,6 +238,115 @@ class BrainRouter:
 
         return await self._finalize_result(request, result, cache_key=cache_key)
 
+    async def route_stream(self, request: RoutingRequest):
+        """Stream query response with real-time thinking traces.
+
+        Yields chunks in format:
+        {
+            "delta": str,              # Content delta
+            "delta_thinking": str,     # Thinking trace delta (optional)
+            "done": bool,              # Whether stream is complete
+            "routing_result": RoutingResult  # Final result (only when done=True)
+        }
+
+        Note: Streaming only supports local tier routing (no escalation or caching).
+        """
+        # Streaming doesn't support caching or escalation
+        # Only use local tier for streaming
+
+        start = time.perf_counter()
+        full_content = ""
+        full_thinking = ""
+
+        # Default to F16 (Ollama reasoner) for streaming with thinking traces
+        # Q4 (llama.cpp) doesn't support streaming yet
+        model_alias = request.model_hint or "kitty-f16"
+        model_format = detect_model_format(model_alias)
+
+        # Get tools based on prompt and mode
+        tools = get_tools_for_prompt(request.prompt, mode=request.tool_mode)
+        if not request.allow_paid:
+            tools = [
+                tool
+                for tool in tools
+                if tool.get("function", {}).get("name") not in {"research_deep"}
+            ]
+
+        final_prompt = request.prompt
+        if tools:
+            final_prompt = self._prompt_builder.build(
+                mode="cli",
+                tools=tools,
+                model_format=model_format.value,
+                query=request.prompt,
+                freshness_required=request.freshness_required,
+                vision_targets=request.vision_targets,
+            )
+
+        # Stream from llama client
+        async for chunk in self._llama.generate_stream(final_prompt, model_alias):
+            # Accumulate full response
+            if chunk.get("delta"):
+                full_content += chunk["delta"]
+            if chunk.get("delta_thinking"):
+                full_thinking += chunk["delta_thinking"]
+
+            # Yield chunk to caller
+            yield chunk
+
+            # If done, construct final RoutingResult
+            if chunk.get("done"):
+                latency = int((time.perf_counter() - start) * 1000)
+
+                metadata = {
+                    "provider": "llamacpp",
+                    "model": model_alias or self._config.llamacpp.model_alias or self._config.local_models[0],
+                    "host": self._config.llamacpp.host,
+                    "streaming": True,
+                    "thinking_length": len(full_thinking) if full_thinking else 0,
+                }
+
+                # Use confidence scorer to calculate dynamic confidence
+                confidence_result = self._confidence_scorer.score_response(
+                    response_text=full_content,
+                    tool_calls=[],
+                    metadata=metadata,
+                    prompt=request.prompt,
+                )
+                confidence = confidence_result.overall
+
+                # Log routing decision
+                log_routing_decision(
+                    logger=logger,
+                    tier="local",
+                    model=metadata["model"],
+                    confidence=confidence,
+                    cost=_COST_BY_TIER[RoutingTier.local],
+                    prompt=request.prompt,
+                    response=full_content,
+                    metadata=metadata,
+                )
+
+                result = RoutingResult(
+                    output=full_content,
+                    tier=RoutingTier.local,
+                    confidence=confidence,
+                    latency_ms=latency,
+                    metadata=metadata,
+                )
+
+                # Record audit and usage
+                self._record(request, result, cache_key=None)
+                self._record_usage(result)
+
+                # Yield final chunk with result
+                yield {
+                    "delta": "",
+                    "delta_thinking": None,
+                    "done": True,
+                    "routing_result": result,
+                }
+
     async def _invoke_local(self, request: RoutingRequest) -> RoutingResult:
         start = time.perf_counter()
         # Default to Q4 orchestrator model for tool calling

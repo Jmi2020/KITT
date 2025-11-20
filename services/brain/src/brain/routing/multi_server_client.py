@@ -174,5 +174,61 @@ class MultiServerLlamaCppClient:
             "model": routing_config.ollama.model,
         }
 
+    async def generate_stream(self, prompt: str, model: Optional[str] = None):
+        """Stream generation request with real-time thinking traces.
+
+        Yields chunks in format:
+        {
+            "delta": str,              # Content delta
+            "delta_thinking": str,     # Thinking trace delta (optional)
+            "done": bool,              # Whether stream is complete
+        }
+
+        Note: Currently only supports Ollama models with thinking mode.
+        llama.cpp streaming support to be added in future.
+
+        Args:
+            prompt: The input prompt text
+            model: Model alias (e.g., "kitty-f16" for Ollama reasoner)
+
+        Yields:
+            Dict containing delta, delta_thinking, and done flag
+
+        Raises:
+            ValueError: If model alias is unknown
+            NotImplementedError: If model doesn't support streaming
+        """
+        selected_model = model or self._default_model
+
+        client = self._clients.get(selected_model)
+        if not client:
+            raise ValueError(
+                f"Unknown model '{selected_model}'. Available: {list(self._clients.keys())}"
+            )
+
+        logger.debug(f"Streaming from {selected_model}")
+
+        # Handle Ollama streaming
+        if client == "ollama" and self._ollama_client:
+            # Get thinking level from config
+            routing_config = get_routing_config()
+            think_level = routing_config.ollama.think
+
+            # Build messages in OpenAI format
+            messages = [{"role": "user", "content": prompt}]
+
+            logger.debug(f"Streaming from Ollama with thinking mode: {think_level}")
+
+            # Stream from Ollama
+            for chunk in self._ollama_client.stream_chat(messages, think=think_level):
+                yield chunk
+            return
+
+        # llama.cpp streaming not yet implemented
+        raise NotImplementedError(
+            f"Streaming not yet supported for llama.cpp models (requested: {selected_model}). "
+            "Use Ollama reasoner (LOCAL_REASONER_PROVIDER=ollama) for streaming with thinking traces."
+        )
+
 
 __all__ = ["MultiServerLlamaCppClient"]

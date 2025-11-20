@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any, Dict, Optional, Tuple
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ConfigDict
 
 from common.db.conversations import record_conversation_message
@@ -262,4 +264,123 @@ async def post_query(
         confirmation_phrase=confirmation_phrase,
         pending_tool=pending_tool,
         hazard_class=hazard_class,
+    )
+
+
+@router.post("/query/stream")
+async def post_query_stream(
+    body: QueryInput, orchestrator: BrainOrchestrator = Depends(get_orchestrator)
+) -> StreamingResponse:
+    """Stream query response with real-time thinking traces.
+
+    Returns SSE (Server-Sent Events) stream with:
+    - thinking deltas (displayed separately)
+    - content deltas (actual response)
+    - metadata (when complete)
+
+    Note: Only works with Ollama provider (LOCAL_REASONER_PROVIDER=ollama)
+    """
+    prompt = body.prompt or body.payload.get("prompt")
+    if not prompt:
+        raise ValueError("prompt is required")
+
+    # Parse inline provider/model syntax
+    cleaned_prompt, inline_provider, inline_model = parse_inline_provider_syntax(prompt)
+
+    try:
+        record_conversation_message(
+            conversation_id=body.conversation_id,
+            role=ConversationRole.user,
+            content=cleaned_prompt,
+            user_id=body.user_id,
+            metadata={
+                "intent": body.intent,
+                "toolMode": body.tool_mode,
+            },
+            title_hint=cleaned_prompt,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to record user message: %s", exc)
+
+    async def event_generator():
+        """Generate SSE events for streaming response."""
+        full_content = ""
+        full_thinking = ""
+        routing_result = None
+
+        try:
+            async for chunk in orchestrator.generate_response_stream(
+                conversation_id=body.conversation_id,
+                request_id=uuid4().hex,
+                prompt=cleaned_prompt,
+                user_id=body.user_id,
+                force_tier=body.force_tier,
+                freshness_required=body.freshness_required,
+                model_hint=body.model_alias,
+                use_agent=body.use_agent,
+                tool_mode=body.tool_mode,
+            ):
+                # Accumulate for final storage
+                if chunk.get("delta"):
+                    full_content += chunk["delta"]
+                if chunk.get("delta_thinking"):
+                    full_thinking += chunk["delta_thinking"]
+
+                # Send SSE event
+                event_data = {
+                    "type": "chunk",
+                    "delta": chunk.get("delta", ""),
+                    "delta_thinking": chunk.get("delta_thinking"),
+                    "done": chunk.get("done", False),
+                }
+
+                yield f"data: {json.dumps(event_data)}\n\n"
+
+                # Store routing result from final chunk
+                if chunk.get("done") and chunk.get("routing_result"):
+                    routing_result = chunk["routing_result"]
+
+            # Record assistant message
+            if routing_result:
+                try:
+                    record_conversation_message(
+                        conversation_id=body.conversation_id,
+                        role=ConversationRole.assistant,
+                        content=full_content,
+                        metadata={
+                            "tier": routing_result.tier.value,
+                            "confidence": routing_result.confidence,
+                            "thinking_length": len(full_thinking) if full_thinking else 0,
+                        },
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to record assistant message: %s", exc)
+
+            # Send completion event
+            completion_data = {
+                "type": "complete",
+                "conversation_id": body.conversation_id,
+                "routing": {
+                    "tier": routing_result.tier.value if routing_result else "unknown",
+                    "confidence": routing_result.confidence if routing_result else 0,
+                } if routing_result else None
+            }
+            yield f"data: {json.dumps(completion_data)}\n\n"
+
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Streaming error: %s", exc, exc_info=True)
+            error_data = {
+                "type": "error",
+                "error": str(exc),
+            }
+            yield f"data: {json.dumps(error_data)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
     )
