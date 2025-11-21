@@ -11,6 +11,11 @@
   margin-bottom: 16px;
 }
 
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .autonomy-calendar .muted {
   color: #6b7280;
   margin-top: 4px;
@@ -172,4 +177,22 @@
   padding: 10px;
   border-radius: 8px;
   margin-bottom: 12px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-row {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+}
+
+.history-row .error-text {
+  color: #b91c1c;
+  margin-top: 4px;
 }

@@ -24,6 +24,7 @@ interface Schedule {
 
 const AutonomyCalendar = () => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [jobName, setJobName] = useState('');
@@ -37,6 +38,7 @@ const AutonomyCalendar = () => {
 
   useEffect(() => {
     loadSchedules();
+    loadHistory();
   }, []);
 
   const loadSchedules = async () => {
@@ -51,6 +53,17 @@ const AutonomyCalendar = () => {
       setError(e.message || 'Failed to load schedules');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadHistory = async () => {
+    try {
+      const res = await fetch('/api/autonomy/calendar/history?limit=30');
+      if (!res.ok) throw new Error(`Failed to load history (${res.status})`);
+      const data: any[] = await res.json();
+      setHistory(data);
+    } catch (e: any) {
+      setError((prev) => prev || e.message || 'Failed to load history');
     }
   };
 
@@ -125,7 +138,10 @@ const AutonomyCalendar = () => {
           <h2>Autonomy Calendar</h2>
           <p className="muted">Create and manage autonomous schedules (research, checks, etc.).</p>
         </div>
-        <button onClick={loadSchedules} className="btn-refresh">{loading ? 'Loading…' : 'Refresh'}</button>
+        <div className="header-actions">
+          <button onClick={loadSchedules} className="btn-refresh">{loading ? 'Loading…' : 'Refresh'}</button>
+          <button onClick={loadHistory} className="btn-refresh">Reload History</button>
+        </div>
       </header>
 
       {error && <div className="banner error">{error}</div>}
@@ -204,6 +220,25 @@ const AutonomyCalendar = () => {
           </div>
         ))}
         {schedules.length === 0 && <div className="empty">No schedules yet.</div>}
+      </div>
+
+      <div className="list-header">
+        <h3>Recent Executions</h3>
+        <span className="count">{history.length}</span>
+      </div>
+      <div className="history-list">
+        {history.map((h) => (
+          <div key={h.id} className="history-row">
+            <div className="name">{h.job_name}</div>
+            <div className="meta">
+              <span className="pill">{h.status}</span>
+              {h.budget_spent_usd != null && <span className="pill pill-muted">Cost: ${Number(h.budget_spent_usd).toFixed(2)}</span>}
+              <span className="pill pill-muted">{formatDate(h.execution_time)}</span>
+            </div>
+            {h.error_message && <div className="error-text">{h.error_message}</div>}
+          </div>
+        ))}
+        {history.length === 0 && <div className="empty">No executions yet.</div>}
       </div>
     </section>
   );

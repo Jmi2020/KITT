@@ -2759,6 +2759,124 @@ def research_stream(
         raise typer.Exit(1) from exc
 
 
+# ---------------------------------------------------------------------------
+# Autonomy Calendar (schedules)
+# ---------------------------------------------------------------------------
+
+
+def _calendar_list(user_id: str) -> List[Dict[str, Any]]:
+    try:
+        data = _get_json(f"{API_BASE}/api/autonomy/calendar/schedules?user_id={quote_plus(user_id)}")
+        schedules = data if isinstance(data, list) else data.get("schedules", [])
+        if not schedules:
+            console.print("[yellow]No schedules found[/yellow]")
+            return []
+        table = Table(title="Autonomy Schedules", show_lines=False, header_style="bold cyan")
+        table.add_column("ID", overflow="fold")
+        table.add_column("Job", overflow="fold")
+        table.add_column("Type")
+        table.add_column("Cron/NL", overflow="fold")
+        table.add_column("Enabled")
+        table.add_column("Next")
+        for s in schedules:
+            table.add_row(
+                s.get("id", ""),
+                s.get("job_name", ""),
+                s.get("job_type", ""),
+                s.get("natural_language_schedule") or s.get("cron_expression") or "",
+                "yes" if s.get("enabled") else "no",
+                s.get("next_execution_at") or "—",
+            )
+        console.print(table)
+        return schedules
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to list schedules: {exc}")
+        raise typer.Exit(1) from exc
+
+
+def _calendar_create(
+    user_id: str,
+    job_name: str,
+    job_type: str,
+    nl: Optional[str],
+    cron: Optional[str],
+    budget: Optional[float],
+    priority: int,
+    enabled: bool,
+) -> None:
+    payload: Dict[str, Any] = {
+        "user_id": user_id,
+        "job_name": job_name,
+        "job_type": job_type,
+        "natural_language_schedule": nl,
+        "cron_expression": cron,
+        "budget_limit_usd": budget,
+        "priority": priority,
+        "enabled": enabled,
+    }
+    try:
+        data = _post_json(f"{API_BASE}/api/autonomy/calendar/schedules", payload)
+        console.print(f"[green]Created schedule:[/green] {data.get('id')}")
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to create schedule: {exc}")
+        raise typer.Exit(1) from exc
+
+
+def _calendar_delete(schedule_id: str) -> None:
+    try:
+        with _client() as client:
+            resp = client.delete(f"{API_BASE}/api/autonomy/calendar/schedules/{schedule_id}")
+            resp.raise_for_status()
+        console.print(f"[green]Deleted schedule:[/green] {schedule_id}")
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to delete schedule: {exc}")
+        raise typer.Exit(1) from exc
+
+
+@app.command(name="calendar")
+def calendar_cmd(
+    action: str = typer.Argument("list", help="Action: list | create | delete"),
+    schedule_id: Optional[str] = typer.Argument(None, help="Schedule ID (for delete)"),
+    job_name: Optional[str] = typer.Option(None, "--name", "-n", help="Job name (create)"),
+    job_type: str = typer.Option("research", "--type", "-t", help="Job type"),
+    nl: Optional[str] = typer.Option(None, "--nl", help="Natural language schedule, e.g., 'every monday at 5'"),
+    cron: Optional[str] = typer.Option(None, "--cron", help="Cron expression, e.g., '0 5 * * 1'"),
+    budget: Optional[float] = typer.Option(None, "--budget", help="Budget limit per run (USD)"),
+    priority: int = typer.Option(5, "--priority", "-p", min=1, max=10, help="Priority 1-10"),
+    enable: bool = typer.Option(True, "--enable/--disable", help="Enable the schedule"),
+    user_id: str = typer.Option(state.user_id, "--user", "-u", help="User ID"),
+) -> None:
+    """Manage autonomy calendar schedules."""
+    action = action.lower()
+    if action == "list":
+        _calendar_list(user_id=user_id)
+    elif action == "create":
+        if not job_name:
+            console.print("[red]--name is required for create[/red]")
+            raise typer.Exit(1)
+        if not nl and not cron:
+            console.print("[yellow]Provide --nl or --cron (natural language or cron expression)[/yellow]")
+            raise typer.Exit(1)
+        _calendar_create(
+            user_id=user_id,
+            job_name=job_name,
+            job_type=job_type,
+            nl=nl,
+            cron=cron,
+            budget=budget,
+            priority=priority,
+            enabled=enable,
+        )
+    elif action == "delete":
+        if not schedule_id:
+            console.print("[red]schedule_id required for delete[/red]")
+            raise typer.Exit(1)
+        _calendar_delete(schedule_id)
+    else:
+        console.print("[red]Unknown action. Use list | create | delete[/red]")
+        raise typer.Exit(1)
+
+
 @app.command(name="report")
 def research_report(
     session_id: str = typer.Argument(..., help="Research session ID to export"),
