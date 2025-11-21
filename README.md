@@ -15,7 +15,7 @@
 
 ## 🎯 Vision: A Maker Space for Technical AI
 
-I want to build a maker space purpose-built for technical AI: a place where models such as Claude, GPT-5, Llama, Qwen, and Mistral can run research and directly control fabrication hardware. The core will be a cluster of Mac Studios providing energy-efficient, reliable compute and a secure network interface to the devices we care about most — primarily 3D printers, but also CNC machines, test rigs, and sensing equipment.
+I want to build a maker space purpose-built for technical AI: a place where models such as Claude, GPT-5, Llama, Qwen, and Mistral can run research and directly control fabrication hardware. The core will be a cluster of Mac Studios providing energy-efficient, reliable compute and a secure network interface to the devices we care about most - primarily 3D printers, but also CNC machines, test rigs, and sensing equipment.
 
 This environment will let models investigate materials, estimate production costs, run simulations, and then orchestrate fabrication steps. By combining on-device processing with curated research pipelines, we can shorten the loop from idea to physical prototype. The facility will prioritize sustainable, ethically sourced materials and robotic procurement workflows that reduce supply-chain impacts and improve repeatability.
 
@@ -519,7 +519,7 @@ curl -s "http://localhost:8000/api/autonomy/budget?days=7" | jq
 
 ### Web Search + Extraction Stack (SearXNG → Brave → DuckDuckGo → Perplexity → Jina Reader)
 
-1. **Run SearXNG locally (free, private)** — already bundled in KITTY
+1. **Run SearXNG locally (free, private)** - already bundled in KITTY
    ```bash
    # start the built-in SearXNG container (listens on the internal name `searxng:8080`)
     docker compose -f infra/compose/docker-compose.yml up -d searxng
