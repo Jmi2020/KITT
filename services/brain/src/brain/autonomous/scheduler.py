@@ -166,6 +166,47 @@ class AutonomousScheduler:
         )
         return job.id
 
+    def add_cron_expression_job(
+        self,
+        func: Callable,
+        cron_expression: str,
+        job_id: Optional[str] = None,
+        replace_existing: bool = True,
+        **kwargs
+    ) -> str:
+        """
+        Add a job using a full cron expression.
+
+        Args:
+            func: Function to execute
+            cron_expression: Standard cron string (min hour dom month dow)
+            job_id: Unique identifier
+            replace_existing: Replace existing job with same ID
+        """
+        if not self._is_running or self._scheduler is None:
+            raise RuntimeError("Scheduler not started. Call start() first.")
+
+        trigger = CronTrigger.from_crontab(cron_expression, timezone="UTC")
+        job = self._scheduler.add_job(
+            func=func,
+            trigger=trigger,
+            id=job_id,
+            replace_existing=replace_existing,
+            kwargs=kwargs,
+            name=job_id or func.__name__
+        )
+        logger.info(f"Added cron job '{job.id}' ({cron_expression})")
+        return job.id
+
+    def remove_job(self, job_id: str) -> None:
+        """Remove a job if it exists."""
+        if not self._is_running or self._scheduler is None:
+            return
+        try:
+            self._scheduler.remove_job(job_id)
+        except Exception:
+            return
+
     def add_cron_job(
         self,
         func: Callable,

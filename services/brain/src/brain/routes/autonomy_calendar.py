@@ -14,6 +14,11 @@ from sqlalchemy.orm import Session
 from common.db import get_db
 from common.db.models import AutonomousSchedule, JobExecutionHistory
 
+from brain.autonomous.scheduler import get_scheduler
+from brain.autonomous import jobs as autonomous_jobs
+from brain.autonomous.scheduler import AutonomousScheduler
+from common.db import SessionLocal
+
 router = APIRouter(prefix="/api/autonomy/calendar", tags=["autonomy-calendar"])
 
 
@@ -169,6 +174,91 @@ def _resolve_cron(req: ScheduleCreateRequest) -> str:
     raise HTTPException(status_code=400, detail="Provide either cron_expression or natural_language_schedule.")
 
 
+def _dispatch_job(schedule_id: str) -> None:
+    """
+    Scheduler callback: dispatches a job and records execution history.
+
+    This is a minimal dispatcher; known job_types are mapped to existing
+    autonomous jobs. Unknown types are treated as no-op successes.
+    """
+    from time import perf_counter
+
+    started = perf_counter()
+    status = "success"
+    error_message = None
+    job_name = "unknown"
+    job_type = "custom"
+
+    session = SessionLocal()
+    try:
+        schedule = session.get(AutonomousSchedule, schedule_id)
+        if not schedule:
+            return
+        job_name = schedule.job_name
+        job_type = schedule.job_type
+
+        # Map job_type to existing autonomous job function
+        job_map = {
+            "health_check": autonomous_jobs.daily_health_check,
+            "weekly_research": autonomous_jobs.weekly_research_cycle,
+            "knowledge_update": autonomous_jobs.knowledge_base_update,
+            "printer_health": autonomous_jobs.printer_fleet_health_check,
+            "project_generation": autonomous_jobs.project_generation_cycle,
+            "task_execution": autonomous_jobs.task_execution_cycle,
+            "outcome_measurement": autonomous_jobs.outcome_measurement_cycle,
+        }
+        func = job_map.get(job_type)
+        if func:
+            try:
+                func()  # funcs are sync
+            except Exception as exc:  # pragma: no cover
+                status = "failed"
+                error_message = str(exc)
+        else:
+            # Unknown job type -> no-op success
+            status = "success"
+
+        duration = perf_counter() - started
+
+        history = JobExecutionHistory(
+            job_id=str(schedule_id),
+            job_name=job_name,
+            execution_time=datetime.utcnow(),
+            duration_seconds=duration,
+            status=status,
+            budget_spent_usd=None,
+            error_message=error_message,
+            result_summary=None,
+        )
+        session.add(history)
+
+        schedule.last_execution_at = datetime.utcnow()
+        session.add(schedule)
+        session.commit()
+    finally:
+        session.close()
+
+
+def _register_with_scheduler(
+    scheduler: AutonomousScheduler,
+    schedule: AutonomousSchedule,
+) -> None:
+    """Register/replace the schedule with APScheduler if running."""
+    if not scheduler.is_running:
+        return
+    try:
+        scheduler.add_cron_expression_job(
+            _dispatch_job,
+            cron_expression=schedule.cron_expression,
+            job_id=str(schedule.id),
+            replace_existing=True,
+        )
+    except Exception as exc:  # pragma: no cover
+        # Best-effort; API still returns success so user can retry once scheduler is healthy
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to register schedule with scheduler: {exc}")
+
+
 @router.post("/schedules", response_model=ScheduleResponse)
 async def create_schedule(req: ScheduleCreateRequest, db: Session = Depends(get_db)) -> ScheduleResponse:
     cron = _resolve_cron(req)
@@ -192,6 +282,8 @@ async def create_schedule(req: ScheduleCreateRequest, db: Session = Depends(get_
     db.add(schedule)
     db.commit()
     db.refresh(schedule)
+    # Register with scheduler if running
+    _register_with_scheduler(get_scheduler(), schedule)
     return ScheduleResponse.from_orm(schedule)
 
 
@@ -246,6 +338,11 @@ async def update_schedule(
     db.add(schedule)
     db.commit()
     db.refresh(schedule)
+    # Re-register if enabled
+    if schedule.enabled:
+        _register_with_scheduler(get_scheduler(), schedule)
+    else:
+        get_scheduler().remove_job(str(schedule.id))
     return ScheduleResponse.from_orm(schedule)
 
 
@@ -254,6 +351,7 @@ async def delete_schedule(schedule_id: str, db: Session = Depends(get_db)) -> di
     schedule = db.get(AutonomousSchedule, schedule_id)
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
+    get_scheduler().remove_job(str(schedule.id))
     db.delete(schedule)
     db.commit()
     return {"status": "deleted", "id": schedule_id}
