@@ -5,6 +5,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { getWebUserId } from '../utils/user';
 import './Results.css';
 
 interface ResearchSession {
@@ -54,7 +55,7 @@ const Results = () => {
   const [loading, setLoading] = useState(false);
   const [generatingSynthesis, setGeneratingSynthesis] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [userId] = useState('demo-user');
+  const [userId] = useState<string>(() => getWebUserId());
   const [showModal, setShowModal] = useState(false);
 
   // Load completed sessions

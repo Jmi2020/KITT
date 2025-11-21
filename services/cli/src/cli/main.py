@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shlex
+import subprocess
 import sys
 import time
 import uuid
@@ -11,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Set
 from urllib.parse import quote_plus, urlencode, urlparse
+from pathlib import Path
 
 import httpx
 import typer
@@ -735,6 +739,219 @@ def _get_json(url: str) -> Dict[str, Any]:
         response = client.get(url)
         response.raise_for_status()
         return response.json()
+
+
+def _safe_value(val: Any, default: str = "N/A") -> str:
+    """Stringify with a fallback."""
+    if val is None:
+        return default
+    if isinstance(val, (int, float)):
+        return str(val)
+    text = str(val).strip()
+    return text if text else default
+
+
+def _render_research_report(detail: Dict[str, Any], results: Dict[str, Any]) -> str:
+    """Render a research session into the GPTOSS research template."""
+    now = datetime.utcnow().replace(tzinfo=None)
+    created_at = detail.get("created_at") or now.isoformat()
+    config = detail.get("config") or {}
+
+    total_findings = results.get("total_findings", 0)
+    total_sources = results.get("total_sources", 0)
+    total_cost = results.get("total_cost_usd", 0.0)
+    final_synthesis = results.get("final_synthesis") or "N/A"
+    findings = results.get("findings") or []
+
+    sample_findings = []
+    for idx, finding in enumerate(findings[:3], 1):
+        content = finding.get("content", "") or ""
+        snippet = content[:500] + ("…" if len(content) > 500 else "")
+        sample_findings.append(f"Finding {idx}: {snippet}")
+    rep_block_parts = ["Synthesis:\n" + final_synthesis]
+    if sample_findings:
+        rep_block_parts.append("\n".join(sample_findings))
+    rep_block = "\n\n".join(rep_block_parts) if rep_block_parts else "N/A"
+
+    temperature = config.get("temperature", "N/A")
+    top_p = config.get("top_p", "N/A")
+    max_tokens = (
+        config.get("max_output_tokens")
+        or config.get("max_tokens")
+        or "N/A"
+    )
+    stop_sequences = config.get("stop_sequences") or "N/A"
+    strategy = config.get("strategy", "N/A")
+
+    report = f"""
+<LLM_RESEARCH_OUTPUT>
+
+# 0. METADATA
+Run_ID: {detail.get('session_id', 'N/A')}
+Date: {created_at[:10]}
+Researcher: {USER_NAME}
+Model_Name: GPTOSS-120B
+Model_Revision: N/A
+KITTY_Pipeline_Stage: analysis
+Dataset_Name: research_sessions
+Task_Type: research
+Experiment_Tag: strategy={strategy}
+
+# 1. RESEARCH QUESTION
+Primary_Question: {_safe_value(detail.get('query'))}
+Secondary_Questions:
+- N/A
+- N/A
+
+# 2. HYPOTHESES
+Null_Hypothesis: N/A
+Working_Hypotheses:
+- H1: N/A
+- H2: N/A
+- H3: N/A
+
+# 3. EXPERIMENT DESIGN
+
+## 3.1 Variables
+Independent_Variables:
+- strategy: {strategy}
+- max_iterations: {_safe_value(config.get('max_iterations', 'N/A'))}
+Dependent_Variables:
+- findings: total findings collected
+- cost_usd: total cost in USD
+
+## 3.2 Model Configuration
+Temperature: {temperature}
+Top_p: {top_p}
+Max_Tokens: {max_tokens}
+Stop_Sequences: {stop_sequences}
+System_Prompt_Summary: N/A
+Other_Params: {json.dumps(config)}
+
+## 3.3 Data & Sampling
+Input_Source: web + tools
+Sample_Size: {total_findings}
+Sampling_Strategy: iterative search
+Train_Dev_Test_Split: N/A
+Filtering_Notes:
+- N/A
+- N/A
+
+# 4. PROMPT SETUP
+
+## 4.1 System Prompt (verbatim)
+<BEGIN_BLOCK:SYSTEM_PROMPT>
+N/A
+<END_BLOCK:SYSTEM_PROMPT>
+
+## 4.2 User Prompt / Template (verbatim)
+<BEGIN_BLOCK:USER_PROMPT_TEMPLATE>
+N/A
+<END_BLOCK:USER_PROMPT_TEMPLATE>
+
+## 4.3 Few-Shot Examples
+Has_Few_Shot: no
+<BEGIN_BLOCK:FEW_SHOT_EXAMPLES>
+N/A
+<END_BLOCK:FEW_SHOT_EXAMPLES>
+
+# 5. RESULTS
+
+## 5.1 Quantitative Results
+Metrics:
+- total_findings: {total_findings} (all)
+- total_sources: {total_sources} (all)
+- total_cost_usd: {total_cost:.4f} (all)
+Aggregate_Summary:
+- Findings collected: {total_findings}
+- Sources referenced: {total_sources}
+- Spend: ${total_cost:.4f}
+
+## 5.2 Qualitative Results
+Representative_Outputs:
+<BEGIN_BLOCK:REPRESENTATIVE_OUTPUTS>
+{rep_block}
+<END_BLOCK:REPRESENTATIVE_OUTPUTS>
+
+Error_Patterns:
+- N/A
+- N/A
+
+# 6. ANALYSIS
+
+Interpretation:
+- Session status: {_safe_value(detail.get('status'))}
+- Completeness score: {_safe_value(results.get('completeness_score'))}
+- Confidence score: {_safe_value(results.get('confidence_score'))}
+
+Surprises:
+- N/A
+
+Threats_to_Validity:
+- Internal: N/A
+- External: Findings not audited; relies on upstream sources
+
+# 7. DECISIONS & NEXT STEPS
+Decisions:
+- N/A
+
+Followup_Experiments:
+- Run further iterations if findings are sparse
+- N/A
+
+Notes_for_KITTY_Pipeline:
+- Session exported from CLI report command
+- N/A
+
+# 8. RAW LOG / TRACE (OPTIONAL)
+<BEGIN_BLOCK:RAW_LOG>
+N/A
+<END_BLOCK:RAW_LOG>
+
+</LLM_RESEARCH_OUTPUT>
+"""
+    return report.strip() + "\n"
+
+
+def _write_report_file(report: str, session_id: str, output_dir: str) -> Path:
+    """Persist report to disk."""
+    out_dir_path = Path(output_dir)
+    out_dir_path.mkdir(parents=True, exist_ok=True)
+    path = out_dir_path / f"{session_id}.md"
+    path.write_text(report, encoding="utf-8")
+    return path
+
+
+def _open_report(path: Path, editor: Optional[str]) -> None:
+    """Open a report file in an editor/pager."""
+    cmd = shlex.split(editor) if editor else shlex.split(os.getenv("EDITOR", ""))
+    if not cmd:
+        cmd = ["nano"]
+    cmd.append(str(path))
+    try:
+        subprocess.run(cmd, check=False)
+    except FileNotFoundError:
+        subprocess.run(["less", "-R", str(path)], check=False)
+
+
+def _export_research_report(
+    session_id: str,
+    output_dir: str = "Research/exports",
+    open_file: bool = True,
+    editor: Optional[str] = None,
+) -> Path:
+    """Fetch session + results, render a template report, save, and optionally open."""
+    detail = _get_json(f"{API_BASE}/api/research/sessions/{session_id}")
+    results = _get_json(f"{API_BASE}/api/research/sessions/{session_id}/results")
+
+    report = _render_research_report(detail, results)
+    path = _write_report_file(report, session_id, output_dir)
+    console.print(f"[green]Saved report:[/green] {path}")
+
+    if open_file:
+        _open_report(path, editor)
+
+    return path
 
 
 def _vision_post(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -2542,6 +2759,21 @@ def research_stream(
         raise typer.Exit(1) from exc
 
 
+@app.command(name="report")
+def research_report(
+    session_id: str = typer.Argument(..., help="Research session ID to export"),
+    output_dir: str = typer.Option("Research/exports", "--output-dir", "-o", help="Directory to save the report"),
+    open_file: bool = typer.Option(True, "--open/--no-open", help="Open in editor after export"),
+    editor: Optional[str] = typer.Option(None, "--editor", "-e", help="Editor command (default: $EDITOR, fallback nano/less)"),
+) -> None:
+    """Export a research session to the GPTOSS template and optionally open it."""
+    try:
+        _export_research_report(session_id, output_dir=output_dir, open_file=open_file, editor=editor)
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Failed to export report: {exc}")
+        raise typer.Exit(1) from exc
+
+
 @app.command()
 def shell(
     conversation: Optional[str] = typer.Option(
@@ -2581,6 +2813,7 @@ def shell(
     console.print("  [cyan]/sessions [limit][/cyan]   - List all research sessions")
     console.print("  [cyan]/session <id>[/cyan]       - View detailed session info and metrics")
     console.print("  [cyan]/stream <id>[/cyan]        - Stream progress of active research session")
+    console.print("  [cyan]/report <id>[/cyan]        - Export & open full report (GPTOSS template)")
 
     console.print("\n[bold]Conversational AI:[/bold]")
     console.print("  [cyan]/verbosity <1-5>[/cyan]  - Set response detail level")
@@ -2667,6 +2900,7 @@ def shell(
                 console.print("      [dim]Or type row number after listing to view that session[/dim]")
                 console.print("  [cyan]/session <id>[/cyan]       - View detailed session info and metrics")
                 console.print("  [cyan]/stream <id>[/cyan]        - Stream progress of active research session")
+                console.print("  [cyan]/report <id>[/cyan]        - Export & open full report (GPTOSS template)")
 
                 console.print("\n[bold]Conversational AI:[/bold]")
                 console.print("  [cyan]/verbosity <1-5>[/cyan]  - Set verbosity (1=terse, 5=exhaustive)")
@@ -2813,6 +3047,43 @@ def shell(
                     _stream_research_progress(session_id, state.user_id, query)
                 except Exception as exc:
                     console.print(f"[red]Failed to stream session: {exc}")
+                continue
+
+            if cmd == "report":
+                if not args:
+                    console.print("[yellow]Usage: /report <session_id> [--no-open] [--editor <cmd>] [--output-dir <path>]")
+                    console.print("[dim]Example: /report d99a3593 --editor 'less -R'[/dim]")
+                    continue
+
+                session_id = args[0]
+                output_dir = "Research/exports"
+                open_file = True
+                editor = None
+
+                idx = 1
+                while idx < len(args):
+                    arg = args[idx]
+                    if arg in {"--no-open", "--noopen"}:
+                        open_file = False
+                    elif arg == "--open":
+                        open_file = True
+                    elif arg in {"-e", "--editor"} and idx + 1 < len(args):
+                        idx += 1
+                        editor = args[idx]
+                    elif arg in {"-o", "--output-dir"} and idx + 1 < len(args):
+                        idx += 1
+                        output_dir = args[idx]
+                    idx += 1
+
+                try:
+                    _export_research_report(
+                        session_id,
+                        output_dir=output_dir,
+                        open_file=open_file,
+                        editor=editor,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    console.print(f"[red]Failed to export report: {exc}")
                 continue
 
             if cmd == "history":

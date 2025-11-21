@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
+import { getWebUserId } from '../utils/user';
 import './Research.css';
 
 interface ResearchSession {
@@ -74,7 +75,7 @@ interface ResearchTemplate {
 const Research = () => {
   // State
   const [query, setQuery] = useState('');
-  const [userId, setUserId] = useState('demo-user');
+  const [userId, setUserId] = useState<string>(() => getWebUserId());
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
   const [templates, setTemplates] = useState<ResearchTemplate[]>([]);
   const [maxIterations, setMaxIterations] = useState(10);
