@@ -1895,7 +1895,7 @@ def _display_session_detail(session_id: str) -> None:
 
 
 def _stream_research_progress(session_id: str, user_id: str, query: str) -> None:
-    """Stream research progress with real-time updates."""
+    """Stream research progress with real-time updates; fall back to polling if WS fails."""
     import json
     import asyncio
     import websockets
@@ -1910,10 +1910,68 @@ def _stream_research_progress(session_id: str, user_id: str, query: str) -> None
         # Use WebSocket to stream research progress
         ws_url = f"ws://{API_BASE.replace('http://', '').replace('https://', '')}/api/research/sessions/{session_id}/stream"
 
+        async def poll_status_fallback(reason: Optional[str] = None) -> None:
+            """Poll session status when streaming is unavailable."""
+            if reason:
+                console.print(f"\n[yellow]WebSocket stream unavailable ({reason}). Falling back to HTTP polling...[/yellow]")
+            poll_interval = 5
+
+            with Live(console=console, refresh_per_second=1) as live:
+                while True:
+                    try:
+                        session = await asyncio.to_thread(
+                            _get_json,
+                            f"{API_BASE}/api/research/sessions/{session_id}"
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        console.print(f"[red]Failed to poll session status: {exc}[/red]")
+                        return
+
+                    status = (session.get("status") or "unknown").lower()
+                    config = session.get("config") or {}
+                    max_iters = config.get("max_iterations") or config.get("max_iters") or "—"
+
+                    progress_table = Table.grid(padding=(0, 2))
+                    progress_table.add_column(style="cyan")
+                    progress_table.add_column()
+
+                    progress_table.add_row("Status:", status.capitalize())
+                    progress_table.add_row("Iteration:", f"{session.get('total_iterations', 0)}/{max_iters}")
+                    progress_table.add_row("Findings:", str(session.get("total_findings", 0)))
+                    progress_table.add_row("Cost:", f"${float(session.get('total_cost_usd', 0) or 0):.2f}")
+
+                    saturation = session.get("saturation_status") or {}
+                    if saturation:
+                        is_sat = saturation.get("is_saturated", False)
+                        novelty = saturation.get("novelty_rate")
+                        novelty_text = f" (novelty {novelty:.2%})" if isinstance(novelty, (int, float)) else ""
+                        progress_table.add_row(
+                            "Saturation:",
+                            f"{'🟡' if is_sat else '🟢'} {'Yes' if is_sat else 'No'}{novelty_text}"
+                        )
+
+                    live.update(Panel(
+                        progress_table,
+                        title="[bold cyan]Research Status (polling)[/bold cyan]",
+                        border_style="cyan"
+                    ))
+
+                    if status in {"completed", "failed", "paused"}:
+                        color = "green" if status == "completed" else "red" if status == "failed" else "yellow"
+                        console.print(f"\n[{color}]{status.capitalize()}[/] – check /session {session_id} for details\n")
+                        return
+
+                    await asyncio.sleep(poll_interval)
+
         try:
             # Use open_timeout for connection establishment (websockets 12.0+ API)
             # The stream itself can run indefinitely
-            async with websockets.connect(ws_url, open_timeout=30) as websocket:
+            async with websockets.connect(
+                ws_url,
+                open_timeout=30,
+                ping_interval=None,  # disable client keepalive pings; some proxies drop them
+                ping_timeout=None,
+            ) as websocket:
                 with Live(console=console, refresh_per_second=2) as live:
                     current_iteration = 0
                     findings_count = 0
@@ -1964,8 +2022,7 @@ def _stream_research_progress(session_id: str, user_id: str, query: str) -> None
                             break
 
         except Exception as exc:
-            console.print(f"\n[red]Streaming error: {exc}[/red]")
-            console.print(f"[yellow]Session is running in background. Check with /session {session_id}[/yellow]\n")
+            await poll_status_fallback(str(exc))
 
     # Run async stream
     try:
