@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import useKittyContext from '../hooks/useKittyContext';
+import './FabricationConsole.css';
 
 type LocalModelResponse = {
   local: string[];
@@ -185,6 +186,47 @@ const FabricationConsole = () => {
     setLlmRouting(null);
   };
 
+  const copyCommand = async (command: string) => {
+    try {
+      await navigator.clipboard.writeText(command);
+      alert('Command copied to clipboard');
+    } catch (error) {
+      console.warn('Clipboard copy failed, showing prompt instead.');
+      window.prompt('Copy command', command);
+    }
+  };
+
+  const serviceControls = [
+    {
+      name: 'Ollama (GPT-OSS)',
+      start: 'ops/scripts/ollama/start.sh',
+      stop: 'ops/scripts/ollama/stop.sh',
+      restart: 'ops/scripts/ollama/stop.sh && ops/scripts/ollama/start.sh',
+      description: 'Primary reasoning + judge stack (GPT-OSS via Ollama).',
+    },
+    {
+      name: 'llama.cpp (Legacy)',
+      start: 'ops/scripts/llama/start.sh',
+      stop: 'ops/scripts/llama/stop.sh',
+      restart: 'ops/scripts/llama/stop.sh && ops/scripts/llama/start.sh',
+      description: 'Fallback local inference stack.',
+    },
+    {
+      name: 'Docker Compose (Core Stack)',
+      start: 'ops/scripts/start-all.sh',
+      stop: 'ops/scripts/stop-all.sh',
+      restart: 'ops/scripts/stop-all.sh && ops/scripts/start-all.sh',
+      description: 'Gateway/brain/api services.',
+    },
+    {
+      name: 'Images Service',
+      start: 'ops/scripts/start-images-service.sh',
+      stop: 'ops/scripts/stop-images-service.sh',
+      restart: 'ops/scripts/stop-images-service.sh && ops/scripts/start-images-service.sh',
+      description: 'Stable Diffusion/image generation backend.',
+    },
+  ];
+
   return (
     <section className="fabrication-console">
       <header>
@@ -193,6 +235,28 @@ const FabricationConsole = () => {
           New Session
         </button>
       </header>
+
+      <div className="panel grid service-grid">
+        <div>
+          <h3>Runtime Controls</h3>
+          <p className="text-muted">Start/stop/restart individual stacks quickly.</p>
+        </div>
+        <div className="service-list">
+          {serviceControls.map((svc) => (
+            <div key={svc.name} className="service-card">
+              <div className="service-card-header">
+                <strong>{svc.name}</strong>
+              </div>
+              <p className="text-muted">{svc.description}</p>
+              <div className="service-actions">
+                <button type="button" onClick={() => copyCommand(svc.start)}>Start</button>
+                <button type="button" onClick={() => copyCommand(svc.stop)}>Stop</button>
+                <button type="button" onClick={() => copyCommand(svc.restart)}>Restart</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div className="panel">
         <h3>Model & Verbosity</h3>

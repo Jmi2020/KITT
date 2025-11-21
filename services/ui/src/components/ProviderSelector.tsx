@@ -33,6 +33,9 @@ interface ProviderSelectorProps {
   apiBase?: string;
 }
 
+const LOCAL_LABEL = 'Local (GPT-OSS / Ollama)';
+const LOCAL_ICON = '🧠';
+
 const ProviderSelector: React.FC<ProviderSelectorProps> = ({
   selectedProvider,
   selectedModel,
@@ -81,11 +84,12 @@ const ProviderSelector: React.FC<ProviderSelectorProps> = ({
   const getCurrentProviderIcon = (): string => {
     if (!selectedProvider) return '🏠';
     const provider = providers?.providers[selectedProvider];
-    return provider?.icon || '❓';
+    if (provider) return provider.icon || '❓';
+    return LOCAL_ICON;
   };
 
   const getCurrentProviderLabel = (): string => {
-    if (!selectedProvider) return 'Local (Q4)';
+    if (!selectedProvider) return LOCAL_LABEL;
     const provider = providers?.providers[selectedProvider];
     if (!provider) return 'Unknown';
     return `${provider.name} ${selectedModel ? `(${selectedModel})` : ''}`;
@@ -152,10 +156,10 @@ const ProviderSelector: React.FC<ProviderSelectorProps> = ({
                   className="provider-option-header"
                   onClick={() => provider.enabled && handleProviderSelect(key)}
                 >
-                  <span className="provider-icon-large">{provider.icon}</span>
+                  <span className="provider-icon-large">{key === 'local' ? LOCAL_ICON : provider.icon}</span>
                   <div className="provider-info">
                     <div className="provider-name">
-                      {provider.name}
+                      {key === 'local' ? LOCAL_LABEL : provider.name}
                       {!provider.enabled && <span className="disabled-badge">Disabled</span>}
                     </div>
                     <div className="provider-models">
