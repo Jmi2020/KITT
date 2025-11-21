@@ -179,6 +179,20 @@
   margin-bottom: 12px;
 }
 
+.filters-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.filters-row input,
+.filters-row select {
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+}
+
 .history-list {
   display: flex;
   flex-direction: column;

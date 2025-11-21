@@ -27,6 +27,9 @@ const AutonomyCalendar = () => {
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [jobTypeFilter, setJobTypeFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [search, setSearch] = useState('');
   const [jobName, setJobName] = useState('');
   const [jobType, setJobType] = useState('research');
   const [nlSchedule, setNlSchedule] = useState('every monday at 5');
@@ -58,7 +61,7 @@ const AutonomyCalendar = () => {
 
   const loadHistory = async () => {
     try {
-      const res = await fetch('/api/autonomy/calendar/history?limit=30');
+      const res = await fetch('/api/autonomy/calendar/history?limit=50');
       if (!res.ok) throw new Error(`Failed to load history (${res.status})`);
       const data: any[] = await res.json();
       setHistory(data);
@@ -131,6 +134,19 @@ const AutonomyCalendar = () => {
     return isNaN(d.getTime()) ? '—' : d.toLocaleString();
   };
 
+  const filteredSchedules = schedules
+    .filter((s) => (jobTypeFilter === 'all' ? true : s.job_type === jobTypeFilter))
+    .filter((s) => (search ? s.job_name.toLowerCase().includes(search.toLowerCase()) : true))
+    .sort((a, b) => {
+      const aNext = a.next_execution_at ? new Date(a.next_execution_at).getTime() : Infinity;
+      const bNext = b.next_execution_at ? new Date(b.next_execution_at).getTime() : Infinity;
+      return aNext - bNext;
+    });
+
+  const filteredHistory = history
+    .filter((h) => (statusFilter === 'all' ? true : h.status === statusFilter))
+    .slice(0, 50);
+
   return (
     <section className="autonomy-calendar">
       <header>
@@ -145,6 +161,28 @@ const AutonomyCalendar = () => {
       </header>
 
       {error && <div className="banner error">{error}</div>}
+
+      <div className="filters-row">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by job name"
+        />
+        <select value={jobTypeFilter} onChange={(e) => setJobTypeFilter(e.target.value)}>
+          <option value="all">All types</option>
+          <option value="research">Research</option>
+          <option value="health_check">Health Check</option>
+          <option value="project_generation">Project Generation</option>
+          <option value="knowledge_update">Knowledge Update</option>
+          <option value="task_execution">Task Execution</option>
+          <option value="custom">Custom</option>
+        </select>
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="all">All history statuses</option>
+          <option value="success">success</option>
+          <option value="failed">failed</option>
+        </select>
+      </div>
 
       <div className="create-card">
         <h3>New Schedule</h3>
@@ -190,10 +228,10 @@ const AutonomyCalendar = () => {
 
       <div className="list-header">
         <h3>Schedules</h3>
-        <span className="count">{schedules.length}</span>
+        <span className="count">{filteredSchedules.length}</span>
       </div>
       <div className="schedule-list">
-        {schedules.map((s) => (
+        {filteredSchedules.map((s) => (
           <div key={s.id} className="schedule-card">
             <div className="schedule-row">
               <div>
@@ -202,6 +240,8 @@ const AutonomyCalendar = () => {
                   <span className="pill">{s.job_type}</span>
                   <span className="pill">{s.cron_expression}</span>
                   {s.natural_language_schedule && <span className="pill pill-muted">{s.natural_language_schedule}</span>}
+                  {s.priority && <span className="pill pill-muted">P{String(s.priority)}</span>}
+                  {s.enabled ? <span className="pill">enabled</span> : <span className="pill pill-muted">disabled</span>}
                 </div>
               </div>
               <div className="actions">
@@ -224,10 +264,10 @@ const AutonomyCalendar = () => {
 
       <div className="list-header">
         <h3>Recent Executions</h3>
-        <span className="count">{history.length}</span>
+        <span className="count">{filteredHistory.length}</span>
       </div>
       <div className="history-list">
-        {history.map((h) => (
+        {filteredHistory.map((h) => (
           <div key={h.id} className="history-row">
             <div className="name">{h.job_name}</div>
             <div className="meta">
