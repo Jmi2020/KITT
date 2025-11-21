@@ -199,6 +199,64 @@ class KittyLauncherApp(App):
             return
         self._schedule_command("Starting llama.cpp servers", ["bash", str(script)])
 
+    def action_stop_llama(self) -> None:
+        """Stop llama.cpp servers."""
+        script = find_first_existing(("ops/scripts/llama/stop.sh",))
+        if not script:
+            msg = "Llama stop script not found (ops/scripts/llama/stop.sh)"
+            self.notify(msg, severity="error")
+            self._log(msg, "red")
+            return
+        self._schedule_command("Stopping llama.cpp servers", ["bash", str(script)])
+
+    def action_restart_llama(self) -> None:
+        """Restart llama.cpp servers."""
+        script = find_first_existing(("ops/scripts/llama/start.sh",))
+        stop_script = find_first_existing(("ops/scripts/llama/stop.sh",))
+        if not script or not stop_script:
+            msg = "Llama start/stop scripts not found"
+            self.notify(msg, severity="error")
+            self._log(msg, "red")
+            return
+        self._schedule_command(
+            "Restarting llama.cpp servers",
+            ["bash", "-lc", f"{stop_script} && {script}"],
+        )
+
+    def action_start_ollama(self) -> None:
+        """Start Ollama (GPT-OSS) server."""
+        script = find_first_existing(("ops/scripts/ollama/start.sh",))
+        if not script:
+            msg = "Ollama start script not found (ops/scripts/ollama/start.sh)"
+            self.notify(msg, severity="error")
+            self._log(msg, "red")
+            return
+        self._schedule_command("Starting Ollama (GPT-OSS)", ["bash", str(script)])
+
+    def action_stop_ollama(self) -> None:
+        """Stop Ollama server."""
+        script = find_first_existing(("ops/scripts/ollama/stop.sh",))
+        if not script:
+            msg = "Ollama stop script not found (ops/scripts/ollama/stop.sh)"
+            self.notify(msg, severity="error")
+            self._log(msg, "red")
+            return
+        self._schedule_command("Stopping Ollama (GPT-OSS)", ["bash", str(script)])
+
+    def action_restart_ollama(self) -> None:
+        """Restart Ollama server."""
+        start_script = find_first_existing(("ops/scripts/ollama/start.sh",))
+        stop_script = find_first_existing(("ops/scripts/ollama/stop.sh",))
+        if not start_script or not stop_script:
+            msg = "Ollama start/stop scripts not found"
+            self.notify(msg, severity="error")
+            self._log(msg, "red")
+            return
+        self._schedule_command(
+            "Restarting Ollama (GPT-OSS)",
+            ["bash", "-lc", f"{stop_script} && {start_script}"],
+        )
+
     def action_start_docker(self) -> None:
         """Launch only the docker compose stack."""
         command = [
@@ -211,6 +269,26 @@ class KittyLauncherApp(App):
             "--build",
         ]
         self._schedule_command("Starting Docker stack", command)
+
+    def action_stop_docker(self) -> None:
+        """Stop docker compose stack."""
+        command = [
+            "docker",
+            "compose",
+            "-f",
+            "infra/compose/docker-compose.yml",
+            "down",
+        ]
+        self._schedule_command("Stopping Docker stack", command)
+
+    def action_restart_docker(self) -> None:
+        """Restart docker compose stack."""
+        command = [
+            "bash",
+            "-lc",
+            "docker compose -f infra/compose/docker-compose.yml down && docker compose -f infra/compose/docker-compose.yml up -d --build",
+        ]
+        self._schedule_command("Restarting Docker stack", command)
 
     def action_launch_model_manager(self) -> None:
         """Replace the console with kitty-model-manager."""

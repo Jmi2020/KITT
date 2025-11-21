@@ -1,4 +1,4 @@
-"""System status panel showing llama.cpp and Docker service health."""
+"""System status panel showing Ollama (GPT-OSS), llama.cpp, and Docker health."""
 
 import asyncio
 
@@ -11,6 +11,7 @@ from textual.worker import Worker
 
 from launcher.managers.docker_manager import DockerManager
 from launcher.managers.llama_manager import LlamaInstanceStatus, LlamaManager
+from launcher.managers.ollama_manager import OllamaManager, OllamaStatus
 
 
 class SystemStatusPanel(Static):
@@ -62,6 +63,8 @@ class SystemStatusPanel(Static):
     """
 
     # Reactive properties that trigger UI updates
+    ollama_status = reactive("Unknown")
+    ollama_detail = reactive("")
     llama_status = reactive("Unknown")
     llama_model = reactive("")
     docker_status = reactive("Unknown")
@@ -72,15 +75,23 @@ class SystemStatusPanel(Static):
         """Initialize status panel."""
         super().__init__()
         self.llama_manager = LlamaManager()
+        self.ollama_manager = OllamaManager()
         self.docker_manager = DockerManager()
         self._update_worker: Worker | None = None
         self.llama_instances: list[LlamaInstanceStatus] = []
+        self.ollama: OllamaStatus | None = None
 
     def compose(self) -> ComposeResult:
         """Compose the status panel layout."""
         yield Static("[bold cyan]KITTY System Status[/bold cyan]\n")
 
         with Container(classes="status-grid"):
+            # Ollama status
+            yield Static("Ollama (GPT-OSS):", classes="status-label")
+            yield Static(self._format_ollama_status(), id="ollama-status", classes="status-value")
+            yield Static("", classes="status-label")
+            yield Static("[dim]Checking models...[/dim]", id="ollama-status-detail", classes="service-list")
+
             # llama.cpp status
             yield Static("llama.cpp Servers:", classes="status-label")
             yield Static(self._format_llama_status(), id="llama-status", classes="status-value")
@@ -109,6 +120,18 @@ class SystemStatusPanel(Static):
 
     async def update_status(self) -> None:
         """Fetch and update status information."""
+        # Update Ollama (GPT-OSS) status
+        self.ollama = await self.ollama_manager.get_status()
+        if self.ollama.running:
+            self.ollama_status = "Healthy"
+            models = self.ollama.models or []
+            top = models[:3]
+            more = f" (+{len(models) - len(top)})" if len(models) > len(top) else ""
+            self.ollama_detail = ", ".join(top) + more if top else "online"
+        else:
+            self.ollama_status = "Offline"
+            self.ollama_detail = self.ollama.error or "unreachable"
+
         # Update llama.cpp status
         llama_instances = await self.llama_manager.get_all_statuses()
         self.llama_instances = llama_instances
@@ -150,6 +173,12 @@ class SystemStatusPanel(Static):
         llama_widget = self.query_one("#llama-status", Static)
         llama_widget.update(self._format_llama_status())
 
+        # Update Ollama status display
+        ollama_widget = self.query_one("#ollama-status", Static)
+        ollama_widget.update(self._format_ollama_status())
+        ollama_detail_widget = self.query_one("#ollama-status-detail", Static)
+        ollama_detail_widget.update(self._format_ollama_detail())
+
         # Update list of llama servers
         detail_widget = self.query_one("#llama-status-detail", Static)
         detail_widget.update(self._format_llama_instances())
@@ -168,6 +197,24 @@ class SystemStatusPanel(Static):
             status_str = "[red]✗ Offline[/red]"
 
         return status_str
+
+    def _format_ollama_status(self) -> str:
+        """Format Ollama (GPT-OSS) status with color coding."""
+        if self.ollama_status == "Healthy":
+            version = f" v{self.ollama.version}" if self.ollama and self.ollama.version else ""
+            return f"[green]✓ Ollama online{version}[/green]"
+        return f"[red]✗ Ollama offline[/red]"
+
+    def _format_ollama_detail(self) -> str:
+        """Show top models or error detail."""
+        if not self.ollama:
+            return "[dim]Checking...[/dim]"
+        if self.ollama.running:
+            models = self.ollama.models or []
+            if not models:
+                return "[dim]No models listed[/dim]"
+            return "[green]" + ", ".join(models[:3]) + ("[/green]" if models else "")
+        return f"[dim]{self.ollama_detail}[/dim]"
 
     def _format_llama_instances(self) -> str:
         """Format the list of llama.cpp instances."""
