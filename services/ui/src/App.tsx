@@ -12,11 +12,12 @@ import IOControl from './pages/IOControl';
 import MaterialInventory from './pages/MaterialInventory';
 import PrintIntelligence from './pages/PrintIntelligence';
 import VisionService from './pages/VisionService';
+import AutonomyCalendar from './pages/AutonomyCalendar';
 import useRemoteMode from './hooks/useRemoteMode';
 import { useTheme } from './contexts/ThemeContext';
 
 const App = () => {
-  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'shell' | 'wall' | 'vision' | 'images' | 'research' | 'results' | 'iocontrol' | 'inventory' | 'intelligence' | 'cameras'>('shell');
+  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'shell' | 'wall' | 'vision' | 'images' | 'research' | 'results' | 'iocontrol' | 'inventory' | 'intelligence' | 'cameras' | 'calendar'>('shell');
   const remoteMode = useRemoteMode();
   const { theme, toggleTheme } = useTheme();
 
@@ -46,6 +47,8 @@ const App = () => {
         return <PrintIntelligence />;
       case 'cameras':
         return <VisionService />;
+      case 'calendar':
+        return <AutonomyCalendar />;
       default:
         return <Dashboard remoteMode={remoteMode} />;
     }
@@ -72,6 +75,8 @@ const App = () => {
       setActiveView('intelligence');
     } else if (viewParam === 'cameras') {
       setActiveView('cameras');
+    } else if (viewParam === 'calendar') {
+      setActiveView('calendar');
     }
   }, []);
 
@@ -83,6 +88,7 @@ const App = () => {
           <button onClick={() => setActiveView('shell')}>💬 Shell</button>
           <button onClick={() => setActiveView('research')}>🔬 Research</button>
           <button onClick={() => setActiveView('results')}>📊 Results</button>
+          <button onClick={() => setActiveView('calendar')}>📅 Calendar</button>
           <button onClick={() => setActiveView('iocontrol')}>⚙️ I/O Control</button>
           <button onClick={() => setActiveView('inventory')}>📦 Inventory</button>
           <button onClick={() => setActiveView('intelligence')}>📊 Intelligence</button>
