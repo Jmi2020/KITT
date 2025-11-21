@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import enum
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Optional
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -861,6 +861,55 @@ class DiscoveryScan(Base):
     triggered_by: Mapped[Optional[str]] = mapped_column(String(255))
 
 
+class AutonomousSchedule(Base):
+    __tablename__ = "autonomous_schedules"
+
+    id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(255))
+    job_type: Mapped[str] = mapped_column(String(100))
+    job_name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    natural_language_schedule: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cron_expression: Mapped[str] = mapped_column(String(100))
+    timezone: Mapped[str] = mapped_column(String(50), default="UTC")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    budget_limit_usd: Mapped[Optional[float]] = mapped_column(Numeric(10, 4), nullable=True)
+    priority: Mapped[int] = mapped_column(Integer, default=5)
+    tags: Mapped[Optional[list[str]]] = mapped_column(ARRAY(String), nullable=True)
+    metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    last_execution_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_execution_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class JobExecutionHistory(Base):
+    __tablename__ = "job_execution_history"
+
+    id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    job_id: Mapped[str] = mapped_column(String(255))
+    job_name: Mapped[str] = mapped_column(String(255))
+    execution_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    duration_seconds: Mapped[Optional[float]] = mapped_column(Numeric(10, 4), nullable=True)
+    status: Mapped[str] = mapped_column(String(50))
+    budget_spent_usd: Mapped[Optional[float]] = mapped_column(Numeric(10, 4), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    result_summary: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class BudgetForecast(Base):
+    __tablename__ = "budget_forecasts"
+
+    id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    forecast_date: Mapped[date] = mapped_column(Date, unique=True)
+    total_scheduled_jobs: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    estimated_cost_usd: Mapped[Optional[float]] = mapped_column(Numeric(10, 4), nullable=True)
+    actual_cost_usd: Mapped[Optional[float]] = mapped_column(Numeric(10, 4), nullable=True)
+    daily_limit_usd: Mapped[float] = mapped_column(Numeric(10, 4), default=5.00)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
 __all__ = [
     "Base",
     # Enums
@@ -916,4 +965,7 @@ __all__ = [
     "QueuedPrint",  # Phase 4
     "DiscoveredDevice",
     "DiscoveryScan",
+    "AutonomousSchedule",
+    "JobExecutionHistory",
+    "BudgetForecast",
 ]

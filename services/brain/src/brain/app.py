@@ -26,6 +26,7 @@ from .autonomous.jobs import (
 from .logging_config import setup_reasoning_logging
 from .metrics import router as metrics_router
 from .routes.autonomy import router as autonomy_router
+from .routes.autonomy_calendar import router as autonomy_calendar_router
 from .routes.collective import router as collective_router
 from .routes.models import router as models_router
 from .routes.projects import router as projects_router
@@ -397,6 +398,7 @@ app.include_router(conversations_router)
 app.include_router(projects_router)
 app.include_router(models_router)
 app.include_router(autonomy_router)
+app.include_router(autonomy_calendar_router)
 app.include_router(collective_router)
 app.include_router(memory_router)
 app.include_router(usage_router)
