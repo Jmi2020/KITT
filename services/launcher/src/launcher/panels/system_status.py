@@ -231,6 +231,8 @@ class SystemStatusPanel(Static):
                 lines.append(f"[green]✓ {label}[/green]")
             else:
                 reason = inst.error or "offline"
+                if reason and "connection failed" in reason.lower():
+                    reason = "not currently connected"
                 lines.append(f"[red]✗ {label}[/red] [dim]- {reason}[/dim]")
 
         return "\n".join(lines)
