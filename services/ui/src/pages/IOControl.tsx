@@ -54,6 +54,7 @@ const IOControl = () => {
   const [features, setFeatures] = useState<Feature[]>([]);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [restartScopeFilter, setRestartScopeFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -228,6 +229,27 @@ const IOControl = () => {
     return pendingChanges.hasOwnProperty(featureId);
   };
 
+  const copyCommand = async (command: string) => {
+    try {
+      await navigator.clipboard.writeText(command);
+    } catch (e) {
+      window.prompt('Copy command', command);
+    }
+  };
+
+  const totalFeatures = features.length;
+  const enabledFeatures = features.filter((f) => Boolean(f.current_value)).length;
+  const pendingCount = Object.keys(pendingChanges).length;
+  const restartSummary = features.reduce<Record<string, number>>((acc, f) => {
+    acc[f.restart_scope] = (acc[f.restart_scope] || 0) + 1;
+    return acc;
+  }, {});
+
+  const matchesRestartScope = (feature: Feature) => {
+    if (restartScopeFilter === 'all') return true;
+    return feature.restart_scope === restartScopeFilter;
+  };
+
   return (
     <div className="iocontrol-page">
       <div className="iocontrol-header">
@@ -235,6 +257,38 @@ const IOControl = () => {
         <p className="subtitle">
           Manage external device integrations and feature flags with dependency validation
         </p>
+      </div>
+
+      <div className="stats-grid">
+        <div className="stat-card">
+          <div className="stat-label">Pending Changes</div>
+          <div className="stat-value">{pendingCount}</div>
+          <div className="stat-hint">Preview before applying</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Features Enabled</div>
+          <div className="stat-value">
+            {enabledFeatures}/{totalFeatures || '—'}
+          </div>
+          <div className="stat-hint">Current on/off state</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Restart Scopes</div>
+          <div className="stat-legend">
+            <span className="legend-item scope-none">🟢 none ({restartSummary['none'] || 0})</span>
+            <span className="legend-item scope-service">🟡 service ({restartSummary['service'] || 0})</span>
+            <span className="legend-item scope-llamacpp">🟠 llama.cpp ({restartSummary['llamacpp'] || 0})</span>
+            <span className="legend-item scope-stack">🔴 stack ({restartSummary['stack'] || 0})</span>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Quick Links</div>
+          <div className="stat-links">
+            <span className="link-pill" onClick={() => copyCommand('kitty-launcher run')}>Access-All Console</span>
+            <span className="link-pill" onClick={() => copyCommand('kitty-cli shell')}>CLI Shell</span>
+            <span className="link-pill" onClick={() => window.open('http://localhost:4173', '_blank')}>Web UI</span>
+          </div>
+        </div>
       </div>
 
       {error && (
@@ -265,12 +319,24 @@ const IOControl = () => {
               </option>
             ))}
           </select>
+
+          <select
+            className="category-select"
+            value={restartScopeFilter}
+            onChange={(e) => setRestartScopeFilter(e.target.value)}
+          >
+            <option value="all">All restart scopes</option>
+            <option value="none">No restart</option>
+            <option value="service">Service restart</option>
+            <option value="llamacpp">llama.cpp restart</option>
+            <option value="stack">Stack restart</option>
+          </select>
         </div>
 
         <div className="toolbar-right">
-          {Object.keys(pendingChanges).length > 0 && (
+          {pendingCount > 0 && (
             <>
-              <span className="pending-count">{Object.keys(pendingChanges).length} pending changes</span>
+              <span className="pending-count">{pendingCount} pending changes</span>
               <button className="btn-secondary" onClick={cancelChanges}>
                 Cancel
               </button>
@@ -311,135 +377,139 @@ const IOControl = () => {
 
       {/* Features by Category */}
       <div className="features-container">
-        {Object.entries(featuresByCategory).map(([category, categoryFeatures]) => (
-          <div key={category} className="feature-category">
-            <h2 className="category-title">
-              {category.replace(/_/g, ' ').toUpperCase()}
-              <span className="feature-count">({categoryFeatures.length})</span>
-            </h2>
+        {Object.entries(featuresByCategory).map(([category, categoryFeatures]) => {
+          const scoped = categoryFeatures.filter(matchesRestartScope);
+          if (scoped.length === 0) return null;
+          return (
+            <div key={category} className="feature-category">
+              <h2 className="category-title">
+                {category.replace(/_/g, ' ').toUpperCase()}
+                <span className="feature-count">({scoped.length})</span>
+              </h2>
 
-            <div className="features-list">
-              {categoryFeatures.map((feature) => {
-                const currentValue = getFeatureValue(feature);
-                const isPending = hasPendingChange(feature.id);
-                const isBoolean = typeof feature.default_value === 'boolean';
+              <div className="features-list">
+                {scoped.map((feature) => {
+                  const currentValue = getFeatureValue(feature);
+                  const isPending = hasPendingChange(feature.id);
+                  const isBoolean = typeof feature.default_value === 'boolean';
 
-                return (
-                  <div
-                    key={feature.id}
-                    className={`feature-card ${isPending ? 'pending-change' : ''} ${!feature.can_enable && currentValue === false ? 'disabled' : ''}`}
-                  >
-                    <div className="feature-header">
-                      <div className="feature-title-row">
-                        <h3 className="feature-name">{feature.name}</h3>
-                        <span className={`restart-badge ${getRestartScopeColor(feature.restart_scope)}`}>
-                          {getRestartScopeIcon(feature.restart_scope)} {feature.restart_scope}
-                        </span>
+                  return (
+                    <div
+                      key={feature.id}
+                      className={`feature-card ${isPending ? 'pending-change' : ''} ${!feature.can_enable && currentValue === false ? 'disabled' : ''}`}
+                    >
+                      <div className="feature-header">
+                        <div className="feature-title-row">
+                          <h3 className="feature-name">{feature.name}</h3>
+                          <span className={`restart-badge ${getRestartScopeColor(feature.restart_scope)}`}>
+                            {getRestartScopeIcon(feature.restart_scope)} {feature.restart_scope}
+                          </span>
+                        </div>
+
+                        <div className="feature-toggle">
+                          {isBoolean ? (
+                            <label className="toggle-switch">
+                              <input
+                                type="checkbox"
+                                checked={currentValue as boolean}
+                                onChange={(e) => toggleFeature(feature.id, e.target.checked)}
+                                disabled={
+                                  (currentValue && !feature.can_disable) ||
+                                  (!currentValue && !feature.can_enable)
+                                }
+                              />
+                              <span className="toggle-slider"></span>
+                            </label>
+                          ) : (
+                            <input
+                              type="text"
+                              value={currentValue as string}
+                              onChange={(e) => toggleFeature(feature.id, e.target.value)}
+                              className="feature-input"
+                            />
+                          )}
+                        </div>
                       </div>
 
-                      <div className="feature-toggle">
-                        {isBoolean ? (
-                          <label className="toggle-switch">
-                            <input
-                              type="checkbox"
-                              checked={currentValue as boolean}
-                              onChange={(e) => toggleFeature(feature.id, e.target.checked)}
-                              disabled={
-                                (currentValue && !feature.can_disable) ||
-                                (!currentValue && !feature.can_enable)
-                              }
-                            />
-                            <span className="toggle-slider"></span>
-                          </label>
-                        ) : (
-                          <input
-                            type="text"
-                            value={currentValue as string}
-                            onChange={(e) => toggleFeature(feature.id, e.target.value)}
-                            className="feature-input"
-                          />
+                      <div className="feature-description">{feature.description}</div>
+
+                      {isPending && (
+                        <div className="pending-indicator">
+                          ⚠️ Pending change: {String(feature.current_value)} → {String(currentValue)}
+                        </div>
+                      )}
+
+                      {feature.requires.length > 0 && (
+                        <div className="feature-dependencies">
+                          <strong>Requires:</strong>{' '}
+                          {feature.requires.map((reqId) => {
+                            const reqFeature = features.find((f) => f.id === reqId);
+                            const isMetFeature = reqFeature?.current_value;
+                            return (
+                              <span
+                                key={reqId}
+                                className={`dependency-tag ${isMetFeature ? 'met' : 'unmet'}`}
+                              >
+                                {reqFeature?.name || reqId}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {feature.enables.length > 0 && (
+                        <div className="feature-enables">
+                          <strong>Enables:</strong>{' '}
+                          {feature.enables.map((enableId) => {
+                            const enableFeature = features.find((f) => f.id === enableId);
+                            return (
+                              <span key={enableId} className="enable-tag">
+                                {enableFeature?.name || enableId}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {feature.conflicts_with.length > 0 && (
+                        <div className="feature-conflicts">
+                          <strong>⚠️ Conflicts with:</strong>{' '}
+                          {feature.conflicts_with.map((conflictId) => {
+                            const conflictFeature = features.find((f) => f.id === conflictId);
+                            return (
+                              <span key={conflictId} className="conflict-tag">
+                                {conflictFeature?.name || conflictId}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <div className="feature-footer">
+                        <code className="env-var">{feature.env_var}</code>
+                        {feature.docs_url && (
+                          <a href={feature.docs_url} target="_blank" rel="noopener noreferrer" className="docs-link">
+                            📚 Docs
+                          </a>
                         )}
                       </div>
-                    </div>
 
-                    <div className="feature-description">{feature.description}</div>
+                      {!feature.dependencies_met && (
+                        <div className="warning-banner">
+                          ⚠️ Dependencies not met. Enable required features first.
+                        </div>
+                      )}
 
-                    {isPending && (
-                      <div className="pending-indicator">
-                        ⚠️ Pending change: {String(feature.current_value)} → {String(currentValue)}
-                      </div>
-                    )}
-
-                    {feature.requires.length > 0 && (
-                      <div className="feature-dependencies">
-                        <strong>Requires:</strong>{' '}
-                        {feature.requires.map((reqId) => {
-                          const reqFeature = features.find((f) => f.id === reqId);
-                          const isMetFeature = reqFeature?.current_value;
-                          return (
-                            <span
-                              key={reqId}
-                              className={`dependency-tag ${isMetFeature ? 'met' : 'unmet'}`}
-                            >
-                              {reqFeature?.name || reqId}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {feature.enables.length > 0 && (
-                      <div className="feature-enables">
-                        <strong>Enables:</strong>{' '}
-                        {feature.enables.map((enableId) => {
-                          const enableFeature = features.find((f) => f.id === enableId);
-                          return (
-                            <span key={enableId} className="enable-tag">
-                              {enableFeature?.name || enableId}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {feature.conflicts_with.length > 0 && (
-                      <div className="feature-conflicts">
-                        <strong>⚠️ Conflicts with:</strong>{' '}
-                        {feature.conflicts_with.map((conflictId) => {
-                          const conflictFeature = features.find((f) => f.id === conflictId);
-                          return (
-                            <span key={conflictId} className="conflict-tag">
-                              {conflictFeature?.name || conflictId}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    <div className="feature-footer">
-                      <code className="env-var">{feature.env_var}</code>
-                      {feature.docs_url && (
-                        <a href={feature.docs_url} target="_blank" rel="noopener noreferrer" className="docs-link">
-                          📚 Docs
-                        </a>
+                      {feature.validation_message && currentValue && (
+                        <div className="info-banner">{feature.validation_message}</div>
                       )}
                     </div>
-
-                    {!feature.dependencies_met && (
-                      <div className="warning-banner">
-                        ⚠️ Dependencies not met. Enable required features first.
-                      </div>
-                    )}
-
-                    {feature.validation_message && currentValue && (
-                      <div className="info-banner">{feature.validation_message}</div>
-                    )}
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Preview Modal */}
