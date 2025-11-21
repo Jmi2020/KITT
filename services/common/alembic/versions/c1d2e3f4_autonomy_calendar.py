@@ -7,7 +7,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "c1d2e3f4_autonomy_calendar"
-down_revision = "k1l2m3n4o5p6_add_apscheduler_job_persistence"
+down_revision = "k1l2m3n4o5p6"
 branch_labels = None
 depends_on = None
 
@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column("budget_limit_usd", sa.Numeric(10, 4), nullable=True),
         sa.Column("priority", sa.Integer(), nullable=False, server_default="5"),
         sa.Column("tags", sa.ARRAY(sa.Text()), nullable=True),
-        sa.Column("metadata", sa.JSON(), nullable=True, server_default=sa.text("'{}'::json")),
+        sa.Column("config", sa.JSON(), nullable=True, server_default=sa.text("'{}'::json")),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("last_execution_at", sa.DateTime(timezone=True), nullable=True),

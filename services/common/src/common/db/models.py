@@ -876,7 +876,7 @@ class AutonomousSchedule(Base):
     budget_limit_usd: Mapped[Optional[float]] = mapped_column(Numeric(10, 4), nullable=True)
     priority: Mapped[int] = mapped_column(Integer, default=5)
     tags: Mapped[Optional[list[str]]] = mapped_column(ARRAY(String), nullable=True)
-    metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+    config: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     last_execution_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

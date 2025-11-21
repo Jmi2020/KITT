@@ -133,7 +133,7 @@ class ScheduleResponse(BaseModel):
     budget_limit_usd: Optional[float]
     priority: int
     tags: Optional[List[str]]
-    metadata: dict
+    config: dict = Field(default_factory=dict, alias="config")
     created_at: datetime
     updated_at: datetime
     last_execution_at: Optional[datetime]
@@ -141,6 +141,7 @@ class ScheduleResponse(BaseModel):
 
     class Config:
         orm_mode = True
+        populate_by_name = True
 
 
 class ExecutionHistoryResponse(BaseModel):
@@ -276,7 +277,7 @@ async def create_schedule(req: ScheduleCreateRequest, db: Session = Depends(get_
         budget_limit_usd=req.budget_limit_usd,
         priority=req.priority,
         tags=req.tags,
-        metadata=req.metadata or {},
+        config=req.metadata or {},
         next_execution_at=next_run,
     )
     db.add(schedule)
@@ -333,7 +334,7 @@ async def update_schedule(
         data["next_execution_at"] = _next_run_from_cron(data["cron_expression"])
 
     for field, value in data.items():
-        setattr(schedule, field, value)
+        setattr(schedule, field if field != "metadata" else "config", value)
     schedule.updated_at = datetime.utcnow()
     db.add(schedule)
     db.commit()
