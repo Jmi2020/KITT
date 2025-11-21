@@ -6,7 +6,7 @@ Each node represents a step in the autonomous research workflow.
 
 import logging
 import httpx
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from decimal import Decimal
 
 from .state import (
@@ -54,6 +54,50 @@ from ..extraction import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Lightweight stop-words for query rewriting (kept minimal to avoid dependencies)
+_STOP_WORDS = {
+    "the", "a", "an", "of", "and", "or", "in", "on", "to", "for", "with", "about",
+    "latest", "recent", "from", "since", "this", "that", "these", "those", "is", "are"
+}
+
+
+def _rewrite_search_queries(query: str) -> list[str]:
+    """
+    Generate targeted search query variants to improve recall/precision.
+
+    Strategy:
+    - Normalize whitespace/punctuation
+    - Build a condensed keyword-only variant
+    - Add freshness/insight intents
+    """
+    cleaned = (query or "").strip().strip("?.! ")
+    if not cleaned:
+        return []
+
+    # Keyword-only variant (drop short stop words)
+    keywords = [
+        token for token in cleaned.replace(",", " ").split()
+        if len(token) > 3 and token.lower() not in _STOP_WORDS
+    ]
+    condensed = " ".join(keywords[:10]) if keywords else cleaned
+
+    candidates = [
+        cleaned,
+        condensed,
+        f"{condensed} latest results",
+        f"{condensed} key papers",
+        f"{condensed} open challenges",
+    ]
+
+    seen = set()
+    rewrites = []
+    for c in candidates:
+        norm = c.lower()
+        if norm and norm not in seen:
+            seen.add(norm)
+            rewrites.append(c)
+    return rewrites
 
 
 async def invoke_model(model_id: str, prompt: str, context: Dict[str, Any]) -> str:
@@ -304,7 +348,7 @@ Provide ONLY the JSON response, no additional text.
                 state = record_model_call(
                     state,
                     model_id=response.model_used,
-                    cost=response.cost,
+                    cost=Decimal(str(response.cost_usd)),
                     latency_ms=response.latency_ms,
                     success=True
                 )
@@ -608,27 +652,42 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
             # Normal priority: use web_search (free)
             if task["priority"] >= 0.7 and state["budget_remaining"] > Decimal("0.10"):
                 tool_name = ToolType.RESEARCH_DEEP
-                arguments = {
-                    "query": task["query"],
-                    "depth": task.get("depth", "medium")
-                }
             else:
                 tool_name = ToolType.WEB_SEARCH
-                arguments = {"query": task["query"]}
 
-            logger.info(f"Executing tool: {tool_name} with args: {arguments}")
+            # Rewrite and retry search queries to avoid empty results
+            search_variants = _rewrite_search_queries(task.get("query", ""))
+            if not search_variants:
+                search_variants = [task.get("query", "")]
 
-            # Execute tool
-            try:
-                result = await components.tool_executor.execute(
-                    tool_name=tool_name,
-                    arguments=arguments,
-                    context=context
-                )
-                logger.info(f"✅ Tool execution completed: success={result.success}")
-            except Exception as tool_exc:
-                logger.error(f"❌ Tool execution FAILED: {tool_exc}", exc_info=True)
-                raise
+            result = None
+            used_query = search_variants[0]
+
+            for variant in search_variants:
+                arguments = {"query": variant}
+                if tool_name == ToolType.RESEARCH_DEEP:
+                    arguments["depth"] = task.get("depth", "medium")
+
+                used_query = variant
+                logger.info(f"Executing tool: {tool_name} with args: {arguments}")
+
+                try:
+                    candidate_result = await components.tool_executor.execute(
+                        tool_name=tool_name,
+                        arguments=arguments,
+                        context=context
+                    )
+                    result = candidate_result
+                    logger.info(f"✅ Tool execution completed: success={candidate_result.success}")
+                except Exception as tool_exc:
+                    logger.error(f"❌ Tool execution FAILED: {tool_exc}", exc_info=True)
+                    raise
+
+                # Break early if we have results or a hard failure
+                if (candidate_result.success and candidate_result.data.get("results")) or not candidate_result.success:
+                    break
+
+            task["query_used"] = used_query
 
             # Process results
             logger.info(
@@ -650,7 +709,8 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                         "iteration": state["current_iteration"],
                         "confidence": 0.85,  # Higher confidence for deep research
                         "tool": "research_deep",
-                        "citations": result.data.get("citations", [])
+                        "citations": result.data.get("citations", []),
+                        "search_query": task.get("query_used", task.get("query"))
                     }
 
                     # Tag with sub-question if hierarchical
@@ -758,7 +818,8 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                             "iteration": state["current_iteration"],
                             "confidence": 0.70,
                             "tool": "web_search",
-                            "result_count": len(search_results)
+                            "result_count": len(search_results),
+                            "search_query": task.get("query_used", task.get("query"))
                         }
 
                         # Tag with sub-question if hierarchical
@@ -783,11 +844,12 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                         # No results found
                         finding = {
                             "id": f"finding_{state['current_iteration']}_{task['task_id']}",
-                            "content": f"No results found for: {task['query']}",
+                            "content": f"No results found for: {task.get('query_used', task.get('query'))}",
                             "task_id": task["task_id"],
                             "iteration": state["current_iteration"],
                             "confidence": 0.0,
-                            "tool": "web_search"
+                            "tool": "web_search",
+                            "search_query": task.get("query_used", task.get("query"))
                         }
 
                         # Tag with sub-question if hierarchical
@@ -1387,7 +1449,7 @@ Structure your response clearly with:
             state = record_model_call(
                 state,
                 model_id=response.model_used,
-                cost=response.cost,
+                cost=Decimal(str(response.cost_usd)),
                 latency_ms=response.latency_ms,
                 success=True
             )
@@ -1798,7 +1860,7 @@ Provide a well-structured answer with:
             state = record_model_call(
                 state,
                 model_id=response.model_used,
-                cost=response.cost,
+                cost=Decimal(str(response.cost_usd)),
                 latency_ms=response.latency_ms,
                 success=True
             )
@@ -2008,6 +2070,74 @@ Keep items concise (2-4 words max). Return ONLY the JSON, no other text."""
         return {"topics": [], "entities": []}
 
 
+async def _consult_with_debate(components, request, state: ResearchState, max_models: int = 3) -> Optional[str]:
+    """
+    Run the same prompt across multiple models and return a combined answer.
+
+    Strategy: fan-out to diverse models, pick the strongest response (by length)
+    and append short alternate takes for transparency.
+    """
+    from ..models.coordinator import ModelSelection
+    import time
+
+    mc = components.model_coordinator
+    try:
+        selected = mc.select_models_for_debate(
+            request,
+            budget_remaining=state["budget_remaining"],
+            external_calls_remaining=state["external_calls_remaining"],
+            num_models=max_models,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Debate selection failed: {exc}")
+        return None
+
+    if not selected:
+        return None
+
+    debate_responses = []
+    for sel in selected:
+        model_id = sel.model_info.model_id
+        start = time.time()
+        try:
+            text = await invoke_model(model_id, request.task_description, request.context or {})
+            latency_ms = (time.time() - start) * 1000
+            debate_responses.append({
+                "model_id": model_id,
+                "text": text or "",
+                "latency_ms": latency_ms,
+                "cost": sel.estimated_cost
+            })
+            state = record_model_call(
+                state,
+                model_id=model_id,
+                cost=sel.estimated_cost,
+                latency_ms=latency_ms,
+                success=True
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Debate model {model_id} failed: {exc}")
+            continue
+
+    if not debate_responses:
+        return None
+
+    # Pick the longest non-empty answer as primary
+    best = max(debate_responses, key=lambda r: len(r["text"]))
+    if len(debate_responses) == 1:
+        return best["text"]
+
+    alternates = [
+        f"### {r['model_id']}\n{r['text'][:1200]}"
+        for r in debate_responses
+        if r["model_id"] != best["model_id"] and r["text"]
+    ]
+    combined = best["text"]
+    if alternates:
+        combined += "\n\n---\nAlternate perspectives (truncated):\n" + "\n\n".join(alternates)
+    return combined
+
+
 async def _generate_ai_synthesis(state: ResearchState, components) -> str:
     """
     Generate AI synthesis using ModelCoordinator.
@@ -2134,13 +2264,25 @@ Sources Consulted (with content excerpts):
 IMPORTANT: Analyze the actual source content provided above. Reference specific information, quotes, and evidence from the source snippets when constructing your synthesis. Evaluate source quality, relevance, and consistency.
 
 Please provide:
-1. A direct answer to the query based on source analysis
-2. Key insights with specific evidence from sources (cite by title or URL)
-3. Analysis of source quality and consistency
-4. Important caveats, limitations, or conflicting evidence
-5. Properly attributed citations and quotes where appropriate
+1) A direct answer to the query based on the sources
+2) Key insights with inline source tags in the form [source title or URL]
+3) Evidence: 1 short quote per major insight (trim if long)
+4) Conflicts or caveats across sources
+5) Gaps/next steps if coverage is weak
 
-Format the response in a clear, professional manner with proper source attribution."""
+Use this outline:
+## Direct Answer
+<2-3 sentences with citations>
+
+## Key Findings
+- Insight w/ citation(s) and a short quote
+- Insight w/ citation(s) and a short quote
+
+## Caveats & Conflicts
+- Note discrepancies, weak evidence, or missing data
+
+## Confidence & Coverage
+Rate High/Medium/Low and justify using source quality, diversity, and agreement."""
 
         # Determine consultation tier based on quality and budget
         avg_quality = sum(state["quality_scores"]) / len(state["quality_scores"]) if state["quality_scores"] else 0.0
@@ -2171,6 +2313,17 @@ Format the response in a clear, professional manner with proper source attributi
         )
 
         # Consult model
+        # If debate flag set, try multi-model consensus first
+        use_debate = bool(state.get("config", {}).get("use_debate"))
+        if use_debate and components and components.model_coordinator:
+            debate_text = await _consult_with_debate(
+                components=components,
+                request=request,
+                state=state
+            )
+            if debate_text:
+                return debate_text
+
         response = await components.model_coordinator.consult(
             request,
             budget_remaining=state["budget_remaining"],
@@ -2183,20 +2336,17 @@ Format the response in a clear, professional manner with proper source attributi
             state = record_model_call(
                 state,
                 model_id=response.model_used,
-                result={"synthesis": "success"},
-                cost=response.cost,
+                cost=Decimal(str(response.cost_usd)),
+                latency_ms=response.latency_ms,
                 success=True
             )
 
-            # Update budget
-            state["budget_remaining"] -= response.cost
-
             logger.info(
                 f"AI synthesis generated using {response.model_used} "
-                f"(tier: {tier.value}, cost: ${response.cost})"
+                f"(tier: {tier.value}, cost: ${response.cost_usd})"
             )
 
-            return response.response
+            return response.result
         else:
             logger.warning(f"AI synthesis failed: {response.error}, using fallback")
             return _generate_basic_synthesis(state)

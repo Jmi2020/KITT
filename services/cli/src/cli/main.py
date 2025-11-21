@@ -167,6 +167,13 @@ def _format_history_time(value: Optional[str], show_date: bool = False) -> str:
     return parsed.strftime("%m-%d %H:%M")
 
 
+def _truncate_text(text: str, limit: Optional[int]) -> str:
+    """Truncate text with a dim suffix; limit<=0 returns full text."""
+    if not limit or limit <= 0 or len(text) <= limit:
+        return text
+    return text[:limit] + "\n\n[dim]... (truncated; use --truncate 0 for full)[/dim]"
+
+
 def _conversation_preview(entry: Dict[str, Any]) -> str:
     title = entry.get("title")
     if title:
@@ -1780,7 +1787,103 @@ def _format_research_sessions_table(sessions: List[Dict[str, Any]]) -> Table:
     return table
 
 
-def _display_session_detail(session_id: str) -> None:
+def _load_research_results(session_id: str, quiet: bool = False) -> Optional[Dict[str, Any]]:
+    """Load full research results; return None on failure."""
+    try:
+        return _get_json(f"{API_BASE}/api/research/sessions/{session_id}/results")
+    except Exception as exc:  # noqa: BLE001
+        if not quiet:
+            console.print(f"[yellow]Could not load full results for {session_id}: {exc}[/yellow]")
+        return None
+
+
+def _render_research_results(session_id: str, results: Dict[str, Any], truncate: int = 800, show_findings: bool = True) -> None:
+    """Render synthesis, sources, and findings from /results."""
+    if not results:
+        return
+
+    # Metrics panel
+    metrics = Table.grid(padding=(0, 2))
+    metrics.add_column(style="cyan")
+    metrics.add_column()
+    metrics.add_row("Status:", results.get("status", "unknown"))
+    metrics.add_row("Findings:", str(results.get("total_findings", 0)))
+    metrics.add_row("Sources:", str(results.get("total_sources", 0)))
+    metrics.add_row("Cost:", f"${float(results.get('total_cost_usd', 0) or 0):.2f}")
+
+    completeness = results.get("completeness_score")
+    confidence = results.get("confidence_score")
+    if completeness is not None:
+        metrics.add_row("Completeness:", f"{float(completeness):.2f}")
+    if confidence is not None:
+        metrics.add_row("Confidence:", f"{float(confidence):.2f}")
+
+    console.print(Panel(metrics, title="[bold]Results Summary[/bold]", border_style="cyan"))
+
+    # Synthesis
+    synthesis = results.get("final_synthesis")
+    if synthesis:
+        console.print(Panel(
+            _truncate_text(synthesis, truncate),
+            title="[bold green]Synthesis[/bold green]",
+            border_style="green"
+        ))
+
+    # Sources (flattened from findings)
+    sources = []
+    seen_sources = set()
+    for finding in results.get("findings", []):
+        iteration = finding.get("iteration")
+        for src in finding.get("sources", []) or []:
+            if not isinstance(src, dict):
+                continue
+            url = src.get("url") or src.get("source_url") or ""
+            title = src.get("title") or src.get("source_title") or url or "Unknown source"
+            key = (title, url)
+            if key in seen_sources:
+                continue
+            seen_sources.add(key)
+            sources.append({
+                "title": title,
+                "url": url,
+                "iteration": iteration,
+            })
+
+    if sources:
+        src_table = Table(title="Sources", show_lines=False, header_style="bold cyan")
+        src_table.add_column("#", justify="right", style="cyan")
+        src_table.add_column("Title", overflow="fold")
+        src_table.add_column("URL", overflow="fold")
+        src_table.add_column("Iter", justify="right")
+        for idx, src in enumerate(sources, 1):
+            src_table.add_row(
+                str(idx),
+                src["title"],
+                src["url"] or "—",
+                str(src.get("iteration", "—"))
+            )
+        console.print(src_table)
+
+    # Findings
+    findings = results.get("findings", [])
+    if show_findings and findings:
+        console.print(f"\n[bold cyan]Findings ({len(findings)}):[/bold cyan]\n")
+        for idx, finding in enumerate(findings, 1):
+            content = finding.get("content", "") or ""
+            confidence = finding.get("confidence", 0)
+            iteration = finding.get("iteration", 0)
+            ftype = finding.get("finding_type", "unknown")
+            header = f"Finding #{idx} | Type: {ftype} | Confidence: {float(confidence):.2f} | Iteration: {iteration}"
+            console.print(Panel(
+                _truncate_text(content, truncate),
+                title=header,
+                border_style="green",
+                expand=False
+            ))
+            console.print()
+
+
+def _display_session_detail(session_id: str, full: bool = True, truncate: int = 800, show_findings: bool = True) -> None:
     """Display detailed research session information."""
     try:
         data = _get_json(f"{API_BASE}/api/research/sessions/{session_id}")
@@ -1818,6 +1921,15 @@ def _display_session_detail(session_id: str) -> None:
     status_table.add_row("Ext. Calls:", f"{session.get('external_calls_used', 0)}/{session.get('external_calls_remaining', 0) + session.get('external_calls_used', 0)}")
 
     console.print(Panel(status_table, title="[bold]Session Info", border_style="green"))
+
+    # Hint if running local-only (no external calls allowed)
+    if session.get('external_calls_used', 0) == 0 and session.get('external_calls_remaining', 0) == 0:
+        console.print("[yellow]Note: External calls are disabled; enable paid tools or raise budget to use web providers.[/yellow]")
+
+    results = _load_research_results(session_id, quiet=not full)
+    if results and full:
+        _render_research_results(session_id, results, truncate=truncate, show_findings=show_findings)
+        return
 
     # Fetch and display detailed findings
     total_findings = session.get("total_findings", 0)
@@ -1894,7 +2006,7 @@ def _display_session_detail(session_id: str) -> None:
         ))
 
 
-def _stream_research_progress(session_id: str, user_id: str, query: str) -> None:
+def _stream_research_progress(session_id: str, user_id: str, query: str, render_results: bool = True, truncate: int = 800) -> None:
     """Stream research progress with real-time updates; fall back to polling if WS fails."""
     import json
     import asyncio
@@ -1959,6 +2071,10 @@ def _stream_research_progress(session_id: str, user_id: str, query: str) -> None
                     if status in {"completed", "failed", "paused"}:
                         color = "green" if status == "completed" else "red" if status == "failed" else "yellow"
                         console.print(f"\n[{color}]{status.capitalize()}[/] – check /session {session_id} for details\n")
+                        if status == "completed" and render_results:
+                            results = _load_research_results(session_id, quiet=True)
+                            if results:
+                                _render_research_results(session_id, results, truncate=truncate)
                         return
 
                     await asyncio.sleep(poll_interval)
@@ -2023,6 +2139,12 @@ def _stream_research_progress(session_id: str, user_id: str, query: str) -> None
 
         except Exception as exc:
             await poll_status_fallback(str(exc))
+
+        # After streaming completes, try to show full results
+        if render_results:
+            results = _load_research_results(session_id, quiet=True)
+            if results:
+                _render_research_results(session_id, results, truncate=truncate)
 
     # Run async stream
     try:
@@ -2252,6 +2374,7 @@ def autonomy(
 def research(
     query: str = typer.Argument(..., help="Research query to investigate"),
     no_config: bool = typer.Option(False, "--no-config", help="Skip configuration prompts, use defaults"),
+    use_debate: bool = typer.Option(False, "--debate/--no-debate", help="Use multi-model debate for synthesis when enabled"),
 ) -> None:
     """Start an autonomous research session with interactive configuration.
 
@@ -2311,6 +2434,13 @@ def research(
         )
         enable_hierarchical = enable_hierarchical_input.lower() in ['y', 'yes']
 
+        # Enable debate
+        use_debate = typer.prompt(
+            "Enable debate (multi-model synthesis)? (y/n)",
+            default="n",
+            show_default=True
+        ).lower() in ["y", "yes"]
+
         # If hierarchical, prompt for sub-question limits
         max_sub_questions = 5
         if enable_hierarchical:
@@ -2334,12 +2464,14 @@ def research(
         enable_paid = False
         enable_hierarchical = False
         max_sub_questions = 5
+        # use_debate remains from option default
 
     # Build config
     config = {
         "strategy": strategy_input,
         "max_iterations": max_iterations,
         "max_cost_usd": max_cost,
+        "use_debate": use_debate,
     }
 
     # Add base_priority if paid tools enabled (sets priority >= 0.7 to use Perplexity)
@@ -2379,13 +2511,16 @@ def research_sessions(
 @app.command(name="research-session")
 def research_session(
     session_id: str = typer.Argument(..., help="Research session ID"),
+    full: bool = typer.Option(True, "--full/--no-full", help="Show synthesis/sources/findings from /results"),
+    truncate: int = typer.Option(800, "--truncate", "-t", help="Character limit for long sections (0 = no limit)"),
+    show_findings: bool = typer.Option(True, "--findings/--no-findings", help="Show findings body content"),
 ) -> None:
     """View detailed information about a research session.
 
     Examples:
         kitty-cli research-session d99a3593-5710-4297-baf3-9e4c017adf56
     """
-    _display_session_detail(session_id)
+    _display_session_detail(session_id, full=full, truncate=truncate, show_findings=show_findings)
 
 
 @app.command(name="research-stream")
@@ -2600,11 +2735,16 @@ def shell(
                 enable_paid_input = console.input("[cyan]Enable paid tools (Perplexity)?[/] [dim](y/n)[/] [[dim]n[/dim]]: ").strip().lower()
                 enable_paid = enable_paid_input in ['y', 'yes']
 
+                # Enable debate
+                enable_debate_input = console.input("[cyan]Enable debate (multi-model synthesis)?[/] [dim](y/n)[/] [[dim]n[/dim]]: ").strip().lower()
+                enable_debate = enable_debate_input in ['y', 'yes']
+
                 # Build config
                 config = {
                     "strategy": strategy,
                     "max_iterations": max_iterations,
                     "max_cost_usd": max_cost,
+                    "use_debate": enable_debate,
                 }
 
                 # Add base_priority if paid tools enabled
