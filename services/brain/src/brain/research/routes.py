@@ -26,6 +26,7 @@ from brain.research.templates import (
 )
 from brain.research.extraction import extract_claims_from_content
 from brain.research.types import Claim, EvidenceSpan
+from brain.research.template_selector import TemplateSelector
 from brain.research.graph.nodes import invoke_model
 
 logger = logging.getLogger(__name__)
@@ -257,7 +258,6 @@ async def create_research_session(
     try:
         # Apply research template
         if request.template:
-            # User specified a template
             try:
                 template_type = ResearchTemplateType(request.template)
                 config = apply_template(request.query, request.config)
@@ -268,8 +268,17 @@ async def create_research_session(
                     detail=f"Invalid template: {request.template}. Valid options: {[t.value for t in ResearchTemplateType]}"
                 )
         else:
-            # Auto-detect template
-            config = apply_template(request.query, request.config)
+            # Use enhanced selector for better template matching (ethics/academic vs product, etc.)
+            selector = TemplateSelector()
+            selected = selector.select_template(request.query)
+            config = selected["config"].copy()
+            if request.config:
+                config.update(request.config)
+            config["template"] = {
+                "type": selected["name"],
+                "name": selected["name"],
+                "description": selected["name"],
+            }
 
         # Create session in database
         session_id = await manager.create_session(
@@ -283,7 +292,7 @@ async def create_research_session(
             session_id=session_id,
             user_id=request.user_id,
             query=request.query,
-            config=request.config
+            config=config
         )
 
         # Get session info to return thread_id
