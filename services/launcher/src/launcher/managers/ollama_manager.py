@@ -30,61 +30,81 @@ class OllamaManager:
         """
         import os
 
-        env_url = base_url or os.getenv("OLLAMA_HOST") or "http://localhost:11434"
-        parsed = urlparse(env_url)
-        if not parsed.scheme:
-            env_url = f"http://{env_url}"
-        self.base_url = env_url.rstrip("/")
+        env_url = base_url or os.getenv("OLLAMA_HOST") or os.getenv("OLLAMA_BASE_URL")
+        self.explicit_url = env_url.rstrip("/") if env_url else None
         self.timeout = timeout
 
     async def get_status(self) -> OllamaStatus:
         """Check Ollama health by hitting /api/tags and /api/version."""
-        tags_url = f"{self.base_url}/api/tags"
-        version_url = f"{self.base_url}/api/version"
-
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                tags_resp = await client.get(tags_url)
-                if tags_resp.status_code != 200:
+            errors = []
+            for base in self._candidate_urls():
+                tags_url = f"{base}/api/tags"
+                version_url = f"{base}/api/version"
+                try:
+                    tags_resp = await client.get(tags_url)
+                    if tags_resp.status_code != 200:
+                        errors.append(f"{base} HTTP {tags_resp.status_code}")
+                        continue
+
+                    tags = tags_resp.json().get("models", []) or []
+                    models = [m.get("name") for m in tags if isinstance(m, dict)]
+
+                    version = None
+                    try:
+                        ver_resp = await client.get(version_url)
+                        if ver_resp.status_code == 200:
+                            version = ver_resp.json().get("version")
+                    except Exception:
+                        pass  # version optional
+
                     return OllamaStatus(
-                        running=False,
-                        url=self.base_url,
-                        error=f"HTTP {tags_resp.status_code}",
-                        models=[],
+                        running=True,
+                        url=base,
+                        version=version,
+                        model_count=len(models),
+                        models=models,
+                        error=None,
                     )
 
-                tags = tags_resp.json().get("models", []) or []
-                models = [m.get("name") for m in tags if isinstance(m, dict)]
+                except (httpx.ConnectError, httpx.TimeoutException) as exc:
+                    errors.append(f"{base} connection failed: {type(exc).__name__}")
+                except Exception as exc:  # pragma: no cover - defensive
+                    errors.append(f"{base} error: {exc}")
 
-                version = None
-                try:
-                    ver_resp = await client.get(version_url)
-                    if ver_resp.status_code == 200:
-                        version = ver_resp.json().get("version")
-                except Exception:
-                    # Version is optional; ignore failures
-                    pass
+        # If we get here, all candidates failed
+        detail = "; ".join(errors) if errors else "unreachable"
+        fallback = self.explicit_url or "http://localhost:11434"
+        return OllamaStatus(
+            running=False,
+            url=fallback,
+            error=detail,
+            models=[],
+        )
 
-                return OllamaStatus(
-                    running=True,
-                    url=self.base_url,
-                    version=version,
-                    model_count=len(models),
-                    models=models,
-                    error=None,
-                )
-
-            except (httpx.ConnectError, httpx.TimeoutException) as exc:
-                return OllamaStatus(
-                    running=False,
-                    url=self.base_url,
-                    error=f"Connection failed: {type(exc).__name__}",
-                    models=[],
-                )
-            except Exception as exc:  # pragma: no cover - defensive
-                return OllamaStatus(
-                    running=False,
-                    url=self.base_url,
-                    error=f"Error: {exc}",
-                    models=[],
-                )
+    def _candidate_urls(self) -> list[str]:
+        """Generate possible Ollama base URLs to probe in order."""
+        hosts = []
+        if self.explicit_url:
+            hosts.append(self.explicit_url)
+        # Common defaults
+        hosts.extend(
+            [
+                "http://localhost:11434",
+                "http://127.0.0.1:11434",
+                "http://host.docker.internal:11434",
+            ]
+        )
+        # Normalize and de-dup while preserving order
+        seen = set()
+        cleaned = []
+        for h in hosts:
+            parsed = urlparse(h)
+            base = h
+            if not parsed.scheme:
+                base = f"http://{h}"
+            base = base.rstrip("/")
+            if base not in seen:
+                seen.add(base)
+                cleaned.append(base)
+        return cleaned

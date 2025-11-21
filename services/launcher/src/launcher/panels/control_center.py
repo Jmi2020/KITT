@@ -30,12 +30,12 @@ class QuickAction:
 
 
 QUICK_ACTIONS: tuple[QuickAction, ...] = (
-    QuickAction("start_stack", "🚀 Start KITTY", "Run llama.cpp + Docker stack", "success"),
-    QuickAction("stop_stack", "⏹ Stop KITTY", "Graceful shutdown (Docker + llama.cpp)", "warning"),
-    QuickAction("start_ollama", "🧠 Start Ollama (GPT-OSS)", "Launch Ollama reasoning/judge stack", "accent"),
+    QuickAction("start_stack", "🚀 Start KITTY", "Run Ollama + Docker + llama.cpp", "success"),
+    QuickAction("stop_stack", "⏹ Stop KITTY", "Graceful shutdown (Docker + local servers)", "warning"),
+    QuickAction("start_ollama", "🧠 Start Ollama (GPT-OSS)", "Main reasoning/judge stack", "accent"),
     QuickAction("stop_ollama", "🧠 Stop Ollama", "Stop Ollama server", "warning"),
     QuickAction("restart_ollama", "🧠 Restart Ollama", "Restart Ollama server", "neutral"),
-    QuickAction("start_llama", "🔥 Start llama.cpp", "Launch legacy/local llama.cpp instances", "accent"),
+    QuickAction("start_llama", "🔥 Start llama.cpp", "Legacy/local fallback instances", "accent"),
     QuickAction("stop_llama", "🔥 Stop llama.cpp", "Stop llama.cpp instances", "warning"),
     QuickAction("restart_llama", "🔥 Restart llama.cpp", "Restart llama.cpp instances", "neutral"),
     QuickAction("start_docker", "🐳 Start Docker Stack", "Bring up docker compose services", "accent"),
