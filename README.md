@@ -1513,7 +1513,7 @@ By default we cap completions at **896 tokens** with a 90 s HTTP timeout. When
    ```
 2. Restart the llama.cpp service (`./ops/scripts/start-llamacpp.sh` or via Model Manager) and `docker compose … restart brain`.
 
-**Mac Studio (M2 Ultra, 24c CPU / 60c GPU, 192–256 GB unified memory) suggestions**
+**Mac Studio (M3 Ultra, 24c CPU / 60c GPU, 192–256 GB unified memory) suggestions**
 
 - Use the Metal backend with **flash attention** enabled.
 - 30–40 GPU layers per model (as already configured) keeps VRAM usage comfortable.

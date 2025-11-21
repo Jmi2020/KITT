@@ -23,6 +23,7 @@ docs/admin/
 tmp/
 AGENTS.md
 CLAUDE.md
+GEMINI.md
 
 # Editor
 .vscode/
