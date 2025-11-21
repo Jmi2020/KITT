@@ -39,21 +39,21 @@ success() {
 # Server Configuration
 # ========================================
 
-# Q4 Server (Fast Tool Orchestrator)
+# Q4 Server (Quality-First Tool Orchestrator - 128k context)
 Q4_MODEL="${LLAMACPP_Q4_MODEL:-athene-v2-agent/Athene-V2-Agent-Q4_K_M.gguf}"
 Q4_PORT="${LLAMACPP_Q4_PORT:-8083}"
 Q4_ALIAS="${LLAMACPP_Q4_ALIAS:-kitty-q4}"
-Q4_CTX_SIZE="${LLAMACPP_Q4_CTX:-8192}"
-Q4_N_PARALLEL="${LLAMACPP_Q4_PARALLEL:-4}"
+Q4_CTX_SIZE="${LLAMACPP_Q4_CTX:-131072}"
+Q4_N_PARALLEL="${LLAMACPP_Q4_PARALLEL:-1}"
 Q4_LOG="$LOG_DIR/llamacpp-q4.log"
 Q4_PID="$LOG_DIR/llamacpp-q4.pid"
 
-# F16 Server (Deep Reasoning Engine)
+# F16 Server (Deep Reasoning Engine - 128k context)
 F16_MODEL="${LLAMACPP_F16_MODEL:-llama-3.3-70b/Llama-3.3-70B-Instruct-F16.gguf}"
 F16_PORT="${LLAMACPP_F16_PORT:-8082}"
 F16_ALIAS="${LLAMACPP_F16_ALIAS:-kitty-f16}"
-F16_CTX_SIZE="${LLAMACPP_F16_CTX:-8192}"
-F16_N_PARALLEL="${LLAMACPP_F16_PARALLEL:-2}"
+F16_CTX_SIZE="${LLAMACPP_F16_CTX:-131072}"
+F16_N_PARALLEL="${LLAMACPP_F16_PARALLEL:-1}"
 F16_LOG="$LOG_DIR/llamacpp-f16.log"
 F16_PID="$LOG_DIR/llamacpp-f16.pid"
 
@@ -100,6 +100,11 @@ else
         --n-gpu-layers 999 \
         --ctx-size $Q4_CTX_SIZE \
         -np $Q4_N_PARALLEL \
+        -kvu \
+        --rope-scaling yarn \
+        --yarn-orig-ctx 32768 \
+        --yarn-ext-factor 4.0 \
+        --override-kv llama.context_length=int:131072 \
         --batch-size 512 \
         --threads 8 \
         --alias "$Q4_ALIAS" \

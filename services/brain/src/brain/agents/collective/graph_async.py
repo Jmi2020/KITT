@@ -1,18 +1,105 @@
 
 from __future__ import annotations
-from typing import TypedDict, List
+from typing import TypedDict, List, Dict, Any, Optional
 import os
+import logging
 from langgraph.graph import StateGraph, END
 
 # Import async chat interface
 from brain.llm_client import chat_async
 from .context_policy import fetch_domain_context
 
+# Import tool registry and MCP execution
+from brain.routing.tool_registry import TOOL_DEFINITIONS
+from brain.tools.mcp_client import MCPClient
+
+# Import token budget system
+from brain.token_budgets import TokenBudgetManager, summarize_conversation
+
+# Import judge prompt builder
+from .judge_prompts import (
+    build_judge_system_prompt,
+    build_judge_user_prompt,
+    check_judge_prompt_budget,
+    trim_proposals_to_budget,
+    deduplicate_kb_references
+)
+
+logger = logging.getLogger(__name__)
+
+# Global MCP client instance (lazy initialization)
+_mcp_client: Optional[MCPClient] = None
+
+
+def _get_mcp_client() -> MCPClient:
+    """Get or create global MCP client instance."""
+    global _mcp_client
+    if _mcp_client is None:
+        _mcp_client = MCPClient()
+        logger.info("Initialized MCPClient for collective tool execution")
+    return _mcp_client
+
 # Prompts from environment
 HINT_PROPOSER = os.getenv("COLLECTIVE_HINT_PROPOSER",
                           "Solve independently; do not reference other agents or a group.")
 HINT_JUDGE = os.getenv("COLLECTIVE_HINT_JUDGE",
                        "You are the judge; prefer safety, clarity, testability.")
+
+
+async def _execute_tool_calls(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Execute tool calls via MCP and return results.
+
+    Simplified version for collective agents - no safety checks since these are
+    read-only research tools (web_search mainly).
+
+    Args:
+        tool_calls: List of tool call dicts with 'function' containing 'name' and 'arguments'
+
+    Returns:
+        List of result dicts with 'tool', 'result', or 'error' keys
+    """
+    results = []
+    mcp_client = _get_mcp_client()
+
+    for tool_call in tool_calls:
+        try:
+            # Parse tool call structure (supports both llama.cpp and Ollama formats)
+            if isinstance(tool_call, dict):
+                if "function" in tool_call:
+                    # Ollama format: {function: {name: ..., arguments: ...}}
+                    func = tool_call.get("function", {})
+                    tool_name = func.get("name")
+                    tool_args = func.get("arguments", {})
+                else:
+                    # Direct format: {name: ..., arguments: ...}
+                    tool_name = tool_call.get("name")
+                    tool_args = tool_call.get("arguments", {})
+            else:
+                # Object format (hasattr)
+                tool_name = getattr(tool_call, "name", None)
+                tool_args = getattr(tool_call, "arguments", {}) or {}
+
+            if not tool_name:
+                results.append({"tool": "unknown", "error": "Missing tool name"})
+                continue
+
+            logger.info(f"Collective executing tool: {tool_name}")
+
+            # Execute via MCP (returns dict with success, data, error, metadata)
+            result = await mcp_client.execute_tool(tool_name, tool_args)
+
+            # Format result for collective agents
+            if result.get("success"):
+                results.append({"tool": tool_name, "result": result.get("data")})
+            else:
+                results.append({"tool": tool_name, "error": result.get("error", "Unknown error")})
+
+        except Exception as e:
+            logger.error(f"Collective tool execution failed for {tool_name}: {e}")
+            results.append({"tool": tool_name, "error": str(e)})
+
+    return results
+
 
 class CollectiveState(TypedDict, total=False):
     task: str
@@ -23,11 +110,44 @@ class CollectiveState(TypedDict, total=False):
     logs: str
 
 async def n_plan(s: CollectiveState) -> CollectiveState:
-    """Plan node - uses Q4 to create high-level plan."""
+    """Plan node - uses Q4 to create high-level plan.
+
+    Token Budget (Option A): Planning with 32k context limit:
+    - Lightweight planning (no KB context needed)
+    - ~2k tokens for conversation summary
+    - ~2k tokens for system + task
+    - ~2k tokens for plan output
+    """
+    # Get conversation summary if available
+    conversation_history = s.get("conversation_history", [])
+    conv_summary = summarize_conversation(conversation_history, max_tokens=2000) if conversation_history else ""
+
+    # Build system prompt
+    system_prompt = (
+        "You are KITTY's meta-orchestrator. Plan agent roles and workflow for the task briefly.\n"
+        "Provide a concise plan outlining how specialists should approach the problem."
+    )
+
+    # Build user prompt
+    user_prompt_parts = []
+
+    if conv_summary:
+        user_prompt_parts.append(f"## Conversation Context\n{conv_summary}")
+
+    user_prompt_parts.append(
+        f"## Task\n{s['task']}\n\n"
+        f"Pattern: {s.get('pattern','pipeline')} | k={s.get('k',3)}\n\n"
+        f"Create a brief plan outlining the deliberation strategy."
+    )
+
+    user_prompt = "\n\n".join(user_prompt_parts)
+
+    # Simple planning call (no tools, no KB context to fit within budget)
     plan, metadata = await chat_async([
-        {"role":"system","content":"You are KITTY's meta-orchestrator. Plan agent roles for the task briefly."},
-        {"role":"user","content":f"Task: {s['task']} | Pattern: {s.get('pattern','pipeline')} | k={s.get('k',3)}"}
-    ], which="Q4")
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ], which="Q4", max_tokens=2000)
+
     return {**s, "logs": (s.get("logs","") + "\n[plan]\n" + plan)}
 
 async def n_propose_pipeline(s: CollectiveState) -> CollectiveState:
@@ -44,38 +164,82 @@ async def n_propose_council(s: CollectiveState) -> CollectiveState:
     Confidentiality: Proposers receive filtered context (excludes meta/dev/collective)
     to maintain independence and prevent groupthink.
 
-    Diversity: First specialist uses Q4B (diversity seat - different model family)
-    to reduce correlated failures and introduce varied perspectives.
+    Token Budget (Option A): Athene specialists work within 32k training context:
+    - Total budget: 24k prompt + 6-8k output = 30-32k
+    - KB chunks: Auto-trimmed to fit ~10k token budget
+    - Conversation summary: ~2k tokens
+    - System + task framing: ~6k tokens
+    - Output: 6-8k tokens for detailed proposals
     """
     import asyncio
 
     k = int(s.get("k", 3))
 
-    # Fetch filtered context for proposers (excludes meta/dev tags)
-    context = fetch_domain_context(s["task"], limit=6, for_proposer=True)
+    # Get conversation summary if available (for multi-turn context)
+    conversation_history = s.get("conversation_history", [])
+    conv_summary = summarize_conversation(conversation_history, max_tokens=2000) if conversation_history else ""
 
-    # Generate all proposals concurrently with model diversity
+    # Fetch filtered context for proposers with token budget
+    # Budget: ~10k tokens for KB chunks (auto-trimmed by fetch_domain_context)
+    context = fetch_domain_context(
+        s["task"],
+        limit=10,  # Fetch more, let auto-trim select best chunks
+        for_proposer=True,
+        token_budget=10000  # Athene KB budget
+    )
+
+    # Generate all proposals concurrently
     async def generate_proposal(i: int) -> str:
         role = f"specialist_{i+1}"
-
-        # Use Q4 for all specialists
-        # Q4B diversity seat disabled to conserve RAM on this workstation
         which_model = "Q4"
 
         # Vary temperature slightly across specialists (0.7-0.9)
-        # Higher temperature = more creative/diverse responses
         temperature = 0.7 + (i * 0.1)
 
-        # Vary max_tokens slightly (400-600) for different levels of detail
-        max_tokens = 400 + (i * 100)
+        # Output budget: 6-8k tokens
+        max_tokens = 6000 + (i * 500)  # Vary slightly (6k-7.5k)
 
-        system_prompt = f"You are {role}. {HINT_PROPOSER}"
-        user_prompt = f"Task:\n{s['task']}\n\nRelevant context:\n{context}\n\nProvide a concise proposal with justification."
+        # Build system prompt
+        system_prompt = (
+            f"You are {role}, an expert specialist on this task. {HINT_PROPOSER}\n\n"
+            f"When referencing knowledge base context, cite the KB chunk ID (e.g., [KB#123]).\n"
+            f"Provide a detailed, well-justified proposal."
+        )
 
+        # Build user prompt with budget-aware components
+        user_prompt_parts = []
+
+        if conv_summary:
+            user_prompt_parts.append(f"## Conversation Context\n{conv_summary}")
+
+        user_prompt_parts.append(f"## Task\n{s['task']}")
+        user_prompt_parts.append(f"## Relevant Knowledge\n{context}")
+        user_prompt_parts.append(
+            "\n## Your Proposal\nProvide your expert analysis and recommendation. "
+            "Reference KB chunks using [KB#id] when citing evidence."
+        )
+
+        user_prompt = "\n\n".join(user_prompt_parts)
+
+        # Check budget before calling (log for debugging)
+        budget_ok, allocations = TokenBudgetManager.check_athene_budget(
+            system_prompt=system_prompt,
+            conversation_summary=conv_summary,
+            kb_chunks=context,
+            task_query=s['task'],
+            tools_json=None  # No tools for Athene specialists
+        )
+
+        if not budget_ok:
+            logger.warning(f"Specialist {i+1} budget overflow detected")
+            TokenBudgetManager.log_budget_status(allocations, f"Specialist_{i+1}")
+
+        # Generate proposal (no tools to stay within 32k context limit)
         response, metadata = await chat_async([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ], which=which_model, temperature=temperature, max_tokens=max_tokens)
+
         return response
 
     # Run all proposals in parallel
@@ -90,46 +254,180 @@ async def n_propose_debate(s: CollectiveState) -> CollectiveState:
 
     Confidentiality: Both debaters receive filtered context (excludes meta/dev/collective)
     to maintain independence and prevent anchoring.
+
+    Token Budget (Option A): Athene debaters work within 32k training context:
+    - Same budget as council specialists (24k prompt + 6-8k output)
+    - KB chunks auto-trimmed to ~10k tokens
+    - Conversation summary: ~2k tokens
     """
     import asyncio
 
-    # Fetch filtered context for debaters (excludes meta/dev tags)
-    context = fetch_domain_context(s["task"], limit=6, for_proposer=True)
+    # Get conversation summary if available
+    conversation_history = s.get("conversation_history", [])
+    conv_summary = summarize_conversation(conversation_history, max_tokens=2000) if conversation_history else ""
+
+    # Fetch filtered context for debaters with token budget
+    context = fetch_domain_context(
+        s["task"],
+        limit=10,
+        for_proposer=True,
+        token_budget=10000
+    )
+
+    # Helper to generate debate argument with budget awareness
+    async def generate_argument(stance: str, is_pro: bool) -> str:
+        # Build system prompt
+        system_prompt = (
+            f"You are {stance}. {HINT_PROPOSER} Argue {'FOR' if is_pro else 'AGAINST'} the proposal.\n\n"
+            f"When referencing knowledge base context, cite the KB chunk ID (e.g., [KB#123]).\n"
+            f"Provide strong, well-justified arguments with evidence."
+        )
+
+        # Build user prompt
+        user_prompt_parts = []
+
+        if conv_summary:
+            user_prompt_parts.append(f"## Conversation Context\n{conv_summary}")
+
+        user_prompt_parts.append(f"## Task\n{s['task']}")
+        user_prompt_parts.append(f"## Relevant Knowledge\n{context}")
+        user_prompt_parts.append(
+            f"\n## Your {'PRO' if is_pro else 'CON'} Arguments\n"
+            f"Present compelling arguments {'supporting' if is_pro else 'opposing'} the proposal. "
+            f"Reference KB chunks using [KB#id] when citing evidence."
+        )
+
+        user_prompt = "\n\n".join(user_prompt_parts)
+
+        # Check budget before calling
+        budget_ok, allocations = TokenBudgetManager.check_athene_budget(
+            system_prompt=system_prompt,
+            conversation_summary=conv_summary,
+            kb_chunks=context,
+            task_query=s['task'],
+            tools_json=None
+        )
+
+        if not budget_ok:
+            logger.warning(f"Debater {stance} budget overflow detected")
+            TokenBudgetManager.log_budget_status(allocations, f"Debater_{stance}")
+
+        # Generate argument (no tools to stay within 32k context limit)
+        response, metadata = await chat_async([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ], which="Q4", max_tokens=6000)
+
+        return response
 
     # Generate PRO and CON concurrently
-    pro_task = chat_async([
-        {"role": "system", "content": f"You are PRO. {HINT_PROPOSER} Argue FOR the proposal in 6 concise bullet points."},
-        {"role": "user", "content": f"Task:\n{s['task']}\n\nRelevant context:\n{context}\n\nProvide PRO arguments."}
-    ], which="Q4")
+    pro_task = generate_argument("PRO", is_pro=True)
+    con_task = generate_argument("CON", is_pro=False)
 
-    con_task = chat_async([
-        {"role": "system", "content": f"You are CON. {HINT_PROPOSER} Argue AGAINST the proposal in 6 concise bullet points."},
-        {"role": "user", "content": f"Task:\n{s['task']}\n\nRelevant context:\n{context}\n\nProvide CON arguments."}
-    ], which="Q4")
-
-    # Gather results (each returns tuple of (response, metadata))
+    # Gather results
     results = await asyncio.gather(pro_task, con_task)
-    pro, pro_meta = results[0]
-    con, con_meta = results[1]
+    pro = results[0]
+    con = results[1]
 
     return {**s, "proposals": [pro, con]}
 
 async def n_judge(s: CollectiveState) -> CollectiveState:
-    """Judge node - uses F16 to synthesize proposals into final verdict.
+    """Judge node - uses F16 (GPT-OSS 120B) to synthesize proposals into final verdict.
 
     Confidentiality: Judge receives FULL context (no tag filtering) to make
     informed decisions considering both domain knowledge and process context.
+
+    Token Budget (Option A): GPT-OSS 120B with 128k context:
+    - Total budget: 100k prompt + 6-8k output = 106-108k
+    - Full KB context: ~35k tokens (unfiltered, all tags)
+    - Specialist proposals: ~25k tokens (auto-trimmed if needed)
+    - Conversation summary: ~2k tokens
+    - Tools: ~10k tokens
+    - System + task framing: ~6k tokens
+    - Margin: ~7k tokens
+
+    Tool Access: Judge can use tools to verify claims, research additional context,
+    or fact-check proposals before making final decision. GPT-OSS 120B's thinking
+    mode helps with deep reasoning over tool results.
+
+    Structured Prompts: Uses 6-section prompt format for optimal synthesis:
+    1. Conversation Context
+    2. Task Description
+    3. Full Knowledge Base
+    4. Specialist Proposals (with KB citations)
+    5. Planning Context
+    6. Synthesis Instructions
     """
+    # Get conversation summary
+    conversation_history = s.get("conversation_history", [])
+    conv_summary = summarize_conversation(conversation_history, max_tokens=2000) if conversation_history else ""
+
     # Fetch full context for judge (no tag filtering)
-    full_context = fetch_domain_context(s["task"], limit=10, for_proposer=False)
+    # Judge budget: ~35k tokens for KB chunks
+    full_context = fetch_domain_context(
+        s["task"],
+        limit=20,  # Fetch many, let auto-trim select best
+        for_proposer=False,  # Full access (no tag filtering)
+        token_budget=35000  # Judge KB budget
+    )
 
-    proposals_text = "\n\n---\n\n".join(s.get("proposals", []))
-    user_prompt = f"Task:\n{s['task']}\n\nRelevant context (full access):\n{full_context}\n\nProposals:\n\n{proposals_text}\n\nProvide: final decision, rationale, and next step."
+    # Get proposals and trim if needed
+    proposals = s.get("proposals", [])
+    proposals = trim_proposals_to_budget(proposals, max_tokens=25000)
 
+    # Log KB reference deduplication
+    kb_refs = deduplicate_kb_references(proposals)
+    if kb_refs:
+        logger.info(f"Judge analyzing {len(kb_refs)} unique KB chunks cited by specialists: {kb_refs}")
+
+    # Build structured prompts
+    pattern = s.get("pattern", "council")
+    system_prompt = build_judge_system_prompt(pattern)
+    user_prompt = build_judge_user_prompt(
+        task=s["task"],
+        conversation_summary=conv_summary,
+        kb_context=full_context,
+        proposals=proposals,
+        plan_logs=s.get("logs")
+    )
+
+    # Convert tool registry to list format
+    tools_list = list(TOOL_DEFINITIONS.values())
+
+    # Check budget before calling
+    import json
+    tools_json = json.dumps(tools_list)
+    budget_ok = check_judge_prompt_budget(system_prompt, user_prompt, tools_json)
+
+    if not budget_ok:
+        logger.warning("Judge prompt exceeds budget - proceeding with caution")
+
+    # Initial call with tools (GPT-OSS 120B with thinking mode)
     verdict, metadata = await chat_async([
-        {"role": "system", "content": f"{HINT_JUDGE} You may consider all available context including process and meta information."},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt}
-    ], which="F16")
+    ], which="F16", tools=tools_list, max_tokens=6000)
+
+    # If tool calls were made, execute them and get final verdict
+    tool_calls = metadata.get("tool_calls", [])
+    if tool_calls:
+        logger.info(f"Judge (F16/GPT-OSS) executing {len(tool_calls)} tool calls")
+        tool_results = await _execute_tool_calls(tool_calls)
+
+        # Format results for model
+        results_text = "\n".join([
+            f"Tool: {r['tool']}\nResult: {r.get('result', r.get('error'))}"
+            for r in tool_results
+        ])
+
+        # Get final verdict incorporating tool results
+        # GPT-OSS 120B will use thinking mode to deeply reason about the evidence
+        verdict, _ = await chat_async([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+            {"role": "assistant", "content": "I need to verify some claims first."},
+            {"role": "user", "content": f"Verification results:\n{results_text}\n\nNow provide your final verdict considering all evidence."}
+        ], which="F16", max_tokens=6000)
 
     return {**s, "verdict": verdict}
 

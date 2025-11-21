@@ -348,13 +348,14 @@ async def chat_async(
     metadata["tokens_used"] = 0  # Local doesn't track tokens
     metadata["cost_usd"] = 0.0  # Local is free
 
-    # Log tool calls if any
+    # Log tool calls if any and include in metadata
     tool_calls = result.get("tool_calls", [])
     if tool_calls:
         logger.info(
             f"Collective {which} generated {len(tool_calls)} tool calls: "
-            f"{[tc.name for tc in tool_calls]}"
+            f"{[tc.get('function', {}).get('name') if isinstance(tc, dict) else getattr(tc, 'name', 'unknown') for tc in tool_calls]}"
         )
+    metadata["tool_calls"] = tool_calls
 
     return response_text, metadata
 
