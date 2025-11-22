@@ -46,6 +46,7 @@ from ..metrics import (
     SaturationDetector,
     GapDetector,
     StoppingCriteria,
+    StoppingReason,
 )
 from ..extraction import (
     extract_claims_from_content,
@@ -422,6 +423,30 @@ async def _select_strategy_flat(state: ResearchState) -> ResearchState:
         # Plan next iteration
         tasks = await strategy.plan(state["query"], strategy_context)
 
+        # Inject targeted follow-ups from reflection (knowledge gaps, rewrites)
+        extra_queries = state.get("next_queries", [])
+        if extra_queries:
+            from ..orchestration.strategies import ResearchTask
+
+            existing_queries = {t.query.strip().lower() for t in tasks}
+            for idx, q in enumerate(extra_queries):
+                norm_q = (q or "").strip()
+                if not norm_q or norm_q.lower() in existing_queries:
+                    continue
+
+                task_id = f"{state['session_id']}_gap_{state['current_iteration']}_{idx}"
+                tasks.insert(0, ResearchTask(
+                    task_id=task_id,
+                    query=norm_q,
+                    priority=0.72,
+                    depth=0,
+                    context={"source": "reflection"}
+                ))
+                existing_queries.add(norm_q.lower())
+
+            # Clear queue once consumed
+            state["next_queries"] = []
+
         # Store tasks in state
         state["strategy_context"]["current_tasks"] = [
             {
@@ -525,6 +550,33 @@ async def _select_strategy_hierarchical(state: ResearchState) -> ResearchState:
 
         # Plan tasks for this sub-question
         tasks = await strategy.plan(next_sq["question_text"], sq_context)
+
+        # Inject reflection-driven queries (tag with sub-question for provenance)
+        extra_queries = state.get("next_queries", [])
+        if extra_queries:
+            from ..orchestration.strategies import ResearchTask
+
+            existing_queries = {t.query.strip().lower() for t in tasks}
+            for idx, q in enumerate(extra_queries):
+                norm_q = (q or "").strip()
+                if not norm_q or norm_q.lower() in existing_queries:
+                    continue
+
+                task_id = f"{state['session_id']}_gap_{next_sq['sub_question_id']}_{idx}"
+                tasks.insert(0, ResearchTask(
+                    task_id=task_id,
+                    query=norm_q,
+                    priority=0.72,
+                    depth=0,
+                    context={
+                        "source": "reflection",
+                        "sub_question_id": next_sq["sub_question_id"],
+                        "sub_question_text": next_sq["question_text"],
+                    }
+                ))
+                existing_queries.add(norm_q.lower())
+
+            state["next_queries"] = []
 
         # Tag all tasks with sub-question ID
         for task in tasks:
@@ -1225,6 +1277,112 @@ async def score_quality(state: ResearchState) -> ResearchState:
     return state
 
 
+async def reflect_and_plan_next(state: ResearchState) -> ResearchState:
+    """
+    Lightweight reflection loop to steer the next iteration.
+
+    Captures:
+    - Coverage across sub-questions or general findings
+    - Stagnation streak when no new findings land
+    - Targeted follow-up queries derived from knowledge gaps or pending sub-questions
+    """
+    logger.info("Running reflection + gap analysis")
+
+    try:
+        current_total = len(state.get("findings", []))
+        previous_summaries = state.get("iteration_summaries", [])
+        last_total = previous_summaries[-1]["findings_total"] if previous_summaries else 0
+        delta_findings = current_total - last_total
+
+        # Track stagnation streak (no new findings)
+        prior_reflection = state.get("reflection") or {}
+        stagnation_streak = prior_reflection.get("stagnation_streak", 0)
+        if delta_findings <= 0:
+            stagnation_streak += 1
+        else:
+            stagnation_streak = 0
+
+        # Compute simple coverage score
+        coverage_score = 1.0
+        notes: list[str] = []
+        next_queries: list[str] = []
+
+        if state.get("sub_questions") and state["config"].get("enable_hierarchical"):
+            total_sq = len(state["sub_questions"])
+            answered = len([
+                sq for sq in state["sub_questions"]
+                if sq.get("findings") or sq.get("synthesis")
+            ])
+            coverage_score = answered / total_sq if total_sq else 0.0
+
+            # Queue pending sub-questions as next queries (highest priority first)
+            pending = sorted(
+                [sq for sq in state["sub_questions"] if sq.get("status") == "pending"],
+                key=lambda s: s.get("priority", 0.5),
+                reverse=True,
+            )
+            for sq in pending[:3]:
+                next_queries.append(sq.get("question_text", ""))
+            if pending:
+                notes.append(f"Pending sub-questions: {len(pending)}")
+        else:
+            # Heuristic coverage for flat mode: scale with findings density
+            coverage_score = min(1.0, current_total / 6) if current_total else 0.0
+
+        # Turn knowledge gaps into focused follow-ups
+        for gap in state.get("knowledge_gaps", [])[:3]:
+            gap_topics = gap.get("missing_topics") or gap.get("related_findings") or []
+            if gap_topics:
+                next_queries.append(f"{state['query']} {' '.join(gap_topics[:3])}")
+
+        # If nothing new landed, generate alternative rewrites to shake the search tree
+        if delta_findings <= 0 and not next_queries:
+            next_queries.extend(_rewrite_search_queries(state.get("query", ""))[:3])
+            notes.append("No new findings; injecting rewritten queries")
+
+        # Deduplicate while preserving order
+        seen_queries = set()
+        filtered_queries = []
+        for q in next_queries:
+            norm = q.strip().lower()
+            if not norm or norm in seen_queries:
+                continue
+            seen_queries.add(norm)
+            filtered_queries.append(q)
+
+        recommended_tools = []
+        if stagnation_streak >= 2:
+            recommended_tools.append("research_deep")
+            notes.append(f"Stagnation streak {stagnation_streak} → escalate depth")
+
+        # Persist iteration summary for observability
+        state.setdefault("iteration_summaries", []).append({
+            "iteration": state.get("current_iteration", 0),
+            "findings_total": current_total,
+            "sources_total": len(state.get("sources", [])),
+            "delta_findings": delta_findings,
+            "stagnation": delta_findings <= 0,
+        })
+
+        reflection = {
+            "coverage_score": round(coverage_score, 3),
+            "delta_findings": delta_findings,
+            "stagnation_streak": stagnation_streak,
+            "next_queries": filtered_queries[:3],
+            "recommended_tools": recommended_tools,
+            "notes": notes,
+        }
+
+        state["reflection"] = reflection
+        state["next_queries"] = reflection["next_queries"]
+
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Reflection failed: {exc}", exc_info=True)
+        state = record_error(state, str(exc), {"node": "reflect_and_plan_next"})
+
+    return state
+
+
 async def synthesize_sub_question(state: ResearchState) -> ResearchState:
     """
     Synthesize findings for the current sub-question.
@@ -1589,6 +1747,20 @@ async def _check_stopping_flat(state: ResearchState) -> ResearchState:
             budget_remaining=state["budget_remaining"],
             external_calls_remaining=state["external_calls_remaining"]
         )
+
+        # Incorporate stagnation signal from reflection loop
+        reflection = state.get("reflection") or {}
+        stagnation_streak = reflection.get("stagnation_streak", 0)
+        if stagnation_streak >= 2 and len(state.get("findings", [])) < 3:
+            decision.should_stop = True
+            if StoppingReason.STAGNATION not in decision.reasons:
+                decision.reasons.append(StoppingReason.STAGNATION)
+            decision.explanation = (
+                decision.explanation or "Stagnation detected"
+            ) + f"; no new findings for {stagnation_streak} iteration(s)"
+            decision.recommendations.append(
+                "Change search angle: use deep research or refreshed keywords"
+            )
 
         state["stopping_decision"] = decision.to_dict()
 
@@ -2263,12 +2435,13 @@ Sources Consulted (with content excerpts):
 
 IMPORTANT: Analyze the actual source content provided above. Reference specific information, quotes, and evidence from the source snippets when constructing your synthesis. Evaluate source quality, relevance, and consistency.
 
-Please provide:
+Please provide (keep every section, even if brief):
 1) A direct answer to the query based on the sources
 2) Key insights with inline source tags in the form [source title or URL]
 3) Evidence: 1 short quote per major insight (trim if long)
 4) Conflicts or caveats across sources
-5) Gaps/next steps if coverage is weak
+5) Methodology & source quality notes (how you derived the answer)
+6) Gaps/next steps if coverage is weak
 
 Use this outline:
 ## Direct Answer
@@ -2281,8 +2454,14 @@ Use this outline:
 ## Caveats & Conflicts
 - Note discrepancies, weak evidence, or missing data
 
+## Methodology & Source Notes
+- How sources were used, diversity, and limitations
+
 ## Confidence & Coverage
-Rate High/Medium/Low and justify using source quality, diversity, and agreement."""
+Rate High/Medium/Low and justify using source quality, diversity, and agreement.
+
+## Next Steps / Missing Pieces
+- Focused follow-ups that would raise confidence or coverage."""
 
         # Determine consultation tier based on quality and budget
         avg_quality = sum(state["quality_scores"]) / len(state["quality_scores"]) if state["quality_scores"] else 0.0

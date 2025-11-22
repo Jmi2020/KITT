@@ -111,6 +111,11 @@ class ResearchState(TypedDict):
     # Knowledge gaps
     knowledge_gaps: List[Dict[str, Any]]
 
+    # Reflection / progress tracking
+    iteration_summaries: List[Dict[str, Any]]
+    reflection: Optional[Dict[str, Any]]
+    next_queries: List[str]
+
     # Stopping criteria
     stopping_decision: Optional[Dict[str, Any]]
 
@@ -233,6 +238,11 @@ def create_initial_state(
 
         # Knowledge gaps
         knowledge_gaps=[],
+
+        # Reflection / progress tracking
+        iteration_summaries=[],
+        reflection=None,
+        next_queries=[],
 
         # Stopping criteria
         stopping_decision=None,

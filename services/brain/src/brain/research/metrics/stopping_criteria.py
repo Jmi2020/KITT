@@ -31,6 +31,7 @@ class StoppingReason(str, Enum):
     TIME_LIMIT = "time_limit"              # Time limit reached
     MAX_ITERATIONS = "max_iterations"      # Max iterations reached
     GAPS_RESOLVED = "gaps_resolved"        # All critical gaps resolved
+    STAGNATION = "stagnation"              # No new value being added
     USER_REQUESTED = "user_requested"      # User manually stopped
     ERROR = "error"                        # Error occurred, cannot continue
 
@@ -323,6 +324,7 @@ class StoppingCriteria:
             StoppingReason.BUDGET_EXHAUSTED,
             StoppingReason.TIME_LIMIT,
             StoppingReason.MAX_ITERATIONS,
+            StoppingReason.STAGNATION,
             StoppingReason.ERROR
         }
 
@@ -368,6 +370,8 @@ class StoppingCriteria:
                 explanation += f"Research saturated (novelty rate: {saturation_status.novelty_rate:.1%}). "
             if StoppingReason.GAPS_RESOLVED in reasons:
                 explanation += "All critical knowledge gaps resolved. "
+            if StoppingReason.STAGNATION in reasons:
+                explanation += "Stagnation detected (no new findings). "
 
         else:
             explanation = f"Research should continue (iteration {current_iteration}). "
@@ -403,6 +407,8 @@ class StoppingCriteria:
                 recommendations.append("Diminishing returns detected - consider stopping or changing approach")
             if StoppingReason.BUDGET_EXHAUSTED in reasons:
                 recommendations.append("Budget exhausted - synthesize available findings")
+            if StoppingReason.STAGNATION in reasons:
+                recommendations.append("No new findings - change search terms or increase depth")
         else:
             # Recommend addressing high-priority gaps
             high_priority_gaps = [

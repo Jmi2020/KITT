@@ -17,6 +17,7 @@ from .nodes import (
     execute_iteration,
     validate_findings,
     score_quality,
+    reflect_and_plan_next,
     check_stopping,
     synthesize_sub_question,
     synthesize_results,
@@ -59,6 +60,7 @@ class ResearchGraph:
         graph.add_node("execute_iteration", execute_iteration)
         graph.add_node("validate", validate_findings)
         graph.add_node("score_quality", score_quality)
+        graph.add_node("reflect_and_plan", reflect_and_plan_next)
         graph.add_node("check_stopping", check_stopping)
         graph.add_node("synthesize_sub_question", synthesize_sub_question)
         graph.add_node("synthesize", synthesize_results)
@@ -83,10 +85,13 @@ class ResearchGraph:
         # 6. After validation, score quality
         graph.add_edge("validate", "score_quality")
 
-        # 7. After scoring, check stopping criteria
-        graph.add_edge("score_quality", "check_stopping")
+        # 7. After scoring, reflect on gaps and next queries
+        graph.add_edge("score_quality", "reflect_and_plan")
 
-        # 8. Conditional routing from stopping check
+        # 8. After reflection, check stopping criteria
+        graph.add_edge("reflect_and_plan", "check_stopping")
+
+        # 9. Conditional routing from stopping check
         graph.add_conditional_edges(
             "check_stopping",
             self._should_continue,
@@ -98,13 +103,13 @@ class ResearchGraph:
             }
         )
 
-        # 9. After sub-question synthesis, go back to select next sub-question
+        # 10. After sub-question synthesis, go back to select next sub-question
         graph.add_edge("synthesize_sub_question", "select_strategy")
 
-        # 10. After final synthesis, end
+        # 11. After final synthesis, end
         graph.add_edge("synthesize", END)
 
-        # 11. After error handling, end
+        # 12. After error handling, end
         graph.add_edge("handle_error", END)
 
         logger.info("Research graph built successfully")
