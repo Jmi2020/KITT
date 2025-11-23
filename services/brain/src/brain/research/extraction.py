@@ -66,8 +66,13 @@ CLAIM_EXTRACTION_PROMPT = """You are a research assistant extracting verifiable 
 
 TASK: Extract atomic claims that are DIRECTLY SUPPORTED by verbatim quotes from the passage below.
 
+For each claim, classify its type as one of:
+- "fact"           → objective, verifiable statement
+- "opinion"        → author’s judgment, interpretation, or prediction
+- "recommendation" → explicit advice, best-practice, or suggested action
+
 RULES:
-1. Each claim must be a single, independent factual assertion
+1. Each claim must be a single, independent factual or opinionated assertion
 2. Only extract claims that have direct quote support in the passage
 3. Provide the exact verbatim quote(s) that support each claim
 4. Include character positions (char_start, char_end) for each quote if possible
@@ -80,6 +85,7 @@ OUTPUT FORMAT (strict JSON):
   "claims": [
     {{
       "claim": "The exact claim text",
+      "claim_type": "fact" | "opinion" | "recommendation",
       "quotes": [
         {{
           "text": "The exact verbatim quote from passage",
@@ -97,7 +103,7 @@ PASSAGE:
 
 CONTEXT QUERY: {query}
 
-Extract all verifiable claims with their supporting quotes:"""
+Extract all verifiable claims with their supporting quotes and types:"""
 
 
 async def extract_claims_from_content(
@@ -218,6 +224,8 @@ async def extract_claims_from_content(
         claims: List[Claim] = []
         for claim_data in claims_data:
             claim_text = claim_data.get("claim", "").strip()
+            raw_type = (claim_data.get("claim_type") or "fact").strip().lower()
+            claim_type = raw_type if raw_type in {"fact", "opinion", "recommendation"} else "fact"
             quotes_data = claim_data.get("quotes", [])
 
             if not claim_text or not quotes_data:
@@ -258,7 +266,8 @@ async def extract_claims_from_content(
                 entailment_score=0.0,  # Will be computed later by NLI
                 provenance_score=prov_score,
                 dedupe_fingerprint=fingerprint(claim_text),
-                confidence=prov_score * 0.7  # Bootstrap confidence from provenance
+                confidence=prov_score * 0.7,  # Bootstrap confidence from provenance
+                claim_type=claim_type,
             )
 
             claims.append(claim)

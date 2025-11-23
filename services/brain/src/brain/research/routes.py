@@ -169,6 +169,7 @@ class ClaimResponse(BaseModel):
     provenance_score: float
     dedupe_fingerprint: str
     confidence: float
+    claim_type: str = "fact"
 
 
 class ExtractClaimsRequest(BaseModel):
@@ -1225,7 +1226,8 @@ async def extract_claims_endpoint(
                     entailment_score=claim.entailment_score,
                     provenance_score=claim.provenance_score,
                     dedupe_fingerprint=claim.dedupe_fingerprint,
-                    confidence=claim.confidence
+                    confidence=claim.confidence,
+                    claim_type=getattr(claim, "claim_type", "fact")
                 )
             )
 

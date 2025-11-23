@@ -48,6 +48,7 @@ class Claim:
         provenance_score: Quote coverage score 0-1 (lexical overlap)
         dedupe_fingerprint: Hash for clustering duplicate claims
         confidence: Overall confidence score 0-1
+        claim_type: Nature of the claim (fact/opinion/recommendation)
     """
     id: str
     session_id: str
@@ -58,6 +59,7 @@ class Claim:
     provenance_score: float = 0.0       # 0..1 (quote coverage)
     dedupe_fingerprint: str = ""        # For clustering identical claims
     confidence: float = 0.0              # Overall confidence
+    claim_type: str = "fact"            # fact | opinion | recommendation
 
 
 # Helper functions
@@ -230,7 +232,8 @@ def merge_duplicate_claims(claims: List[Claim]) -> List[Claim]:
                 entailment_score=avg_entailment,
                 provenance_score=avg_provenance,
                 dedupe_fingerprint=fingerprint,
-                confidence=avg_confidence
+                confidence=avg_confidence,
+                claim_type=getattr(best, "claim_type", "fact"),
             )
 
             merged.append(merged_claim)

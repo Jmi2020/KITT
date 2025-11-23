@@ -57,6 +57,13 @@ class ResearchConfig(TypedDict, total=False):
     allow_external: bool
     enable_debate: bool
 
+    # Local/offline mode
+    force_local_only: bool
+
+    # Analysis options
+    enable_source_summaries: bool        # Summarize each fetched source
+    enable_opinion_tagging: bool         # Tag claims as fact/opinion/recommendation
+
     # Stopping criteria
     require_critical_gaps_resolved: bool
 
@@ -167,12 +174,17 @@ DEFAULT_RESEARCH_CONFIG: ResearchConfig = {
     "prefer_local": True,
     "allow_external": True,
     "enable_debate": True,
+    "force_local_only": False,
     "require_critical_gaps_resolved": True,
     "enable_hierarchical": False,  # Opt-in feature
     "min_sub_questions": 2,
     "max_sub_questions": 5,
     "sub_question_min_iterations": 2,
     "sub_question_max_iterations": 5,
+
+    # Analysis options
+    "enable_source_summaries": True,
+    "enable_opinion_tagging": True,
 }
 
 
@@ -200,6 +212,13 @@ def create_initial_state(
     final_config = DEFAULT_RESEARCH_CONFIG.copy()
     if config:
         final_config.update(config)
+
+    # If force_local_only is enabled, harden configuration to local tools/models
+    if final_config.get("force_local_only"):
+        final_config["allow_external"] = False
+        final_config["enable_debate"] = False
+        final_config["prefer_local"] = True
+        final_config["max_external_calls"] = 0
 
     return ResearchState(
         # Session metadata

@@ -475,6 +475,13 @@ class ResearchSessionManager:
             )
             logger.info(f"✅ graph.run() completed for session {session_id}")
 
+            # Determine success/failure from final state
+            success = final_state.get("status") == ResearchStatus.COMPLETED
+            last_error = final_state.get("last_error")
+            metadata_update = final_state.get("metadata") or {}
+            if last_error:
+                metadata_update["last_error"] = last_error
+
             # Persist findings and sources to database
             try:
                 await self._persist_findings_and_sources(session_id, final_state)
@@ -507,7 +514,8 @@ class ResearchSessionManager:
                     findings=len(final_state.get("findings", [])),
                     sources=len(final_state.get("sources", [])),
                     cost_usd=float(final_state.get("total_cost_usd", 0.0)),
-                    external_calls=final_state.get("external_calls_used", 0)
+                    external_calls=final_state.get("external_calls_used", 0),
+                    metadata=metadata_update if metadata_update else None,
                 )
             except Exception as e:
                 logger.error(f"⚠️  Failed to update session stats (continuing): {e}")
@@ -517,9 +525,11 @@ class ResearchSessionManager:
             try:
                 await self.mark_completed(
                     session_id=session_id,
-                    success=True
+                    success=success
                 )
-                logger.info(f"✅ Research completed successfully for session {session_id}")
+                logger.info(
+                    f"✅ Research {'completed' if success else 'failed'} for session {session_id}"
+                )
             except Exception as e:
                 logger.error(f"🚨 CRITICAL: Failed to mark session {session_id} as completed: {e}")
                 # Session stuck in ACTIVE state - will need manual intervention or recovery
@@ -643,7 +653,8 @@ class ResearchSessionManager:
         external_calls: Optional[int] = None,
         completeness: Optional[float] = None,
         confidence: Optional[float] = None,
-        saturation: Optional[Dict] = None
+        saturation: Optional[Dict] = None,
+        metadata: Optional[Dict] = None
     ) -> bool:
         """
         Update session statistics.
@@ -691,6 +702,9 @@ class ResearchSessionManager:
             if saturation is not None:
                 updates.append("saturation_status = %s")
                 params.append(Json(saturation))
+            if metadata is not None:
+                updates.append("metadata = %s")
+                params.append(Json(metadata))
 
             if not updates:
                 return True  # Nothing to update

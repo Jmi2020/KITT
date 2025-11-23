@@ -6,8 +6,9 @@ Each node represents a step in the autonomous research workflow.
 
 import logging
 import httpx
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from decimal import Decimal
+import re
 
 from .state import (
     ResearchState,
@@ -53,6 +54,7 @@ from ..extraction import (
     deduplicate_and_merge_claims,
     get_claim_summary,
 )
+from ..summarization import summarize_source_content
 
 logger = logging.getLogger(__name__)
 
@@ -275,6 +277,7 @@ Provide ONLY the JSON response, no additional text.
         tier=ConsultationTier.MEDIUM,
         max_cost=Decimal("0.05"),
         prefer_local=state["config"]["prefer_local"],
+        allow_external=state["config"].get("allow_external", True) and not state["config"].get("force_local_only", False),
         context={
             "task": "question_decomposition",
             "query": state["query"],
@@ -695,17 +698,19 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                 budget_remaining=state["budget_remaining"],
                 external_calls_remaining=state["external_calls_remaining"],
                 perplexity_enabled=True,  # From I/O Control
-                offline_mode=False,  # From I/O Control
-                cloud_routing_enabled=True
+                offline_mode=state["config"].get("force_local_only", False),  # From I/O Control
+                cloud_routing_enabled=not state["config"].get("force_local_only", False)
             )
 
             # Determine tool type based on task priority and budget
-            # High priority or deep research: use research_deep (paid)
-            # Normal priority: use web_search (free)
-            if task["priority"] >= 0.7 and state["budget_remaining"] > Decimal("0.10"):
-                tool_name = ToolType.RESEARCH_DEEP
-            else:
+            # If force_local_only, always use local web search/fetch.
+            if state["config"].get("force_local_only", False):
                 tool_name = ToolType.WEB_SEARCH
+            else:
+                if task["priority"] >= 0.7 and state["budget_remaining"] > Decimal("0.10"):
+                    tool_name = ToolType.RESEARCH_DEEP
+                else:
+                    tool_name = ToolType.WEB_SEARCH
 
             # Rewrite and retry search queries to avoid empty results
             search_variants = _rewrite_search_queries(task.get("query", ""))
@@ -840,6 +845,32 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
 
                         # Create finding from fetched content
                         if full_contents:
+                            # Optional per-source summarization
+                            source_summaries = []
+                            if state["config"].get("enable_source_summaries", True):
+                                for fc in full_contents:
+                                    try:
+                                        summary_md = await summarize_source_content(
+                                            content=fc["content"],
+                                            query=state["query"],
+                                            source_url=fc["url"],
+                                            source_title=fc["title"],
+                                            session_id=state["session_id"],
+                                        )
+                                        if summary_md:
+                                            source_summaries.append(
+                                                {
+                                                    "url": fc["url"],
+                                                    "title": fc["title"],
+                                                    "summary": summary_md,
+                                                }
+                                            )
+                                    except Exception as exc:  # noqa: BLE001
+                                        logger.error(
+                                            f"Source summarization failed for {fc.get('url')}: {exc}",
+                                            exc_info=True,
+                                        )
+
                             # Combine full webpage content for claim extraction
                             content_parts = []
                             for fc in full_contents:
@@ -873,6 +904,9 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                             "result_count": len(search_results),
                             "search_query": task.get("query_used", task.get("query"))
                         }
+
+                        if full_contents and source_summaries:
+                            finding["source_summaries"] = source_summaries
 
                         # Tag with sub-question if hierarchical
                         if sq_id:
@@ -1028,7 +1062,8 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
                                     entailment_score=claim_data.get("entailment_score", 0.0),
                                     provenance_score=claim_data.get("provenance_score", 0.0),
                                     dedupe_fingerprint=claim_data.get("dedupe_fingerprint", ""),
-                                    confidence=claim_data.get("confidence", 0.0)
+                                    confidence=claim_data.get("confidence", 0.0),
+                                    claim_type=claim_data.get("claim_type", "fact"),
                                 ))
 
                             logger.info(f"DEBUG_CLAIM_8: HTTP endpoint returned {len(claims)} claims")
@@ -1038,6 +1073,10 @@ async def _execute_tasks_real(state: ResearchState, tasks: list, components):
 
                     # Deduplicate and add claims to state
                     if claims:
+                        if not state["config"].get("enable_opinion_tagging", True):
+                            for c in claims:
+                                c.claim_type = "fact"
+
                         # Deduplicate against existing claims
                         all_claims = state.get("claims", []) + claims
                         all_claims = deduplicate_and_merge_claims(all_claims)
@@ -1568,6 +1607,7 @@ Structure your response clearly with:
         tier=ConsultationTier.MEDIUM,
         max_cost=Decimal("0.10"),
         prefer_local=state["config"]["prefer_local"],
+        allow_external=state["config"].get("allow_external", True) and not state["config"].get("force_local_only", False),
         context={
             "task": "sub_question_synthesis",
             "sub_question_id": sq_id,
@@ -2005,6 +2045,7 @@ Provide a well-structured answer with:
             tier=ConsultationTier.HIGH,
             max_cost=Decimal("0.20"),
             prefer_local=state["config"]["prefer_local"],
+            allow_external=state["config"].get("allow_external", True) and not state["config"].get("force_local_only", False),
             context={
                 "task": "hierarchical_meta_synthesis",
                 "query": state["query"],
@@ -2310,6 +2351,132 @@ async def _consult_with_debate(components, request, state: ResearchState, max_mo
     return combined
 
 
+def _cluster_claims_light(claims: List) -> List[Dict[str, Any]]:
+    """Greedy keyword-based clustering to pre-group claims into themes.
+
+    Keeps it simple to avoid additional dependencies. Clusters by most frequent
+    content words (len>4). Claims with no matching keywords fall back to a misc bucket.
+    """
+    if not claims:
+        return []
+
+    # Extract keyword sets per claim
+    keyword_maps: List[Tuple[str, set]] = []
+    freq: Dict[str, int] = {}
+    for claim in claims:
+        text = getattr(claim, "text", "") or ""
+        words = {w for w in re.findall(r"[a-zA-Z]{5,}", text.lower())}
+        keyword_maps.append((claim.id, words))
+        for w in words:
+            freq[w] = freq.get(w, 0) + 1
+
+    clusters: List[Dict[str, Any]] = []
+    used_claims: set[str] = set()
+
+    # Sort keywords by frequency
+    sorted_keywords = sorted(freq.items(), key=lambda kv: kv[1], reverse=True)
+    for kw, _count in sorted_keywords:
+        if len(clusters) >= 6:  # cap clusters
+            break
+        cluster_claims = [cid for cid, words in keyword_maps if cid not in used_claims and kw in words]
+        if len(cluster_claims) < 2:
+            continue
+
+        clusters.append({
+            "label": kw.title(),
+            "claim_ids": cluster_claims,
+        })
+        used_claims.update(cluster_claims)
+
+    # Bucket remaining unclustered claims into Misc
+    remaining = [cid for cid, _ in keyword_maps if cid not in used_claims]
+    if remaining:
+        clusters.append({
+            "label": "Miscellaneous",
+            "claim_ids": remaining,
+        })
+
+    return clusters
+
+
+async def _detect_contradictions_llm(claims: List, max_pairs: int = 6) -> List[Dict[str, Any]]:
+    """Lightweight LLM-based contradiction check across claim pairs.
+
+    Uses invoke_model (kitty-primary) to classify agree/contradict/unclear for
+    a handful of diverse pairs. Only returns contradictions for prompt inclusion.
+    """
+    if len(claims) < 2:
+        return []
+
+    # Build pairs with different sources (when available)
+    pairs: List[Tuple[Any, Any]] = []
+    seen = set()
+    for i, c1 in enumerate(claims):
+        src1 = c1.evidence[0].url if getattr(c1, "evidence", []) else ""
+        for c2 in claims[i + 1:]:
+            src2 = c2.evidence[0].url if getattr(c2, "evidence", []) else ""
+            if src1 and src2 and src1 == src2:
+                continue
+            key = tuple(sorted([c1.id, c2.id]))
+            if key in seen:
+                continue
+            seen.add(key)
+            pairs.append((c1, c2))
+            if len(pairs) >= max_pairs:
+                break
+        if len(pairs) >= max_pairs:
+            break
+
+    contradictions: List[Dict[str, Any]] = []
+    for c1, c2 in pairs:
+        prompt = f"""You are checking for contradictions between two claims.
+
+Claim A: "{c1.text}"
+Claim B: "{c2.text}"
+
+Determine if B contradicts A, agrees with A, or is unrelated.
+Return JSON: {{"relation": "contradict" | "agree" | "unclear", "rationale": "short"}}"""
+
+        try:
+            result = await invoke_model(
+                model_id="kitty-primary",
+                prompt=prompt,
+                context={"task": "contradiction_check"},
+            )
+            # Parse naive JSON
+            import json
+            rel = None
+            rationale = ""
+            try:
+                parsed = json.loads(result)
+                rel = parsed.get("relation")
+                rationale = parsed.get("rationale", "")
+            except Exception:
+                # fallback to keyword
+                low = (result or "").lower()
+                if "contrad" in low:
+                    rel = "contradict"
+                elif "agree" in low or "support" in low:
+                    rel = "agree"
+                else:
+                    rel = "unclear"
+                rationale = result[:200]
+
+            if rel == "contradict":
+                contradictions.append({
+                    "a": c1.text,
+                    "b": c2.text,
+                    "rationale": rationale,
+                    "source_a": c1.evidence[0].url if getattr(c1, "evidence", []) else "",
+                    "source_b": c2.evidence[0].url if getattr(c2, "evidence", []) else "",
+                })
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Contradiction check failed: {exc}")
+            continue
+
+    return contradictions
+
+
 async def _generate_ai_synthesis(state: ResearchState, components) -> str:
     """
     Generate AI synthesis using ModelCoordinator.
@@ -2336,6 +2503,7 @@ async def _generate_ai_synthesis(state: ResearchState, components) -> str:
             for claim in claims:
                 claim_obj = {
                     "claim": claim.text,
+                    "claim_type": getattr(claim, "claim_type", "fact"),
                     "confidence": round(claim.confidence, 2),
                     "provenance_score": round(claim.provenance_score, 2),
                     "quotes": [
@@ -2349,7 +2517,7 @@ async def _generate_ai_synthesis(state: ResearchState, components) -> str:
                 }
                 claims_json.append(claim_obj)
 
-            claims_text = json.dumps(claims_json, indent=2)
+            claims_text = json.dumps(claims_json, indent=2, ensure_ascii=False)
 
             # Build unique sources list
             source_urls = set()
@@ -2363,40 +2531,92 @@ async def _generate_ai_synthesis(state: ResearchState, components) -> str:
                 for i, s in enumerate(sources_list)
             ])
 
+            # Lightweight clustering for theme hints
+            clusters = _cluster_claims_light(claims)
+            cluster_text = "\n".join([
+                f"- {c['label']}: {len(c['claim_ids'])} claim(s)"
+                for c in clusters
+            ]) if clusters else "N/A"
+
+            # Optional contradiction detection (limited pairs)
+            contradictions = await _detect_contradictions_llm(claims)
+            contradictions_text = "\n".join([
+                f"- A: {c['a'][:120]}\n  B: {c['b'][:120]}\n  Rationale: {c['rationale'][:200]}"
+                for c in contradictions
+            ]) if contradictions else "None detected"
+
             # Construct evidence-first synthesis prompt
-            prompt = f"""Synthesize verified claims into a comprehensive answer to the research query.
+            prompt = f"""You are an expert research synthesizer helping an autonomous research agent.
 
-**Original Query**: {state["query"]}
+Original Query: {state["query"]}
 
-**VERIFIED CLAIMS** (with evidence):
+You are given VERIFIED CLAIMS extracted from multiple sources. Each claim includes:
+- claim: the text of the claim
+- claim_type: "fact", "opinion", or "recommendation"
+- quotes: verbatim evidence with source URLs and titles
+- provenance_score and confidence scores
+
+VERIFIED CLAIMS (JSON):
 {claims_text}
 
-**SOURCES TABLE**:
+SOURCES TABLE:
 {sources_text}
 
-**Your Task**:
-Create a structured, citation-rich answer using ONLY the verified claims above.
+Pre-grouped Themes (suggested):
+{cluster_text}
 
-**Requirements**:
-1. Each major point becomes a bullet with [citation_number(s)]
-2. Include ONE short verbatim quote per point (max 1 sentence)
-3. Map citations to the SOURCES TABLE indices above
-4. NO claims without quote support
-5. Add a "Knowledge Gaps" section for limitations or missing information
+Known Potential Contradictions:
+{contradictions_text}
 
-**Output Format**:
-## Direct Answer
-[One paragraph summarizing the key finding]
+YOUR TASK
+=========
+Produce a two-part answer:
 
-## Key Insights
-- **Insight 1** [1,2]: "verbatim quote..."
-- **Insight 2** [3]: "verbatim quote..."
+1. **Executive Summary** — a concise, non-technical overview of the most important takeaways.
+2. **Deep Dive by Theme** — a structured analysis that groups related claims into themes, surfaces consensus and disagreements, and clearly distinguishes facts from opinions/recommendations.
+
+DETAILED REQUIREMENTS
+---------------------
+- Work ONLY from the verified claims and sources table above.
+- First, mentally cluster claims into 3–7 themes (e.g., "Effectiveness", "Risks", "Adoption Barriers").
+- Within each theme:
+  - Clearly state the main factual findings.
+  - Call out author opinions and recommendations (claim_type != "fact") as perspectives, not facts.
+  - Explicitly describe any disagreements or conflicting claims between sources.
+- Use inline citation numbers [1], [2], ... that map back to the SOURCES TABLE.
+- Prefer high-provenance, high-confidence claims; mention when evidence is thin or mixed.
+
+OUTPUT FORMAT (Markdown)
+------------------------
+
+## Executive Summary
+- 3–6 bullet points summarizing the most important overall insights.
+- Each bullet should be stand-alone and, where possible, include citation numbers [1], [2]...
+
+## Deep Dive by Theme
+
+### Theme 1: <short label>
+- Short paragraph describing the theme and why it matters.
+- Bullet list of key factual findings with citations (fact claims).
+- Bullet list or short paragraph for author opinions / recommendations, clearly labeled as such.
+
+### Theme 2: <short label>
+...
+
+(Continue with as many themes as are justified by the claims.)
+
+## Perspectives & Disagreements
+- Bullet list of the most important areas where sources disagree, including citations.
+- For each, briefly describe why the disagreement exists (different data, methodology, context, etc.) if you can infer it from the claims.
 
 ## Knowledge Gaps
-- [Any significant gaps or limitations]
+- Bullet list of missing information, ambiguities, or open questions.
 
 ## Confidence Assessment
-[High/Medium/Low] because [reasoning based on provenance scores, coverage, and source quality]
+One short paragraph stating overall confidence (High / Medium / Low) and why, based on:
+- number and diversity of sources
+- provenance_score and confidence for key claims
+- presence or absence of strong disagreements.
 """
 
         else:
@@ -2422,6 +2642,17 @@ Create a structured, citation-rich answer using ONLY the verified claims above.
 
             sources_text = "\n\n".join(sources_with_content) if sources_with_content else "No sources available"
 
+            # Surface source summaries if present on findings
+            source_summaries = []
+            for f in state.get("findings", []):
+                for summary in f.get("source_summaries", []) or []:
+                    source_summaries.append(summary)
+
+            source_summaries_text = "\n\n".join([
+                f"- **{ss.get('title', 'Untitled')}** ({ss.get('url', '')})\n  {ss.get('summary', '')[:800]}"
+                for ss in source_summaries[:10]
+            ]) if source_summaries else "No source summaries available"
+
             # Construct synthesis prompt
             prompt = f"""Synthesize the following research findings into a comprehensive, well-structured answer.
 
@@ -2432,6 +2663,9 @@ Research Findings:
 
 Sources Consulted (with content excerpts):
 {sources_text}
+
+Source Summaries (if provided):
+{source_summaries_text}
 
 IMPORTANT: Analyze the actual source content provided above. Reference specific information, quotes, and evidence from the source snippets when constructing your synthesis. Evaluate source quality, relevance, and consistency.
 
@@ -2482,7 +2716,8 @@ Rate High/Medium/Low and justify using source quality, diversity, and agreement.
             required_capabilities={ModelCapability.SYNTHESIS, ModelCapability.REASONING},
             tier=tier,
             max_cost=state["budget_remaining"],
-            prefer_local=state["budget_remaining"] < Decimal("0.50"),
+            prefer_local=state["config"].get("prefer_local", True),
+            allow_external=state["config"].get("allow_external", True) and not state["config"].get("force_local_only", False),
             context={
                 "query": state["query"],
                 "findings_count": len(state["findings"]),
@@ -2493,7 +2728,7 @@ Rate High/Medium/Low and justify using source quality, diversity, and agreement.
 
         # Consult model
         # If debate flag set, try multi-model consensus first
-        use_debate = bool(state.get("config", {}).get("use_debate"))
+        use_debate = bool(state.get("config", {}).get("enable_debate")) and request.allow_external
         if use_debate and components and components.model_coordinator:
             debate_text = await _consult_with_debate(
                 components=components,
@@ -2582,6 +2817,17 @@ async def handle_error(state: ResearchState) -> ResearchState:
         else:
             logger.info(f"Retry {state['retry_count']}/3")
             # Could implement retry logic here
+
+        # Always propagate error details for reporting/UI
+        state.setdefault("metadata", {})
+        state["metadata"]["last_error"] = state.get("last_error") or "Unknown error"
+
+        # If no retries are scheduled, mark failed explicitly and attach a fallback answer
+        if state["status"] != ResearchStatus.FAILED:
+            state = set_status(state, ResearchStatus.FAILED)
+
+        if not state.get("final_answer"):
+            state["final_answer"] = f"Research failed: {state.get('last_error', 'Unknown error')}"
 
     except Exception as e:
         logger.error(f"Error in error handler: {e}")
