@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, Optional, Set
+from collections import defaultdict, deque
 
 from common.db.models import RoutingTier
 
@@ -77,6 +78,9 @@ class SafeToolExecutor:
             "get_citations",
             "reset_research_session",
         }  # Always allowed
+        # Track recent web_search queries per conversation to reduce repetition and nudge synthesis
+        self._recent_web_queries: Dict[str, deque] = defaultdict(lambda: deque(maxlen=5))
+        self._web_search_counts: Dict[str, int] = defaultdict(int)
 
     async def execute(
         self,
@@ -120,7 +124,69 @@ class SafeToolExecutor:
                 }
 
         # Execute tool via MCP client
+        # Lightweight guardrails for web_search in conversation flow (applies to "say")
+        if tool_name == "web_search" and conversation_id:
+            query = (arguments or {}).get("query", "") or ""
+            normalized_query = query.strip().lower()
+
+            # Hard/soft budgets on repeated web_search in a conversation
+            self._web_search_counts[conversation_id] += 1
+            count = self._web_search_counts[conversation_id]
+            SOFT_BUDGET = 5
+            HARD_BUDGET = 9
+            if count > HARD_BUDGET:
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": "web_search blocked: too many searches in this conversation; synthesize with existing evidence.",
+                    "metadata": {"reason": "hard_budget", "count": count},
+                }
+
+            # Duplicate / near-duplicate detection (require >=3 novel tokens vs recent queries)
+            recent = self._recent_web_queries[conversation_id]
+            if normalized_query:
+                tokens = set(normalized_query.split())
+                for prev in recent:
+                    if normalized_query == prev:
+                        return {
+                            "success": False,
+                            "data": None,
+                            "error": "Duplicate web_search blocked; change the query or synthesize.",
+                            "metadata": {"reason": "duplicate_query", "blocked_query": query},
+                        }
+                    prev_tokens = set(prev.split())
+                    if len(tokens - prev_tokens) < 3:
+                        return {
+                            "success": False,
+                            "data": None,
+                            "error": "Near-duplicate web_search blocked; add new tokens or pivot to synthesis.",
+                            "metadata": {
+                                "reason": "near_duplicate_query",
+                                "blocked_query": query,
+                                "previous_query": prev,
+                            },
+                        }
+
+                recent.append(normalized_query)
+
+            # Soft budget nudge (allow call but annotate after execution)
+            soft_nudge = count > SOFT_BUDGET
+        else:
+            soft_nudge = False
+
         result = await self._mcp.execute_tool(tool_name, arguments)
+
+        # Attach nudge metadata for callers (if web_search and over soft budget)
+        if tool_name == "web_search" and conversation_id and soft_nudge:
+            result = {
+                **result,
+                "metadata": {
+                    **(result.get("metadata") or {}),
+                    "nudge_synthesis": True,
+                    "nudge_message": "Approaching web_search budget; prefer synthesis or a diversified query.",
+                    "web_search_count": self._web_search_counts[conversation_id],
+                },
+            }
 
         # Log tool execution
         cost = self._estimate_tool_cost(tool_name) if tool_name in self._cloud_tools else 0.0
