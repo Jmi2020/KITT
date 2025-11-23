@@ -372,12 +372,21 @@ Commands are executed locally when possible.`);
 
       // Handle different response types
       if (userInput.startsWith('/collective')) {
-        // Display collective results
-        const proposals = data.proposals.map((p: any, i: number) =>
-          `${i + 1}. [${p.role}]\n   ${p.text}`
-        ).join('\n\n');
+        // Display collective results with rankings if present
+        const proposals = (data.proposals || []).map((p: any, i: number) => {
+          const label = p.label || `Response ${String.fromCharCode(65 + i)}`;
+          const model = p.model ? ` (${p.model})` : '';
+          return `${label} [${p.role}${model}]\n${p.text}`;
+        }).join('\n\n');
 
-        addMessage('assistant', proposals, { pattern: data.pattern });
+        let rankingText = '';
+        if (data.aggregate_rankings && data.aggregate_rankings.length) {
+          rankingText = 'Aggregate ranking:\n' + data.aggregate_rankings.map((r: any) =>
+            `- ${r.label} (${r.model || ''}): avg_rank=${r.average_rank}`
+          ).join('\n');
+        }
+
+        addMessage('assistant', proposals + (rankingText ? `\n\n${rankingText}` : ''), { pattern: data.pattern });
         addMessage('assistant', `⚖️ Judge Verdict\n\n${data.verdict}`, { pattern: data.pattern });
       } else if (userInput.startsWith('/usage')) {
         // Format usage data

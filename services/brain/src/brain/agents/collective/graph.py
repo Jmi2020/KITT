@@ -13,6 +13,7 @@ HINT_PROPOSER = os.getenv("COLLECTIVE_HINT_PROPOSER",
                           "Solve independently; do not reference other agents or a group.")
 HINT_JUDGE = os.getenv("COLLECTIVE_HINT_JUDGE",
                        "You are the judge; prefer safety, clarity, testability.")
+PEER_REVIEW_ENABLED = os.getenv("COLLECTIVE_ENABLE_PEER_REVIEW", "true").lower() == "true"
 
 
 class Proposal(TypedDict, total=False):
@@ -276,8 +277,11 @@ def build_collective_graph() -> StateGraph:
         "propose_debate":"propose_debate"
     })
     g.add_edge("propose_pipeline","judge")
-    g.add_edge("propose_council","peer_review")
+    if PEER_REVIEW_ENABLED:
+        g.add_edge("propose_council","peer_review")
+        g.add_edge("peer_review","judge")
+    else:
+        g.add_edge("propose_council","judge")
     g.add_edge("propose_debate","judge")
-    g.add_edge("peer_review","judge")
     g.add_edge("judge", END)
     return g.compile()

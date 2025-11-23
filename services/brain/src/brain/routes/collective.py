@@ -86,12 +86,18 @@ class RunReq(BaseModel):
 class Proposal(BaseModel):
     role: str
     text: str
+    label: Optional[str] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = None
 
 class RunRes(BaseModel):
     pattern: str
     proposals: List[Proposal]
     verdict: str
     logs: Optional[str] = None
+    peer_reviews: Optional[List[Dict[str, Any]]] = None
+    aggregate_rankings: Optional[List[Dict[str, Any]]] = None
+    peer_review_enabled: bool = True
     aux: Dict[str, Any] = {}
 
 @router.post("/run", response_model=RunRes)
@@ -183,11 +189,21 @@ async def run_collective(req: RunReq):
         else:
             result = _graph.invoke(state)
 
-        props = result.get("proposals", [])
-
-        for i, p in enumerate(props):
+        raw_props = result.get("proposals", [])
+        for i, p in enumerate(raw_props):
             role = "pro" if (req.pattern=="debate" and i==0) else ("con" if (req.pattern=="debate" and i==1) else f"specialist_{i+1}")
-            proposals.append(Proposal(role=role, text=p))
+            if isinstance(p, dict):
+                proposals.append(
+                    Proposal(
+                        role=role,
+                        text=p.get("content",""),
+                        label=p.get("label"),
+                        model=p.get("model"),
+                        temperature=p.get("temperature"),
+                    )
+                )
+            else:
+                proposals.append(Proposal(role=role, text=str(p)))
 
         # Calculate diversity metrics
         diversity_metrics = pairwise_diversity(props)
@@ -201,13 +217,26 @@ async def run_collective(req: RunReq):
         proposal_diversity.labels(pattern=req.pattern).observe(diversity_metrics["avg_diversity"])
 
         verdict_text = result.get("verdict", "")
+        peer_reviews = result.get("peer_reviews")
+        aggregate_rankings = result.get("aggregate_rankings")
 
         if req.conversation_id:
             try:
                 proposal_lines = [
                     f"{prop.role}: {prop.text.strip()}" for prop in proposals
                 ]
-                assistant_body = "\n\n".join(proposal_lines + [f"Verdict: {verdict_text}"])
+                summary_lines = []
+                if aggregate_rankings:
+                    summary_lines.append("Aggregate ranking:")
+                    for r in aggregate_rankings:
+                        summary_lines.append(
+                            f"- {r.get('label','')} ({r.get('model','')}): avg_rank={r.get('average_rank')}"
+                        )
+                assistant_body = "\n\n".join(
+                    proposal_lines
+                    + (["\n".join(summary_lines)] if summary_lines else [])
+                    + [f"Verdict: {verdict_text}"]
+                )
                 record_conversation_message(
                     conversation_id=req.conversation_id,
                     role=ConversationRole.assistant,
@@ -218,6 +247,7 @@ async def run_collective(req: RunReq):
                         "k": req.k,
                         "proposalCount": len(proposals),
                         "verdict": verdict_text,
+                        "aggregate_rankings": aggregate_rankings,
                     },
                 )
             except Exception as exc:  # noqa: BLE001
@@ -232,6 +262,9 @@ async def run_collective(req: RunReq):
             proposals=proposals,
             verdict=verdict_text,
             logs=result.get("logs",""),
+            peer_reviews=peer_reviews,
+            aggregate_rankings=aggregate_rankings,
+            peer_review_enabled=os.getenv("COLLECTIVE_ENABLE_PEER_REVIEW", "true").lower() == "true",
             aux={}
         )
 
