@@ -133,6 +133,16 @@ trap cleanup INT TERM
 # Phase 1: Start LLM Servers
 # ========================================
 
+# Resolve ports/aliases (defaults align with .env keys)
+Q4_PORT="${LLAMACPP_Q4_PORT:-8083}"
+Q4_ALIAS="${LLAMACPP_Q4_ALIAS:-kitty-q4}"
+F16_PORT="${LLAMACPP_F16_PORT:-8082}"
+F16_ALIAS="${LLAMACPP_F16_ALIAS:-kitty-f16}"
+SUMMARY_PORT="${LLAMACPP_SUMMARY_PORT:-8084}"
+SUMMARY_ALIAS="${LLAMACPP_SUMMARY_ALIAS:-kitty-summary}"
+VISION_PORT="${LLAMACPP_VISION_PORT:-8086}"
+VISION_ALIAS="${LLAMACPP_VISION_ALIAS:-kitty-vision}"
+
 # Determine if we should start Ollama instead of llama.cpp F16
 LOCAL_REASONER_PROVIDER="${LOCAL_REASONER_PROVIDER:-llamacpp}"
 

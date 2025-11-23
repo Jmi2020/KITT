@@ -123,11 +123,15 @@ class SystemStatusPanel(Static):
         # Update Ollama (GPT-OSS) status
         self.ollama = await self.ollama_manager.get_status()
         if self.ollama.running:
-            self.ollama_status = "Healthy"
             models = self.ollama.models or []
-            top = models[:3]
-            more = f" (+{len(models) - len(top)})" if len(models) > len(top) else ""
-            self.ollama_detail = ", ".join(top) + more if top else "online"
+            if models:
+                self.ollama_status = "Healthy"
+                top = models[:3]
+                more = f" (+{len(models) - len(top)})" if len(models) > len(top) else ""
+                self.ollama_detail = ", ".join(top) + more if top else "online"
+            else:
+                self.ollama_status = "Degraded"
+                self.ollama_detail = "No models running"
         else:
             self.ollama_status = "Offline"
             self.ollama_detail = self.ollama.error or "unreachable"
@@ -203,17 +207,21 @@ class SystemStatusPanel(Static):
         if self.ollama_status == "Healthy":
             version = f" v{self.ollama.version}" if self.ollama and self.ollama.version else ""
             return f"[green]✓ Ollama online{version}[/green]"
+        if self.ollama_status == "Degraded":
+            return "[yellow]⚠ Ollama online (no models running)[/yellow]"
         return f"[red]✗ Ollama offline[/red]"
 
     def _format_ollama_detail(self) -> str:
         """Show top models or error detail."""
         if not self.ollama:
             return "[dim]Checking...[/dim]"
-        if self.ollama.running:
+        if self.ollama.running and self.ollama_status == "Healthy":
             models = self.ollama.models or []
             if not models:
                 return "[dim]No models listed[/dim]"
             return "[green]" + ", ".join(models[:3]) + ("[/green]" if models else "")
+        if self.ollama_status == "Degraded":
+            return "[yellow]No models running[/yellow]"
         return f"[dim]{self.ollama_detail}[/dim]"
 
     def _format_llama_instances(self) -> str:

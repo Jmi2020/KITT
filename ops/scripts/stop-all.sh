@@ -1,6 +1,6 @@
 #!/bin/bash
 # Stop all KITTY services
-# Gracefully stops Docker services and llama.cpp servers
+# Gracefully stops Docker services, llama.cpp servers, and Ollama (if running)
 
 set -e
 
@@ -80,6 +80,22 @@ else
 fi
 
 # ========================================
+# Phase 4: Stop Ollama (GPT-OSS reasoner)
+# ========================================
+
+log "Phase 4: Stopping Ollama server (if running)"
+
+if [ -x "$SCRIPT_DIR/ollama/stop.sh" ]; then
+    if "$SCRIPT_DIR/ollama/stop.sh"; then
+        success "Ollama server stopped"
+    else
+        warn "Ollama stop script reported an issue (check logs)"
+    fi
+else
+    log "Ollama stop script not found, skipping"
+fi
+
+# ========================================
 # Summary
 # ========================================
 
@@ -92,9 +108,16 @@ echo ""
 # Verify nothing running
 REMAINING_PROCESSES=$(ps aux | grep -E "llama-server|docker" | grep -v grep | wc -l)
 
-if [ "$REMAINING_PROCESSES" -gt 0 ]; then
-    error "Warning: $REMAINING_PROCESSES processes may still be running"
-    echo "Run: ps aux | grep -E 'llama-server|docker'"
+# Check for running Ollama models (daemon may remain up)
+OLLAMA_RUNNING_MODELS=""
+if command -v ollama >/dev/null 2>&1; then
+    OLLAMA_RUNNING_MODELS=$(ollama ps 2>/dev/null | awk 'NR>1 && $1!="" {print $1}' | paste -sd " " -)
+fi
+
+if [ "$REMAINING_PROCESSES" -gt 0 ] || [ -n "$OLLAMA_RUNNING_MODELS" ]; then
+    error "Warning: services may still be running"
+    [ "$REMAINING_PROCESSES" -gt 0 ] && echo "Run: ps aux | grep -E 'llama-server|docker'"
+    [ -n "$OLLAMA_RUNNING_MODELS" ] && echo "Ollama models still running: $OLLAMA_RUNNING_MODELS (run: ollama stop <model>)"
 else
     success "All processes terminated cleanly"
 fi

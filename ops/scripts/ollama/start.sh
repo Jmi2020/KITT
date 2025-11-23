@@ -22,9 +22,6 @@ OLLAMA_PORT="${OLLAMA_PORT:-11434}"
 PID_FILE="$PROJECT_ROOT/.ollama.pid"
 LOG_FILE="$PROJECT_ROOT/.logs/ollama.log"
 
-# Ensure log directory exists
-mkdir -p "$(dirname "$LOG_FILE")"
-
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -42,6 +39,25 @@ warn() {
 error() {
     echo -e "${RED}[Ollama]${NC} $1"
 }
+
+# When OLLAMA_HOST points at host.docker.internal (common in Docker envs), resolve to
+# localhost for host-side CLI operations if that hostname is unavailable (e.g., on mac).
+CLIENT_OLLAMA_HOST="$OLLAMA_HOST"
+HOST_PART="$(printf "%s" "$OLLAMA_HOST" | sed -e 's|^[a-zA-Z0-9+.-]*://||' -e 's|:.*$||')"
+if [[ "$HOST_PART" == "host.docker.internal" ]]; then
+    if python3 - <<'PY' 2>/dev/null; then
+import socket
+socket.gethostbyname("host.docker.internal")
+PY
+        :
+    else
+        warn "host.docker.internal not resolvable; using localhost for CLI operations"
+        CLIENT_OLLAMA_HOST="http://localhost:${OLLAMA_PORT}"
+    fi
+fi
+
+# Ensure log directory exists
+mkdir -p "$(dirname "$LOG_FILE")"
 
 # Check if Ollama is already running
 if [ -f "$PID_FILE" ]; then
@@ -75,7 +91,7 @@ log "Waiting for Ollama API to be ready..."
 MAX_WAIT=30
 ELAPSED=0
 while [ $ELAPSED -lt $MAX_WAIT ]; do
-    if curl -s "http://localhost:$OLLAMA_PORT/api/tags" >/dev/null 2>&1; then
+    if curl -s "${CLIENT_OLLAMA_HOST}/api/tags" >/dev/null 2>&1; then
         log "Ollama API is ready"
         break
     fi
@@ -90,7 +106,7 @@ fi
 
 # Check if model is already pulled
 log "Checking for model: $OLLAMA_MODEL"
-if curl -s "http://localhost:$OLLAMA_PORT/api/tags" | grep -q "\"$OLLAMA_MODEL\""; then
+if curl -s "${CLIENT_OLLAMA_HOST}/api/tags" | grep -q "\"$OLLAMA_MODEL\""; then
     log "Model $OLLAMA_MODEL is already available"
 else
     warn "Model $OLLAMA_MODEL not found"
@@ -98,7 +114,7 @@ else
     log "You can also run manually: ollama pull $OLLAMA_MODEL"
 
     # Pull model
-    if ollama pull "$OLLAMA_MODEL"; then
+    if OLLAMA_HOST="$CLIENT_OLLAMA_HOST" ollama pull "$OLLAMA_MODEL"; then
         log "Model $OLLAMA_MODEL pulled successfully"
     else
         error "Failed to pull model $OLLAMA_MODEL"
@@ -110,12 +126,12 @@ fi
 # Warmup: Load model into memory
 log "Warming up model (keep_alive)..."
 echo '{"model":"'"$OLLAMA_MODEL"'","prompt":"Hello","stream":false,"keep_alive":"5m"}' | \
-    curl -s -X POST "http://localhost:$OLLAMA_PORT/api/generate" \
+    curl -s -X POST "${CLIENT_OLLAMA_HOST}/api/generate" \
     -H "Content-Type: application/json" \
     -d @- >/dev/null 2>&1 || {
     warn "Model warmup request failed (non-critical)"
 }
 
 log "✓ Ollama is ready with model: $OLLAMA_MODEL"
-log "API endpoint: http://localhost:$OLLAMA_PORT"
+log "API endpoint: ${CLIENT_OLLAMA_HOST}"
 log "Logs: $LOG_FILE"
