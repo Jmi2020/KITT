@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
 from enum import Enum
+from collections import defaultdict, deque
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,8 @@ class ResearchToolExecutor:
         self.memory_server = memory_server
         self.permission_gate = permission_gate
         self.budget = budget_manager
+        # Track recent web_search queries per session to prevent duplicates / near-duplicates
+        self._recent_web_queries: Dict[str, deque] = defaultdict(lambda: deque(maxlen=5))
 
     async def execute(
         self,
@@ -197,8 +200,62 @@ class ResearchToolExecutor:
         arguments: Dict[str, Any],
         context: ToolExecutionContext
     ) -> ToolExecutionResult:
-        """Execute free web search (DuckDuckGo)"""
+        """Execute free web search (DuckDuckGo) with guardrails for duplication and budget."""
+        query = (arguments or {}).get("query", "") or ""
+        session_id = context.session_id
+
+        # Hard stop if we've already spent too many steps; force synthesis
+        HARD_BUDGET = 9
+        SOFT_BUDGET = 5
+        if context.iteration >= HARD_BUDGET:
+            return ToolExecutionResult(
+                success=False,
+                tool_name="web_search",
+                error="Reasoning budget exhausted; synthesize with existing evidence instead of more web_search.",
+                metadata={"reason": "hard_budget", "iteration": context.iteration}
+            )
+
+        # Duplicate / near-duplicate detection (require ≥3 new tokens vs recent queries)
+        normalized_query = query.strip().lower()
+        recent = self._recent_web_queries[session_id]
+        if normalized_query:
+            tokens = set(normalized_query.split())
+            for prev in recent:
+                if normalized_query == prev:
+                    return ToolExecutionResult(
+                        success=False,
+                        tool_name="web_search",
+                        error="Duplicate web_search blocked; change the query or synthesize.",
+                        metadata={"reason": "duplicate_query", "blocked_query": query}
+                    )
+                # Near-duplicate: fewer than 3 novel tokens compared to previous query
+                prev_tokens = set(prev.split())
+                novel_tokens = tokens - prev_tokens
+                if len(novel_tokens) < 3:
+                    return ToolExecutionResult(
+                        success=False,
+                        tool_name="web_search",
+                        error="Near-duplicate web_search blocked; add at least 3 new meaningful tokens or pivot to synthesis.",
+                        metadata={
+                            "reason": "near_duplicate_query",
+                            "blocked_query": query,
+                            "previous_query": prev
+                        }
+                    )
+
+        # Soft budget nudge (allow call but warn caller to start synthesizing)
+        metadata: Dict[str, Any] = {}
+        if context.iteration >= SOFT_BUDGET:
+            metadata["nudge_synthesis"] = True
+            metadata["nudge_message"] = (
+                "Approaching reasoning budget; prefer synthesis or a single diversified query."
+            )
+
         result = await self.research_server.execute_tool("web_search", arguments)
+
+        # Record query on success (or even on attempt if we reach here)
+        if normalized_query:
+            recent.append(normalized_query)
 
         return ToolExecutionResult(
             success=result.success,
@@ -207,7 +264,7 @@ class ResearchToolExecutor:
             error=result.error if not result.success else None,
             cost_usd=Decimal("0.0"),  # Free
             is_external=False,
-            metadata=result.metadata or {}
+            metadata={**metadata, **(result.metadata or {})}
         )
 
     async def _execute_research_deep(
