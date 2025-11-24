@@ -21,6 +21,7 @@ from common.io_control import (
     ALL_PRESETS,
 )
 from common.io_control.state_manager import FeatureStateManager
+from common.io_control.tool_availability import ToolAvailability
 
 router = APIRouter(prefix="/api/io-control", tags=["io-control"])
 
@@ -129,6 +130,9 @@ class DashboardStateResponse(BaseModel):
     current_state: Dict[str, bool | str | int | float]
     restart_pending: bool = False
     restart_services: List[str] = []
+    tool_availability: Dict[str, bool] | None = None
+    enabled_functions: List[str] | None = None
+    unavailable_message: str | None = None
 
 
 # ============================================================================
@@ -287,6 +291,10 @@ async def bulk_update_features(request: BulkUpdateRequest):
 async def get_dashboard_state():
     """Get complete dashboard state grouped by category."""
     current_state = state_manager.get_current_state()
+    tool_checker = ToolAvailability(redis_client=redis_client)
+    tool_availability = tool_checker.get_available_tools()
+    enabled_functions = tool_checker.get_enabled_function_names()
+    unavailable_message = tool_checker.get_unavailable_tools_message()
 
     # Group features by category
     features_by_category = {}
@@ -328,6 +336,9 @@ async def get_dashboard_state():
     return DashboardStateResponse(
         features_by_category=features_by_category,
         current_state=current_state,
+        tool_availability=tool_availability,
+        enabled_functions=enabled_functions,
+        unavailable_message=unavailable_message,
     )
 
 

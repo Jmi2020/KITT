@@ -148,17 +148,21 @@ class UnifiedPermissionGate:
 
         # Check offline mode
         if state["offline_mode"]:
+            logger.info(f"I/O Control deny [{provider}]: offline_mode=true")
             return False, "System in offline mode (I/O Control). All external APIs disabled."
 
         # Check cloud routing
         if not state["cloud_routing_enabled"]:
+            logger.info(f"I/O Control deny [{provider}]: cloud_routing disabled")
             return False, "Cloud routing disabled (I/O Control). External APIs not available."
 
         # Check provider-specific flag
         provider_key = f"{provider}_enabled"
         if provider_key in state and not state[provider_key]:
+            logger.info(f"I/O Control deny [{provider}]: provider disabled")
             return False, f"{provider.title()} API disabled in I/O Control. Enable in dashboard to use."
 
+        logger.debug(f"I/O Control allow [{provider}]")
         return True, ""
 
     async def _check_budget(self, estimated_cost: Decimal) -> tuple[bool, str]:

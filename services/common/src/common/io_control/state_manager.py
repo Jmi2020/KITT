@@ -25,16 +25,19 @@ LOGGER = get_logger(__name__)
 class FeatureStateManager:
     """Manages feature state with hot-reload and persistence."""
 
-    def __init__(self, redis_client: Optional[redis.Redis] = None, env_file: Optional[Path] = None):
+    def __init__(self, redis_client: Optional[redis.Redis] = None, env_file: Optional[Path] = None, volatile: bool = False):
         """Initialize state manager.
 
         Args:
             redis_client: Redis client for hot-reload state (optional)
             env_file: Path to .env file for persistence (defaults to project root)
+            volatile: If True, do not persist to .env (runtime-only toggles)
         """
         self.redis = redis_client
-        self.env_file = env_file or Path("/home/user/KITT/.env")
+        # Default to project root .env if not provided
+        self.env_file = env_file or Path(__file__).resolve().parents[5] / ".env"
         self.settings = Settings()
+        self.volatile = volatile
 
     # ========================================================================
     # Preview and Validation
@@ -372,8 +375,8 @@ class FeatureStateManager:
             self.redis.set(f"{redis_key}:updated_at", datetime.utcnow().isoformat())
             LOGGER.info(f"Updated feature in Redis: {feature_id} = {value}")
 
-        # Persist to .env if requested
-        if persist:
+        # Persist to .env if requested (and not volatile)
+        if persist and not getattr(self, "volatile", False):
             success = self._update_env_file(feature.env_var, value)
             if not success:
                 return False, "Failed to update .env file"
