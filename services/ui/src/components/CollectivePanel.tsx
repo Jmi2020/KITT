@@ -7,6 +7,8 @@ const { TextArea } = Input;
 interface Proposal {
   role: string;
   text: string;
+  label?: string;
+  model?: string;
 }
 
 interface CollectiveResponse {
@@ -14,6 +16,8 @@ interface CollectiveResponse {
   proposals: Proposal[];
   verdict: string;
   logs?: string;
+  peer_reviews?: any[];
+  aggregate_rankings?: { label: string; model?: string; average_rank: number }[];
 }
 
 export const CollectivePanel: React.FC = () => {
@@ -193,13 +197,25 @@ Examples:
                       count={i + 1}
                       style={{ backgroundColor: '#1890ff', marginRight: 8 }}
                     />
-                    {prop.role}
+                    {prop.label || `Response ${String.fromCharCode(65 + i)}`} [{prop.role}{prop.model ? ` • ${prop.model}` : ''}]
                   </span>
                 }
               >
                 <div style={{ whiteSpace: 'pre-wrap' }}>{prop.text}</div>
               </Card>
             ))}
+
+            {result.aggregate_rankings && result.aggregate_rankings.length > 0 && (
+              <Card type="inner" size="small" title="Aggregate Ranking" style={{ marginTop: 12 }}>
+                <ul style={{ paddingLeft: 16 }}>
+                  {result.aggregate_rankings.map((r, idx) => (
+                    <li key={idx}>
+                      {r.label} {r.model ? `(${r.model})` : ''} — avg_rank={r.average_rank}
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            )}
           </div>
 
           {/* Verdict */}
@@ -216,6 +232,19 @@ Examples:
               </div>
             </Card>
           </div>
+
+          {/* Peer Reviews */}
+          {result.peer_reviews && result.peer_reviews.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <h4>Peer Reviews</h4>
+              {result.peer_reviews.map((pr, i) => (
+                <Card key={i} type="inner" size="small" style={{ marginBottom: 12 }}>
+                  <strong>Reviewer:</strong> {pr.reviewer_model || 'anonymous'}<br />
+                  <div style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>{pr.critiques || pr.raw_ranking}</div>
+                </Card>
+              ))}
+            </div>
+          )}
 
           {/* Logs (collapsible) */}
           {result.logs && (

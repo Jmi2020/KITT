@@ -62,11 +62,19 @@ const IOControl = () => {
   const [previewData, setPreviewData] = useState<PreviewChanges | null>(null);
   const [showPreview, setShowPreview] = useState(false);
 
-  // Load features on mount
+  // Load features/state on mount
   useEffect(() => {
     loadFeatures();
     loadPresets();
+    loadState();
   }, []);
+
+  const [toolAvailability, setToolAvailability] = useState<Record<string, boolean>>({});
+  const [enabledFunctions, setEnabledFunctions] = useState<string[]>([]);
+  const [unavailableMessage, setUnavailableMessage] = useState<string | undefined>();
+  const [healthWarnings, setHealthWarnings] = useState<any[]>([]);
+  const [restartImpacts, setRestartImpacts] = useState<Record<string, string[]>>({});
+  const [costHints, setCostHints] = useState<Record<string, string>>({});
 
   const loadFeatures = async () => {
     setLoading(true);
@@ -91,6 +99,22 @@ const IOControl = () => {
       setPresets(data.presets || []);
     } catch (err: any) {
       console.error('Error loading presets:', err);
+    }
+  };
+
+  const loadState = async () => {
+    try {
+      const response = await fetch('/api/io-control/state');
+      if (!response.ok) throw new Error('Failed to load state');
+      const data = await response.json();
+      setToolAvailability(data.tool_availability || {});
+      setEnabledFunctions(data.enabled_functions || []);
+      setUnavailableMessage(data.unavailable_message);
+      setHealthWarnings(data.health_warnings || []);
+      setRestartImpacts(data.restart_impacts || {});
+      setCostHints(data.cost_hints || {});
+    } catch (err: any) {
+      console.warn('Error loading state:', err);
     }
   };
 
@@ -245,6 +269,13 @@ const IOControl = () => {
     return acc;
   }, {});
 
+  const [toolAvailability, setToolAvailability] = useState<Record<string, boolean>>({});
+  const [enabledFunctions, setEnabledFunctions] = useState<string[]>([]);
+  const [unavailableMessage, setUnavailableMessage] = useState<string | undefined>();
+  const [healthWarnings, setHealthWarnings] = useState<any[]>([]);
+  const [restartImpacts, setRestartImpacts] = useState<Record<string, string[]>>({});
+  const [costHints, setCostHints] = useState<Record<string, string>>({});
+
   const matchesRestartScope = (feature: Feature) => {
     if (restartScopeFilter === 'all') return true;
     return feature.restart_scope === restartScopeFilter;
@@ -289,6 +320,51 @@ const IOControl = () => {
             <span className="link-pill" onClick={() => window.open('http://localhost:4173', '_blank')}>Web UI</span>
           </div>
         </div>
+      </div>
+
+      {/* Tool Availability Snapshot */}
+      <div className="card availability-card">
+        <div className="card-header">
+          <h3>Tool Availability</h3>
+          <small>Derived from providers, offline mode, and cloud routing</small>
+        </div>
+        <div className="availability-grid">
+          {Object.entries(toolAvailability).map(([tool, enabled]) => (
+            <div key={tool} className={`availability-item ${enabled ? 'ok' : 'off'}`}>
+              <span className="dot" aria-hidden /> {tool} {costHints[tool] ? `— ${costHints[tool]}` : ''}
+            </div>
+          ))}
+        </div>
+        {enabledFunctions.length > 0 && (
+          <div className="enabled-functions">
+            <strong>Enabled functions:</strong> {enabledFunctions.join(', ')}
+          </div>
+        )}
+        {unavailableMessage && (
+          <div className="unavailable-message">
+            {unavailableMessage}
+          </div>
+        )}
+        {healthWarnings && healthWarnings.length > 0 && (
+          <div className="health-warnings">
+            <strong>Health warnings:</strong>
+            <ul>
+              {healthWarnings.map((hw, i) => (
+                <li key={i}>{hw.feature_name}: {hw.message}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {restartImpacts && Object.keys(restartImpacts).length > 0 && (
+          <div className="restart-impacts">
+            <strong>Restart impacts:</strong>
+            <ul>
+              {Object.entries(restartImpacts).map(([scope, services]) => (
+                <li key={scope}>{scope}: {services.join(', ')}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       {error && (
