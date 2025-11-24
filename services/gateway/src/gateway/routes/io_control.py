@@ -134,6 +134,8 @@ class DashboardStateResponse(BaseModel):
     enabled_functions: List[str] | None = None
     unavailable_message: str | None = None
     health_warnings: List[HealthStatusResponse] | None = None
+    restart_impacts: Dict[str, List[str]] | None = None
+    cost_hints: Dict[str, str] | None = None
 
 
 # ============================================================================
@@ -310,6 +312,20 @@ async def get_dashboard_state():
                 )
             )
 
+    # Restart impacts (static mapping for now)
+    restart_impacts = {
+        "llamacpp": ["llama.cpp servers"],
+        "service": ["fabrication"],  # example
+        "stack": ["All Docker services"],
+    }
+
+    # Cost hints for paid providers (static strings for UI)
+    cost_hints = {
+        "openai_api": "OpenAI usage billed per model (see platform docs).",
+        "anthropic_api": "Anthropic usage billed per model.",
+        "perplexity_api": "Perplexity research_deep charged per request.",
+    }
+
     # Group features by category
     features_by_category = {}
     for category in FeatureCategory:
@@ -354,6 +370,8 @@ async def get_dashboard_state():
         enabled_functions=enabled_functions,
         unavailable_message=unavailable_message,
         health_warnings=health_warnings or None,
+        restart_impacts=restart_impacts,
+        cost_hints=cost_hints,
     )
 
 
