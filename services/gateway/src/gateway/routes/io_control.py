@@ -133,6 +133,7 @@ class DashboardStateResponse(BaseModel):
     tool_availability: Dict[str, bool] | None = None
     enabled_functions: List[str] | None = None
     unavailable_message: str | None = None
+    health_warnings: List[HealthStatusResponse] | None = None
 
 
 # ============================================================================
@@ -295,6 +296,19 @@ async def get_dashboard_state():
     tool_availability = tool_checker.get_available_tools()
     enabled_functions = tool_checker.get_enabled_function_names()
     unavailable_message = tool_checker.get_unavailable_tools_message()
+    health_status = feature_registry.get_health_status(current_state)
+    health_warnings = []
+    for feature_id, (is_healthy, message) in health_status.items():
+        feature = feature_registry.get(feature_id)
+        if feature and not is_healthy:
+            health_warnings.append(
+                HealthStatusResponse(
+                    feature_id=feature_id,
+                    feature_name=feature.name,
+                    is_healthy=is_healthy,
+                    message=message,
+                )
+            )
 
     # Group features by category
     features_by_category = {}
@@ -339,6 +353,7 @@ async def get_dashboard_state():
         tool_availability=tool_availability,
         enabled_functions=enabled_functions,
         unavailable_message=unavailable_message,
+        health_warnings=health_warnings or None,
     )
 
 
