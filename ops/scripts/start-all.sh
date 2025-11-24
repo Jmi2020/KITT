@@ -133,6 +133,14 @@ trap cleanup INT TERM
 # Phase 1: Start LLM Servers
 # ========================================
 
+# Optional: skip discovery container if host-native discovery is used
+if [ "${DISCOVERY_HOST_NATIVE:-0}" = "1" ]; then
+    log "DISCOVERY_HOST_NATIVE=1 set - skipping discovery container; expecting host service on ${DISCOVERY_BASE:-http://localhost:8500}"
+    SKIP_DISCOVERY=1
+else
+    SKIP_DISCOVERY=0
+fi
+
 # Resolve ports/aliases (defaults align with .env keys)
 Q4_PORT="${LLAMACPP_Q4_PORT:-8083}"
 Q4_ALIAS="${LLAMACPP_Q4_ALIAS:-kitty-q4}"
@@ -262,9 +270,17 @@ fi
 log "Phase 3: Starting Docker Compose services"
 
 # Change to infra/compose directory for docker compose
-if ! compose_cmd up -d --build 2>&1 | tee -a "$STARTUP_LOG"; then
-    error "Docker Compose startup failed"
-    exit 1
+if [ "$SKIP_DISCOVERY" -eq 1 ]; then
+    log "Bringing up compose services without discovery (scaled to 0)"
+    if ! compose_cmd up -d --build --scale discovery=0 2>&1 | tee -a "$STARTUP_LOG"; then
+        error "Docker Compose startup failed"
+        exit 1
+    fi
+else
+    if ! compose_cmd up -d --build 2>&1 | tee -a "$STARTUP_LOG"; then
+        error "Docker Compose startup failed"
+        exit 1
+    fi
 fi
 
 success "Docker services started"

@@ -11,7 +11,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Set
 from urllib.parse import quote_plus, urlencode, urlparse
 from pathlib import Path
@@ -114,6 +114,17 @@ FABRICATION_API_BASE = _first_valid_url(
     ),
     "http://localhost:8080",
 )
+DISCOVERY_BASE = _first_valid_url(
+    (
+        os.getenv("DISCOVERY_BASE"),
+        os.getenv("DISCOVERY_SERVICE_URL"),
+        os.getenv("DISCOVERY_API"),
+        os.getenv("GATEWAY_API"),
+        "http://localhost:8500",
+        "http://gateway:8080",
+    ),
+    "http://localhost:8500",
+)
 USER_NAME = _env("USER_NAME", "ssh-operator")
 USER_UUID = _env(
     "KITTY_USER_ID",
@@ -157,7 +168,11 @@ def _parse_iso_timestamp(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        # Assume UTC if no timezone info is provided
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
     except ValueError:
         return None
 
@@ -166,9 +181,13 @@ def _format_history_time(value: Optional[str], show_date: bool = False) -> str:
     parsed = _parse_iso_timestamp(value)
     if not parsed:
         return "—"
-    if show_date:
-        return parsed.strftime("%Y-%m-%d %H:%M")
-    return parsed.strftime("%m-%d %H:%M")
+    try:
+        local_tz = datetime.now().astimezone().tzinfo
+        parsed = parsed.astimezone(local_tz)
+        fmt = "%Y-%m-%d %H:%M" if show_date else "%m-%d %H:%M"
+        return parsed.strftime(fmt)
+    except Exception:  # noqa: BLE001
+        return value or "—"
 
 
 def _truncate_text(text: str, limit: Optional[int]) -> str:
@@ -476,6 +495,7 @@ class CommandCompleter(Completer):
             "trace": "Toggle agent reasoning trace",
             "agent": "Toggle ReAct agent mode",
             "collective": "Multi-agent collaboration (council/debate/pipeline)",
+            "discover": "Network discovery (scan/status/list/approve/reject)",
             "reset": "Start a fresh conversation session",
             "remember": "Store a long-term memory note",
             "memories": "Search saved memory notes",
@@ -741,6 +761,32 @@ def _get_json(url: str) -> Dict[str, Any]:
         return response.json()
 
 
+def _discovery_url(path: str) -> str:
+    return f"{DISCOVERY_BASE.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _discovery_get(path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    with _client() as client:
+        response = client.get(_discovery_url(path), params=params)
+        response.raise_for_status()
+        return response.json()
+
+
+def _discovery_post(
+    path: str,
+    payload: Dict[str, Any],
+    *,
+    spinner_text: Optional[str] = None,
+) -> Dict[str, Any]:
+    url = _discovery_url(path)
+    if spinner_text:
+        return _post_json_with_spinner(url, payload, spinner_text)
+    with _client() as client:
+        response = client.post(url, json=payload)
+        response.raise_for_status()
+        return response.json()
+
+
 def _safe_value(val: Any, default: str = "N/A") -> str:
     """Stringify with a fallback."""
     if val is None:
@@ -749,6 +795,170 @@ def _safe_value(val: Any, default: str = "N/A") -> str:
         return str(val)
     text = str(val).strip()
     return text if text else default
+
+
+def _format_services(services: Optional[List[Dict[str, Any]]]) -> str:
+    if not services:
+        return "—"
+    entries = []
+    for svc in services[:3]:
+        name = svc.get("name") or svc.get("protocol") or "svc"
+        port = svc.get("port")
+        if port:
+            entries.append(f"{name}:{port}")
+        else:
+            entries.append(name)
+    extra = max(0, len(services) - 3)
+    if extra:
+        entries.append(f"+{extra} more")
+    return ", ".join(entries)
+
+
+def _format_conf(val: Optional[float]) -> str:
+    return f"{val:.2f}" if isinstance(val, (int, float)) else "—"
+
+
+def _render_devices_table(devices: List[Dict[str, Any]], total: int, filters: Optional[Dict[str, Any]] = None) -> None:
+    if not devices:
+        console.print("[yellow]No devices found.[/yellow]")
+        if filters:
+            console.print(f"[dim]Filters: {filters}[/dim]")
+        return
+
+    table = Table(show_edge=False, header_style="bold cyan")
+    table.add_column("Type", style="cyan")
+    table.add_column("IP")
+    table.add_column("Host")
+    table.add_column("Vendor/Model")
+    table.add_column("Services")
+    table.add_column("Conf")
+    table.add_column("Approved", justify="center")
+    table.add_column("Last Seen")
+
+    for dev in devices:
+        caps = dev.get("capabilities") or {}
+        kind = caps.get("candidate_kind") or dev.get("device_type") or "unknown"
+        vendor_parts = [dev.get("manufacturer"), dev.get("model")]
+        vendor_model = " ".join([part for part in vendor_parts if part]).strip() or "—"
+        last_seen = _format_history_time(dev.get("last_seen"), show_date=True)
+        approved = "yes" if dev.get("approved") else "no"
+        conf_val = caps.get("candidate_confidence") or dev.get("confidence_score")
+        table.add_row(
+            kind,
+            dev.get("ip_address") or "—",
+            dev.get("hostname") or "—",
+            vendor_model,
+            _format_services(dev.get("services")),
+            _format_conf(conf_val),
+            approved,
+            last_seen,
+        )
+
+    console.print(table)
+    console.print(f"[dim]Total: {total}[/dim]")
+    if filters:
+        console.print(f"[dim]Filters: {filters}[/dim]")
+
+
+def _print_scan_status(status: Dict[str, Any]) -> None:
+    table = Table(title="Discovery Scan", show_edge=False, header_style="bold cyan")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("Scan ID", str(status.get("scan_id")))
+    table.add_row("Status", status.get("status", "unknown"))
+    table.add_row("Methods", ", ".join(status.get("methods", [])) or "default")
+    table.add_row("Devices Found", str(status.get("devices_found", 0)))
+    if status.get("errors"):
+        table.add_row("Errors", "; ".join(status.get("errors", [])))
+    if status.get("started_at"):
+        table.add_row("Started", _format_history_time(status.get("started_at"), show_date=True))
+    if status.get("completed_at"):
+        table.add_row("Completed", _format_history_time(status.get("completed_at"), show_date=True))
+    console.print(table)
+
+
+def _parse_bool_str(val: Optional[str]) -> Optional[bool]:
+    if val is None:
+        return None
+    lowered = val.strip().lower()
+    if lowered in {"1", "true", "yes", "y", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "n", "off"}:
+        return False
+    return None
+
+
+def _run_discover(
+    action: str,
+    *,
+    scan_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+    methods: Optional[List[str]] = None,
+    timeout_seconds: int = 30,
+    search: Optional[str] = None,
+    device_type: Optional[str] = None,
+    approved: Optional[bool] = None,
+    online: Optional[bool] = None,
+    manufacturer: Optional[str] = None,
+    limit: int = 100,
+    notes: Optional[str] = None,
+) -> None:
+    action = action.lower()
+
+    if action == "scan":
+        payload: Dict[str, Any] = {"timeout_seconds": timeout_seconds}
+        if methods:
+            payload["methods"] = methods
+        status = _discovery_post("api/discovery/scan", payload, spinner_text="Starting discovery scan")
+        _print_scan_status(status)
+        console.print("[dim]Use `kitty-cli discover status <scan_id>` to follow progress.[/dim]")
+        return
+
+    if action == "status":
+        if not scan_id:
+            console.print("[red]Scan ID is required.[/red]")
+            raise typer.Exit(1)
+        status = _discovery_get(f"api/discovery/scan/{scan_id}")
+        _print_scan_status(status)
+        return
+
+    if action == "list":
+        params: Dict[str, Any] = {"limit": limit}
+        if device_type:
+            params["device_type"] = device_type
+        if approved is not None:
+            params["approved"] = approved
+        if online is not None:
+            params["is_online"] = online
+        if manufacturer:
+            params["manufacturer"] = manufacturer
+
+        if search:
+            data = _discovery_get("api/discovery/search", {"q": search, "limit": limit})
+        else:
+            data = _discovery_get("api/discovery/devices", params)
+
+        devices = data.get("devices", [])
+        total = data.get("total", len(devices))
+        filters = data.get("filters_applied", {})
+        _render_devices_table(devices, total, filters)
+        return
+
+    if action in {"approve", "reject"}:
+        if not device_id:
+            console.print("[red]Device ID is required.[/red]")
+            raise typer.Exit(1)
+        path = f"api/discovery/devices/{device_id}/approve" if action == "approve" else f"api/discovery/devices/{device_id}/reject"
+        payload = {"notes": notes} if notes else {}
+        result = _discovery_post(path, payload or {}, spinner_text=f"{action.title()}ing device")
+        status = "approved" if action == "approve" else "rejected"
+        console.print(f"[green]Device {device_id} {status}.[/green]")
+        if result.get("notes"):
+            console.print(f"[dim]Notes: {result.get('notes')}[/dim]")
+        return
+
+    console.print("[red]Unknown discovery action. Use scan | status | list | approve | reject.[/red]")
+    raise typer.Exit(1)
 
 
 def _render_research_report(detail: Dict[str, Any], results: Dict[str, Any]) -> str:
@@ -1325,6 +1535,87 @@ def usage(
 ) -> None:
     """Display provider-level usage stats and recent paid calls."""
     _display_usage_dashboard(refresh)
+
+
+@app.command()
+def discover(
+    action: str = typer.Argument(..., help="Action: scan | status | list | approve | reject"),
+    target: Optional[str] = typer.Argument(
+        None,
+        help="Scan ID (for status) or Device ID (for approve/reject).",
+    ),
+    methods: Optional[List[str]] = typer.Option(
+        None,
+        "--method",
+        "-m",
+        help="Discovery methods to use for scan (mdns, ssdp, bamboo_udp, snapmaker_udp, network_scan).",
+    ),
+    timeout_seconds: int = typer.Option(
+        30,
+        "--timeout",
+        "-t",
+        help="Scan timeout in seconds.",
+        min=5,
+        max=300,
+    ),
+    search: Optional[str] = typer.Option(
+        None,
+        "--search",
+        "-q",
+        help="Search devices by hostname/model/manufacturer/IP.",
+    ),
+    device_type: Optional[str] = typer.Option(
+        None,
+        "--type",
+        "-k",
+        help="Filter by device type (e.g., printer_3d, esp32, raspberry_pi).",
+    ),
+    approved: Optional[bool] = typer.Option(
+        None,
+        "--approved",
+        help="Filter by approval status (true/false) when listing.",
+    ),
+    online: Optional[bool] = typer.Option(
+        None,
+        "--online",
+        help="Filter by online status (true/false) when listing.",
+    ),
+    manufacturer: Optional[str] = typer.Option(
+        None,
+        "--manufacturer",
+        help="Filter by manufacturer name.",
+    ),
+    limit: int = typer.Option(
+        100,
+        "--limit",
+        "-l",
+        help="Max results to display.",
+        min=1,
+        max=500,
+    ),
+    notes: Optional[str] = typer.Option(
+        None,
+        "--notes",
+        help="Optional notes for approve/reject.",
+    ),
+) -> None:
+    """Network discovery helpers."""
+    scan_id = target if action == "status" else None
+    device_id = target if action in {"approve", "reject"} else None
+    _run_discover(
+        action,
+        scan_id=scan_id,
+        device_id=device_id,
+        methods=methods,
+        timeout_seconds=timeout_seconds,
+        search=search,
+        device_type=device_type,
+        approved=approved,
+        online=online,
+        manufacturer=manufacturer,
+        limit=limit,
+        notes=notes,
+    )
 
 
 def _prompt_for_selection(count: int, picks: Optional[str]) -> List[int]:
@@ -2953,6 +3244,13 @@ def shell(
     console.print("  [cyan]/vision <query>[/cyan]   - Search & store reference images")
     console.print("  [cyan]/images[/cyan]           - List stored reference images")
 
+    console.print("\n[bold]Network & Discovery:[/bold]")
+    console.print("  [cyan]/discover scan[/cyan]           - Start a network discovery scan")
+    console.print("  [cyan]/discover status <id>[/cyan]    - Check scan status")
+    console.print("  [cyan]/discover list[/cyan]           - List discovered devices (use search/type filters)")
+    console.print("  [cyan]/discover approve <id>[/cyan]   - Approve a device")
+    console.print("  [cyan]/discover reject <id>[/cyan]    - Reject a device")
+
     console.print("\n[bold]Memory & Sessions:[/bold]")
     console.print("  [cyan]/remember <note>[/cyan]  - Store a long-term memory note")
     console.print("  [cyan]/memories [query][/cyan] - Search saved memories")
@@ -3039,6 +3337,13 @@ def shell(
                 console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact #idx to printer")
                 console.print("  [cyan]/vision <query>[/cyan]   - Search/select reference images")
                 console.print("  [cyan]/images[/cyan]           - Show stored reference images")
+
+                console.print("\n[bold]Network & Discovery:[/bold]")
+                console.print("  [cyan]/discover scan[/cyan]           - Start a network discovery scan")
+                console.print("  [cyan]/discover status <id>[/cyan]    - Check scan status")
+                console.print("  [cyan]/discover list[/cyan]           - List discovered devices (search/type filters)")
+                console.print("  [cyan]/discover approve <id>[/cyan]   - Approve a device")
+                console.print("  [cyan]/discover reject <id>[/cyan]    - Reject a device")
 
                 console.print("\n[bold]Memory & Sessions:[/bold]")
                 console.print("  [cyan]/remember <note>[/cyan]  - Store a long-term memory note")
@@ -3585,6 +3890,48 @@ def shell(
                     border_style="green"
                 )
                 console.print()  # blank line
+                continue
+
+            if cmd == "discover":
+                if not args:
+                    console.print("[yellow]Usage: /discover scan | status <scan_id> | list | approve <id> | reject <id> [key=value options]")
+                    console.print("[dim]Options: methods=mdns,ssdp  search=term  type=printer_3d  approved=true  online=true  limit=50[/dim]")
+                    continue
+
+                action = args[0].lower()
+                option_tokens = args[1:]
+                positional: List[str] = []
+                options: Dict[str, str] = {}
+                for tok in option_tokens:
+                    if "=" in tok:
+                        k, v = tok.split("=", 1)
+                        options[k.lower()] = v
+                    else:
+                        positional.append(tok)
+
+                target_id = positional[0] if positional else None
+                methods_raw = options.get("methods") or options.get("method")
+                methods_list = methods_raw.split(",") if methods_raw else None
+                approved_flag = _parse_bool_str(options.get("approved"))
+                online_flag = _parse_bool_str(options.get("online"))
+
+                try:
+                    _run_discover(
+                        action,
+                        scan_id=target_id if action == "status" else None,
+                        device_id=target_id if action in {"approve", "reject"} else None,
+                        methods=methods_list,
+                        timeout_seconds=int(options.get("timeout", "30")),
+                        search=options.get("search") or options.get("q"),
+                        device_type=options.get("type") or options.get("device_type"),
+                        approved=approved_flag,
+                        online=online_flag,
+                        manufacturer=options.get("manufacturer"),
+                        limit=int(options.get("limit", "100")),
+                        notes=options.get("notes"),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    console.print(f"[red]Discovery command failed: {exc}[/red]")
                 continue
 
             if cmd == "queue":

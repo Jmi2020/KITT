@@ -5,7 +5,7 @@ Handles storing and querying discovered devices in PostgreSQL.
 """
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
 from sqlalchemy import and_, desc, func, or_, select
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from ..models import DeviceRecord, ScanRecord
+from ..oui import get_vendor
 from ..scanners.base import DiscoveredDevice
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,100 @@ class DeviceStore:
         self.async_session_maker = sessionmaker(
             self.engine, class_=AsyncSession, expire_on_commit=False
         )
+
+    # -------------------------------------------------------------------------
+    # Classification helpers
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def _classify_device(
+        mac: Optional[str],
+        hostname: Optional[str],
+        manufacturer: Optional[str],
+        services: Optional[List[Dict[str, str]]],
+    ) -> Tuple[Optional[str], float, List[str]]:
+        """
+        Derive a candidate device kind (esp32, raspberry_pi, printer, unknown) with a confidence score.
+
+        Heuristics:
+        - MAC OUI prefixes for Espressif and Raspberry Pi
+        - Hostname hints (esp32/esphome/raspberrypi/octopi/mainsail/fluiddpi)
+        - Service/port hints (esphome, ssh on pi-ish hostnames)
+        """
+        hints: List[str] = []
+        confidence = 0.0
+        kind: Optional[str] = None
+
+        mac_upper = (mac or "").upper().replace("-", ":")
+        hostname_lower = (hostname or "").lower()
+        manuf_lower = (manufacturer or "").lower()
+        # Try OUI vendor lookup
+        oui_vendor = get_vendor(mac)
+        if oui_vendor:
+            hints.append(f"oui:{oui_vendor}")
+            # Only override manufacturer if it's empty
+            if not manufacturer:
+                manufacturer = oui_vendor
+                manuf_lower = oui_vendor.lower()
+            confidence = max(confidence, 0.5)
+
+        esp_ouis = {"24:6F:28", "30:AE:A4", "7C:9E:BD", "7C:DF:A1", "8C:4B:14", "BC:FF:4D"}
+        rpi_ouis = {"B8:27:EB", "DC:A6:32", "E4:5F:01", "DC:44:6D"}
+
+        def mac_matches(ouis: set[str]) -> bool:
+            return any(mac_upper.startswith(prefix) for prefix in ouis) if mac_upper else False
+
+        # MAC-based hints
+        if mac_matches(esp_ouis):
+            kind = "esp32"
+            confidence = max(confidence, 0.7)
+            hints.append("mac:esp32")
+        if mac_matches(rpi_ouis):
+            kind = "raspberry_pi"
+            confidence = max(confidence, 0.7)
+            hints.append("mac:rpi")
+
+        # Hostname hints
+        if any(token in hostname_lower for token in ["esp32", "esphome", "espressif"]):
+            kind = kind or "esp32"
+            confidence = max(confidence, 0.6)
+            hints.append("host:esp32")
+        if any(token in hostname_lower for token in ["raspberrypi", "octopi", "octoprint", "mainsail", "fluiddpi"]):
+            kind = kind or "raspberry_pi"
+            confidence = max(confidence, 0.6)
+            hints.append("host:rpi")
+
+        # Manufacturer hints
+        if "espressif" in manuf_lower:
+            kind = kind or "esp32"
+            confidence = max(confidence, 0.65)
+            hints.append("manufacturer:espressif")
+        if "raspberry" in manuf_lower or "pi trading" in manuf_lower:
+            kind = kind or "raspberry_pi"
+            confidence = max(confidence, 0.65)
+            hints.append("manufacturer:rpi")
+
+        # Service hints
+        for svc in services or []:
+            name = (svc.get("name") or svc.get("protocol") or "").lower()
+            port = str(svc.get("port") or "")
+            if "esphome" in name:
+                kind = kind or "esp32"
+                confidence = max(confidence, 0.75)
+                hints.append("svc:esphome")
+            if name.startswith("ssh") or port == "22":
+                if any(token in hostname_lower for token in ["raspberry", "pi", "octo", "mainsail", "fluiddpi"]):
+                    kind = kind or "raspberry_pi"
+                    confidence = max(confidence, 0.55)
+                    hints.append("svc:ssh+pi-host")
+
+        # Fallbacks
+        if kind is None:
+            kind = "unknown"
+            confidence = max(confidence, 0.1)
+
+        # Clamp
+        confidence = min(1.0, max(confidence, 0.0))
+        return kind, confidence, hints
 
     async def store_device(
         self, device: DiscoveredDevice, scan_id: Optional[UUID] = None
@@ -82,8 +177,24 @@ class DeviceStore:
                         for s in device.services
                     ]
 
+                capabilities = existing.capabilities or {}
                 if device.capabilities:
-                    existing.capabilities.update(device.capabilities)
+                    capabilities.update(device.capabilities)
+                # Add candidate classification
+                services_payload = existing.services or []
+                kind, kind_conf, hints = self._classify_device(
+                    mac=device.mac_address or existing.mac_address,
+                    hostname=device.hostname or existing.hostname,
+                    manufacturer=device.manufacturer or existing.manufacturer,
+                    services=services_payload,
+                )
+                capabilities["candidate_kind"] = kind
+                capabilities["candidate_confidence"] = kind_conf
+                if hints:
+                    capabilities["candidate_hints"] = list(set(hints + capabilities.get("candidate_hints", [])))
+                if not existing.manufacturer and capabilities.get("oui_vendor"):
+                    existing.manufacturer = capabilities.get("oui_vendor")
+                existing.capabilities = capabilities
 
                 # Increase confidence if rediscovered via same method
                 if existing.discovery_method == device.discovery_method.value:
@@ -96,6 +207,33 @@ class DeviceStore:
 
             else:
                 # Create new device record
+                # Build services payload for classification and storage
+                services_payload = [
+                    {
+                        "protocol": s.protocol,
+                        "port": s.port,
+                        "name": s.name,
+                        "version": s.version
+                    }
+                    for s in device.services
+                ] if device.services else []
+
+                capabilities = device.capabilities or {}
+                kind, kind_conf, hints = self._classify_device(
+                    mac=device.mac_address,
+                    hostname=device.hostname,
+                    manufacturer=device.manufacturer,
+                    services=services_payload,
+                )
+                capabilities = capabilities.copy()
+                capabilities["candidate_kind"] = kind
+                capabilities["candidate_confidence"] = kind_conf
+                oui_vendor = get_vendor(device.mac_address)
+                if oui_vendor:
+                    capabilities["oui_vendor"] = oui_vendor
+                if hints:
+                    capabilities["candidate_hints"] = hints
+
                 record = DeviceRecord(
                     id=str(uuid4()),
                     discovered_at=device.discovered_at,
@@ -109,16 +247,8 @@ class DeviceStore:
                     model=device.model,
                     serial_number=device.serial_number,
                     firmware_version=device.firmware_version,
-                    services=[
-                        {
-                            "protocol": s.protocol,
-                            "port": s.port,
-                            "name": s.name,
-                            "version": s.version
-                        }
-                        for s in device.services
-                    ] if device.services else [],
-                    capabilities=device.capabilities or {},
+                    services=services_payload,
+                    capabilities=capabilities,
                     is_online=True,
                     confidence_score=device.confidence_score
                 )

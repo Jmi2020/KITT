@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.kitty.discovery</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/bin/zsh</string>
+      <string>-lc</string>
+      <string>cd /Users/Shared/Coding/KITT && ./ops/scripts/discovery/run-host.sh</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>WorkingDirectory</key>
+    <string>/Users/Shared/Coding/KITT</string>
+    <key>StandardOutPath</key>
+    <string>/Users/Shared/Coding/KITT/.logs/discovery-host.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/Shared/Coding/KITT/.logs/discovery-host.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>DISCOVERY_PING_PRIVILEGED</key>
+      <string>false</string>
+      <key>DISCOVERY_ENABLE_NETWORK_SCAN</key>
+      <string>true</string>
+      <key>OUI_DB_PATH</key>
+      <string>/Users/Shared/Coding/KITT/config/oui.manuf</string>
+      <key>PYTHONPATH</key>
+      <string>/Users/Shared/Coding/KITT</string>
+      <key>SETTINGS_MODULE</key>
+      <string>services.common.config</string>
+      <key>POSTGRES_HOST</key>
+      <string>localhost</string>
+      <key>POSTGRES_PORT</key>
+      <string>5432</string>
+      <key>POSTGRES_USER</key>
+      <string>kitty</string>
+      <key>POSTGRES_PASSWORD</key>
+      <string>changeme</string>
+      <key>POSTGRES_DB</key>
+      <string>kitty</string>
+    </dict>
+  </dict>
+</plist>

@@ -12,7 +12,8 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
-from typing import List
+import subprocess
+from typing import List, Optional
 
 from icmplib import multiping
 
@@ -92,15 +93,21 @@ class PingScanner(BaseScanner):
             for host in alive_hosts:
                 if not host.is_alive:
                     continue
+                mac = self._lookup_mac(host.address)
                 capabilities = {
                     "latency_ms": round(host.avg_rtt, 2) if host.avg_rtt is not None else None,
                     "packet_loss": host.packet_loss,
                     "jitter_ms": round(host.jitter, 2) if host.jitter else None,
+                    "mac_address": mac,
                 }
+                confidence = 0.3
+                if mac:
+                    confidence = 0.6  # bump when MAC is known for OUI/vendor tagging
                 device = self._create_device(
                     ip_address=host.address,
                     device_type=DeviceType.UNKNOWN,
-                    confidence_score=0.3,
+                    mac_address=mac,
+                    confidence_score=confidence,
                     capabilities=capabilities,
                 )
                 result.add_device(device)
@@ -133,3 +140,47 @@ class PingScanner(BaseScanner):
         except Exception as exc:  # noqa: BLE001
             logger.error("multiping execution failed: %s", exc, exc_info=True)
             return []
+
+    @staticmethod
+    def _lookup_mac(ip: str) -> Optional[str]:
+        """
+        Best-effort ARP lookup using `ip neigh show <ip>`.
+
+        Works inside the Docker network; returns None on failure.
+        """
+        # Linux style: ip neigh
+        try:
+            out = subprocess.check_output(
+                ["ip", "neigh", "show", ip],
+                stderr=subprocess.DEVNULL,
+                timeout=1.0,
+                text=True,
+            )
+            for line in out.splitlines():
+                parts = line.split()
+                if "lladdr" in parts:
+                    idx = parts.index("lladdr")
+                    if idx + 1 < len(parts):
+                        mac = parts[idx + 1].strip()
+                        if mac and mac.lower() != "failed":
+                            return mac
+        except Exception:
+            pass
+
+        # macOS/BSD style: arp -n <ip>
+        try:
+            out = subprocess.check_output(
+                ["arp", "-n", ip],
+                stderr=subprocess.DEVNULL,
+                timeout=1.0,
+                text=True,
+            )
+            for line in out.splitlines():
+                parts = line.replace("(", " ").replace(")", " ").split()
+                for token in parts:
+                    if token.count(":") == 5:  # rudimentary MAC pattern
+                        return token.strip()
+        except Exception:
+            pass
+
+        return None

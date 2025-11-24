@@ -5,6 +5,7 @@ Schedules background discovery scans at configurable intervals.
 """
 import asyncio
 import logging
+import os
 from typing import List, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -62,9 +63,17 @@ class ScanScheduler:
             "mdns", "ssdp", "bamboo_udp", "snapmaker_udp"
         ]
         self.subnets = subnets or ["192.168.1.0/24"]
+        self.ping_privileged = self._env_bool("DISCOVERY_PING_PRIVILEGED", default=True)
 
         self.scheduler = AsyncIOScheduler()
         self._running = False
+
+    @staticmethod
+    def _env_bool(name: str, default: bool) -> bool:
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
 
     async def start(self) -> None:
         """Start the periodic scan scheduler."""
@@ -139,7 +148,8 @@ class ScanScheduler:
                 timeout_seconds=300,  # 5 minutes for large subnets
                 ping_count=1,
                 ping_interval=0.01,
-                ping_timeout=1.0
+                ping_timeout=1.0,
+                privileged=self.ping_privileged,
             )
 
             # Run ping sweep
@@ -294,7 +304,8 @@ class ScanScheduler:
                     timeout_seconds=timeout_seconds,
                     ping_count=1,
                     ping_interval=0.01,
-                    ping_timeout=1.0
+                    ping_timeout=1.0,
+                    privileged=self.ping_privileged,
                 ))
 
             # Run all scanners concurrently
