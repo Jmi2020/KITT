@@ -32,7 +32,7 @@ class ToolAvailability:
         Returns:
             Dict mapping tool category to availability (True/False)
         """
-        return {
+        availability = {
             # API Services
             "perplexity_search": self._check_perplexity(),
             "openai_completion": self._check_openai(),
@@ -54,6 +54,14 @@ class ToolAvailability:
             # Autonomous
             "autonomous_execution": self._check_autonomous(),
         }
+
+        # Derived application-level tools
+        availability["research_deep"] = availability["perplexity_search"] and availability["cloud_routing"]
+        availability["web_search"] = True  # free, local
+        availability["openai_chat"] = availability["openai_completion"] and availability["cloud_routing"]
+        availability["anthropic_chat"] = availability["anthropic_completion"] and availability["cloud_routing"]
+
+        return availability
 
     def get_enabled_function_names(self) -> List[str]:
         """Get list of function names that should be exposed to LLM.
@@ -231,6 +239,9 @@ class ToolAvailability:
             "perplexity_search": "Add PERPLEXITY_API_KEY to .env",
             "openai_completion": "Add OPENAI_API_KEY to .env",
             "anthropic_completion": "Add ANTHROPIC_API_KEY to .env",
+            "openai_chat": "Add OPENAI_API_KEY to .env",
+            "anthropic_chat": "Add ANTHROPIC_API_KEY to .env",
+            "research_deep": "Add PERPLEXITY_API_KEY and enable cloud routing (disable OFFLINE_MODE)",
             "zoo_cad_generation": "Add ZOO_API_KEY to .env and disable offline mode",
             "tripo_cad_generation": "Add TRIPO_API_KEY to .env and disable offline mode",
             "printer_control": "Enable ENABLE_FUNCTION_CALLING and configure printer IPs",
