@@ -75,6 +75,19 @@ class FeatureRegistry:
         self.features: Dict[str, FeatureDefinition] = {}
         self._register_all_features()
 
+    def restart_impacts(self) -> Dict[str, List[str]]:
+        """Map restart scopes to affected services based on registered features."""
+        impacts = {
+            RestartScope.LLAMACPP.value: ["llama.cpp servers"],
+            RestartScope.STACK.value: ["All Docker services"],
+        }
+        service_scopes = set(
+            f.restart_scope for f in self.features.values() if f.restart_scope == RestartScope.SERVICE
+        )
+        if service_scopes:
+            impacts[RestartScope.SERVICE.value] = ["fabrication"]
+        return impacts
+
     def _register_all_features(self):
         """Register all features in the system."""
 

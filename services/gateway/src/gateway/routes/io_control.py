@@ -312,12 +312,8 @@ async def get_dashboard_state():
                 )
             )
 
-    # Restart impacts (static mapping for now)
-    restart_impacts = {
-        "llamacpp": ["llama.cpp servers"],
-        "service": ["fabrication"],  # example
-        "stack": ["All Docker services"],
-    }
+    # Restart impacts (from registry)
+    restart_impacts = feature_registry.restart_impacts()
 
     # Cost hints for paid providers (static strings for UI)
     cost_hints = {
