@@ -19,6 +19,8 @@ def get_tool_call_examples(format_type: ToolCallFormat) -> str:
         return _get_qwen_xml_examples()
     elif format_type == ToolCallFormat.LLAMA_JSON:
         return _get_llama_json_examples()
+    elif format_type == ToolCallFormat.ATHENE_JSON:
+        return _get_athene_json_examples()
     elif format_type == ToolCallFormat.MISTRAL_JSON:
         return _get_mistral_json_examples()
     elif format_type == ToolCallFormat.GEMMA_FUNCTION:
@@ -72,6 +74,37 @@ Example - Multiple calls:
 
 DO NOT make up URLs or fake results. ALWAYS use tools when the user requests an action that requires them.
 If your knowledge is outdated or you need current information, USE web_search tool BEFORE declining to answer."""
+
+
+def _get_athene_json_examples() -> str:
+    """Get Athene V2 Agent JSON format examples.
+
+    Athene V2 uses a custom JSON format with 'tool' and 'parameters' keys.
+    Based on Qwen2.5 but fine-tuned for agentic function calling.
+    """
+    return """IMPORTANT: When you need to use a tool, output a JSON object with this EXACT format:
+{{"tool": "tool_name", "parameters": {{"param": "value"}}}}
+
+Output ONLY the JSON object on its own line. No other text before or after.
+
+Example - Search the web:
+{{"tool": "web_search", "parameters": {{"query": "llama.cpp Metal GPU optimization", "max_results": 5}}}}
+
+Example - Generate a CAD model:
+{{"tool": "generate_cad_model", "parameters": {{"prompt": "sphere 2 inches diameter"}}}}
+
+Example - Control a device:
+{{"tool": "control_device", "parameters": {{"domain": "light", "service": "turn_on", "entity_id": "light.living_room"}}}}
+
+Example - Chat response (no tool needed):
+{{"tool": "chat", "parameters": {{"message": "I'll help you with that question."}}}}
+
+CRITICAL RULES:
+1. Use "tool" and "parameters" keys (NOT "name" and "arguments")
+2. Output the JSON object on its own line with no surrounding text
+3. If no tool is needed, use the "chat" tool to respond conversationally
+4. DO NOT make up URLs or fake results
+5. ALWAYS use web_search when you need current/updated information"""
 
 
 def _get_mistral_json_examples() -> str:

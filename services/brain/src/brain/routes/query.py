@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
+import httpx
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ConfigDict
@@ -21,6 +23,9 @@ from ..models.context import DeviceSelection
 from ..orchestrator import BrainOrchestrator
 
 logger = logging.getLogger(__name__)
+
+# Vision model configuration
+LLAMACPP_VISION_HOST = os.getenv("LLAMACPP_VISION_HOST", "http://localhost:8086")
 
 router = APIRouter(prefix="/api", tags=["query"])
 
@@ -110,9 +115,51 @@ class QueryInput(BaseModel):
     model_alias: Optional[str] = Field(default=None, alias="modelAlias")
     use_agent: bool = Field(default=True, alias="useAgent")
     tool_mode: str = Field(default="auto", alias="toolMode")
-    # Multi-provider support (new)
+    # Multi-provider support
     provider: Optional[str] = None
     model: Optional[str] = None
+    # Vision support - list of base64 encoded images
+    images: Optional[List[str]] = None
+
+
+async def vision_query(prompt: str, images: List[str]) -> str:
+    """Send prompt + images to Gemma Vision model.
+
+    Args:
+        prompt: Text prompt for the vision model
+        images: List of base64 encoded images (data:image/png;base64,...)
+
+    Returns:
+        Vision model response text
+    """
+    # Build multimodal content array
+    content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for img in images:
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": img}  # data:image/png;base64,...
+        })
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{LLAMACPP_VISION_HOST}/v1/chat/completions",
+                json={
+                    "model": "gemma-vision",
+                    "messages": [{"role": "user", "content": content}],
+                    "temperature": 0.7,
+                    "max_tokens": 2048,
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+    except httpx.HTTPError as e:
+        logger.error(f"Vision query failed: {e}")
+        raise ValueError(f"Vision model unavailable: {e}")
+    except (KeyError, IndexError) as e:
+        logger.error(f"Unexpected vision response format: {e}")
+        raise ValueError("Invalid vision model response")
 
 
 class QueryResponse(BaseModel):
@@ -173,16 +220,63 @@ async def post_query(
                 "provider": final_provider,
                 "model": final_model,
                 "toolMode": body.tool_mode,
+                "imageCount": len(body.images) if body.images else 0,
             },
             title_hint=cleaned_prompt,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to record user message for %s: %s", body.conversation_id, exc)
 
-    # TODO: Pass provider/model to orchestrator when multi-provider routing is integrated
-    # For now, just use the cleaned prompt
-
     verbosity_level = clamp_level(body.verbosity) if body.verbosity else get_verbosity_level()
+
+    # Route to vision model if images are present and gemma-vision selected
+    if body.images and len(body.images) > 0 and final_model == "gemma-vision":
+        try:
+            vision_response = await vision_query(cleaned_prompt, body.images)
+
+            # Record assistant response
+            try:
+                record_conversation_message(
+                    conversation_id=body.conversation_id,
+                    role=ConversationRole.assistant,
+                    content=vision_response,
+                    metadata={
+                        "tier": "vision",
+                        "model": "gemma-vision",
+                        "imageCount": len(body.images),
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to record vision response: %s", exc)
+
+            return QueryResponse(
+                conversation_id=body.conversation_id,
+                intent=body.intent,
+                result={"output": vision_response},
+                routing={"tier": "vision", "model": "gemma-vision", "imageCount": len(body.images)},
+                requires_confirmation=False,
+            )
+        except ValueError as e:
+            # Vision model failed, return error
+            return QueryResponse(
+                conversation_id=body.conversation_id,
+                intent=body.intent,
+                result={"output": f"Vision processing failed: {str(e)}"},
+                routing={"tier": "error", "model": "gemma-vision"},
+                requires_confirmation=False,
+            )
+
+    # Use model from UI (body.model) or legacy model_alias for routing
+    effective_model_hint = body.model or body.model_alias
+    # Map UI model IDs to internal aliases if needed
+    model_id_to_alias = {
+        "athene-q4": "kitty-q4",
+        "gpt-oss": "kitty-f16",
+        "gemma-vision": "kitty-vision",
+        "hermes-summary": "kitty-summary",
+    }
+    if effective_model_hint:
+        effective_model_hint = model_id_to_alias.get(effective_model_hint, effective_model_hint)
 
     routing_result = await orchestrator.generate_response(
         conversation_id=body.conversation_id,
@@ -191,7 +285,7 @@ async def post_query(
         user_id=body.user_id,
         force_tier=body.force_tier,
         freshness_required=body.freshness_required,
-        model_hint=body.model_alias,
+        model_hint=effective_model_hint,
         use_agent=body.use_agent,
         tool_mode=body.tool_mode,
     )
@@ -302,6 +396,17 @@ async def post_query_stream(
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to record user message: %s", exc)
 
+    # Map UI model IDs to internal aliases
+    stream_model_hint = body.model or body.model_alias
+    model_id_to_alias = {
+        "athene-q4": "kitty-q4",
+        "gpt-oss": "kitty-f16",
+        "gemma-vision": "kitty-vision",
+        "hermes-summary": "kitty-summary",
+    }
+    if stream_model_hint:
+        stream_model_hint = model_id_to_alias.get(stream_model_hint, stream_model_hint)
+
     async def event_generator():
         """Generate SSE events for streaming response."""
         full_content = ""
@@ -316,7 +421,7 @@ async def post_query_stream(
                 user_id=body.user_id,
                 force_tier=body.force_tier,
                 freshness_required=body.freshness_required,
-                model_hint=body.model_alias,
+                model_hint=stream_model_hint,
                 use_agent=body.use_agent,
                 tool_mode=body.tool_mode,
             ):

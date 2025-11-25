@@ -41,6 +41,8 @@ def parse_tool_calls(
         return _parse_qwen_xml(text)
     elif format_type == ToolCallFormat.LLAMA_JSON:
         return _parse_llama_json(text)
+    elif format_type == ToolCallFormat.ATHENE_JSON:
+        return _parse_athene_json(text)
     elif format_type == ToolCallFormat.MISTRAL_JSON:
         return _parse_mistral_json(text)
     elif format_type == ToolCallFormat.GEMMA_FUNCTION:
@@ -164,6 +166,80 @@ def _parse_llama_json(text: str) -> tuple[List[ToolCall], str]:
 
     # Remove the bracketed tool calls from text
     cleaned_text = text.replace(raw_full, "").strip()
+
+    return tool_calls, cleaned_text
+
+
+def _parse_athene_json(text: str) -> tuple[List[ToolCall], str]:
+    """Parse Athene V2 raw JSON format: {"tool": "...", "parameters": {...}}
+
+    Athene outputs simple JSON objects with:
+    - "tool" key for function name (instead of "name")
+    - "parameters" key for arguments (instead of "arguments")
+
+    Special handling for pseudo-tools:
+    - "chat" tool: extracts message as conversational response (not a real tool)
+    - "no_relevant_function": indicates no tool is needed
+
+    Args:
+        text: LLM response text
+
+    Returns:
+        Tuple of (list of ToolCall objects, remaining text without tool calls)
+    """
+    tool_calls: List[ToolCall] = []
+    chat_messages: List[str] = []
+
+    # Pattern to match JSON object with "tool" key
+    # Match: {"tool": "...", "parameters": {...}} or {"tool": "..."}
+    pattern = r'\{[^{}]*"tool"\s*:\s*"[^"]+(?:"[^{}]*(?:\{[^{}]*\})?[^{}]*)?\}'
+
+    # Try to find all JSON objects in the text
+    for match in re.finditer(r'\{[^{}]*\}|\{[^{}]*\{[^{}]*\}[^{}]*\}', text):
+        json_str = match.group(0)
+        try:
+            data = json.loads(json_str)
+
+            # Check for Athene format: {"tool": "...", "parameters": {...}}
+            if isinstance(data, dict) and "tool" in data:
+                tool_name = data["tool"]
+                params = data.get("parameters", data.get("arguments", {}))
+
+                # Handle pseudo-tools that aren't real function calls
+                if tool_name == "chat":
+                    # Extract chat message as conversational response
+                    message = params.get("message", params.get("response", ""))
+                    if message:
+                        chat_messages.append(message)
+                    # Remove from text but don't add as tool call
+                    text = text.replace(json_str, "").strip()
+                    continue
+                elif tool_name == "no_relevant_function":
+                    # Model indicates no tool is appropriate - just remove it
+                    text = text.replace(json_str, "").strip()
+                    continue
+
+                # Real tool call
+                tool_call = ToolCall(
+                    name=tool_name,
+                    arguments=params,
+                    raw_xml=json_str,
+                )
+                tool_calls.append(tool_call)
+        except json.JSONDecodeError:
+            continue
+
+    # Remove tool call JSON from text
+    cleaned_text = text
+    for tc in tool_calls:
+        cleaned_text = cleaned_text.replace(tc.raw_xml, "").strip()
+
+    # If we found chat messages, append them to cleaned text
+    if chat_messages:
+        if cleaned_text:
+            cleaned_text = cleaned_text + "\n" + "\n".join(chat_messages)
+        else:
+            cleaned_text = "\n".join(chat_messages)
 
     return tool_calls, cleaned_text
 

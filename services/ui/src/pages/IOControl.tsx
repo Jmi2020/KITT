@@ -269,13 +269,6 @@ const IOControl = () => {
     return acc;
   }, {});
 
-  const [toolAvailability, setToolAvailability] = useState<Record<string, boolean>>({});
-  const [enabledFunctions, setEnabledFunctions] = useState<string[]>([]);
-  const [unavailableMessage, setUnavailableMessage] = useState<string | undefined>();
-  const [healthWarnings, setHealthWarnings] = useState<any[]>([]);
-  const [restartImpacts, setRestartImpacts] = useState<Record<string, string[]>>({});
-  const [costHints, setCostHints] = useState<Record<string, string>>({});
-
   const matchesRestartScope = (feature: Feature) => {
     if (restartScopeFilter === 'all') return true;
     return feature.restart_scope === restartScopeFilter;

@@ -15,6 +15,7 @@ class ToolCallFormat(Enum):
     MISTRAL_JSON = "mistral_json"  # Mistral: [TOOL_CALLS] {...}
     GEMMA_FUNCTION = "gemma_function"  # Gemma: <function_call>...</function_call>
     LLAMA_JSON = "llama_json"  # Llama 3.1+/3.3: JSON tool calls
+    ATHENE_JSON = "athene_json"  # Athene V2: {"tool": "...", "parameters": {...}}
     GENERIC_XML = "generic_xml"  # Generic fallback
 
 
@@ -58,7 +59,7 @@ def detect_model_format(model_path_or_alias: str) -> ToolCallFormat:
         return ToolCallFormat.QWEN_XML
     # kitty-q4 = Athene V2 Agent (from LLAMACPP_Q4_MODEL)
     elif "kitty-q4" in model_lower or "athene" in model_lower:
-        return ToolCallFormat.LLAMA_JSON
+        return ToolCallFormat.ATHENE_JSON
     # Model path-based detection
     elif "qwen" in model_lower or "qwen2.5" in model_lower or "qwen3" in model_lower:
         return ToolCallFormat.QWEN_XML
@@ -97,6 +98,13 @@ def get_model_config(model_path_or_alias: str) -> ModelConfig:
             requires_jinja=True,
             requires_function_auth=True,
             supports_parallel_calls=True,
+        )
+    elif format_type == ToolCallFormat.ATHENE_JSON:
+        return ModelConfig(
+            format=ToolCallFormat.ATHENE_JSON,
+            requires_jinja=True,
+            requires_function_auth=True,
+            supports_parallel_calls=False,
         )
     elif format_type == ToolCallFormat.MISTRAL_JSON:
         return ModelConfig(

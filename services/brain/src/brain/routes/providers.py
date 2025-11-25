@@ -1,19 +1,53 @@
 # noqa: D401
-"""HTTP routes for multi-provider collective status."""
+"""HTTP routes for model selection and provider status.
+
+Provides a flat list of available models for the Shell page model selector,
+including local models (Ollama, llama.cpp) and cloud providers.
+"""
 
 from __future__ import annotations
 
-from typing import Dict
-from fastapi import APIRouter
+from typing import Any, Dict, List, Optional
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..llm_client import ProviderRegistry, PROVIDER_COSTS
+from ..data.model_cards import get_model_card, get_all_model_cards
 
 router = APIRouter(prefix="/api/providers", tags=["providers"])
 
 
+class ModelInfo(BaseModel):
+    """Individual model information for flat model list."""
+
+    id: str
+    name: str
+    type: str  # "local" or "cloud"
+    provider: str  # "ollama", "llamacpp", "openai", "anthropic", etc.
+    enabled: bool
+    default: bool = False
+    icon: str
+    description: str
+    supports_vision: bool = False
+    supports_tools: bool = False
+    feature_flag: Optional[str] = None  # For cloud providers
+    cost: Optional[str] = None  # Human-readable cost estimate
+    setup_url: Optional[str] = None
+    huggingface_url: Optional[str] = None  # Link to HuggingFace model card
+    docs_url: Optional[str] = None  # Link to official documentation
+    parameters: Optional[str] = None  # Model size (e.g., "70B")
+    context_length: Optional[str] = None  # Context window size
+
+
+class ModelsResponse(BaseModel):
+    """Response containing flat list of all available models."""
+
+    models: List[ModelInfo]
+    default_model: str
+
+
 class ProviderInfo(BaseModel):
-    """Information about a provider."""
+    """Information about a provider (legacy format)."""
 
     enabled: bool
     name: str
@@ -23,34 +57,165 @@ class ProviderInfo(BaseModel):
     setup_url: str | None = None
 
 
+@router.get("/models")
+async def get_available_models() -> ModelsResponse:
+    """Get flat list of all available models for Shell page selector.
+
+    Returns models grouped visually by type (local vs cloud) with:
+    - Individual model entries (not grouped by provider)
+    - Inline toggle support for cloud providers via feature_flag
+    - Vision support indicator for multimodal models
+
+    Returns:
+        ModelsResponse with flat model list and default model ID
+    """
+    registry = ProviderRegistry()
+
+    # Build models list with data from model cards
+    model_cards = get_all_model_cards()
+
+    models = [
+        # =====================================================================
+        # LOCAL MODELS (Free)
+        # =====================================================================
+        ModelInfo(
+            id="gpt-oss",
+            name="Llama 3.3 70B",
+            type="local",
+            provider="ollama",
+            enabled=True,
+            default=True,
+            icon="🧠",
+            description="Primary reasoner with thinking mode",
+            supports_tools=True,
+            huggingface_url=model_cards["gpt-oss"].huggingface_url,
+            docs_url=model_cards["gpt-oss"].docs_url,
+            parameters=model_cards["gpt-oss"].parameters,
+            context_length=model_cards["gpt-oss"].context_length,
+        ),
+        ModelInfo(
+            id="athene-q4",
+            name="Athene V2 Agent",
+            type="local",
+            provider="llamacpp",
+            enabled=True,
+            icon="🔧",
+            description="Fast tool orchestrator (73B Q4)",
+            supports_tools=True,
+            huggingface_url=model_cards["athene-q4"].huggingface_url,
+            docs_url=model_cards["athene-q4"].docs_url,
+            parameters=model_cards["athene-q4"].parameters,
+            context_length=model_cards["athene-q4"].context_length,
+        ),
+        ModelInfo(
+            id="gemma-vision",
+            name="Gemma 3 27B Vision",
+            type="local",
+            provider="llamacpp",
+            enabled=True,
+            icon="👁️",
+            description="Multimodal image understanding",
+            supports_vision=True,
+            huggingface_url=model_cards["gemma-vision"].huggingface_url,
+            docs_url=model_cards["gemma-vision"].docs_url,
+            parameters=model_cards["gemma-vision"].parameters,
+            context_length=model_cards["gemma-vision"].context_length,
+        ),
+        ModelInfo(
+            id="hermes-summary",
+            name="Hermes 3 8B",
+            type="local",
+            provider="llamacpp",
+            enabled=True,
+            icon="📝",
+            description="Response summarization",
+            supports_tools=True,
+            huggingface_url=model_cards["hermes-summary"].huggingface_url,
+            docs_url=model_cards["hermes-summary"].docs_url,
+            parameters=model_cards["hermes-summary"].parameters,
+            context_length=model_cards["hermes-summary"].context_length,
+        ),
+
+        # =====================================================================
+        # CLOUD MODELS (Paid - controlled by I/O Control feature flags)
+        # =====================================================================
+        ModelInfo(
+            id="gpt5",
+            name="GPT-5.1",
+            type="cloud",
+            provider="openai",
+            enabled=registry.is_enabled("openai"),
+            icon="🤖",
+            description="OpenAI's latest model",
+            supports_tools=True,
+            feature_flag="enable_openai_collective",
+            cost="$0.01-0.06/query",
+            setup_url="https://platform.openai.com/api-keys",
+            docs_url=model_cards["gpt5"].docs_url,
+            parameters=model_cards["gpt5"].parameters,
+            context_length=model_cards["gpt5"].context_length,
+        ),
+        ModelInfo(
+            id="claude",
+            name="Claude 4.5",
+            type="cloud",
+            provider="anthropic",
+            enabled=registry.is_enabled("anthropic"),
+            icon="🧠",
+            description="Anthropic's latest model",
+            supports_tools=True,
+            feature_flag="enable_anthropic_collective",
+            cost="$0.01-0.08/query",
+            setup_url="https://console.anthropic.com/settings/keys",
+            docs_url=model_cards["claude"].docs_url,
+            parameters=model_cards["claude"].parameters,
+            context_length=model_cards["claude"].context_length,
+        ),
+        ModelInfo(
+            id="perplexity",
+            name="Perplexity",
+            type="cloud",
+            provider="perplexity",
+            enabled=registry.is_enabled("perplexity"),
+            icon="🔍",
+            description="Web-connected AI search",
+            feature_flag="enable_perplexity_collective",
+            cost="$0.001-0.005/query",
+            setup_url="https://www.perplexity.ai/settings/api",
+            docs_url=model_cards["perplexity"].docs_url,
+            parameters=model_cards["perplexity"].parameters,
+            context_length=model_cards["perplexity"].context_length,
+        ),
+        ModelInfo(
+            id="gemini",
+            name="Gemini",
+            type="cloud",
+            provider="gemini",
+            enabled=registry.is_enabled("gemini"),
+            icon="💎",
+            description="Google's multimodal model",
+            supports_vision=True,
+            feature_flag="enable_gemini_collective",
+            cost="$0.0075-0.03/query",
+            setup_url="https://aistudio.google.com/app/apikey",
+            docs_url=model_cards["gemini"].docs_url,
+            parameters=model_cards["gemini"].parameters,
+            context_length=model_cards["gemini"].context_length,
+        ),
+    ]
+
+    return ModelsResponse(models=models, default_model="gpt-oss")
+
+
 @router.get("/available")
 async def get_available_providers() -> Dict[str, Dict[str, ProviderInfo]]:
-    """Get list of available providers with their status.
+    """Get list of available providers with their status (legacy format).
+
+    This endpoint is kept for backward compatibility.
+    New code should use /api/providers/models instead.
 
     Returns:
         Dictionary with 'providers' key containing provider info
-
-    Example response:
-        {
-            "providers": {
-                "local": {
-                    "enabled": true,
-                    "name": "Local (llama.cpp)",
-                    "models": ["Q4", "F16", "CODER", "Q4B"],
-                    "cost_per_1m_tokens": {"input": 0.0, "output": 0.0},
-                    "icon": "🏠"
-                },
-                "openai": {
-                    "enabled": false,
-                    "name": "OpenAI",
-                    "models": ["gpt-4o-mini", "gpt-4o", "o1-mini"],
-                    "cost_per_1m_tokens": {"input": 0.15, "output": 0.60},
-                    "icon": "🤖",
-                    "setup_url": "https://platform.openai.com/api-keys"
-                },
-                ...
-            }
-        }
     """
     registry = ProviderRegistry()
 
@@ -105,3 +270,29 @@ async def get_available_providers() -> Dict[str, Dict[str, ProviderInfo]]:
     }
 
     return {"providers": providers}
+
+
+@router.get("/models/{model_id}/card")
+async def get_model_card_endpoint(model_id: str) -> Dict[str, Any]:
+    """Get detailed model card information for a specific model.
+
+    Returns comprehensive information about the model including:
+    - Full description from HuggingFace model card
+    - Capabilities list
+    - Technical specifications (parameters, context length, architecture)
+    - Links to documentation and HuggingFace
+
+    Args:
+        model_id: Model identifier (e.g., "gpt-oss", "athene-q4")
+
+    Returns:
+        Model card dictionary with all available information
+
+    Raises:
+        HTTPException: 404 if model not found
+    """
+    card = get_model_card(model_id)
+    if not card:
+        raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found")
+
+    return card.to_dict()

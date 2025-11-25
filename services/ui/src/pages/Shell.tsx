@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import '../styles/Shell.css';
 import ProviderSelector from '../components/ProviderSelector';
 import ProviderBadge, { ProviderMetadata } from '../components/ProviderBadge';
@@ -8,6 +8,7 @@ interface Message {
   type: 'user' | 'assistant' | 'system' | 'artifact' | 'thinking';
   content: string;
   timestamp: Date;
+  images?: string[];  // Base64 images attached to user messages
   metadata?: {
     tier?: string;
     confidence?: number;
@@ -20,7 +21,7 @@ interface Message {
     tokens_used?: number;
     cost_usd?: number;
     fallback_occurred?: boolean;
-  };  
+  };
 }
 
 interface ConversationSummary {
@@ -45,9 +46,10 @@ interface ShellState {
   verbosity: number;
   agentEnabled: boolean;
   traceEnabled: boolean;
-  // Multi-provider state
-  selectedProvider: string | null;
+  // Model selection
   selectedModel: string | null;
+  // Vision support
+  isVisionModel: boolean;
 }
 
 const COMMANDS = [
@@ -82,8 +84,8 @@ const Shell = () => {
     verbosity: 3,
     agentEnabled: true,
     traceEnabled: false,
-    selectedProvider: null,
     selectedModel: null,
+    isVisionModel: false,
   });
   const [showCommands, setShowCommands] = useState(false);
   const [filteredCommands, setFilteredCommands] = useState(COMMANDS);
@@ -92,8 +94,57 @@ const Shell = () => {
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
+  // Vision model image upload state
+  const [conversationImages, setConversationImages] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Image upload handlers
+  const handleImageUpload = useCallback((file: File) => {
+    if (!file.type.startsWith('image/')) {
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      if (result) {
+        setConversationImages(prev => [...prev, result]);
+      }
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files) {
+      Array.from(files).forEach(handleImageUpload);
+    }
+    // Reset input so same file can be selected again
+    e.target.value = '';
+  }, [handleImageUpload]);
+
+  const handleRemoveImage = useCallback((index: number) => {
+    setConversationImages(prev => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const handleClearImages = useCallback(() => {
+    setConversationImages([]);
+  }, []);
+
+  // Handle drag and drop
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    if (!state.isVisionModel) return;
+
+    const files = Array.from(e.dataTransfer.files);
+    files.forEach(handleImageUpload);
+  }, [state.isVisionModel, handleImageUpload]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+  }, []);
 
   // Auto-scroll to bottom when new messages appear
   useEffect(() => {
@@ -255,27 +306,12 @@ Commands are executed locally when possible.`);
         return true;
 
       case 'provider':
-        if (args.length === 0) {
-          const current = state.selectedProvider || 'local';
-          addMessage('system', `Current provider: ${current}`);
-        } else {
-          const providerName = args[0].toLowerCase();
-          if (providerName === 'local' || providerName === 'none') {
-            setState(prev => ({ ...prev, selectedProvider: null, selectedModel: null }));
-            addMessage('system', '✓ Provider set to: local (Q4)');
-          } else {
-            setState(prev => ({ ...prev, selectedProvider: providerName, selectedModel: null }));
-            addMessage('system', `✓ Provider set to: ${providerName}\n💡 Enable in I/O Control if disabled`);
-          }
-        }
-        return true;
-
       case 'model':
         if (args.length === 0) {
-          const current = state.selectedModel || state.selectedProvider || 'local Q4';
+          const current = state.selectedModel || 'gpt-oss (default)';
           addMessage('system', `Current model: ${current}`);
         } else {
-          const modelName = args[0];
+          const modelName = args[0].toLowerCase();
           setState(prev => ({ ...prev, selectedModel: modelName }));
           addMessage('system', `✓ Model set to: ${modelName}`);
         }
@@ -321,12 +357,14 @@ Commands are executed locally when possible.`);
       let payload: any = {
         conversationId: state.conversationId,
         userId: 'web-user',
+        intent: 'chat.prompt',
         prompt: userInput,
         verbosity: state.verbosity,
         useAgent: state.agentEnabled,
-        // Multi-provider support
-        provider: state.selectedProvider,
+        // Model selection
         model: state.selectedModel,
+        // Include images for vision model
+        images: state.isVisionModel && conversationImages.length > 0 ? conversationImages : undefined,
       };
 
       // Special routing for specific commands
@@ -354,7 +392,104 @@ Commands are executed locally when possible.`);
         payload = null;
       }
 
-      // Make API call
+      // Use streaming for regular queries (prevents timeout on long-running queries)
+      const isRegularQuery = endpoint === '/api/query';
+      if (isRegularQuery) {
+        const streamEndpoint = '/api/query/stream';
+        const startTime = Date.now();
+        let streamedContent = '';
+        let streamedThinking = '';
+        let routingData: any = null;
+        const responseId = crypto.randomUUID();
+
+        // Update thinking message with elapsed time
+        const elapsedInterval = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - startTime) / 1000);
+          const minutes = Math.floor(elapsed / 60);
+          const seconds = elapsed % 60;
+          const timeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+          setMessages(prev => prev.map(m =>
+            m.id === thinkingId
+              ? { ...m, content: `Processing... (${timeStr})${streamedThinking ? '\n\n💭 ' + streamedThinking.slice(-200) : ''}` }
+              : m
+          ));
+        }, 1000);
+
+        try {
+          const response = await fetch(streamEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          const reader = response.body?.getReader();
+          const decoder = new TextDecoder();
+
+          if (!reader) {
+            throw new Error('No response body');
+          }
+
+          // Create streaming response message
+          setMessages(prev => prev.filter(m => m.id !== thinkingId));
+          setMessages(prev => [...prev, {
+            id: responseId,
+            type: 'assistant',
+            content: '▌',
+            timestamp: new Date(),
+          }]);
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n');
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const event = JSON.parse(line.slice(6));
+                  if (event.type === 'chunk') {
+                    if (event.delta) {
+                      streamedContent += event.delta;
+                      setMessages(prev => prev.map(m =>
+                        m.id === responseId ? { ...m, content: streamedContent + '▌' } : m
+                      ));
+                    }
+                    if (event.delta_thinking) {
+                      streamedThinking += event.delta_thinking;
+                    }
+                  } else if (event.type === 'complete') {
+                    routingData = event.routing;
+                  } else if (event.type === 'error') {
+                    throw new Error(event.error);
+                  }
+                } catch (parseErr) {
+                  // Ignore parse errors for incomplete JSON chunks
+                }
+              }
+            }
+          }
+
+          // Finalize message
+          setMessages(prev => prev.map(m =>
+            m.id === responseId
+              ? { ...m, content: streamedContent || 'No response', metadata: routingData }
+              : m
+          ));
+
+        } finally {
+          clearInterval(elapsedInterval);
+          setIsThinking(false);
+        }
+        return;
+      }
+
+      // Non-streaming path for special commands (/collective, /usage)
       const response = await fetch(endpoint, {
         method: payload ? 'POST' : 'GET',
         headers: payload ? { 'Content-Type': 'application/json' } : undefined,
@@ -548,23 +683,78 @@ Commands are executed locally when possible.`);
             ))}
           </div>
         )}
-        <div className="shell-input-wrapper">
+        {/* Vision Model Image Strip */}
+        {state.isVisionModel && (
+          <div className="image-context-strip">
+            {conversationImages.map((img, idx) => (
+              <div key={idx} className="image-thumbnail">
+                <img src={img} alt={`Context ${idx + 1}`} />
+                <button
+                  className="image-remove-btn"
+                  onClick={() => handleRemoveImage(idx)}
+                  title="Remove image"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <button
+              className="add-image-btn"
+              onClick={() => fileInputRef.current?.click()}
+              title="Add image"
+            >
+              📷 Add Image
+            </button>
+            {conversationImages.length > 0 && (
+              <button
+                className="clear-images-btn"
+                onClick={handleClearImages}
+                title="Clear all images"
+              >
+                Clear All
+              </button>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleFileInputChange}
+              style={{ display: 'none' }}
+            />
+          </div>
+        )}
+        <div
+          className={`shell-input-wrapper ${state.isVisionModel ? 'vision-mode' : ''}`}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+        >
           <ProviderSelector
-            selectedProvider={state.selectedProvider}
             selectedModel={state.selectedModel}
-            onProviderChange={(provider, model) => {
+            onModelChange={(modelId) => {
               setState(prev => ({
                 ...prev,
-                selectedProvider: provider,
-                selectedModel: model,
+                selectedModel: modelId,
               }));
+            }}
+            onVisionModelSelected={(isVision) => {
+              setState(prev => ({
+                ...prev,
+                isVisionModel: isVision,
+              }));
+              // Clear images when switching away from vision model
+              if (!isVision) {
+                setConversationImages([]);
+              }
             }}
           />
           <input
             ref={inputRef}
             type="text"
             className="shell-input"
-            placeholder="Type a message or / for commands..."
+            placeholder={state.isVisionModel && conversationImages.length > 0
+              ? `Ask about ${conversationImages.length} image${conversationImages.length > 1 ? 's' : ''}...`
+              : "Type a message or / for commands..."}
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
