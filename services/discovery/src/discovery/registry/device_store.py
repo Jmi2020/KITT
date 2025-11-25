@@ -491,6 +491,130 @@ class DeviceStore:
 
             return True
 
+    async def upsert_manual_device(
+        self,
+        ip_address: str,
+        mac_address: Optional[str] = None,
+        vendor_hint: Optional[str] = None,
+        discovery_method: str = "arp_scan",
+    ) -> DeviceRecord:
+        """Upsert a device from trusted ARP/scan input."""
+        async with self.async_session_maker() as session:
+            stmt = select(DeviceRecord).where(DeviceRecord.ip_address == ip_address)
+            result = await session.execute(stmt)
+            existing = result.scalar_one_or_none()
+
+            capabilities: Dict[str, Any] = {}
+            if vendor_hint:
+                capabilities["vendor_hint"] = vendor_hint
+            if mac_address:
+                capabilities["mac_address"] = mac_address
+                oui_vendor = get_vendor(mac_address)
+                if oui_vendor:
+                    capabilities["oui_vendor"] = oui_vendor
+                    if not vendor_hint:
+                        vendor_hint = oui_vendor
+
+            if existing:
+                existing.last_seen = datetime.utcnow()
+                existing.is_online = True
+                existing.discovery_method = discovery_method
+                if mac_address:
+                    existing.mac_address = mac_address
+                if vendor_hint and not existing.manufacturer:
+                    existing.manufacturer = vendor_hint
+
+                merged_caps = existing.capabilities or {}
+                merged_caps.update(capabilities)
+                existing.capabilities = merged_caps
+
+                await session.commit()
+                await session.refresh(existing)
+                return existing
+
+            record = DeviceRecord(
+                id=str(uuid4()),
+                discovered_at=datetime.utcnow(),
+                last_seen=datetime.utcnow(),
+                discovery_method=discovery_method,
+                ip_address=ip_address,
+                mac_address=mac_address,
+                hostname=None,
+                device_type="unknown",
+                manufacturer=vendor_hint,
+                services=[],
+                capabilities=capabilities,
+                is_online=True,
+                confidence_score=0.6 if mac_address else 0.3,
+            )
+            session.add(record)
+            await session.commit()
+            await session.refresh(record)
+            logger.info(f"Upserted manual device {ip_address} via {discovery_method}")
+            return record
+
+    async def upsert_manual_device(
+        self,
+        ip_address: str,
+        mac_address: Optional[str] = None,
+        vendor_hint: Optional[str] = None,
+        discovery_method: str = "arp_scan",
+    ) -> DeviceRecord:
+        """Upsert a device from trusted ARP/scan input."""
+        async with self.async_session_maker() as session:
+            stmt = select(DeviceRecord).where(DeviceRecord.ip_address == ip_address)
+            result = await session.execute(stmt)
+            existing = result.scalar_one_or_none()
+
+            capabilities: Dict[str, Any] = {}
+            if vendor_hint:
+                capabilities["vendor_hint"] = vendor_hint
+            if mac_address:
+                capabilities["mac_address"] = mac_address
+                oui_vendor = get_vendor(mac_address)
+                if oui_vendor:
+                    capabilities["oui_vendor"] = oui_vendor
+                    if not vendor_hint:
+                        vendor_hint = oui_vendor
+
+            if existing:
+                existing.last_seen = datetime.utcnow()
+                existing.is_online = True
+                existing.discovery_method = discovery_method
+                if mac_address:
+                    existing.mac_address = mac_address
+                if vendor_hint and not existing.manufacturer:
+                    existing.manufacturer = vendor_hint
+
+                merged_caps = existing.capabilities or {}
+                merged_caps.update(capabilities)
+                existing.capabilities = merged_caps
+
+                await session.commit()
+                await session.refresh(existing)
+                return existing
+
+            record = DeviceRecord(
+                id=str(uuid4()),
+                discovered_at=datetime.utcnow(),
+                last_seen=datetime.utcnow(),
+                discovery_method=discovery_method,
+                ip_address=ip_address,
+                mac_address=mac_address,
+                hostname=None,
+                device_type="unknown",
+                manufacturer=vendor_hint,
+                services=[],
+                capabilities=capabilities,
+                is_online=True,
+                confidence_score=0.6 if mac_address else 0.3,
+            )
+            session.add(record)
+            await session.commit()
+            await session.refresh(record)
+            logger.info(f"Upserted manual device {ip_address} via {discovery_method}")
+            return record
+
     async def mark_offline(self, device_id: UUID) -> None:
         """
         Mark a device as offline.

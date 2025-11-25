@@ -11,6 +11,18 @@ from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+from .models import (
+    ApproveDeviceRequest,
+    ApproveDeviceResponse,
+    DeviceListResponse,
+    DeviceResponse,
+    RejectDeviceRequest,
+    RejectDeviceResponse,
+    ScanRequest,
+    ScanStatusResponse,
+)
 
 try:
     from common.config import Settings
@@ -31,16 +43,6 @@ except ImportError:
             os.getenv("DISCOVERY_ENABLE_PERIODIC_SCANS", "true").lower() == "true"
         )
 
-from .models import (
-    ApproveDeviceRequest,
-    ApproveDeviceResponse,
-    DeviceListResponse,
-    DeviceResponse,
-    RejectDeviceRequest,
-    RejectDeviceResponse,
-    ScanRequest,
-    ScanStatusResponse,
-)
 from .registry.device_store import DeviceStore
 from .scheduler.scan_scheduler import ScanScheduler
 
@@ -55,6 +57,48 @@ logger = logging.getLogger(__name__)
 device_store: Optional[DeviceStore] = None
 scan_scheduler: Optional[ScanScheduler] = None
 settings: Optional[Settings] = None
+
+
+class ArpIngestEntry(BaseModel):
+    ip_address: str
+    mac_address: str
+    vendor: Optional[str] = None
+
+
+class ArpIngestRequest(BaseModel):
+    entries: list[ArpIngestEntry]
+
+
+@app.post("/api/discovery/arp")
+async def ingest_arp(body: ArpIngestRequest) -> Dict[str, Any]:
+    """
+    Ingest ARP scan results (IP/MAC/vendor) from a host-side scan.
+
+    This endpoint expects trusted input (no auth implemented here).
+    """
+    try:
+        if not device_store:
+            raise HTTPException(status_code=500, detail="Device store not initialized")
+
+        count = 0
+        for entry in body.entries:
+            try:
+                await device_store.upsert_manual_device(
+                    ip_address=entry.ip_address,
+                    mac_address=entry.mac_address,
+                    vendor_hint=entry.vendor,
+                    discovery_method="arp_scan",
+                )
+                count += 1
+            except Exception as e:
+                logger.error(f"Failed to upsert ARP entry {entry.ip_address}: {e}")
+
+        return {"ingested": count}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"ARP ingest failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @asynccontextmanager
@@ -473,6 +517,42 @@ async def general_exception_handler(request, exc):
         status_code=500,
         content={"error": "Internal server error"}
     )
+
+
+# ==============================================================================
+# ARP Ingest (optional host-privileged scan)
+# ==============================================================================
+
+@app.post("/api/discovery/arp")
+async def ingest_arp(body: ArpIngestRequest) -> Dict[str, Any]:
+    """
+    Ingest ARP scan results (IP/MAC/vendor) from a host-side scan.
+
+    This endpoint expects trusted input (no auth implemented here).
+    """
+    try:
+        if not device_store:
+            raise HTTPException(status_code=500, detail="Device store not initialized")
+
+        count = 0
+        for entry in body.entries:
+            try:
+                await device_store.upsert_manual_device(
+                    ip_address=entry.ip_address,
+                    mac_address=entry.mac_address,
+                    vendor_hint=entry.vendor,
+                    discovery_method="arp_scan",
+                )
+                count += 1
+            except Exception as e:
+                logger.error(f"Failed to upsert ARP entry {entry.ip_address}: {e}")
+
+        return {"ingested": count}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"ARP ingest failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

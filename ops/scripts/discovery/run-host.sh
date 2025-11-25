@@ -54,6 +54,49 @@ export DISCOVERY_SUBNETS="$SUBNETS_JSON"
 export DISCOVERY_PING_PRIVILEGED=false   # avoid raw sockets on macOS
 export DISCOVERY_ENABLE_PERIODIC_SCANS=true
 
+do_arp_scan() {
+  if ! command -v arp-scan >/dev/null 2>&1; then
+    echo "[arp-scan] arp-scan not installed (brew install arp-scan) - skipping vendor labeling"
+    return 0
+  fi
+  echo "[arp-scan] Root is required to read ARP tables. You will be prompted once."
+  if ! sudo -v; then
+    echo "[arp-scan] sudo failed or aborted; skipping"
+    return 0
+  fi
+  echo "[arp-scan] Running sudo arp-scan -l ..."
+  if ! output=$(sudo arp-scan -l 2>/dev/null); then
+    echo "[arp-scan] arp-scan failed; skipping"
+    return 0
+  }
+  payload="{\"entries\":["
+  first=1
+  while IFS= read -r line; do
+    ip=$(echo "$line" | awk '{print $1}')
+    mac=$(echo "$line" | awk '{print $2}')
+    vendor=$(echo "$line" | cut -d' ' -f3-)
+    if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$mac" =~ : ]]; then
+      # Skip broadcast/summary lines
+      if [[ "$ip" == "Interface:" || "$ip" == "Ending" || "$ip" == "Address" ]]; then
+        continue
+      fi
+      if [ $first -eq 0 ]; then
+        payload+=","
+      fi
+      first=0
+      vendor_esc=${vendor//\"/}
+      payload+="{\"ip_address\":\"$ip\",\"mac_address\":\"$mac\",\"vendor\":\"$vendor_esc\"}"
+    fi
+  done <<< "$output"
+  payload+="]}"
+
+  echo "[arp-scan] Posting ARP entries to discovery..."
+  curl -sf -X POST -H "Content-Type: application/json" -d "$payload" http://localhost:8500/api/discovery/arp || true
+}
+
 echo "Running discovery on host network (subnets=$DISCOVERY_SUBNETS)..."
 cd "$PROJECT_ROOT"
+# Kick off arp-scan once before starting uvicorn (optional)
+do_arp_scan
+
 exec "$VENV/bin/uvicorn" services.discovery.src.discovery.app:app --host 0.0.0.0 --port 8500
