@@ -1,8 +1,8 @@
-# 🐱 KITTY: Your AI-Powered Fabrication Lab Assistant
+# 🐱 KITTY: Technical AI Habitat for Fabrication
 
 > **K**nowledgeable **I**ntelligent **T**ool-using **T**abletop **Y**ardMaster
 >
-> An offline-first, voice-enabled warehouse orchestrator running on Mac Studio M3 Ultra. Think "JARVIS for your workshop" - but it actually works, runs locally, and won't spy on you.
+> An offline-first, voice-enabled fabrication lab orchestrator running on Mac Studio M3 Ultra. Think "JARVIS for your workshop" - but it actually works, runs locally, and won't spy on you.
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+"/>
@@ -15,13 +15,73 @@
 
 ## 🎯 Vision: A Maker Space for Technical AI
 
-I want to build a maker space purpose-built for technical AI: a place where models such as Claude, GPT-5, Llama, Qwen, and Mistral can run research and directly control fabrication hardware. The core will be a cluster of Mac Studios providing energy-efficient, reliable compute and a secure network interface to the devices we care about most - primarily 3D printers, but also CNC machines, test rigs, and sensing equipment.
+KITTY is a **technical AI habitat** - a maker space purpose-built for AI models like Claude, GPT-5, Llama, Qwen, and Mistral to come "live," run research, and directly control fabrication hardware. Built on the energy-efficient Mac Studio M3 Ultra, it provides a secure network interface to 3D printers, CNC machines, test rigs, and sensing equipment.
 
-This environment will let models investigate materials, estimate production costs, run simulations, and then orchestrate fabrication steps. By combining on-device processing with curated research pipelines, we can shorten the loop from idea to physical prototype. The facility will prioritize sustainable, ethically sourced materials and robotic procurement workflows that reduce supply-chain impacts and improve repeatability.
+**What makes KITTY different:**
 
-KITTY will serve as the orchestration layer: lightweight processes that can spin up for a single query and spin down when finished, or remain active for deeper, after-hours projects. A practical starting cadence could be one KITTY-owned project per week, giving it controlled access to printers, inventories, and simulation resources so it can propose, prototype, and iterate. Let's give KITTY the tools and permissions it needs to thrive and to create useful, verifiable improvements for humans and machines alike.
+- **AI Residency Model**: Models can spin up for a single query or remain active for deep, after-hours projects
+- **Bounded Autonomy**: One KITTY-owned project per week with controlled access to printers, inventory, and research
+- **Sustainable Manufacturing**: Prioritizes ethically sourced materials with robotic procurement workflows
+- **Idea → Prototype Pipeline**: Investigate materials, estimate costs, run simulations, then orchestrate fabrication
+- **Energy Efficient**: Mac Studio runs indefinitely with minimal power draw
 
 > 📖 **Full Vision & Roadmap**: See [NorthStar/ProjectVision.md](NorthStar/ProjectVision.md) for the complete multi-phase implementation plan.
+
+---
+
+## 🛠️ Complete Tech Stack
+
+### AI/ML Infrastructure
+
+| Component | Purpose | Technology |
+|-----------|---------|------------|
+| **Q4 Tool Orchestrator** | Fast tool calling, ReAct agent | llama.cpp (Athene V2 Agent Q4_K_M) @ port 8083 |
+| **F16 Reasoning Engine** | Deep reasoning, complex analysis | llama.cpp (Llama 3.3 70B F16) @ port 8082 |
+| **Vision Model** | Image understanding, multimodal | llama.cpp (Gemma 3 27B Q4_K_M) @ port 8086 |
+| **Summary Model** | Response compression | llama.cpp (Hermes 3 8B Q4_K_M) @ port 8084 |
+| **Coder Model** | Code generation specialist | llama.cpp (Qwen2.5 Coder 32B Q8) @ port 8085 |
+| **Alternative Reasoner** | Thinking mode support | Ollama (GPT-OSS 120B) @ port 11434 |
+| **Cloud Fallbacks** | Complex queries, verification | OpenAI GPT-5, Claude Sonnet 4.5, Perplexity |
+
+### Backend Services (Python 3.11 + FastAPI)
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| **Brain** | 8000 | Core orchestrator, ReAct agent, intelligent routing |
+| **Gateway** | 8080 | REST API (HAProxy load-balanced, 3 replicas) |
+| **CAD** | 8200 | 3D model generation (Zoo, Tripo, local CadQuery) |
+| **Fabrication** | 8300 | Printer control, queue management, outcome tracking |
+| **Safety** | 8400 | Hazard workflows, policy engine, audit logging |
+| **Discovery** | 8500 | Network device scanning (mDNS, SSDP, Bamboo/Snapmaker UDP) |
+| **Broker** | 8777 | Command execution with allow-list safety |
+| **Images** | 8600 | Stable Diffusion generation with RQ workers |
+| **Mem0 MCP** | 8765 | Semantic memory with vector embeddings |
+
+### Frontend
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **Web UI** | React 18 + TypeScript + Vite | Main dashboard, vision gallery, I/O control |
+| **CLI** | Python Click | Terminal interface (`kitty-cli`) |
+| **Launcher TUI** | Python Textual | Unified control center (`kitty`) |
+| **Model Manager** | Python Textual | Model selection and server control |
+
+### Infrastructure (Docker Compose)
+
+| Service | Technology | Purpose |
+|---------|------------|---------|
+| **Load Balancer** | HAProxy | Gateway traffic distribution, health checks |
+| **Database** | PostgreSQL 16 | Audit logs, state, projects (clustering optional) |
+| **Cache** | Redis 7 | Semantic cache, routing state, feature flags |
+| **Vector DB** | Qdrant 1.11 | Memory embeddings, semantic search |
+| **Object Storage** | MinIO | CAD artifacts, images, snapshots (S3-compatible) |
+| **Message Queue** | RabbitMQ 3.12 | Async events, job distribution |
+| **MQTT Broker** | Eclipse Mosquitto 2.0 | Device communication, printer telemetry |
+| **Search Engine** | SearXNG | Private, local web search |
+| **Smart Home** | Home Assistant | Device control, automation |
+| **Metrics** | Prometheus + Grafana | Observability dashboards |
+| **Logs** | Loki | Log aggregation |
+| **Traces** | Tempo | Distributed tracing |
 
 ---
 
@@ -744,38 +804,55 @@ python ops/scripts/discover-homeassistant.py --all
 
 ## 🎯 What is KITTY?
 
-KITTY transforms your Mac Studio into a conversational command center for your entire fabrication lab. It's like having a knowledgeable assistant who:
+KITTY transforms your Mac Studio into a **conversational command center** for your entire fabrication lab. It's the bridge between AI reasoning and physical manufacturing.
 
-- **Talks to you** via voice (Whisper) or CLI/web interface
-- **Thinks locally first** using llama.cpp with Metal GPU acceleration (70%+ queries handled offline)
-- **Knows your tools** - integrates with 3D printers (OctoPrint/Klipper), smart home (Home Assistant), cameras (UniFi), and more
-- **Generates CAD models** on demand using AI (Zoo API, Tripo, or local CadQuery/FreeCAD)
-- **Manages fabrication workflows** from voice command through slicing, printing, and quality monitoring
-- **Stays safe** with built-in hazard workflows, confirmation phrases, and audit logging
-- **Keeps learning** with semantic memory storage and citation-tracked research capabilities
-- **Everything has a switch** - Every feature and device integration can be individually controlled via TUI or Web API for safe development and incremental deployment
+### Core Capabilities
+
+| Capability | Description |
+|------------|-------------|
+| **🧠 Local-First AI** | 70%+ of queries handled offline via llama.cpp with Metal GPU acceleration |
+| **🗣️ Multi-Modal Input** | Voice (Whisper), CLI, Web UI, REST API |
+| **🖨️ Printer Control** | OctoPrint, Klipper/Moonraker, Bamboo Labs MQTT, Snapmaker |
+| **🏠 Smart Home** | Home Assistant integration for lights, climate, sensors |
+| **📐 CAD Generation** | Zoo API, Tripo (image-to-3D), local CadQuery/FreeCAD |
+| **🔍 Network Discovery** | Auto-discover printers and IoT devices on your network |
+| **🧪 Research Pipeline** | 5-phase autonomous research with multi-model coordination |
+| **🧠 Semantic Memory** | Long-term knowledge storage with Qdrant vector DB |
+| **🎨 Image Generation** | Stable Diffusion via local GPU workers |
+| **📊 Print Queue** | Multi-printer coordination with intelligent scheduling |
+| **🔐 Safety System** | Hazard workflows, confirmation phrases, audit logging |
 
 ### Core Design Philosophy: "Everything Has a Switch"
 
 A cornerstone principle of KITTY is **controllability**. Every external device, feature, and capability can be individually enabled or disabled through the I/O Control Dashboard:
 
-- **🧪 Safe Development** - Test the entire workflow without physical hardware by disabling cameras, printers, or storage
-- **📈 Incremental Deployment** - Enable one camera at a time, add MinIO storage when ready, activate intelligence features after collecting data
-- **🔧 Rapid Troubleshooting** - Isolate issues by toggling individual components (e.g., disable Bamboo Labs camera to test Snapmaker)
-- **🔄 Hot-Reload** - Most features update instantly via Redis without restart (camera capture, outcome tracking, MinIO uploads)
-- **🎯 Smart Restarts** - When restart is needed, only the affected service restarts (fabrication service vs full stack)
-- **✅ Dependency Validation** - Dashboard prevents enabling features without prerequisites (e.g., can't enable Bamboo camera without MQTT broker)
+| Principle | Benefit |
+|-----------|---------|
+| **🧪 Safe Development** | Test workflows without hardware by disabling cameras, printers, storage |
+| **📈 Incremental Deployment** | Enable one camera at a time, add MinIO when ready |
+| **🔧 Rapid Troubleshooting** | Isolate issues by toggling individual components |
+| **🔄 Hot-Reload** | Most features update instantly via Redis without restart |
+| **🎯 Smart Restarts** | Only affected service restarts, not full stack |
+| **✅ Dependency Validation** | Can't enable features without their prerequisites |
 
 **Control Interfaces:**
-- **TUI**: `python ops/scripts/kitty-io-control.py` - Interactive terminal dashboard with visual indicators
-- **Web API**: `http://localhost:8080/api/io-control/*` - Programmatic control for automation
-- **Documentation**: See `docs/IO_CONTROL_DASHBOARD.md` for complete guide
-
-This makes KITTY **testable without hardware**, **deployable incrementally**, and **debuggable component-by-component** - critical for a system managing physical fabrication equipment.
+- **TUI**: `python ops/scripts/kitty-io-control.py` - Interactive terminal dashboard
+- **Web API**: `http://localhost:8080/api/io-control/*` - Programmatic control
+- **Documentation**: See `docs/IO_CONTROL_DASHBOARD.md`
 
 ### Why "Offline-First"?
 
-Because the internet goes down, APIs get expensive, and your workshop shouldn't stop working when AWS has a bad day. KITTY runs powerful local models (Qwen2.5, Llama, Gemma) on your Mac's Metal GPU and only escalates to cloud providers (OpenAI, Anthropic, Perplexity) when truly necessary.
+Your workshop shouldn't stop working when AWS has a bad day. KITTY runs powerful local models on your Mac's Metal GPU and only escalates to cloud providers when truly necessary:
+
+```
+Query arrives → Local model (free, instant) → Confidence check
+                                                    ↓
+                          High confidence? ──→ Return answer
+                                                    ↓
+                          Low confidence? ──→ Escalate to cloud (with budget gate)
+```
+
+**Budget protection**: Cloud API calls require the `omega` password and respect per-session limits ($2/session default).
 
 ---
 
@@ -926,6 +1003,58 @@ Agent executes:
      )
      → Device approved for integration
 ```
+
+### 🔍 **Network Discovery Service**
+
+KITTY automatically discovers IoT devices on your network using multiple protocols:
+
+| Protocol | Devices Found | How It Works |
+|----------|--------------|--------------|
+| **mDNS** | OctoPrint, Klipper instances | Bonjour/Avahi service discovery |
+| **SSDP** | Smart plugs, cameras | UPnP device discovery |
+| **Bamboo UDP** | Bamboo Labs printers | Proprietary broadcast protocol |
+| **Snapmaker UDP** | Snapmaker printers | Proprietary broadcast protocol |
+| **ARP Scan** | All network devices | Host-native MAC/IP mapping with OUI lookup |
+
+**Discovery Workflow:**
+```bash
+# Trigger manual network scan
+curl -X POST http://localhost:8500/api/discovery/scan \
+  -H "Content-Type: application/json" \
+  -d '{"methods": ["mdns", "ssdp", "bamboo_udp"], "timeout_seconds": 30}'
+
+# List all discovered devices
+curl http://localhost:8500/api/discovery/devices
+
+# List only printers
+curl http://localhost:8500/api/discovery/printers
+
+# Approve a device for integration
+curl -X POST http://localhost:8500/api/discovery/devices/{device_id}/approve \
+  -d '{"notes": "Main workshop printer"}'
+```
+
+**Host-Native ARP Scanning:**
+
+For comprehensive device discovery (including devices that don't advertise via mDNS/SSDP), run the host-native discovery script:
+
+```bash
+# Run ARP scan from host (requires sudo for raw sockets)
+./ops/scripts/discovery/run-host.sh
+
+# This script:
+# 1. Runs arp-scan on all local subnets
+# 2. Performs OUI lookup for vendor identification
+# 3. Submits results to the discovery service
+# 4. Tags devices by manufacturer (Bamboo, Elegoo, Creality, etc.)
+```
+
+**Features:**
+- Periodic automatic scans (configurable interval, default 15 min)
+- Device registry with approval workflow
+- Online/offline status tracking
+- Manufacturer identification via OUI database
+- Integration with fabrication service for printer control
 
 **Adding new tools:**
 
@@ -1230,71 +1359,81 @@ curl http://localhost:8080/api/routing/logs
 ### System Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Mac Studio Host                         │
-│  ┌───────────────────────────────┐  ┌──────────────────┐   │
-│  │ Dual llama.cpp Servers        │  │ Docker Compose   │   │
-│  │ (Metal GPU + CPU Hybrid)      │◄─┤ Services         │   │
-│  │                               │  │                  │   │
-│  │ ┌──────────┐  ┌─────────────┐│  │ ┌──────────┐    │   │
-│  │ │Q4 Server │  │ F16 Server  ││  │ │ Gateway  │    │   │
-│  │ │Tool      │  │ Reasoning   ││  │ │  (REST)  │    │   │
-│  │ │Calling   │  │ Engine      ││  │ └────┬─────┘    │   │
-│  │ │Port 8083 │  │ Port 8082   ││  │      │          │   │
-│  │ └──────────┘  └─────────────┘│  │ ┌────▼─────┐    │   │
-│  │ • 35 GPU layers (Q4)          │  │ │  Brain   │    │   │
-│  │ • 30 GPU layers (F16)         │  │ │ (Router) │    │   │
-│  │ • 24 P-cores shared           │  │ └────┬─────┘    │   │
-│  └───────────────────────────────┘  │      │          │   │
-│                                      │ ┌────▼─────┐    │   │
-│  ┌──────────────┐                   │ │ ReAct    │    │   │
-│  │ Whisper.cpp  │                   │ │ Agent    │    │   │
-│  │ (Voice STT)  │                   │ └────┬─────┘    │   │
-│  └──────────────┘                   │      │          │   │
-│                                      │ ┌────▼─────┐    │   │
-│                                      │ │   MCP    │    │   │
-│                                      │ │ Servers  │    │   │
-│                                      │ └────┬─────┘    │   │
-│                                      │      │          │   │
-│                                      │ ┌────▼───────┐  │   │
-│                                      │ │  CAD │ Fab │  │   │
-│                                      │ │Voice │ UI  │  │   │
-│                                      │ │Safety│Mem  │  │   │
-│                                      │ └────────────┘  │   │
-│                                      └──────────────────┘   │
-│                                                             │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │              Storage Layer                          │  │
-│  │  • PostgreSQL (audit logs, state)                   │  │
-│  │  • Redis (semantic cache, routing state)            │  │
-│  │  • Qdrant (vector embeddings for memory)            │  │
-│  │  • MinIO (CAD artifacts, S3-compatible)             │  │
-│  └─────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-              │                           │
-              │                           │
-         ┌────▼────┐              ┌───────▼────────┐
-         │  Home   │              │   OctoPrint    │
-         │Assistant│              │   Printers     │
-         │ (MQTT)  │              │  (REST/MQTT)   │
-         └─────────┘              └────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           Mac Studio M3 Ultra Host                           │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                    llama.cpp Servers (Metal GPU)                     │   │
+│  │                                                                      │   │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐   │   │
+│  │  │ Q4 Tool     │ │ F16 Reason  │ │ Vision      │ │ Summary     │   │   │
+│  │  │ Orchestrator│ │ Engine      │ │ Gemma 3 27B │ │ Hermes 3 8B │   │   │
+│  │  │ :8083       │ │ :8082       │ │ :8086       │ │ :8084       │   │   │
+│  │  │ Athene V2   │ │ Llama 70B   │ │ +mmproj     │ │             │   │   │
+│  │  └──────┬──────┘ └──────┬──────┘ └──────┬──────┘ └──────┬──────┘   │   │
+│  └─────────┼───────────────┼───────────────┼───────────────┼──────────┘   │
+│            │               │               │               │              │
+│            └───────────────┴───────────────┴───────────────┘              │
+│                                    │                                       │
+│  ┌─────────────────────────────────┼─────────────────────────────────────┐ │
+│  │                    Docker Compose Services                             │ │
+│  │                                 │                                      │ │
+│  │  ┌──────────────────────────────▼────────────────────────────────┐   │ │
+│  │  │                        HAProxy :8080                           │   │ │
+│  │  │                    (Load Balancer, 3 replicas)                 │   │ │
+│  │  └──────────────────────────────┬────────────────────────────────┘   │ │
+│  │                                 │                                      │ │
+│  │  ┌──────────────────────────────▼────────────────────────────────┐   │ │
+│  │  │                        Gateway (x3)                            │   │ │
+│  │  │                   REST API, Auth, Routing                      │   │ │
+│  │  └──────────────────────────────┬────────────────────────────────┘   │ │
+│  │                                 │                                      │ │
+│  │  ┌──────────────────────────────▼────────────────────────────────┐   │ │
+│  │  │                         Brain :8000                            │   │ │
+│  │  │         Orchestrator • ReAct Agent • Research Pipeline         │   │ │
+│  │  └───┬─────────┬─────────┬─────────┬─────────┬─────────┬────────┘   │ │
+│  │      │         │         │         │         │         │            │ │
+│  │  ┌───▼───┐ ┌───▼───┐ ┌───▼───┐ ┌───▼───┐ ┌───▼───┐ ┌───▼───┐      │ │
+│  │  │  CAD  │ │  Fab  │ │Safety │ │Discov │ │Broker │ │Images │      │ │
+│  │  │ :8200 │ │ :8300 │ │ :8400 │ │ :8500 │ │ :8777 │ │ :8600 │      │ │
+│  │  └───────┘ └───────┘ └───────┘ └───────┘ └───────┘ └───────┘      │ │
+│  │                                                                     │ │
+│  │  ┌─────────────────────────────────────────────────────────────┐   │ │
+│  │  │                    Storage & Infrastructure                  │   │ │
+│  │  │  PostgreSQL │ Redis │ Qdrant │ MinIO │ RabbitMQ │ Mosquitto │   │ │
+│  │  └─────────────────────────────────────────────────────────────┘   │ │
+│  │                                                                     │ │
+│  │  ┌─────────────────────────────────────────────────────────────┐   │ │
+│  │  │                      Observability                           │   │ │
+│  │  │        Prometheus │ Grafana │ Loki │ Tempo │ SearXNG         │   │ │
+│  │  └─────────────────────────────────────────────────────────────┘   │ │
+│  └─────────────────────────────────────────────────────────────────────┘ │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+                    │                           │                    │
+         ┌──────────▼──────────┐     ┌──────────▼──────────┐   ┌────▼────┐
+         │    Home Assistant   │     │      3D Printers    │   │ Cameras │
+         │    (MQTT + REST)    │     │  Bamboo │ Elegoo │  │   │  (Pi)   │
+         │  Lights, Climate,   │     │  Snapmaker │ Others │   │         │
+         │  Sensors, Locks     │     │  (OctoPrint/Klipper)│   │         │
+         └─────────────────────┘     └─────────────────────┘   └─────────┘
 ```
 
 ### Service Breakdown
 
-| Service | Purpose | Tech Stack |
-|---------|---------|------------|
-| **Gateway** | REST ingress, auth, request aggregation | FastAPI, JWT auth |
-| **Brain** | Orchestrator, routing logic, ReAct agent | FastAPI, llama.cpp client |
-| **CAD** | Model generation, artifact storage | FastAPI, Zoo SDK, Tripo API |
-| **Fabrication** | Printer integration, CV monitoring | FastAPI, OctoPrint API |
-| **Safety** | Hazard workflows, policy engine | FastAPI, PostgreSQL |
-| **Voice** | Speech capture, NLP parsing | FastAPI, Whisper |
-| **UI** | Web console (PWA) | React, TypeScript, Vite |
-| **CLI** | Terminal interface | Python Click |
-| **MCP Servers** | Tool protocol for agent | Custom MCP implementation |
-| **Research** | Web search, citation tracking | DuckDuckGo, BeautifulSoup |
-| **Memory** | Semantic storage & recall | Qdrant, sentence-transformers |
+| Service | Port | Purpose | Key Technologies |
+|---------|------|---------|------------------|
+| **Gateway** | 8080 | REST API, auth, load balancing | FastAPI, HAProxy (3 replicas), JWT |
+| **Brain** | 8000 | Core orchestrator, ReAct agent, routing | FastAPI, llama.cpp client, LangGraph |
+| **CAD** | 8200 | 3D model generation, artifact storage | FastAPI, Zoo SDK, Tripo API, CadQuery |
+| **Fabrication** | 8300 | Printer control, queue, outcome tracking | FastAPI, OctoPrint, Klipper, Bamboo MQTT |
+| **Safety** | 8400 | Hazard workflows, policy engine | FastAPI, PostgreSQL audit logs |
+| **Discovery** | 8500 | Network device scanning | FastAPI, mDNS, SSDP, UDP broadcast |
+| **Broker** | 8777 | Safe command execution | FastAPI, allow-list YAML |
+| **Images** | 8600 | Stable Diffusion generation | FastAPI, RQ workers, Diffusers |
+| **Mem0 MCP** | 8765 | Semantic memory storage | FastAPI, Qdrant, sentence-transformers |
+| **UI** | 4173 | Web console, dashboards | React 18, TypeScript, Vite |
+| **CLI** | - | Terminal interface | Python Click, Rich |
 
 ### MCP (Model Context Protocol) Servers
 
@@ -1714,22 +1853,36 @@ curl -X POST http://localhost:8080/api/voice/transcript \
 
 ## 🗺️ Roadmap
 
+### Current Status (November 2025)
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| Phase 1: Core Foundation | ✅ Complete | Docker, llama.cpp, FastAPI, Home Assistant |
+| Phase 2: Tool-Aware Agent | ✅ Complete | ReAct agent, MCP protocol, CAD generation |
+| Phase 3: Autonomous Learning | ✅ Complete | Goal identification, research pipeline |
+| Phase 3.5: Research Pipeline | ✅ Complete | 5-phase autonomous research, multi-model |
+| Phase 4: Fabrication Intelligence | 🚧 85% | Dashboards complete, ML features in progress |
+| Phase 5: Safety & Access | 📋 Planned | UniFi Access, zone presence |
+| Phase 6: Advanced Features | 📋 Planned | Multi-user, mobile app |
+
+---
+
 ### Phase 1: Core Foundation ✅ COMPLETE
-- [x] Docker Compose orchestration
-- [x] llama.cpp integration with Metal GPU
-- [x] FastAPI services (gateway, brain, CAD)
-- [x] Home Assistant integration
-- [x] Confidence-based routing
+- [x] Docker Compose orchestration with health checks
+- [x] llama.cpp integration with Metal GPU acceleration
+- [x] FastAPI services (gateway, brain, CAD, fabrication, safety)
+- [x] Home Assistant integration (lights, climate, sensors)
+- [x] Confidence-based routing with semantic caching
 
 ### Phase 2: Tool-Aware Agent ✅ COMPLETE
-- [x] ReAct agent implementation
-- [x] MCP server protocol
+- [x] ReAct agent implementation (Reasoning + Acting)
+- [x] MCP server protocol for tool use
 - [x] Safe tool executor with hazard workflows
-- [x] CAD generation (Zoo/Tripo/local)
+- [x] CAD generation (Zoo/Tripo/local CadQuery)
 - [x] Command broker with allow-lists
 - [x] Web research with citation tracking
-- [x] Conversation history persistence with resume picker (CLI + Web UI)
-- [x] Multi-provider collective workflows with configurable providers/models
+- [x] Conversation history persistence
+- [x] Multi-provider collective workflows
 
 ### Phase 3: Autonomous Learning ✅ COMPLETE
 - [x] Goal identification system
@@ -1737,95 +1890,43 @@ curl -X POST http://localhost:8080/api/voice/transcript \
 - [x] Research goal execution (Perplexity integration)
 - [x] Outcome tracking and effectiveness measurement
 - [x] Knowledge base integration
-- [x] Budget-aware autonomous operation
+- [x] Budget-aware autonomous operation ($5/day)
 
-### Phase 3.5: Autonomous Research Pipeline ✅ COMPLETE (2025-11-16)
-- [x] **Phase 1**: Database schema, checkpointing (PostgreSQL + LangGraph)
-- [x] **Phase 2**: Tool orchestration (dependency graph, wave execution, multi-layer validation, multi-strategy agents)
-- [x] **Phase 3**: Model coordination (7-model registry, 5-tier consultation, budget management, mixture-of-agents debate)
-  - ✅ Local models: Athene V2 Agent Q4, Llama 3.3 70B F16, Gemma 3 27B Vision, Qwen2.5 Coder 32B
-  - ✅ External models: GPT-5, Claude Sonnet 4.5
-- [x] **Phase 4**: Quality metrics (RAGAS, confidence scoring, saturation detection, knowledge gap analysis)
-- [x] **Phase 5**: Complete integration (LangGraph state machine, WebSocket streaming, CLI commands)
-- [x] Multi-strategy research: breadth-first, depth-first, task decomposition, hybrid
-- [x] Multi-layer validation pipeline: schema, format, quality, hallucination detection
-- [x] Multi-model coordination: Local (llama.cpp) + external (GPT-5, Claude Sonnet 4.5)
-- [x] Intelligent stopping criteria: quality thresholds, saturation, budget limits, knowledge gaps
-- [x] Real-time streaming with beautiful CLI visualization
-- [x] Full session management: list, view details, resume from checkpoint
-- [x] **P0/P1 Production Readiness**: All critical and high-priority issues resolved
-  - ✅ P0 #1: Conversation state persistence
-  - ✅ P0 #2: Autonomous jobs persistence (APScheduler SQL)
-  - ✅ P0 #3: Semantic cache TTL
-  - ✅ P0 #4: Research graph wiring
-  - ✅ P0 #5: Database writes awaited
-  - ✅ P1 #1: Distributed locking
-  - ✅ P1 #2: Research Web UI
-  - ✅ P1 #3: I/O Control dashboard
-  - ✅ P1 #4: Gateway load balancer (HAProxy + 3 replicas)
-  - ✅ P1 #5: CAD AI cycling documentation
+### Phase 3.5: Autonomous Research Pipeline ✅ COMPLETE
 
-### Phase 4: Fabrication Intelligence ✅ DASHBOARDS COMPLETE / 🚧 ML FEATURES IN PROGRESS
+**5-Phase Research System:**
 
-**P0/P1 Foundation** ✅ COMPLETE:
-- [x] I/O Control dashboard (health checks, presets, dependency resolution, tool availability)
-- [x] Material inventory system (12 materials, cost/usage tracking)
-- [x] Print outcome tracking with visual evidence
-- [x] Camera integration (Bamboo Labs MQTT + Raspberry Pi HTTP)
-- [x] Human-in-loop feedback workflow
-- [x] I/O feature flags for incremental testing
+| Phase | Feature | Status |
+|-------|---------|--------|
+| 1 | Database schema + LangGraph checkpointing | ✅ |
+| 2 | Tool orchestration (dependency graph, wave execution) | ✅ |
+| 3 | Model coordination (7 models, 5-tier consultation) | ✅ |
+| 4 | Quality metrics (RAGAS, saturation detection) | ✅ |
+| 5 | Integration (WebSocket streaming, CLI commands) | ✅ |
 
-**P2 Medium Priority** ✅ ALL COMPLETE (2025-11-16):
-- [x] **Material Inventory Dashboard** (b82e29a) - React UI with catalog, spool tracking, cost analytics
-  - 1,014 lines of code (TypeScript + CSS), 7 backend API endpoints
-  - Real-time statistics, low-stock warnings, advanced filtering
-  - Docs: `docs/MATERIAL_INVENTORY_DASHBOARD.md`
-- [x] **Print Intelligence Dashboard** (87708ba) - Outcome analytics and human-in-loop review
-  - 1,302 lines of code (TypeScript + CSS), 5 backend API endpoints
-  - Failure tracking (12 types), quality scoring (0-100), visual evidence display
-  - Docs: `docs/PRINT_INTELLIGENCE_DASHBOARD.md`
-- [x] **Vision Service Dashboard** (27908a8) - Camera monitoring for all printers
-  - 823 lines of code (TypeScript + CSS), 4 backend API endpoints
-  - Live feed, snapshot capture, connection testing
-  - Docs: `docs/VISION_SERVICE_DASHBOARD.md`
-- [x] **Database Clustering** (a5ca080) - High availability infrastructure
-  - PostgreSQL: 1 primary + 2 replicas + PgBouncer pooler
-  - Redis: 1 master + 2 replicas + 3 Sentinel nodes
-  - Docs: `docs/DATABASE_CLUSTERING.md` (824 lines)
-- [x] **Message Queue Infrastructure** (6263cd0) - Async event bus
-  - RabbitMQ 3.12 with management UI
-  - Python client library (5 modules, 8 classes)
-  - Three patterns: Event Bus, Task Queue, RPC
-  - Docs: `docs/MESSAGE_QUEUE.md` (832 lines)
+**Model Registry:**
+- Local: Athene V2 Agent Q4, Llama 3.3 70B F16, Gemma 3 27B Vision, Qwen2.5 Coder 32B
+- External: GPT-5, Claude Sonnet 4.5, Perplexity
 
-**P3 Advanced Features** 🚧 IN PROGRESS:
-- [x] **Multi-Printer Coordination** (3d3549d, 903b638) - Parallel job scheduling and queue optimization
-  - Intelligent queue optimizer with multi-factor scoring (deadline urgency, user priority, material batching, FIFO)
-  - Parallel job scheduler across 3 printers (Bamboo H2D, Elegoo Giga, Snapmaker Artisan)
-  - RabbitMQ-based job distribution with printer-specific queues
-  - 6 API endpoints: submit, queue, schedule, cancel, priority, statistics
-  - Web dashboard UI at http://localhost:8300/queue
-  - CLI helper script (scripts/queue-cli.sh)
-  - Docs: `docs/MULTI_PRINTER_COORDINATION.md`, `docs/PRINT_QUEUE_DASHBOARD.md`
-- [x] **Queue Optimization Enhancements** (52c8377) - Advanced scheduling and time estimation
-  - Off-peak scheduling for long prints (≥8h, 10 PM - 6 AM)
-  - Material change penalty accounting (15 min per swap)
-  - Printer maintenance tracking (200h intervals)
-  - Queue completion time estimation (prints + changes + maintenance)
-  - 3 new API endpoints: estimate, maintenance status, record maintenance
-  - 40%+ reduction in material swaps, energy cost optimization
-- [x] **Automated Print Execution** (8f82bed, f0a66ed, e5f959d, 01c34c7) - Fully automated printing workflow
-  - Printer drivers: MoonrakerDriver (Klipper), BambuMqttDriver (Bamboo Labs)
-  - PrintExecutor orchestrator: upload, start, monitor, snapshot, complete
-  - 10-step automated workflow: queue → schedule → upload → print → monitor → snapshot → complete
-  - Zero manual intervention required
-  - Error handling with automatic retries (up to 2x)
-  - Real-time progress monitoring (30s intervals)
-  - Periodic snapshot capture (first layer, progress, final)
-  - Configuration: `services/fabrication/printer_config.example.yaml`
-  - Docs: `docs/PRINTER_DRIVERS.md`
-- [ ] **Print Intelligence** - Success prediction with ML, recommendations
-- [ ] **Autonomous Procurement** - Research suppliers when low inventory
+### Phase 4: Fabrication Intelligence 🚧 IN PROGRESS
+
+**Completed Features:**
+
+| Feature | Lines of Code | Status |
+|---------|---------------|--------|
+| I/O Control Dashboard | 1,500+ | ✅ |
+| Material Inventory Dashboard | 1,014 | ✅ |
+| Print Intelligence Dashboard | 1,302 | ✅ |
+| Vision Service Dashboard | 823 | ✅ |
+| Database Clustering (PostgreSQL + Redis) | 824 | ✅ |
+| Message Queue (RabbitMQ) | 832 | ✅ |
+| Multi-Printer Coordination | 1,200+ | ✅ |
+| Automated Print Execution | 2,000+ | ✅ |
+| Network Discovery Service | 1,500+ | ✅ |
+
+**In Progress:**
+- [ ] Print Intelligence ML (success prediction)
+- [ ] Autonomous Procurement (low inventory alerts → research suppliers)
 
 ### Phase 5: Safety & Access 📋 PLANNED
 - [ ] UniFi Access integration
@@ -1835,9 +1936,8 @@ curl -X POST http://localhost:8080/api/voice/transcript \
 - [ ] Audit dashboard
 
 ### Phase 6: Advanced Features 📋 PLANNED
-- [ ] Multi-user support
-- [ ] Role-based access control
-- [ ] Advanced observability (Loki, Tempo)
+- [ ] Multi-user support with RBAC
+- [ ] Advanced observability (Loki, Tempo complete)
 - [ ] Mobile app (iOS/Android)
 - [ ] Offline CAD model training
 
@@ -1906,12 +2006,33 @@ KITTY stands on the shoulders of giants:
 
 KITTY is built on these principles:
 
-1. **Offline-First**: Your workshop shouldn't depend on the cloud
-2. **Safety-First**: Dangerous operations require explicit confirmation
-3. **Privacy-First**: Your conversations stay on your hardware
-4. **Cost-Conscious**: Cloud APIs are expensive; use them sparingly
-5. **Tool-Neutral**: Multiple providers for every capability
-6. **Open**: Fully inspectable, modifiable, and extensible
+| Principle | Description |
+|-----------|-------------|
+| **Offline-First** | Your workshop shouldn't depend on the cloud. 70%+ queries handled locally. |
+| **Safety-First** | Dangerous operations require explicit confirmation and audit logging. |
+| **Privacy-First** | Your conversations stay on your hardware. No telemetry. |
+| **Cost-Conscious** | Cloud APIs are expensive; budget gates prevent runaway costs. |
+| **Everything Has a Switch** | Every feature toggleable via I/O Control for safe testing. |
+| **Tool-Neutral** | Multiple providers for every capability with automatic fallback. |
+| **Open** | Fully inspectable, modifiable, and extensible MIT-licensed code. |
+| **AI Habitat** | Built for AI models to thrive - not just respond to queries. |
+
+---
+
+## 📊 Project Stats
+
+| Metric | Value |
+|--------|-------|
+| **Services** | 11 FastAPI microservices |
+| **Docker Containers** | 20+ (including infrastructure) |
+| **Local AI Models** | 5 (Q4, F16, Vision, Summary, Coder) |
+| **Cloud Providers** | 4 (OpenAI, Anthropic, Perplexity, Brave) |
+| **Supported Printers** | Bamboo Labs, Elegoo (Klipper), Snapmaker, OctoPrint |
+| **CAD Providers** | 4 (Zoo, Tripo, CadQuery, FreeCAD) |
+| **Discovery Protocols** | 5 (mDNS, SSDP, Bamboo UDP, Snapmaker UDP, ARP) |
+| **Total Documentation** | 70+ markdown files |
+| **Lines of Python** | 50,000+ |
+| **Lines of TypeScript** | 15,000+ |
 
 ---
 
