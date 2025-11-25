@@ -37,8 +37,18 @@ class ArtifactStore:
             self._local_root = Path("artifacts")
             self._local_root.mkdir(parents=True, exist_ok=True)
 
-    def save_bytes(self, content: bytes, suffix: str) -> str:
+    def save_bytes(self, content: bytes, suffix: str, subdir: Optional[str] = None) -> str:
+        """Save bytes to storage, optionally in a subdirectory.
+
+        Args:
+            content: Raw bytes to save
+            suffix: File extension (e.g., ".stl", ".glb")
+            subdir: Optional subdirectory (e.g., "stl", "glb" for organization)
+        """
         object_name = f"{uuid4().hex}{suffix}"
+        if subdir:
+            object_name = f"{subdir}/{object_name}"
+
         if self._minio:
             from io import BytesIO
 
@@ -54,8 +64,14 @@ class ArtifactStore:
                 "Stored artifact in MinIO", bucket=self._bucket, object_name=object_name
             )
             return f"minio://{self._bucket}/{object_name}"
+
         assert self._local_root is not None
-        path = self._local_root / object_name
+        if subdir:
+            target_dir = self._local_root / subdir
+            target_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            target_dir = self._local_root
+        path = target_dir / f"{uuid4().hex}{suffix}"
         path.write_bytes(content)
         LOGGER.info("Stored artifact locally", path=str(path))
         return str(path)

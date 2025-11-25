@@ -306,35 +306,47 @@ class CADCycler:
                 LOGGER.warning("Tripo text-to-3D result missing model URL", result=result_data)
                 return None
 
-            # Download GLB and convert to STL for slicer compatibility
+            # Download GLB
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.get(model_url)
                 response.raise_for_status()
                 glb_data = response.content
 
-            # Convert GLB to STL using trimesh
+            # Always save GLB for preview purposes
+            glb_location = await asyncio.to_thread(
+                self._store.save_bytes, glb_data, ".glb", "glb"
+            )
+            LOGGER.info("Saved GLB for preview", location=glb_location)
+
+            # Convert GLB to STL for slicer compatibility
+            stl_location = None
+            artifact_type = "glb"
+            primary_location = glb_location
             try:
                 stl_data = convert_mesh_to_stl(glb_data, source_format="glb")
-                stored = await asyncio.to_thread(
-                    self._store.save_bytes, stl_data, ".stl"
+                stl_location = await asyncio.to_thread(
+                    self._store.save_bytes, stl_data, ".stl", "stl"
                 )
                 artifact_type = "stl"
+                primary_location = stl_location
+                LOGGER.info("Saved STL for slicer", location=stl_location)
             except MeshConversionError as conv_err:
-                LOGGER.warning("GLB to STL conversion failed, saving GLB", error=str(conv_err))
-                stored = await asyncio.to_thread(
-                    self._store.save_bytes, glb_data, ".glb"
-                )
-                artifact_type = "glb"
+                LOGGER.warning("GLB to STL conversion failed", error=str(conv_err))
+
+            metadata = {
+                "task_id": job.get("task_id", ""),
+                "thumbnail": result.get("thumbnail", ""),
+                "source": "text_to_model",
+                "glb_location": glb_location,
+            }
+            if stl_location:
+                metadata["stl_location"] = stl_location
 
             return CADArtifact(
                 provider="tripo",
                 artifact_type=artifact_type,
-                location=stored,
-                metadata={
-                    "task_id": job.get("task_id", ""),
-                    "thumbnail": result.get("thumbnail", ""),
-                    "source": "text_to_model",
-                },
+                location=primary_location,
+                metadata={k: v for k, v in metadata.items() if v},
             )
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("Tripo text-to-3D generation failed", error=str(exc))
@@ -436,16 +448,29 @@ class CADCycler:
     ) -> Optional[CADArtifact]:
         full_result = result or {}
         payload = self._unwrap_tripo_payload(full_result)
+        thumbnail = (
+            self._extract_thumbnail(payload)
+            or self._extract_thumbnail(full_result)
+            or ""
+        )
 
+        # First, try to get the original mesh URL for GLB preview
+        mesh_url, mesh_format = self._extract_mesh_url(payload)
+        glb_location = None
+        glb_bytes = None
+
+        if mesh_url:
+            glb_bytes = await self._download_bytes(mesh_url)
+            # Always save GLB for preview purposes
+            glb_location = self._store.save_bytes(glb_bytes, ".glb", "glb")
+            LOGGER.info("Saved GLB for preview", location=glb_location)
+
+        # Try server-side STL conversion first
         convert_payload = await self._convert_tripo_task_to_stl(task_id)
         if convert_payload:
             content, convert_task_id = convert_payload
-            location = self._store.save_bytes(content, ".stl")
-            thumbnail = (
-                self._extract_thumbnail(payload)
-                or self._extract_thumbnail(full_result)
-                or ""
-            )
+            stl_location = self._store.save_bytes(content, ".stl", "stl")
+            LOGGER.info("Saved STL from server conversion", location=stl_location)
             metadata = {
                 "task_id": task_id or "",
                 "convert_task_id": convert_task_id or "",
@@ -453,35 +478,37 @@ class CADCycler:
                 "source_image": reference.source_url or reference.download_url or "",
                 "original_format": "stl",
                 "friendly_name": reference.friendly_name or "",
+                "glb_location": glb_location or "",
+                "stl_location": stl_location,
             }
             return CADArtifact(
                 provider="tripo",
                 artifact_type="stl",
-                location=location,
+                location=stl_location,
                 metadata={k: v for k, v in metadata.items() if v},
             )
 
-        mesh_url, mesh_format = self._extract_mesh_url(payload)
+        # Fall back to local conversion if server conversion failed
         if not mesh_url:
             LOGGER.warning("Tripo job completed without mesh URL", task_id=task_id)
             return None
 
-        mesh_bytes = await self._download_bytes(mesh_url)
-        artifact_type = (mesh_format or "glb").lower()
-        suffix = f".{artifact_type}"
-        content = mesh_bytes
+        stl_location = None
+        artifact_type = "glb"
+        primary_location = glb_location
 
-        if self._mesh_converter:
+        if self._mesh_converter and glb_bytes:
             try:
                 converted = await asyncio.to_thread(
-                    self._mesh_converter, mesh_bytes, mesh_format
+                    self._mesh_converter, glb_bytes, mesh_format
                 )
-                content = converted
+                stl_location = self._store.save_bytes(converted, ".stl", "stl")
                 artifact_type = "stl"
-                suffix = ".stl"
+                primary_location = stl_location
+                LOGGER.info("Saved STL from local conversion", location=stl_location)
             except MeshConversionError as exc:
                 LOGGER.warning(
-                    "STL conversion skipped, falling back to original mesh",
+                    "STL conversion skipped, using GLB only",
                     task_id=task_id,
                     error=str(exc),
                 )
@@ -492,23 +519,22 @@ class CADCycler:
                     error=str(exc),
                 )
 
-        location = self._store.save_bytes(content, suffix)
         metadata = {
             "task_id": task_id or "",
-            "thumbnail": (
-                self._extract_thumbnail(payload)
-                or self._extract_thumbnail(full_result)
-                or ""
-            ),
+            "thumbnail": thumbnail,
             "source_image": reference.source_url or reference.download_url or "",
             "original_format": mesh_format or "",
             "mesh_url": mesh_url,
             "friendly_name": reference.friendly_name or "",
+            "glb_location": glb_location or "",
         }
+        if stl_location:
+            metadata["stl_location"] = stl_location
+
         return CADArtifact(
             provider="tripo",
-            artifact_type=artifact_type or "glb",
-            location=location,
+            artifact_type=artifact_type,
+            location=primary_location or glb_location or "",
             metadata={k: v for k, v in metadata.items() if v},
         )
 

@@ -1266,11 +1266,20 @@ def _print_artifacts(artifacts: List[Dict[str, Any]]) -> None:
         console.print("[yellow]No artifacts available.")
         return
     for idx, artifact in enumerate(artifacts, start=1):
+        meta = artifact.get("metadata") or {}
+        glb_loc = meta.get("glb_location", "")
+        stl_loc = meta.get("stl_location", "")
+
         console.print(
             f"[cyan]{idx}[/] provider={artifact.get('provider')} "
             f"type={artifact.get('artifactType')} "
             f"url={artifact.get('location')}"
         )
+        # Show both formats if available
+        if glb_loc:
+            console.print(f"    [dim]GLB (preview): {glb_loc}[/dim]")
+        if stl_loc:
+            console.print(f"    [dim]STL (slicer):  {stl_loc}[/dim]")
 
 
 def _maybe_offer_slicer(artifacts: List[Dict[str, Any]]) -> None:
