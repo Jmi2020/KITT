@@ -289,7 +289,39 @@ class BrainOrchestrator:
             "done": bool,              # Whether stream is complete
             "routing_result": RoutingResult  # Final result (only when done=True)
         }
+
+        Note: For queries requiring tool execution (freshness_required, agentic mode),
+        this falls back to non-streaming to ensure proper tool execution and answer synthesis.
         """
+        # Check if query requires agent mode (tool execution)
+        # Streaming doesn't support agent/tool execution, so fall back to non-streaming
+        agentic_mode = use_agent or settings.agentic_mode_enabled
+        time_sensitive = is_time_sensitive_query(prompt)
+        requires_agent = agentic_mode and (freshness_required or time_sensitive)
+
+        if requires_agent:
+            logger.info("Query requires agent mode - falling back to non-streaming for tool execution")
+            # Use non-streaming route which supports agent/tool execution
+            result = await self.generate_response(
+                conversation_id=conversation_id,
+                request_id=request_id,
+                prompt=prompt,
+                user_id=user_id,
+                force_tier=force_tier,
+                freshness_required=freshness_required,
+                model_hint=model_hint,
+                use_agent=use_agent,
+                tool_mode=tool_mode,
+            )
+            # Yield the complete result as a single chunk
+            yield {
+                "delta": result.output,
+                "delta_thinking": None,
+                "done": True,
+                "routing_result": result,
+            }
+            return
+
         # Get or create conversation state
         conv_state = self._state_manager.get_or_create(conversation_id, user_id or "unknown")
         # Handle case where sync wrapper returns a Task in async context

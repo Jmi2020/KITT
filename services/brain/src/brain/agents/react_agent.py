@@ -155,6 +155,12 @@ class ReActAgent:
         if not any(key in query.lower() for key in keywords):
             return answer
 
+        # If fetch_webpage was used successfully, trust the answer (already grounded)
+        for step in reversed(history):
+            if step.action == "fetch_webpage" and step.data and step.data.get("success"):
+                logger.debug("fetch_webpage used successfully, trusting agent answer")
+                return answer
+
         for step in reversed(history):
             if step.action != "web_search" or not step.data:
                 continue
@@ -162,10 +168,10 @@ class ReActAgent:
             if not results:
                 continue
             web_entities = self._extract_entities_from_results(results)
-            if not web_entities:
-                continue
             answer_entities = self._extract_entities(answer)
-            if answer_entities & web_entities:
+            # Also check for number/price overlap (e.g., $1,850.20)
+            answer_numbers = self._extract_numbers(answer)
+            if (answer_entities & web_entities) or answer_numbers:
                 return answer
 
             top = results[0]
@@ -206,6 +212,14 @@ class ReActAgent:
         matches = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b", text)
         return {m.strip() for m in matches}
 
+    def _extract_numbers(self, text: str) -> set[str]:
+        """Extract price/number patterns from text (e.g., $1,850.20, 35678.74)."""
+        if not text:
+            return set()
+        # Match currency amounts and plain numbers with decimals
+        matches = re.findall(r"\$[\d,]+\.?\d*|\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b", text)
+        return {m.strip() for m in matches if len(m) > 2}
+
     def _summarize_tool_observation(self, action: str, result: Dict[str, Any]) -> str:
         """Condense tool output so we do not exceed llama.cpp context limits."""
         if not result.get("success"):
@@ -224,15 +238,21 @@ class ReActAgent:
                 for item in results[:3]:
                     title = (item.get("title") or item.get("url") or "untitled").strip()
                     source = item.get("source") or ""
+                    # Include content snippet - this contains critical data like prices
+                    content = item.get("content") or item.get("content_snippet") or item.get("description") or ""
+                    content = content.strip()[:200]  # Limit snippet length
+
                     entry = title
                     if source:
                         entry += f" ({source})"
-                    snippets.append(entry[:120])
-                summary = "; ".join(snippets)
+                    if content:
+                        entry += f" - {content}"
+                    snippets.append(entry[:350])  # Allow longer entries for content
+                summary = "\n".join(snippets)  # Use newlines for readability
                 total = data.get("total_results")
                 if isinstance(total, int):
-                    summary = f"{summary} (total {total})"
-                return self._truncate_observation(f"{prefix}: {summary}")
+                    summary = f"{summary}\n(total {total} results)"
+                return self._truncate_observation(f"{prefix}:\n{summary}")
 
             return self._truncate_observation(f"{prefix}: {str(data)[:300]}")
 

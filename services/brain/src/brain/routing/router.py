@@ -120,12 +120,12 @@ class BrainRouter:
         # Initialize safety checker for tool execution validation
         self._safety_checker = SafetyChecker()
 
-        # Agent uses Q4 orchestrator for tool calling
+        # Agent uses F16 model for tool calling (more capable for agentic workflows)
         self._agent = ReActAgent(
             llm_client=self._llama,
             mcp_client=self._tool_mcp,
             max_iterations=10,
-            model_alias="kitty-q4",
+            model_alias="kitty-f16",
         )
 
     async def route(self, request: RoutingRequest) -> RoutingResult:
@@ -354,8 +354,8 @@ class BrainRouter:
 
     async def _invoke_local(self, request: RoutingRequest) -> RoutingResult:
         start = time.perf_counter()
-        # Default to Q4 orchestrator model for tool calling
-        model_alias = request.model_hint or "kitty-q4"
+        # Default to F16 model for tool calling (more capable)
+        model_alias = request.model_hint or "kitty-f16"
         model_format = detect_model_format(model_alias)
 
         # Get tools based on prompt and mode

@@ -82,6 +82,7 @@ API_BASE = _first_valid_url(
     "http://localhost:8000",
 )
 CAD_BASE = _env("KITTY_CAD_API", "http://localhost:8200")
+ARTIFACTS_DIR = Path(_env("KITTY_ARTIFACTS_DIR", "/Users/Shared/KITTY/artifacts"))
 IMAGES_BASE = _first_valid_url(
     (
         os.getenv("IMAGES_BASE"),
@@ -409,31 +410,41 @@ def _match_reference_keywords(prompt: str, limit: int) -> List[Dict[str, Any]]:
     images = _stored_images_newest_first()
     if not images:
         return []
-    tokens = {token for token in re.split(r"[^A-Za-z0-9]+", prompt.lower()) if token}
+    # Filter out short stopwords that would match almost anything
+    stopwords = {"a", "an", "the", "to", "of", "in", "on", "at", "for", "is", "it", "as", "be", "or", "and", "with"}
+    tokens = {
+        token for token in re.split(r"[^A-Za-z0-9]+", prompt.lower())
+        if token and len(token) > 2 and token not in stopwords
+    }
     if not tokens:
-        return images[:limit]
+        return []
 
     def _score(entry: Dict[str, Any]) -> int:
+        # Tokenize haystacks for whole-word matching
         haystacks = [
             _image_display_name(entry).lower(),
             (entry.get("title") or "").lower(),
             (entry.get("source") or "").lower(),
             (entry.get("caption") or "").lower(),
         ]
-        score = 0
-        for token in tokens:
-            for hay in haystacks:
-                if token and token in hay:
-                    score += 1
-                    break
+        haystack_tokens = set()
+        for hay in haystacks:
+            haystack_tokens.update(t.lower() for t in re.split(r"[^A-Za-z0-9]+", hay) if t)
+        # Use whole-word matching instead of substring
+        score = sum(1 for token in tokens if token in haystack_tokens)
         return score
 
+    scored = [(img, _score(img)) for img in images]
+    # Only include images that actually match keywords (score > 0)
+    matched = [(img, s) for img, s in scored if s > 0]
+    if not matched:
+        return []
     ranked = sorted(
-        images,
-        key=lambda item: (_score(item), item.get("storedAt") or ""),
+        matched,
+        key=lambda item: (item[1], item[0].get("storedAt") or ""),
         reverse=True,
     )
-    return ranked[:limit]
+    return [img for img, _ in ranked[:limit]]
 
 
 def _resolve_cad_image_refs(selectors: Optional[List[str]]) -> List[Dict[str, Any]]:
@@ -1298,29 +1309,65 @@ def _maybe_offer_slicer(artifacts: List[Dict[str, Any]]) -> None:
         console.print("[red]Selected artifact does not include a local path.")
         return
 
+    # Translate relative artifact path to absolute host path
+    # CAD service returns paths like "artifacts/xyz.stl" (relative from container /app)
+    # We need to translate to absolute host path like "/Users/Shared/KITTY/artifacts/xyz.stl"
+    if location.startswith("artifacts/"):
+        host_path = ARTIFACTS_DIR / location[len("artifacts/"):]
+    elif location.startswith("storage/artifacts/"):
+        # Legacy path format - map storage/artifacts/ to artifacts dir
+        host_path = ARTIFACTS_DIR / location[len("storage/artifacts/"):]
+    elif location.startswith("/"):
+        # Already absolute path
+        host_path = Path(location)
+    else:
+        # Assume relative path from artifacts dir
+        host_path = ARTIFACTS_DIR / location
+
+    if not host_path.exists():
+        console.print(f"[red]Artifact file not found: {host_path}")
+        return
+
     height_input = typer.prompt(
         "Desired printed height (e.g., 6 in, 150 mm)", default=""
     ).strip()
 
-    payload = {"stl_path": location}
+    payload = {"stl_path": str(host_path), "print_mode": "3d_print"}
     if height_input:
         payload["target_height"] = height_input
 
     try:
+        # Get printer/slicer recommendation from fabrication service
         data = _post_json_with_spinner(
-            f"{FABRICATION_API_BASE}/api/fabrication/open_in_slicer",
+            f"{FABRICATION_API_BASE}/api/fabrication/analyze_model",
             payload,
-            "Opening slicer",
+            "Analyzing model",
         )
-        app_name = data.get("slicer_app") or "slicer"
-        console.print(
-            f"[green]Launched {app_name} for {os.path.basename(location)}[/green]"
-        )
+        app_name = data.get("slicer_app") or "BambuStudio"
         reasoning = data.get("reasoning")
         if reasoning:
             console.print(f"[dim]{reasoning}[/dim]")
+
+        # Launch slicer locally (fabrication service runs in Docker, can't launch macOS apps)
+        import subprocess
+        try:
+            subprocess.run(
+                ["open", "-a", app_name, str(host_path)],
+                check=True,
+                capture_output=True,
+                timeout=10
+            )
+            console.print(
+                f"[green]Launched {app_name} for {host_path.name}[/green]"
+            )
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]Failed to launch {app_name}: {e.stderr.decode() if e.stderr else str(e)}")
+        except subprocess.TimeoutExpired:
+            console.print(f"[red]Timeout launching {app_name}")
+        except FileNotFoundError:
+            console.print(f"[red]{app_name} not found. Please install it first.")
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[red]Failed to open slicer: {exc}")
+        console.print(f"[red]Failed to analyze model: {exc}")
 
 
 def _start_new_session() -> None:
@@ -1410,11 +1457,32 @@ def _parse_inline_provider(query: str) -> tuple[str, Optional[str], Optional[str
     return query, provider_override, model_override
 
 
-def _format_prompt(user_prompt: str) -> str:
+def _format_prompt(user_prompt: str, include_refs: bool = False) -> str:
+    """Format prompt, optionally including image references.
+
+    Image refs are only included for CAD/generate operations where they're relevant.
+    This prevents pollution of tool arguments (e.g., web_search queries) with
+    irrelevant image reference data.
+    """
+    # Only append image refs when explicitly requested (CAD/generate operations)
+    if not include_refs:
+        return user_prompt
+
     reference_block = _format_reference_block()
     if not reference_block:
         return user_prompt
     return f"{user_prompt}\n\n{reference_block}"
+
+
+def _should_include_refs(prompt: str) -> bool:
+    """Check if prompt likely involves CAD/image generation that needs refs."""
+    prompt_lower = prompt.lower()
+    cad_keywords = {
+        "cad", "model", "3d", "print", "generate", "create", "design",
+        "sculpt", "statue", "figurine", "organic", "mesh", "stl",
+        "reference", "using image", "from image", "based on"
+    }
+    return any(kw in prompt_lower for kw in cad_keywords)
 
 
 def _fetch_usage_metrics() -> Dict[str, Dict[str, Any]]:
@@ -1807,7 +1875,8 @@ def say(
     # Parse inline provider/model syntax
     cleaned_text, provider_override, model_override = _parse_inline_provider(text)
 
-    formatted_prompt = _format_prompt(cleaned_text)
+    # Only include image refs for CAD/generate-related prompts
+    formatted_prompt = _format_prompt(cleaned_text, include_refs=_should_include_refs(cleaned_text))
     payload: Dict[str, Any] = {
         "conversationId": state.conversation_id,
         "userId": state.user_id,
@@ -1911,7 +1980,7 @@ def _infer_cad_mode(prompt: str, has_images: bool) -> str:
         return "organic"
     if any(word in text for word in parametric_keywords):
         return "parametric"
-    return "auto"
+    return "organic"
 
 
 @app.command()
@@ -3554,13 +3623,19 @@ def shell(
 
             if cmd == "cad":
                 if not args:
-                    console.print("[yellow]Usage: /cad <prompt>")
+                    console.print("[yellow]Usage: /cad <prompt> [--o|--organic] [--p|--parametric] [--image <ref>]")
                     console.print("[dim]Example: /cad design a wall mount bracket[/dim]")
+                    console.print("[dim]Example: /cad convert to 3D --image 1[/dim]")
                 else:
                     organic_flag = False
                     param_flag = False
+                    image_filters_list: List[str] = []
                     prompt_tokens: List[str] = []
-                    for token in args:
+                    skip_next = False
+                    for i, token in enumerate(args):
+                        if skip_next:
+                            skip_next = False
+                            continue
                         lower = token.lower()
                         if lower in {"--o", "--organic"}:
                             organic_flag = True
@@ -3568,8 +3643,18 @@ def shell(
                         if lower in {"--p", "--parametric"}:
                             param_flag = True
                             continue
+                        if lower in {"--image", "-i"}:
+                            if i + 1 < len(args):
+                                image_filters_list.append(args[i + 1])
+                                skip_next = True
+                            continue
                         prompt_tokens.append(token)
-                    cad(prompt_tokens, organic=organic_flag, parametric=param_flag)
+                    cad(
+                        prompt_tokens,
+                        organic=organic_flag,
+                        parametric=param_flag,
+                        image_filters=image_filters_list if image_filters_list else None,
+                    )
                 continue
 
             if cmd == "vision":

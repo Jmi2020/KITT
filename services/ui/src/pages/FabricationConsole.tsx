@@ -100,7 +100,7 @@ const FabricationConsole = () => {
       const response = await fetch('/api/cad/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId, prompt: cadPrompt }),
+        body: JSON.stringify({ conversationId, prompt: cadPrompt, mode: 'organic' }),
       });
       if (!response.ok) throw new Error('CAD generation failed');
       const data = (await response.json()) as CadResponse;

@@ -56,8 +56,12 @@ def mock_zoo_client():
 def mock_tripo_client():
     """Mock Tripo cloud API client."""
     client = AsyncMock(spec=TripoClient)
-    client.upload_image = AsyncMock(return_value="https://tripo.ai/uploads/upload.png")
-    client.start_image_job = AsyncMock(
+    client.upload_image = AsyncMock(return_value={
+        "file_token": "token-123",
+        "file_type": "image/png",
+        "image_url": "https://tripo.ai/uploads/upload.png",
+    })
+    client.start_image_task = AsyncMock(
         return_value={"task_id": "task-123", "status": "processing", "result": {}}
     )
     async def fake_get_task(task_id):
@@ -201,7 +205,7 @@ async def test_tripo_generation_with_image_url(cad_cycler, mock_tripo_client, tm
 
     # Verify Tripo client was called
     mock_tripo_client.upload_image.assert_called_once()
-    mock_tripo_client.start_image_job.assert_called_once()
+    mock_tripo_client.start_image_task.assert_called_once()
     mock_tripo_client.start_convert_task.assert_called_once()
     mock_tripo_client.get_task.assert_any_await("task-123")  # type: ignore[attr-defined]
     mock_tripo_client.get_task.assert_any_await("convert-1")  # type: ignore[attr-defined]
@@ -399,8 +403,11 @@ async def test_zoo_missing_geometry_url(mock_artifact_store):
 async def test_tripo_missing_model_url(mock_artifact_store, tmp_path):
     """Test handling of Tripo response missing model URL."""
     tripo_client = AsyncMock(spec=TripoClient)
-    tripo_client.upload_image = AsyncMock(return_value="https://tripo/uploads/upload.png")
-    tripo_client.start_image_job = AsyncMock(
+    tripo_client.upload_image = AsyncMock(return_value={
+        "file_token": "token-missing",
+        "file_type": "image/png",
+    })
+    tripo_client.start_image_task = AsyncMock(
         return_value={"task_id": "task-missing", "status": "processing", "result": {}}
     )
     tripo_client.get_task = AsyncMock(

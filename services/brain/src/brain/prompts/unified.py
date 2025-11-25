@@ -523,10 +523,25 @@ Example: [🤖 llama.cpp optimization](https://www.google.com/search?q=llama.cpp
 
         freshness_section = ""
         if freshness_required:
-            freshness_section = (
-                "\n**Fresh Data Required**: Your training data may be stale. "
-                "Use live tools (e.g., web_search) to confirm any time-sensitive details before giving a final answer."
-            )
+            # Detect if query is about prices/commodities that need multi-source verification
+            price_keywords = ["price", "cost", "worth", "value", "rate", "trading", "stock", "crypto"]
+            is_price_query = query and any(kw in query.lower() for kw in price_keywords)
+
+            if is_price_query:
+                freshness_section = (
+                    "\n**Fresh Data Required with Multi-Source Verification**:\n"
+                    "Your training data may be stale. For price/value queries:\n"
+                    "1. Use `web_search` with `max_results: 5` to get multiple sources\n"
+                    "2. Use `fetch_webpage` on at least 3 different sources to verify the data\n"
+                    "3. Cross-reference the values - only provide Final Answer when sources agree\n"
+                    "4. If sources show different prices, report the range and cite each source\n"
+                    "5. Always include the source URL/name with each price you report"
+                )
+            else:
+                freshness_section = (
+                    "\n**Fresh Data Required**: Your training data may be stale. "
+                    "Use live tools (e.g., web_search) to confirm any time-sensitive details before giving a final answer."
+                )
 
         query_section = f"\n**Current Query**: {query}" if query else ""
         history_section = f"\n**Previous Steps**:\n{history_text}" if history_text else ""

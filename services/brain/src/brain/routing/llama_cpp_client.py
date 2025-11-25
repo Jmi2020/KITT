@@ -100,24 +100,51 @@ class LlamaCppClient:
 
         # Parse OpenAI-compatible response
         completion = None
+        openai_tool_calls = None
         if "choices" in data and data["choices"]:
             choice = data["choices"][0]
             message = choice.get("message", {})
             completion = message.get("content", "")
+            # Check for OpenAI-format tool_calls in the message
+            openai_tool_calls = message.get("tool_calls")
 
         if completion is None:
-            logger.warning(f"Unexpected response format from llama.cpp: {data}")
+            logger.debug(f"No text content in response (tool_calls may be present): {data}")
             completion = ""
 
-        # Parse tool calls from response using detected model format
+        # Parse tool calls from response
         tool_calls: List[ToolCall] = []
         cleaned_text = completion or ""
-        if tools and completion:
+
+        # First, check for OpenAI-format tool_calls in the response
+        if tools and openai_tool_calls:
+            import json as json_module
+            for tc in openai_tool_calls:
+                if isinstance(tc, dict) and tc.get("type") == "function":
+                    func = tc.get("function", {})
+                    name = func.get("name")
+                    args = func.get("arguments", {})
+                    # Arguments may be a JSON string, parse if needed
+                    if isinstance(args, str):
+                        try:
+                            args = json_module.loads(args)
+                        except json_module.JSONDecodeError:
+                            args = {}
+                    if name:
+                        # raw_xml represents the original format, use JSON representation for OpenAI format
+                        raw_repr = json_module.dumps(tc)
+                        tool_calls.append(ToolCall(name=name, arguments=args, raw_xml=raw_repr))
+            if tool_calls:
+                logger.info(f"Extracted {len(tool_calls)} tool calls from OpenAI format: {[tc.name for tc in tool_calls]}")
+
+        # Fall back to parsing from text content if no OpenAI-format tool_calls
+        if tools and not tool_calls and completion:
             tool_calls, cleaned_text = parse_tool_calls(completion, format_type=self._model_format)
             if tool_calls:
-                logger.info(f"Parsed {len(tool_calls)} tool calls from response: {[tc.name for tc in tool_calls]}")
-            else:
-                logger.warning("No tool calls found in model response despite tools being provided")
+                logger.info(f"Parsed {len(tool_calls)} tool calls from text: {[tc.name for tc in tool_calls]}")
+
+        if tools and not tool_calls:
+            logger.warning("No tool calls found in model response despite tools being provided")
 
         # Extract metadata from OpenAI-compatible response
         stop_reason = None

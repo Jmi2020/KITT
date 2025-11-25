@@ -131,7 +131,14 @@ class CADCycler:
 
         # Tripo cloud mesh generation
         if run_tripo:
-            artifacts.extend(await self._generate_tripo_meshes(normalized_refs))
+            if normalized_refs:
+                # Image-to-3D when images are provided
+                artifacts.extend(await self._generate_tripo_meshes(normalized_refs))
+            else:
+                # Text-to-3D when no images
+                tripo_text_artifact = await self._generate_tripo_text_mesh(prompt)
+                if tripo_text_artifact:
+                    artifacts.append(tripo_text_artifact)
 
         # Local fallback
         if self._local_runner and "image_path" in references:
@@ -275,6 +282,63 @@ class CADCycler:
                     reference=reference.dedupe_key(),
                 )
         return artifacts
+
+    async def _generate_tripo_text_mesh(self, prompt: str) -> Optional[CADArtifact]:
+        """Generate a 3D mesh from text prompt using Tripo text-to-model."""
+        if not self._tripo or not prompt:
+            return None
+
+        try:
+            job = await self._tripo.start_text_task(
+                prompt=prompt,
+                version=self._tripo_model_version,
+                texture_quality=self._tripo_texture_quality,
+            )
+            result = await self._await_tripo_completion(job)
+            if not result:
+                return None
+
+            result_data = result.get("result", {})
+            # Text-to-model uses pbr_model, image-to-model uses model_mesh
+            model_info = result_data.get("pbr_model") or result_data.get("model_mesh", {})
+            model_url = model_info.get("url") if isinstance(model_info, dict) else None
+            if not model_url:
+                LOGGER.warning("Tripo text-to-3D result missing model URL", result=result_data)
+                return None
+
+            # Download GLB and convert to STL for slicer compatibility
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.get(model_url)
+                response.raise_for_status()
+                glb_data = response.content
+
+            # Convert GLB to STL using trimesh
+            try:
+                stl_data = convert_mesh_to_stl(glb_data, source_format="glb")
+                stored = await asyncio.to_thread(
+                    self._store.save_bytes, stl_data, ".stl"
+                )
+                artifact_type = "stl"
+            except MeshConversionError as conv_err:
+                LOGGER.warning("GLB to STL conversion failed, saving GLB", error=str(conv_err))
+                stored = await asyncio.to_thread(
+                    self._store.save_bytes, glb_data, ".glb"
+                )
+                artifact_type = "glb"
+
+            return CADArtifact(
+                provider="tripo",
+                artifact_type=artifact_type,
+                location=stored,
+                metadata={
+                    "task_id": job.get("task_id", ""),
+                    "thumbnail": result.get("thumbnail", ""),
+                    "source": "text_to_model",
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Tripo text-to-3D generation failed", error=str(exc))
+            return None
 
     async def _load_reference_payload(
         self,

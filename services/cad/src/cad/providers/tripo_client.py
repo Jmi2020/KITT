@@ -140,6 +140,44 @@ class TripoClient:
         )
         return job
 
+    async def start_text_task(
+        self,
+        *,
+        prompt: str,
+        version: Optional[str] = None,
+        texture_quality: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a text-to-model task via the unified task endpoint."""
+
+        if not prompt:
+            raise ValueError("prompt is required for Tripo text-to-model task")
+
+        body: Dict[str, Any] = {
+            "type": "text_to_model",
+            "prompt": prompt,
+        }
+        if version:
+            body["model_version"] = version
+        if texture_quality:
+            body["texture_quality"] = texture_quality
+
+        async with http_client(
+            base_url=self._api_prefix,
+            bearer_token=self._api_key,
+            timeout=30.0,
+        ) as client:
+            response = await client.post("/task", json=body)
+            response.raise_for_status()
+            payload = self._unwrap(response.json())
+
+        job = self._normalize_job(payload)
+        LOGGER.info(
+            "Tripo text task created",
+            task_id=job.get("task_id"),
+            status=job.get("status"),
+        )
+        return job
+
     async def get_task(self, task_id: str) -> Dict[str, Any]:
         """Fetch the latest status for a generation task."""
 

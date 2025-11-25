@@ -34,7 +34,7 @@ class ArtifactStore:
             if not self._minio.bucket_exists(self._bucket):
                 self._minio.make_bucket(self._bucket)
         else:
-            self._local_root = Path("storage/artifacts")
+            self._local_root = Path("artifacts")
             self._local_root.mkdir(parents=True, exist_ok=True)
 
     def save_bytes(self, content: bytes, suffix: str) -> str:

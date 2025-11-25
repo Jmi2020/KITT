@@ -469,6 +469,10 @@ Commands are executed locally when possible.`);
                     throw new Error(event.error);
                   }
                 } catch (parseErr) {
+                  // Re-throw actual errors, only ignore JSON parse errors
+                  if (parseErr instanceof Error && !parseErr.message.includes('JSON')) {
+                    throw parseErr;
+                  }
                   // Ignore parse errors for incomplete JSON chunks
                 }
               }
@@ -481,12 +485,44 @@ Commands are executed locally when possible.`);
               ? { ...m, content: streamedContent || 'No response', metadata: routingData }
               : m
           ));
-
-        } finally {
-          clearInterval(elapsedInterval);
+          setMessages(prev => prev.filter(m => m.id !== thinkingId));
           setIsThinking(false);
+          clearInterval(elapsedInterval);
+          return;
+
+        } catch (streamError: any) {
+          clearInterval(elapsedInterval);
+
+          // Check if streaming is not supported - fall back to non-streaming
+          if (streamError.message?.includes('Streaming not') || streamError.message?.includes('not yet supported')) {
+            // Remove the streaming response message
+            setMessages(prev => prev.filter(m => m.id !== responseId));
+
+            // Fall back to non-streaming API
+            const fallbackResponse = await fetch('/api/query', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+
+            if (!fallbackResponse.ok) {
+              throw new Error(`HTTP ${fallbackResponse.status}: ${fallbackResponse.statusText}`);
+            }
+
+            const data = await fallbackResponse.json();
+            setMessages(prev => prev.filter(m => m.id !== thinkingId));
+            const output = data.result?.output || data.response || 'No response';
+            addMessage('assistant', output, data.routing);
+            setIsThinking(false);
+            return;
+          }
+
+          // For other errors, show error message
+          setMessages(prev => prev.filter(m => m.id !== responseId && m.id !== thinkingId));
+          addMessage('system', `❌ Error: ${streamError.message}`);
+          setIsThinking(false);
+          return;
         }
-        return;
       }
 
       // Non-streaming path for special commands (/collective, /usage)

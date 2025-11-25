@@ -97,6 +97,27 @@ def _parse_height_to_mm(raw_value: Optional[str]) -> Optional[float]:
     return round(value * UNIT_FACTORS[unit], 3)
 
 
+# Host to container path translation
+# When running in Docker, host paths like /Users/Shared/KITTY/artifacts need to
+# be translated to container paths like /app/artifacts
+_HOST_ARTIFACT_DIRS = [
+    "/Users/Shared/KITTY/artifacts",  # macOS default
+    "/home/kitty/artifacts",           # Linux alternative
+]
+_CONTAINER_ARTIFACT_DIR = "/app/artifacts"
+
+
+def _translate_host_path(host_path: str) -> Path:
+    """Translate a host filesystem path to the equivalent container path."""
+    for host_dir in _HOST_ARTIFACT_DIRS:
+        if host_path.startswith(host_dir):
+            # Replace host prefix with container prefix
+            container_path = host_path.replace(host_dir, _CONTAINER_ARTIFACT_DIR, 1)
+            return Path(container_path)
+    # Not a host path, return as-is
+    return Path(host_path)
+
+
 # Global service components
 analyzer: Optional[STLAnalyzer] = None
 status_checker: Optional[PrinterStatusChecker] = None
@@ -513,7 +534,7 @@ async def open_in_slicer(request: OpenInSlicerRequest) -> OpenInSlicerResponse:
     if not analyzer or not selector or not launcher:
         raise HTTPException(status_code=500, detail="Service not initialized")
 
-    stl_path = Path(request.stl_path)
+    stl_path = _translate_host_path(request.stl_path)
     try:
         target_height_mm = _parse_height_to_mm(request.target_height)
     except ValueError as exc:
@@ -621,7 +642,7 @@ async def analyze_model(request: AnalyzeModelRequest) -> AnalyzeModelResponse:
     if not analyzer or not selector:
         raise HTTPException(status_code=500, detail="Service not initialized")
 
-    stl_path = Path(request.stl_path)
+    stl_path = _translate_host_path(request.stl_path)
     try:
         target_height_mm = _parse_height_to_mm(request.target_height)
     except ValueError as exc:
@@ -1682,7 +1703,7 @@ async def submit_print_job(request: SubmitJobRequest) -> SubmitJobResponse:
         from common.db.models import QueuedPrint, QueueStatus
 
         # Validate STL file exists
-        stl_path = Path(request.stl_path)
+        stl_path = _translate_host_path(request.stl_path)
         if not stl_path.exists():
             raise HTTPException(status_code=404, detail=f"STL file not found: {request.stl_path}")
 
