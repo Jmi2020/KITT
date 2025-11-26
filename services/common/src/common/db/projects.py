@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from . import SessionLocal
@@ -14,6 +14,7 @@ from .models import ConversationProject
 
 
 def _apply_filters(stmt, conversation_id: Optional[str], artifact_type: Optional[str]):
+    stmt = stmt.where(ConversationProject.deleted_at.is_(None))
     if conversation_id:
         stmt = stmt.where(ConversationProject.conversation_id == conversation_id)
     if artifact_type:
@@ -34,7 +35,10 @@ def upsert_project(
     try:
         project = session.execute(
             select(ConversationProject).where(
-                ConversationProject.conversation_id == conversation_id
+                and_(
+                    ConversationProject.conversation_id == conversation_id,
+                    ConversationProject.deleted_at.is_(None),
+                )
             )
         ).scalar_one_or_none()
         if not project:
@@ -55,6 +59,7 @@ def upsert_project(
             project.artifacts = artifacts or project.artifacts
             if metadata:
                 project.project_metadata = {**(project.project_metadata or {}), **metadata}
+            project.deleted_at = None
             project.updated_at = datetime.utcnow()
         session.commit()
         session.refresh(project)
@@ -85,7 +90,9 @@ def get_project(project_id: str) -> Optional[ConversationProject]:
     session: Session = SessionLocal()
     try:
         return session.execute(
-            select(ConversationProject).where(ConversationProject.id == project_id)
+            select(ConversationProject).where(
+                and_(ConversationProject.id == project_id, ConversationProject.deleted_at.is_(None))
+            )
         ).scalar_one_or_none()
     finally:
         session.close()
@@ -95,7 +102,9 @@ def append_artifacts(project_id: str, artifacts: List[Dict[str, str]]) -> Option
     session: Session = SessionLocal()
     try:
         project = session.execute(
-            select(ConversationProject).where(ConversationProject.id == project_id)
+            select(ConversationProject).where(
+                and_(ConversationProject.id == project_id, ConversationProject.deleted_at.is_(None))
+            )
         ).scalar_one_or_none()
         if not project:
             return None
@@ -118,7 +127,9 @@ def update_project(
     session: Session = SessionLocal()
     try:
         project = session.execute(
-            select(ConversationProject).where(ConversationProject.id == project_id)
+            select(ConversationProject).where(
+                and_(ConversationProject.id == project_id, ConversationProject.deleted_at.is_(None))
+            )
         ).scalar_one_or_none()
         if not project:
             return None
@@ -134,5 +145,21 @@ def update_project(
         session.commit()
         session.refresh(project)
         return project
+    finally:
+        session.close()
+
+
+def soft_delete_project(project_id: str) -> bool:
+    session: Session = SessionLocal()
+    try:
+        project = session.execute(
+            select(ConversationProject).where(ConversationProject.id == project_id)
+        ).scalar_one_or_none()
+        if not project or project.deleted_at is not None:
+            return False
+        project.deleted_at = datetime.utcnow()
+        project.updated_at = datetime.utcnow()
+        session.commit()
+        return True
     finally:
         session.close()

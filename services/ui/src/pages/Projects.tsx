@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 interface ProjectArtifact {
   provider: string;
@@ -25,6 +25,7 @@ interface LocalStlModel {
 }
 
 const LOCAL_STL_PATH = 'host /Users/Shared/KITTY/artifacts/stl (mounted to /app/storage/stl)';
+const PAGE_SIZE = 20;
 
 const formatFileSize = (bytes: number) => {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -36,18 +37,29 @@ const Projects = () => {
   const [projects, setProjects] = useState<ProjectModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [artifactFilter, setArtifactFilter] = useState<string>('');
+  const [pageOffset, setPageOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
 
   const [localStl, setLocalStl] = useState<LocalStlModel[]>([]);
   const [localStlLoading, setLocalStlLoading] = useState(true);
   const [localStlError, setLocalStlError] = useState<string | null>(null);
   const [selectedStl, setSelectedStl] = useState<string>('');
 
-  useEffect(() => {
-    const loadProjects = async () => {
+  const loadProjects = useMemo(
+    () => async (reset: boolean) => {
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch('/api/projects');
+        const nextOffset = reset ? 0 : pageOffset;
+        const params = new URLSearchParams({
+          limit: PAGE_SIZE.toString(),
+          offset: nextOffset.toString()
+        });
+        if (artifactFilter) {
+          params.set('artifactType', artifactFilter);
+        }
+        const response = await fetch(`/api/projects?${params.toString()}`);
         if (!response.ok) {
           // Handle cases where the endpoint doesn't exist or returns non-JSON
           if (response.status === 404 || response.status === 502) {
@@ -62,16 +74,25 @@ const Projects = () => {
         }
 
         const data = (await response.json()) as ProjectModel[];
-        setProjects(Array.isArray(data) ? data : []);
+        const list = Array.isArray(data) ? data : [];
+        setProjects((prev) => (reset ? list : [...prev, ...list]));
+        setHasMore(list.length === PAGE_SIZE);
+        setPageOffset(nextOffset + list.length);
       } catch (err) {
         console.error('Projects load error:', err);
         setError((err as Error).message);
+        setHasMore(false);
       } finally {
         setLoading(false);
       }
-    };
-    loadProjects();
-  }, []);
+    },
+    [artifactFilter, pageOffset]
+  );
+
+  useEffect(() => {
+    loadProjects(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [artifactFilter]);
 
   useEffect(() => {
     const loadLocalStl = async () => {
@@ -121,7 +142,37 @@ const Projects = () => {
               </div>
             )}
 
-            {!error && !projects.length && (
+            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', alignItems: 'center' }}>
+              <label htmlFor="artifact-filter" className="text-secondary" style={{ fontSize: '0.9rem' }}>
+                Filter by artifact type
+              </label>
+              <select
+                id="artifact-filter"
+                value={artifactFilter}
+                onChange={(e) => {
+                  setProjects([]);
+                  setPageOffset(0);
+                  setArtifactFilter(e.target.value);
+                }}
+                style={{ padding: '0.4rem 0.6rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}
+              >
+                <option value="">All</option>
+                <option value="stl">STL</option>
+                <option value="glb">GLB</option>
+                <option value="gcode">GCode</option>
+                <option value="thumbnail">Thumbnail</option>
+              </select>
+              <button className="btn-ghost" onClick={() => { setPageOffset(0); loadProjects(true); }} disabled={loading}>
+                Refresh
+              </button>
+              {hasMore && (
+                <button className="btn" onClick={() => loadProjects(false)} disabled={loading}>
+                  Load more
+                </button>
+              )}
+            </div>
+
+            {!error && !projects.length && !loading && (
               <div className="text-center">
                 <h3 className="mb-2">No Projects Yet</h3>
                 <p className="text-secondary mb-3">

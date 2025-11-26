@@ -6,7 +6,7 @@ import enum
 from datetime import datetime, date
 from typing import List, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -462,6 +462,19 @@ class Notification(Base):
 
 class ConversationProject(Base):
     __tablename__ = "conversation_projects"
+    __table_args__ = (
+        Index(
+            "ix_conversation_projects_conversation_id_updated_at",
+            "conversation_id",
+            "updated_at",
+        ),
+        Index("ix_conversation_projects_updated_at", "updated_at"),
+        Index(
+            "ix_conversation_projects_artifacts_gin",
+            "artifacts",
+            postgresql_using="gin",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
     conversation_id: Mapped[str] = mapped_column(
@@ -473,6 +486,7 @@ class ConversationProject(Base):
     project_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class Goal(Base):

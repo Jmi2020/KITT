@@ -245,6 +245,12 @@ async def proxy_project_artifacts(request: Request, project_id: str) -> Response
     return await proxy_to_brain(request, f"/api/projects/{project_id}/artifacts")
 
 
+@router.delete("/api/projects/{project_id}")
+async def proxy_project_delete(request: Request, project_id: str) -> Response:
+    """Proxy project delete to brain."""
+    return await proxy_to_brain(request, f"/api/projects/{project_id}")
+
+
 # Usage endpoints
 @router.get("/api/usage/metrics")
 async def proxy_usage_metrics(request: Request) -> Response:

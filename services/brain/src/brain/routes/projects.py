@@ -11,6 +11,7 @@ from common.db.projects import (
     append_artifacts,
     get_project,
     list_projects,
+    soft_delete_project,
     update_project,
     upsert_project,
 )
@@ -150,3 +151,10 @@ async def append_artifacts_endpoint(project_id: str, payload: ArtifactAppendRequ
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return serialize_project(project)
+
+
+@router.delete("/{project_id}", status_code=204)
+async def delete_project_endpoint(project_id: str):
+    deleted = soft_delete_project(project_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Project not found")
