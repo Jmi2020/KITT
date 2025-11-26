@@ -1,0 +1,493 @@
+"""Streaming Text-to-Speech with local Piper and OpenAI fallback.
+
+Supports real-time audio generation as text arrives,
+with sentence-level buffering for natural speech flow.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import io
+import logging
+import os
+import re
+import subprocess
+import tempfile
+from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import AsyncIterator, Optional
+
+logger = logging.getLogger(__name__)
+
+
+class TTSProvider(ABC):
+    """Abstract base class for TTS providers."""
+
+    @abstractmethod
+    async def synthesize(
+        self,
+        text: str,
+        voice: str = "default",
+    ) -> bytes:
+        """Synthesize text to audio bytes (PCM 16-bit mono)."""
+        ...
+
+    @abstractmethod
+    async def synthesize_stream(
+        self,
+        text: str,
+        voice: str = "default",
+    ) -> AsyncIterator[bytes]:
+        """Stream audio chunks as they're generated."""
+        ...
+
+    @abstractmethod
+    def is_available(self) -> bool:
+        """Check if this provider is available."""
+        ...
+
+    @abstractmethod
+    def get_voices(self) -> list[str]:
+        """Get available voice names."""
+        ...
+
+
+class PiperTTSClient(TTSProvider):
+    """Local Piper TTS client for offline speech synthesis.
+
+    Piper is a fast, local neural TTS engine that runs on CPU.
+    https://github.com/rhasspy/piper
+    """
+
+    # Map friendly voice names to Piper model names
+    # Maps OpenAI voice names to local Piper models
+    VOICE_MAP = {
+        "default": "en_US-amy-medium",
+        "alloy": "en_US-amy-medium",
+        "echo": "en_US-ryan-medium",
+        "fable": "en_US-ryan-medium",
+        "onyx": "en_US-ryan-medium",
+        "nova": "en_US-amy-medium",
+        "shimmer": "en_US-amy-medium",
+    }
+
+    def __init__(
+        self,
+        model_dir: str | None = None,
+        sample_rate: int = 16000,
+    ) -> None:
+        self._model_dir = Path(model_dir) if model_dir else Path.home() / ".local" / "share" / "piper"
+        self._sample_rate = sample_rate
+        self._available = False
+        self._piper_path: str | None = None
+        self._check_availability()
+
+    def _check_availability(self) -> None:
+        """Check if Piper is installed and has models available."""
+        try:
+            import sys
+
+            # Check paths where piper might be
+            candidate_paths = [
+                # Current Python environment's bin
+                str(Path(sys.executable).parent / "piper"),
+                # System paths
+                "/usr/local/bin/piper",
+                "/opt/homebrew/bin/piper",
+                str(Path.home() / ".local" / "bin" / "piper"),
+            ]
+
+            # Try to find piper executable
+            for path in candidate_paths:
+                if Path(path).exists():
+                    self._piper_path = path
+                    logger.info("Found Piper executable at: %s", self._piper_path)
+                    break
+            else:
+                # Last resort: use `which`
+                result = subprocess.run(
+                    ["which", "piper"],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode == 0:
+                    self._piper_path = result.stdout.strip()
+                    logger.info("Found Piper via which: %s", self._piper_path)
+
+            if not self._piper_path:
+                logger.warning("Piper executable not found")
+                self._available = False
+                return
+
+            # Check if we have any model files
+            if self._model_dir.exists():
+                models = list(self._model_dir.glob("*.onnx"))
+                if models:
+                    self._available = True
+                    logger.info(
+                        "Piper TTS available: %d models in %s",
+                        len(models),
+                        self._model_dir,
+                    )
+                else:
+                    logger.warning("Piper found but no .onnx models in %s", self._model_dir)
+                    self._available = False
+            else:
+                logger.warning("Piper model directory does not exist: %s", self._model_dir)
+                self._available = False
+
+        except Exception as e:
+            logger.warning("Failed to check Piper availability: %s", e)
+            self._available = False
+
+    def _get_model_path(self, voice: str) -> str:
+        """Get the model path for a voice."""
+        model_name = self.VOICE_MAP.get(voice, voice)
+
+        # Check for model file
+        model_path = self._model_dir / f"{model_name}.onnx"
+        if model_path.exists():
+            return str(model_path)
+
+        # Try with .onnx.json config file
+        config_path = self._model_dir / f"{model_name}.onnx.json"
+        if config_path.exists():
+            return str(self._model_dir / f"{model_name}.onnx")
+
+        # Return the model name and let Piper handle downloading
+        return model_name
+
+    async def synthesize(
+        self,
+        text: str,
+        voice: str = "default",
+    ) -> bytes:
+        """Synthesize text to audio bytes."""
+        if not self._available:
+            raise RuntimeError("Piper TTS not available")
+
+        model_path = self._get_model_path(voice)
+
+        # Create temp output file
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            output_path = f.name
+
+        try:
+            # Run Piper
+            process = await asyncio.create_subprocess_exec(
+                self._piper_path,
+                "--model", model_path,
+                "--output_file", output_path,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            stdout, stderr = await process.communicate(text.encode("utf-8"))
+
+            if process.returncode != 0:
+                raise RuntimeError(f"Piper failed: {stderr.decode()}")
+
+            # Read and return audio data (skip WAV header for raw PCM)
+            with open(output_path, "rb") as f:
+                wav_data = f.read()
+                # Skip 44-byte WAV header
+                return wav_data[44:]
+
+        finally:
+            try:
+                os.unlink(output_path)
+            except OSError:
+                pass
+
+    async def synthesize_stream(
+        self,
+        text: str,
+        voice: str = "default",
+    ) -> AsyncIterator[bytes]:
+        """Stream audio chunks.
+
+        Note: Piper doesn't support true streaming, so we synthesize
+        sentence by sentence for a streaming-like experience.
+        """
+        # Split into sentences for pseudo-streaming
+        sentences = self._split_sentences(text)
+
+        for sentence in sentences:
+            if sentence.strip():
+                audio = await self.synthesize(sentence, voice)
+                yield audio
+
+    def _split_sentences(self, text: str) -> list[str]:
+        """Split text into sentences."""
+        # Simple sentence splitting
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        return [s.strip() for s in sentences if s.strip()]
+
+    def is_available(self) -> bool:
+        """Check if Piper is available."""
+        return self._available
+
+    def get_voices(self) -> list[str]:
+        """Get available voice names."""
+        return list(self.VOICE_MAP.keys())
+
+
+class OpenAITTSClient(TTSProvider):
+    """OpenAI TTS API client for cloud-based speech synthesis."""
+
+    VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "tts-1",
+    ) -> None:
+        self._api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self._model = model
+        self._client = None
+
+    async def _ensure_client(self) -> None:
+        """Lazy initialization of OpenAI client."""
+        if self._client is not None:
+            return
+
+        try:
+            from openai import AsyncOpenAI
+
+            self._client = AsyncOpenAI(api_key=self._api_key)
+        except ImportError:
+            raise RuntimeError("openai package not installed")
+
+    async def synthesize(
+        self,
+        text: str,
+        voice: str = "alloy",
+    ) -> bytes:
+        """Synthesize text using OpenAI TTS API."""
+        await self._ensure_client()
+
+        if self._client is None:
+            raise RuntimeError("OpenAI client not initialized")
+
+        # Map voice name if needed
+        if voice not in self.VOICES:
+            voice = "alloy"
+
+        response = await self._client.audio.speech.create(
+            model=self._model,
+            voice=voice,
+            input=text,
+            response_format="pcm",  # Raw 24kHz 16-bit mono PCM
+        )
+
+        # Read response content
+        audio_data = response.content
+
+        # Resample from 24kHz to 16kHz if needed
+        # For now, return as-is (client can handle resampling)
+        return audio_data
+
+    async def synthesize_stream(
+        self,
+        text: str,
+        voice: str = "alloy",
+    ) -> AsyncIterator[bytes]:
+        """Stream audio from OpenAI TTS.
+
+        OpenAI TTS supports streaming via response chunks.
+        """
+        await self._ensure_client()
+
+        if self._client is None:
+            raise RuntimeError("OpenAI client not initialized")
+
+        if voice not in self.VOICES:
+            voice = "alloy"
+
+        # Use streaming response
+        async with self._client.audio.speech.with_streaming_response.create(
+            model=self._model,
+            voice=voice,
+            input=text,
+            response_format="pcm",
+        ) as response:
+            async for chunk in response.iter_bytes(chunk_size=4096):
+                yield chunk
+
+    def is_available(self) -> bool:
+        """Check if API key is configured."""
+        return bool(self._api_key)
+
+    def get_voices(self) -> list[str]:
+        """Get available voice names."""
+        return self.VOICES
+
+
+class StreamingTTS:
+    """Hybrid streaming TTS that tries local Piper first, falls back to OpenAI.
+
+    Provides real-time audio generation with automatic provider selection.
+    """
+
+    def __init__(
+        self,
+        piper_model_dir: str | None = None,
+        openai_api_key: str | None = None,
+        openai_model: str = "tts-1",
+        prefer_local: bool = True,
+    ) -> None:
+        self._local = PiperTTSClient(model_dir=piper_model_dir)
+        self._cloud = OpenAITTSClient(api_key=openai_api_key, model=openai_model)
+        self._prefer_local = prefer_local
+        self._local_failures = 0
+        self._max_local_failures = 3
+
+    async def synthesize(
+        self,
+        text: str,
+        voice: str = "alloy",
+    ) -> bytes:
+        """Synthesize text to audio with automatic fallback."""
+        providers = self._get_provider_order()
+
+        last_error: Exception | None = None
+
+        for provider in providers:
+            try:
+                result = await provider.synthesize(text, voice)
+
+                if provider is self._local:
+                    self._local_failures = 0
+
+                return result
+
+            except Exception as e:
+                logger.warning(
+                    "TTS provider %s failed: %s",
+                    provider.__class__.__name__,
+                    e,
+                )
+                last_error = e
+
+                if provider is self._local:
+                    self._local_failures += 1
+
+        raise RuntimeError(
+            f"All TTS providers failed. Last error: {last_error}"
+        ) from last_error
+
+    async def synthesize_stream(
+        self,
+        text: str,
+        voice: str = "alloy",
+    ) -> AsyncIterator[bytes]:
+        """Stream audio chunks with automatic fallback."""
+        providers = self._get_provider_order()
+
+        for provider in providers:
+            try:
+                async for chunk in provider.synthesize_stream(text, voice):
+                    yield chunk
+
+                if provider is self._local:
+                    self._local_failures = 0
+
+                return  # Success, don't try other providers
+
+            except Exception as e:
+                logger.warning(
+                    "TTS provider %s failed: %s",
+                    provider.__class__.__name__,
+                    e,
+                )
+
+                if provider is self._local:
+                    self._local_failures += 1
+
+                continue  # Try next provider
+
+        # All providers failed - raise error
+        raise RuntimeError("All TTS providers failed")
+
+    async def synthesize_text_stream(
+        self,
+        text_stream: AsyncIterator[str],
+        voice: str = "alloy",
+    ) -> AsyncIterator[bytes]:
+        """Synthesize audio from streaming text input.
+
+        Buffers text until complete sentences are available,
+        then synthesizes and yields audio chunks.
+        """
+        buffer = ""
+        sentence_pattern = re.compile(r'([.!?])\s*')
+
+        async for text_chunk in text_stream:
+            buffer += text_chunk
+
+            # Check for complete sentences
+            while True:
+                match = sentence_pattern.search(buffer)
+                if not match:
+                    break
+
+                # Extract complete sentence
+                end_pos = match.end()
+                sentence = buffer[:end_pos].strip()
+                buffer = buffer[end_pos:]
+
+                if sentence:
+                    async for audio_chunk in self.synthesize_stream(sentence, voice):
+                        yield audio_chunk
+
+        # Handle remaining text
+        if buffer.strip():
+            async for audio_chunk in self.synthesize_stream(buffer.strip(), voice):
+                yield audio_chunk
+
+    def _get_provider_order(self) -> list[TTSProvider]:
+        """Determine provider order based on preferences and health."""
+        providers: list[TTSProvider] = []
+
+        use_local = (
+            self._prefer_local
+            and self._local.is_available()
+            and self._local_failures < self._max_local_failures
+        )
+
+        if use_local:
+            providers.append(self._local)
+
+        if self._cloud.is_available():
+            providers.append(self._cloud)
+
+        if not providers and not use_local:
+            providers.append(self._local)
+
+        return providers
+
+    def get_voices(self) -> list[str]:
+        """Get available voices from active provider."""
+        if self._prefer_local and self._local.is_available():
+            return self._local.get_voices()
+        elif self._cloud.is_available():
+            return self._cloud.get_voices()
+        return ["alloy"]
+
+    def get_status(self) -> dict:
+        """Get current TTS provider status."""
+        return {
+            "local_available": self._local.is_available(),
+            "cloud_available": self._cloud.is_available(),
+            "local_failures": self._local_failures,
+            "prefer_local": self._prefer_local,
+            "active_provider": (
+                "local"
+                if self._prefer_local
+                and self._local.is_available()
+                and self._local_failures < self._max_local_failures
+                else "cloud" if self._cloud.is_available() else "none"
+            ),
+            "voices": self.get_voices(),
+        }

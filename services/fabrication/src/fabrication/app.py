@@ -37,6 +37,7 @@ from .monitoring.camera_capture import CameraCapture
 from .coordinator.queue_optimizer import QueueOptimizer
 from .coordinator.scheduler import ParallelJobScheduler
 from .coordinator.distributor import JobDistributor
+from .routes.bambu import router as bambu_router
 
 # Configure logging
 configure_logging()
@@ -249,6 +250,9 @@ app = FastAPI(
 static_dir = Path(__file__).parent.parent.parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# Include Bambu Labs printer routes
+app.include_router(bambu_router)
 
 
 # ============================================================================

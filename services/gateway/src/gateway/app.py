@@ -23,6 +23,9 @@ from .routes.providers import router as providers_router
 from .routes.research import router as research_router
 from .routes.projects_local import router as projects_local_router
 from .routes.brain_proxy import router as brain_proxy_router
+from .routes.cameras import router as cameras_router
+from .routes.voice_proxy import router as voice_router
+from .routes.bambu_proxy import router as bambu_router
 
 app = FastAPI(title="KITTY Gateway")
 
@@ -51,6 +54,9 @@ app.include_router(providers_router)  # Provider information
 app.include_router(research_router)  # Research sessions and results
 app.include_router(projects_local_router)  # Local STL listing/downloading
 app.include_router(brain_proxy_router)  # Proxy to brain service (query, conversations, autonomy, etc.)
+app.include_router(cameras_router)  # WebSocket camera streaming
+app.include_router(voice_router)  # Voice service proxy (STT/TTS/WebSocket)
+app.include_router(bambu_router)  # Bambu Labs cloud API proxy
 
 storage_root = Path(os.getenv("KITTY_STORAGE_ROOT", "storage"))
 storage_root.mkdir(parents=True, exist_ok=True)

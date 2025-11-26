@@ -148,6 +148,34 @@ a:hover {
   box-shadow: var(--shadow-sm);
 }
 
+.kitty-app header .header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.kitty-app header .menu-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--border-medium);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 1.25rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.kitty-app header .menu-button:hover {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: white;
+}
+
 .kitty-app header h1 {
   margin: 0;
   font-size: 1.5rem;

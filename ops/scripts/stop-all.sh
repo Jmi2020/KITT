@@ -54,6 +54,17 @@ else
 fi
 
 # ========================================
+# Phase 1.5: Stop Voice Service
+# ========================================
+
+log "Phase 1.5: Stopping voice service"
+if "$SCRIPT_DIR/stop-voice-service.sh" >/dev/null 2>&1; then
+    success "Voice service stopped"
+else
+    warn "Voice service stop script reported an issue (check logs)"
+fi
+
+# ========================================
 # Phase 2: Stop Docker Services
 # ========================================
 

@@ -13,16 +13,27 @@ import MaterialInventory from './pages/MaterialInventory';
 import PrintIntelligence from './pages/PrintIntelligence';
 import VisionService from './pages/VisionService';
 import AutonomyCalendar from './pages/AutonomyCalendar';
+import Voice from './pages/Voice';
+import Settings from './pages/Settings';
+import Menu from './pages/Menu';
 import useRemoteMode from './hooks/useRemoteMode';
 import { useTheme } from './contexts/ThemeContext';
 
+type ViewType = 'menu' | 'dashboard' | 'projects' | 'console' | 'shell' | 'wall' | 'vision' | 'images' | 'research' | 'results' | 'iocontrol' | 'inventory' | 'intelligence' | 'cameras' | 'calendar' | 'voice' | 'settings';
+
 const App = () => {
-  const [activeView, setActiveView] = useState<'dashboard' | 'projects' | 'console' | 'shell' | 'wall' | 'vision' | 'images' | 'research' | 'results' | 'iocontrol' | 'inventory' | 'intelligence' | 'cameras' | 'calendar'>('shell');
+  const [activeView, setActiveView] = useState<ViewType>('menu');
   const remoteMode = useRemoteMode();
   const { theme, toggleTheme } = useTheme();
 
+  const handleNavigate = (view: string) => {
+    setActiveView(view as ViewType);
+  };
+
   const renderView = () => {
     switch (activeView) {
+      case 'menu':
+        return <Menu onNavigate={handleNavigate} />;
       case 'projects':
         return <Projects />;
       case 'console':
@@ -49,6 +60,10 @@ const App = () => {
         return <VisionService />;
       case 'calendar':
         return <AutonomyCalendar />;
+      case 'voice':
+        return <Voice />;
+      case 'settings':
+        return <Settings />;
       default:
         return <Dashboard remoteMode={remoteMode} />;
     }
@@ -57,48 +72,33 @@ const App = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const viewParam = params.get('view');
-    if (viewParam === 'vision') {
-      setActiveView('vision');
-    } else if (viewParam === 'images') {
-      setActiveView('images');
-    } else if (viewParam === 'shell') {
-      setActiveView('shell');
-    } else if (viewParam === 'research') {
-      setActiveView('research');
-    } else if (viewParam === 'results') {
-      setActiveView('results');
-    } else if (viewParam === 'iocontrol') {
-      setActiveView('iocontrol');
-    } else if (viewParam === 'inventory') {
-      setActiveView('inventory');
-    } else if (viewParam === 'intelligence') {
-      setActiveView('intelligence');
-    } else if (viewParam === 'cameras') {
-      setActiveView('cameras');
-    } else if (viewParam === 'calendar') {
-      setActiveView('calendar');
+    const validViews: ViewType[] = ['menu', 'dashboard', 'projects', 'console', 'shell', 'wall', 'vision', 'images', 'research', 'results', 'iocontrol', 'inventory', 'intelligence', 'cameras', 'calendar', 'voice', 'settings'];
+    if (viewParam && validViews.includes(viewParam as ViewType)) {
+      setActiveView(viewParam as ViewType);
     }
   }, []);
 
   return (
     <div className="kitty-app">
       <header>
-        <h1>KITTY Control Console</h1>
+        <div className="header-left">
+          {activeView !== 'menu' && (
+            <button className="menu-button" onClick={() => setActiveView('menu')}>
+              ☰
+            </button>
+          )}
+          <h1>KITTY</h1>
+        </div>
         <nav>
-          <button onClick={() => setActiveView('shell')}>💬 Shell</button>
-          <button onClick={() => setActiveView('research')}>🔬 Research</button>
-          <button onClick={() => setActiveView('results')}>📊 Results</button>
-          <button onClick={() => setActiveView('calendar')}>📅 Calendar</button>
-          <button onClick={() => setActiveView('iocontrol')}>⚙️ I/O Control</button>
-          <button onClick={() => setActiveView('inventory')}>📦 Inventory</button>
-          <button onClick={() => setActiveView('intelligence')}>📊 Intelligence</button>
-          <button onClick={() => setActiveView('cameras')}>📹 Cameras</button>
-          <button onClick={() => setActiveView('dashboard')}>Dashboard</button>
-          <button onClick={() => setActiveView('projects')}>Projects</button>
-          <button onClick={() => setActiveView('console')}>Fabrication Console</button>
-          <button onClick={() => setActiveView('wall')}>Wall Terminal</button>
-          <button onClick={() => setActiveView('vision')}>Vision Gallery</button>
-          <button onClick={() => setActiveView('images')}>Image Generator</button>
+          {activeView !== 'menu' && (
+            <>
+              <button onClick={() => setActiveView('voice')}>🎙️ Voice</button>
+              <button onClick={() => setActiveView('shell')}>💬 Shell</button>
+              <button onClick={() => setActiveView('console')}>🎨 Fabricate</button>
+              <button onClick={() => setActiveView('dashboard')}>🖨️ Printers</button>
+              <button onClick={() => setActiveView('settings')}>⚙️ Settings</button>
+            </>
+          )}
           <button className="theme-toggle" onClick={toggleTheme} title="Toggle theme">
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>

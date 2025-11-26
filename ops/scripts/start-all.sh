@@ -375,6 +375,43 @@ if ! start_images_service; then
 fi
 
 # ========================================
+# Phase 7: Voice Service
+# ========================================
+
+log "Phase 7: Starting voice service"
+
+VOICE_SERVICE_LOG="$LOG_DIR/voice-service.log"
+VOICE_PORT="${VOICE_PORT:-8400}"
+
+is_voice_service_running() {
+    curl -sf "http://localhost:${VOICE_PORT}/healthz" >/dev/null 2>&1
+}
+
+if is_voice_service_running; then
+    success "Voice service already running"
+else
+    if "$SCRIPT_DIR/start-voice-service.sh" >> "$VOICE_SERVICE_LOG" 2>&1; then
+        # Wait for voice service to become healthy
+        MAX_WAIT=30
+        ELAPSED=0
+        while [ $ELAPSED -lt $MAX_WAIT ]; do
+            if is_voice_service_running; then
+                success "Voice service running"
+                break
+            fi
+            sleep 2
+            ELAPSED=$((ELAPSED + 2))
+        done
+
+        if [ $ELAPSED -ge $MAX_WAIT ]; then
+            warn "Voice service health check timed out (check $VOICE_SERVICE_LOG)"
+        fi
+    else
+        warn "Voice service startup failed (check $VOICE_SERVICE_LOG)"
+    fi
+fi
+
+# ========================================
 # Startup Summary
 # ========================================
 
@@ -389,6 +426,7 @@ echo "  llama.cpp F16: http://localhost:8082"
 echo "  Brain API:     http://localhost:8000"
 echo "  Gateway (LB):  http://localhost:8080  (3 replicas + HAProxy)"
 echo "  HAProxy Stats: http://localhost:8404/stats  (admin/changeme)"
+echo "  Voice Service: http://localhost:8400"
 echo "  UI:            http://localhost:4173"
 echo "  Research UI:   http://localhost:8080/research  (P1 #2)"
 echo "  I/O Control:   http://localhost:8080/io-control  (P1 #3)"

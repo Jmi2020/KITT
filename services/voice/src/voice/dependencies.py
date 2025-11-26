@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from functools import lru_cache
 from string import Formatter
+from typing import TYPE_CHECKING
 
 from common.cache import SemanticCache
 from common.config import settings
@@ -13,6 +15,13 @@ from brain.dependencies import get_orchestrator
 
 from .parser import VoiceParser
 from .router import VoiceRouter
+
+if TYPE_CHECKING:
+    from .stt import HybridSTT
+    from .tts import StreamingTTS
+    from .websocket import VoiceWebSocketHandler
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -46,3 +55,102 @@ def get_parser() -> VoiceParser:
 def get_router() -> VoiceRouter:
     mqtt_client = MQTTClient(client_id="voice")
     return VoiceRouter(get_parser(), mqtt_client, get_orchestrator(), SemanticCache())
+
+
+@lru_cache(maxsize=1)
+def get_stt() -> HybridSTT | None:
+    """Initialize hybrid STT with local Whisper and OpenAI fallback."""
+    try:
+        from .stt import HybridSTT
+
+        whisper_model = os.getenv("WHISPER_MODEL", "base.en")
+        whisper_path = os.getenv("WHISPER_MODEL_PATH")
+        openai_key = os.getenv("OPENAI_API_KEY")
+        prefer_local = os.getenv("VOICE_PREFER_LOCAL", "true").lower() == "true"
+
+        stt = HybridSTT(
+            local_model_path=whisper_path,
+            local_model_size=whisper_model,
+            openai_api_key=openai_key,
+            prefer_local=prefer_local,
+        )
+
+        logger.info("STT initialized: %s", stt.get_status())
+        return stt
+
+    except Exception as e:
+        logger.warning("Failed to initialize STT: %s", e)
+        return None
+
+
+@lru_cache(maxsize=1)
+def get_tts() -> StreamingTTS | None:
+    """Initialize hybrid TTS with local Piper and OpenAI fallback."""
+    try:
+        from .tts import StreamingTTS
+
+        piper_dir = os.getenv("PIPER_MODEL_DIR")
+        openai_key = os.getenv("OPENAI_API_KEY")
+        openai_model = os.getenv("OPENAI_TTS_MODEL", "tts-1")
+        prefer_local = os.getenv("VOICE_PREFER_LOCAL", "true").lower() == "true"
+
+        tts = StreamingTTS(
+            piper_model_dir=piper_dir,
+            openai_api_key=openai_key,
+            openai_model=openai_model,
+            prefer_local=prefer_local,
+        )
+
+        logger.info("TTS initialized: %s", tts.get_status())
+        return tts
+
+    except Exception as e:
+        logger.warning("Failed to initialize TTS: %s", e)
+        return None
+
+
+@lru_cache(maxsize=1)
+def get_router_optional() -> VoiceRouter | None:
+    """Try to initialize router, but allow graceful failure."""
+    try:
+        return get_router()
+    except Exception as e:
+        logger.warning("Router initialization failed (MQTT/Brain unavailable): %s", e)
+        return None
+
+
+@lru_cache(maxsize=1)
+def get_websocket_handler() -> VoiceWebSocketHandler | None:
+    """Initialize WebSocket handler for real-time voice streaming.
+
+    Will work with just STT/TTS even if router/orchestrator unavailable.
+    """
+    try:
+        from .websocket import VoiceWebSocketHandler
+
+        # Try to get router, but don't fail if services unavailable
+        router = get_router_optional()
+        stt = get_stt()
+        tts = get_tts()
+
+        # At minimum, we need STT or TTS to be useful
+        if stt is None and tts is None:
+            logger.warning("Neither STT nor TTS available, WebSocket handler limited")
+
+        handler = VoiceWebSocketHandler(
+            router=router,
+            stt=stt,
+            tts=tts,
+        )
+
+        logger.info(
+            "Voice WebSocket handler initialized (STT: %s, TTS: %s, Router: %s)",
+            stt is not None,
+            tts is not None,
+            router is not None,
+        )
+        return handler
+
+    except Exception as e:
+        logger.warning("Failed to initialize WebSocket handler: %s", e)
+        return None
