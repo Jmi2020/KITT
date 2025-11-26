@@ -333,14 +333,26 @@ class CADCycler:
             except MeshConversionError as conv_err:
                 LOGGER.warning("GLB to STL conversion failed", error=str(conv_err))
 
+            thumbnail = result.get("thumbnail", "")
             metadata = {
                 "task_id": job.get("task_id", ""),
-                "thumbnail": result.get("thumbnail", ""),
+                "thumbnail": thumbnail,
                 "source": "text_to_model",
+                "prompt": prompt,
                 "glb_location": glb_location,
             }
             if stl_location:
                 metadata["stl_location"] = stl_location
+
+            # Emit event for background rename
+            asyncio.create_task(
+                self._emit_rename_event(
+                    glb_location=glb_location,
+                    stl_location=stl_location,
+                    thumbnail=thumbnail,
+                    prompt=prompt,
+                )
+            )
 
             return CADArtifact(
                 provider="tripo",
@@ -481,6 +493,17 @@ class CADCycler:
                 "glb_location": glb_location or "",
                 "stl_location": stl_location,
             }
+
+            # Emit event for background rename
+            asyncio.create_task(
+                self._emit_rename_event(
+                    glb_location=glb_location,
+                    stl_location=stl_location,
+                    thumbnail=thumbnail,
+                    prompt=reference.friendly_name or reference.title or "",
+                )
+            )
+
             return CADArtifact(
                 provider="tripo",
                 artifact_type="stl",
@@ -530,6 +553,16 @@ class CADCycler:
         }
         if stl_location:
             metadata["stl_location"] = stl_location
+
+        # Emit event for background rename
+        asyncio.create_task(
+            self._emit_rename_event(
+                glb_location=glb_location,
+                stl_location=stl_location,
+                thumbnail=thumbnail,
+                prompt=reference.friendly_name or reference.title or "",
+            )
+        )
 
         return CADArtifact(
             provider="tripo",
@@ -656,3 +689,37 @@ class CADCycler:
             if isinstance(inner, dict):
                 return inner
         return payload
+
+    async def _emit_rename_event(
+        self,
+        glb_location: Optional[str],
+        stl_location: Optional[str],
+        thumbnail: Optional[str],
+        prompt: Optional[str],
+    ) -> None:
+        """Emit event for background rename processing using Gemma 3 vision.
+
+        This runs in the background and does not block artifact creation.
+        If renaming fails, the original UUID-based filename is preserved.
+        """
+        if not thumbnail:
+            LOGGER.debug("Skipping rename - no thumbnail available")
+            return
+
+        try:
+            from .workers.rename_handler import handle_artifact_saved
+
+            result = await handle_artifact_saved({
+                "glb_location": glb_location,
+                "stl_location": stl_location,
+                "thumbnail": thumbnail,
+                "prompt": prompt,
+            })
+            if result.get("success"):
+                LOGGER.info(
+                    "Artifact rename completed",
+                    glb_new=result.get("glb_new"),
+                    stl_new=result.get("stl_new"),
+                )
+        except Exception as e:
+            LOGGER.warning("Failed to emit rename event", error=str(e))
