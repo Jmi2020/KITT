@@ -21,6 +21,7 @@ from .routes.collective import router as collective_router
 from .routes.io_control import router as io_control_router
 from .routes.providers import router as providers_router
 from .routes.research import router as research_router
+from .routes.projects_local import router as projects_local_router
 from .routes.brain_proxy import router as brain_proxy_router
 
 app = FastAPI(title="KITTY Gateway")
@@ -48,6 +49,7 @@ app.include_router(collective_router)
 app.include_router(io_control_router)  # I/O Control Dashboard API
 app.include_router(providers_router)  # Provider information
 app.include_router(research_router)  # Research sessions and results
+app.include_router(projects_local_router)  # Local STL listing/downloading
 app.include_router(brain_proxy_router)  # Proxy to brain service (query, conversations, autonomy, etc.)
 
 storage_root = Path(os.getenv("KITTY_STORAGE_ROOT", "storage"))

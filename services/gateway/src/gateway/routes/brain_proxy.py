@@ -227,6 +227,23 @@ async def proxy_project_create_slash(request: Request) -> Response:
     """Proxy project create to brain (with trailing slash)."""
     return await proxy_to_brain(request, "/api/projects/")
 
+@router.get("/api/projects/{project_id}")
+async def proxy_project_get(request: Request, project_id: str) -> Response:
+    """Proxy project detail to brain."""
+    return await proxy_to_brain(request, f"/api/projects/{project_id}")
+
+
+@router.patch("/api/projects/{project_id}")
+async def proxy_project_update(request: Request, project_id: str) -> Response:
+    """Proxy project update to brain."""
+    return await proxy_to_brain(request, f"/api/projects/{project_id}")
+
+
+@router.post("/api/projects/{project_id}/artifacts")
+async def proxy_project_artifacts(request: Request, project_id: str) -> Response:
+    """Proxy project artifact append to brain."""
+    return await proxy_to_brain(request, f"/api/projects/{project_id}/artifacts")
+
 
 # Usage endpoints
 @router.get("/api/usage/metrics")
