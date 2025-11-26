@@ -7,9 +7,11 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .routes.generate import router as generate_router
+from .routes.print_integration import router as print_router
 
 app = FastAPI(title="KITTY CAD Service")
 app.include_router(generate_router)
+app.include_router(print_router)
 
 # Serve artifact files (GLB, STL) for web UI downloads
 ARTIFACTS_DIR = Path(os.getenv("CAD_ARTIFACTS_DIR", "artifacts"))

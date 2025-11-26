@@ -1,8 +1,9 @@
-"""Background worker for renaming artifacts using Gemma 3 vision."""
+"""Background worker for renaming artifacts using user prompt or vision fallback."""
 
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -13,9 +14,54 @@ from ..vision.gemma_client import GemmaVisionClient
 
 LOGGER = structlog.get_logger(__name__)
 
+# Words to filter out when extracting filename from prompt
+STOPWORDS = {
+    "a", "an", "the", "of", "for", "with", "and", "or", "in", "on", "to",
+    "create", "make", "generate", "design", "build", "model", "render",
+    "3d", "stl", "glb", "file", "please", "can", "you", "i", "want",
+    "need", "like", "would", "should", "could", "detailed", "simple",
+    "realistic", "stylized", "low", "poly", "high", "resolution",
+}
+
+
+def extract_filename_from_prompt(prompt: str, max_chars: int = 19) -> Optional[str]:
+    """Extract descriptive filename from user prompt.
+
+    Filters stopwords and extracts meaningful keywords.
+
+    Args:
+        prompt: User's generation prompt
+        max_chars: Maximum filename length
+
+    Returns:
+        Sanitized filename or None if extraction fails
+    """
+    if not prompt:
+        return None
+
+    # Lowercase and extract words
+    words = re.findall(r"[a-z]+", prompt.lower())
+
+    # Filter stopwords and short words
+    keywords = [w for w in words if w not in STOPWORDS and len(w) > 2]
+
+    if not keywords:
+        return None
+
+    # Build filename from keywords, respecting max_chars
+    filename = ""
+    for word in keywords:
+        candidate = f"{filename}-{word}" if filename else word
+        if len(candidate) <= max_chars:
+            filename = candidate
+        else:
+            break  # Stop adding words when we'd exceed limit
+
+    return filename if filename else None
+
 
 class ArtifactRenameWorker:
-    """Background worker to rename artifacts using vision-based descriptions."""
+    """Background worker to rename artifacts using prompt extraction or vision fallback."""
 
     def __init__(self):
         self.vision_client = GemmaVisionClient()
@@ -67,16 +113,28 @@ class ArtifactRenameWorker:
             )
             return result
 
-        # Generate descriptive filename from vision
-        description = await self.vision_client.generate_filename(
-            thumbnail_url=thumbnail_url,
-            user_prompt=user_prompt,
-            max_chars=19,  # Leave room for _hash.ext (28 - 4 - 1 - 4 = 19)
-        )
+        # Strategy 1: Extract filename from user prompt (most accurate)
+        description = extract_filename_from_prompt(user_prompt, max_chars=19)
+        if description:
+            LOGGER.info(
+                "Extracted filename from prompt",
+                prompt=user_prompt,
+                description=description,
+            )
+        else:
+            # Strategy 2: Fall back to vision analysis
+            if thumbnail_url:
+                LOGGER.info("No prompt available, falling back to vision")
+                description = await self.vision_client.generate_filename(
+                    thumbnail_url=thumbnail_url,
+                    user_prompt=user_prompt,
+                    max_chars=19,  # Leave room for _hash.ext (28 - 4 - 1 - 4 = 19)
+                )
 
         if not description:
             LOGGER.warning(
-                "Vision failed to generate filename, keeping UUID",
+                "Failed to generate filename from prompt or vision, keeping UUID",
+                prompt=user_prompt,
                 thumbnail=thumbnail_url,
             )
             return result

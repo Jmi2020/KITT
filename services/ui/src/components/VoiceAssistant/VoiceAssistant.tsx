@@ -115,11 +115,12 @@ export function VoiceAssistant({
     status === 'error' ? 'error' : 'idle';
 
   const containerClass = fullscreen
-    ? 'fixed inset-0 bg-gray-900 flex flex-col items-center justify-center'
+    ? 'fixed inset-0 bg-gray-900 overflow-y-auto'
     : 'relative w-full max-w-2xl mx-auto p-6';
 
   return (
     <div className={containerClass}>
+      <div className={fullscreen ? 'min-h-full flex flex-col items-center justify-start py-8 px-4 max-w-2xl mx-auto w-full' : ''}>
       {/* Close button */}
       {onClose && (
         <button
@@ -256,29 +257,33 @@ export function VoiceAssistant({
           )}
         </div>
 
-        {/* Local/Cloud Toggle */}
+        {/* Local/Cloud Toggle - Segmented Button */}
         {status !== 'disconnected' && (
-          <div className="flex items-center justify-center gap-3 pt-2">
-            <span className={`text-xs ${preferLocal ? 'text-cyan-400' : 'text-gray-500'}`}>
-              Local
-            </span>
-            <button
-              onClick={() => setPreferLocal(!preferLocal)}
-              className={`relative w-12 h-6 rounded-full transition-colors ${
-                preferLocal ? 'bg-cyan-500/30' : 'bg-purple-500/30'
-              }`}
-            >
-              <span
-                className={`absolute top-1 w-4 h-4 rounded-full transition-all ${
+          <div className="flex items-center justify-center pt-2">
+            <div className="inline-flex rounded-lg border border-gray-600 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setPreferLocal(true)}
+                className={`px-4 py-2 text-sm font-medium transition-all ${
                   preferLocal
-                    ? 'left-1 bg-cyan-400'
-                    : 'left-7 bg-purple-400'
+                    ? 'bg-cyan-500 text-gray-900'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
                 }`}
-              />
-            </button>
-            <span className={`text-xs ${!preferLocal ? 'text-purple-400' : 'text-gray-500'}`}>
-              Cloud
-            </span>
+              >
+                Local
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreferLocal(false)}
+                className={`px-4 py-2 text-sm font-medium transition-all ${
+                  !preferLocal
+                    ? 'bg-purple-500 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                Cloud
+              </button>
+            </div>
           </div>
         )}
 
@@ -342,6 +347,7 @@ export function VoiceAssistant({
         <p className="mt-3 text-xs text-gray-500">
           KITTY understands natural language - just speak normally!
         </p>
+      </div>
       </div>
     </div>
   );

@@ -96,7 +96,7 @@ fi
 
 # Start service
 VOICE_HOST="${VOICE_HOST:-127.0.0.1}"
-VOICE_PORT="${VOICE_PORT:-8400}"
+VOICE_PORT="${VOICE_PORT:-8410}"
 
 .venv/bin/uvicorn voice.app:app \
     --host "${VOICE_HOST}" \
