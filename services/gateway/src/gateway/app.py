@@ -15,6 +15,7 @@ from .routes.remote import router as remote_router
 from .routes.vision import router as vision_router
 from .routes.images import router as images_router
 from .routes.fabrication import router as fabrication_router
+from .routes.cad import router as cad_router
 from .routes.coding import router as coding_router
 from .routes.collective import router as collective_router
 from .routes.io_control import router as io_control_router
@@ -41,6 +42,7 @@ app.include_router(remote_router)
 app.include_router(vision_router)
 app.include_router(images_router)
 app.include_router(fabrication_router)
+app.include_router(cad_router)  # CAD generation and artifact serving
 app.include_router(coding_router)
 app.include_router(collective_router)
 app.include_router(io_control_router)  # I/O Control Dashboard API

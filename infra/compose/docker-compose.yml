@@ -70,6 +70,7 @@ services:
       UPSTREAM_BRAIN_URL: http://brain:8000
       FABRICATION_BASE: http://fabrication:8300
       DISCOVERY_BASE: http://discovery:8500
+      CAD_BASE: http://cad:8200
       # CODER_AGENT_BASE: http://coder-agent:8092  # Service disabled - not yet implemented
       SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://searxng:8080}
       INTERNAL_SEARXNG_BASE_URL: http://searxng:8080
@@ -81,6 +82,7 @@ services:
       - brain
       - fabrication
       - discovery
+      - cad
     volumes:
       - ../../services/common:/app/services/common:ro
       - ../../services/gateway:/app/services/gateway:ro

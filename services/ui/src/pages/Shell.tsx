@@ -58,7 +58,7 @@ const COMMANDS = [
   { cmd: '/provider', desc: 'Select LLM provider (local/openai/anthropic/etc)' },
   { cmd: '/model', desc: 'Select specific model' },
   { cmd: '/providers', desc: 'List all available providers' },
-  { cmd: '/cad', desc: 'Generate CAD model from description' },
+  { cmd: '/cad', desc: 'Generate CAD model (--organic/--parametric --image <ref>)' },
   { cmd: '/generate', desc: 'Generate image with Stable Diffusion' },
   { cmd: '/list', desc: 'Show cached artifacts' },
   { cmd: '/queue', desc: 'Queue artifact to printer' },
@@ -74,6 +74,56 @@ const COMMANDS = [
   { cmd: '/reset', desc: 'Start a new conversation session' },
   { cmd: '/clear', desc: 'Clear message history (local only)' },
 ];
+
+// Artifact path translation for web UI
+const ARTIFACTS_BASE_URL = '/api/cad/artifacts';
+
+const translateArtifactPath = (location: string): string => {
+  if (location.startsWith('artifacts/')) {
+    return `${ARTIFACTS_BASE_URL}/${location.replace('artifacts/', '')}`;
+  }
+  if (location.startsWith('storage/artifacts/')) {
+    return `${ARTIFACTS_BASE_URL}/${location.replace('storage/artifacts/', '')}`;
+  }
+  if (location.startsWith('/')) {
+    const filename = location.split('/').pop() || location;
+    return `${ARTIFACTS_BASE_URL}/${filename}`;
+  }
+  return location;
+};
+
+interface CadArtifact {
+  provider: string;
+  artifactType: string;
+  location: string;
+  metadata?: {
+    glb_location?: string;
+    stl_location?: string;
+    thumbnail?: string;
+    [key: string]: string | undefined;
+  };
+}
+
+const formatArtifactMessage = (artifacts: CadArtifact[]): string => {
+  if (!artifacts.length) return 'No artifacts generated.';
+
+  return artifacts.map((a, i) => {
+    const lines = [`[${i + 1}] ${a.provider} (${a.artifactType})`];
+    const glbLoc = a.metadata?.glb_location;
+    const stlLoc = a.metadata?.stl_location;
+
+    if (glbLoc) {
+      lines.push(`    📦 GLB (preview): ${translateArtifactPath(glbLoc)}`);
+    }
+    if (stlLoc) {
+      lines.push(`    🖨️  STL (slicer):  ${translateArtifactPath(stlLoc)}`);
+    }
+    if (!glbLoc && !stlLoc) {
+      lines.push(`    📥 ${translateArtifactPath(a.location)}`);
+    }
+    return lines.join('\n');
+  }).join('\n\n');
+};
 
 const Shell = () => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -321,9 +371,58 @@ Commands are executed locally when possible.`);
         // This will be handled by API, but we could show local status
         return false; // Send to API
 
+      case 'cad':
+        // CAD command is handled specially in sendMessage
+        return false;
+
       default:
         return false; // Command not handled locally, send to API
     }
+  };
+
+  // Parse /cad command flags (mirrors CLI main.py logic)
+  const parseCadCommand = (args: string[]): { prompt: string; mode: string; imageRefs: string[] } => {
+    let organic = false;
+    let parametric = false;
+    const imageRefs: string[] = [];
+    const promptTokens: string[] = [];
+    let skipNext = false;
+
+    for (let i = 0; i < args.length; i++) {
+      if (skipNext) {
+        skipNext = false;
+        continue;
+      }
+      const token = args[i];
+      const lower = token.toLowerCase();
+
+      if (lower === '--o' || lower === '--organic') {
+        organic = true;
+        continue;
+      }
+      if (lower === '--p' || lower === '--parametric') {
+        parametric = true;
+        continue;
+      }
+      if (lower === '--image' || lower === '-i') {
+        if (i + 1 < args.length) {
+          imageRefs.push(args[i + 1]);
+          skipNext = true;
+        }
+        continue;
+      }
+      promptTokens.push(token);
+    }
+
+    let mode = 'organic'; // default
+    if (parametric) mode = 'parametric';
+    if (organic) mode = 'organic';
+
+    return {
+      prompt: promptTokens.join(' '),
+      mode,
+      imageRefs,
+    };
   };
 
   const sendMessage = async () => {
@@ -390,6 +489,78 @@ Commands are executed locally when possible.`);
       } else if (userInput.startsWith('/usage')) {
         endpoint = '/api/usage/metrics';
         payload = null;
+      } else if (userInput.startsWith('/cad')) {
+        // CAD generation with CLI-compatible flag parsing
+        endpoint = '/api/cad/generate';
+        const parts = userInput.split(/\s+/).slice(1);
+
+        if (parts.length === 0) {
+          // Show usage help
+          setMessages(prev => prev.filter(m => m.id !== thinkingId));
+          addMessage('system', `Usage: /cad <prompt> [--organic|--parametric] [--image <ref>]
+
+Examples:
+  /cad design a wall mount bracket
+  /cad sculpt a cat figurine --organic
+  /cad create a 2U rack faceplate --parametric
+  /cad convert to 3D --image 1`);
+          setIsThinking(false);
+          return;
+        }
+
+        const { prompt, mode, imageRefs } = parseCadCommand(parts);
+        payload = {
+          conversationId: state.conversationId,
+          prompt,
+          mode,
+          imageRefs: imageRefs.length > 0 ? imageRefs : undefined,
+        };
+      }
+
+      // Handle CAD generation separately (non-streaming, artifact response)
+      if (userInput.startsWith('/cad') && endpoint === '/api/cad/generate') {
+        const startTime = Date.now();
+
+        // Update thinking with elapsed time
+        const elapsedInterval = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - startTime) / 1000);
+          const timeStr = elapsed > 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`;
+          setMessages(prev => prev.map(m =>
+            m.id === thinkingId
+              ? { ...m, content: `Generating 3D model... (${timeStr})` }
+              : m
+          ));
+        }, 1000);
+
+        try {
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+
+          clearInterval(elapsedInterval);
+
+          if (!response.ok) {
+            throw new Error(`CAD generation failed: ${response.status}`);
+          }
+
+          const data = await response.json();
+          setMessages(prev => prev.filter(m => m.id !== thinkingId));
+
+          const artifacts = data.artifacts || [];
+          const artifactMessage = formatArtifactMessage(artifacts);
+          addMessage('assistant', `🎨 CAD Generation Complete\n\n${artifactMessage}`, {
+            artifacts,
+          });
+        } catch (error: any) {
+          clearInterval(elapsedInterval);
+          setMessages(prev => prev.filter(m => m.id !== thinkingId));
+          addMessage('system', `❌ CAD Error: ${error.message}`);
+        } finally {
+          setIsThinking(false);
+        }
+        return;
       }
 
       // Use streaming for regular queries (prevents timeout on long-running queries)

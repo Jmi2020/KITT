@@ -15,6 +15,26 @@ interface Artifact {
   metadata: Record<string, string>;
 }
 
+// Artifact path translation (mirrors CLI ARTIFACTS_DIR logic)
+const ARTIFACTS_BASE_URL = '/api/cad/artifacts';
+
+const translateArtifactPath = (location: string): string => {
+  // CAD service returns paths like "artifacts/stl/xyz.stl" or "artifacts/glb/xyz.glb"
+  // Convert to API-accessible URL
+  if (location.startsWith('artifacts/')) {
+    return `${ARTIFACTS_BASE_URL}/${location.replace('artifacts/', '')}`;
+  }
+  if (location.startsWith('storage/artifacts/')) {
+    return `${ARTIFACTS_BASE_URL}/${location.replace('storage/artifacts/', '')}`;
+  }
+  if (location.startsWith('/')) {
+    // Absolute path - extract filename
+    const filename = location.split('/').pop() || location;
+    return `${ARTIFACTS_BASE_URL}/${filename}`;
+  }
+  return location;
+};
+
 interface CadResponse {
   conversationId: string;
   artifacts: Artifact[];
@@ -324,31 +344,79 @@ const FabricationConsole = () => {
           <div className="artifact-list">
             <h4>Artifacts</h4>
             <ul>
-              {artifacts.map((artifact) => (
-                <li key={artifact.location}>
-                  <label>
-                    <input
-                      type="radio"
-                      name="artifact"
-                      value={artifact.location}
-                      checked={selectedArtifact === artifact.location}
-                      onChange={() => setSelectedArtifact(artifact.location)}
-                    />
-                    <span>
-                      {artifact.provider} ({artifact.artifactType}) —
-                      <a href={artifact.location} target="_blank" rel="noreferrer">
-                        view/download
-                      </a>
-                    </span>
-                  </label>
-                  {Object.keys(artifact.metadata).length > 0 && (
-                    <details>
-                      <summary>Metadata</summary>
-                      <pre>{JSON.stringify(artifact.metadata, null, 2)}</pre>
-                    </details>
-                  )}
-                </li>
-              ))}
+              {artifacts.map((artifact) => {
+                const glbLocation = artifact.metadata?.glb_location;
+                const stlLocation = artifact.metadata?.stl_location;
+                const primaryUrl = translateArtifactPath(artifact.location);
+                const glbUrl = glbLocation ? translateArtifactPath(glbLocation) : null;
+                const stlUrl = stlLocation ? translateArtifactPath(stlLocation) : null;
+
+                return (
+                  <li key={artifact.location} className="artifact-item">
+                    <label>
+                      <input
+                        type="radio"
+                        name="artifact"
+                        value={artifact.location}
+                        checked={selectedArtifact === artifact.location}
+                        onChange={() => setSelectedArtifact(artifact.location)}
+                      />
+                      <span className="artifact-header">
+                        {artifact.provider} ({artifact.artifactType})
+                      </span>
+                    </label>
+                    <div className="artifact-formats">
+                      {glbUrl && (
+                        <a
+                          href={glbUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="format-link glb"
+                          title="Download GLB for 3D preview"
+                        >
+                          📦 GLB (preview)
+                        </a>
+                      )}
+                      {stlUrl && (
+                        <a
+                          href={stlUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="format-link stl"
+                          title="Download STL for slicer"
+                        >
+                          🖨️ STL (slicer)
+                        </a>
+                      )}
+                      {!glbUrl && !stlUrl && (
+                        <a
+                          href={primaryUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="format-link"
+                        >
+                          📥 Download
+                        </a>
+                      )}
+                    </div>
+                    {artifact.metadata?.thumbnail && (
+                      <div className="artifact-thumbnail">
+                        <img
+                          src={artifact.metadata.thumbnail}
+                          alt="Model preview"
+                          loading="lazy"
+                        />
+                      </div>
+                    )}
+                    {Object.keys(artifact.metadata).length > 0 && (
+                      <details>
+                        <summary>Metadata</summary>
+                        <pre>{JSON.stringify(artifact.metadata, null, 2)}</pre>
+                      </details>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}
