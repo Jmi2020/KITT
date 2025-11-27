@@ -122,6 +122,9 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
   const lastConfigRef = useRef<VoiceStreamConfig | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intentionalDisconnectRef = useRef(false);
+  // Use ref to track state for callbacks without causing re-renders
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   // Play audio chunks from TTS
   const playAudioChunk = useCallback(async (base64Audio: string) => {
@@ -370,9 +373,10 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
     ws.onclose = (event) => {
       wsRef.current = null;
 
-      // Check if this was an unexpected close
-      const wasConnected = state.status === 'connected' || state.status === 'listening' || state.status === 'responding';
-      const shouldReconnect = autoReconnect && !intentionalDisconnectRef.current && (wasConnected || state.isReconnecting);
+      // Check if this was an unexpected close (use ref to avoid dependency issues)
+      const currentState = stateRef.current;
+      const wasConnected = currentState.status === 'connected' || currentState.status === 'listening' || currentState.status === 'responding';
+      const shouldReconnect = autoReconnect && !intentionalDisconnectRef.current && (wasConnected || currentState.isReconnecting);
 
       setState((prev) => ({
         ...prev,
@@ -382,7 +386,7 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
 
       // Auto-reconnect if enabled and not intentionally disconnected
       if (shouldReconnect) {
-        const attemptNumber = state.reconnectAttempts;
+        const attemptNumber = currentState.reconnectAttempts;
         scheduleReconnect(attemptNumber);
       } else {
         setState((prev) => ({
@@ -392,7 +396,7 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
         }));
       }
     };
-  }, [wsEndpoint, handleMessage, autoReconnect, state.status, state.isReconnecting, state.reconnectAttempts, scheduleReconnect]);
+  }, [wsEndpoint, handleMessage, autoReconnect, scheduleReconnect]);
 
   const disconnect = useCallback(() => {
     // Mark as intentional to prevent auto-reconnect
