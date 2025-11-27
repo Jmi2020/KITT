@@ -631,6 +631,7 @@ curl http://localhost:8080/api/voice/status
 - **Menu Landing Page**: Card-based navigation to all sections
 - **Bambu Labs Integration**: Login/status via Settings page
 - **Gateway Voice Proxy**: Full voice API proxying through gateway
+- **Markdown Support**: UI renders formatted responses, TTS speaks clean text
 
 ---
 
