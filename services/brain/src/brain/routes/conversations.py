@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from common.db.conversations import (
+    delete_conversation,
     fetch_conversation_messages,
     get_conversation_session,
     list_conversation_sessions,
@@ -123,6 +124,15 @@ def update_title(conversation_id: str, body: ConversationTitleUpdate) -> Convers
     if not session:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return _session_to_summary(session)
+
+
+@router.delete("/{conversation_id}")
+def remove_conversation(conversation_id: str) -> Dict[str, Any]:
+    """Delete a conversation and all its messages."""
+    deleted = delete_conversation(conversation_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"deleted": True, "conversation_id": conversation_id}
 
 
 __all__ = ["router"]

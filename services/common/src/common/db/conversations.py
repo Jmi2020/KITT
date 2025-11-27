@@ -172,10 +172,46 @@ def rename_conversation(conversation_id: str, title: str) -> Optional[Conversati
         db.close()
 
 
+def delete_conversation(conversation_id: str) -> bool:
+    """Soft-delete a conversation by marking it as deleted.
+
+    This removes the session and all associated messages.
+
+    Args:
+        conversation_id: The conversation ID to delete
+
+    Returns:
+        True if deleted, False if not found
+    """
+    db: Session = SessionLocal()
+    try:
+        session_row = db.get(ConversationSession, conversation_id)
+        if not session_row:
+            return False
+
+        # Delete all messages in the conversation
+        db.execute(
+            ConversationMessage.__table__.delete().where(
+                ConversationMessage.conversation_id == conversation_id
+            )
+        )
+
+        # Delete the session
+        db.delete(session_row)
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 __all__ = [
     "record_conversation_message",
     "list_conversation_sessions",
     "fetch_conversation_messages",
     "get_conversation_session",
     "rename_conversation",
+    "delete_conversation",
 ]
