@@ -40,7 +40,7 @@ export function VoiceAssistant({
   const [textInput, setTextInput] = useState('');
   const [showHistoryPanel, setShowHistoryPanel] = useState(showHistory);
   const [conversationId, setConversationId] = useState<string>(
-    initialConversationId || `conv-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+    initialConversationId || crypto.randomUUID()
   );
   const currentMessageIdRef = useRef<string | null>(null);
 
@@ -180,7 +180,7 @@ export function VoiceAssistant({
 
   // Handle new conversation
   const handleNewConversation = useCallback(() => {
-    const newId = `conv-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const newId = crypto.randomUUID();
     setConversationId(newId);
     clearMessages();
     createConversation(`Voice Session ${new Date().toLocaleTimeString()}`);

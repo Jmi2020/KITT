@@ -404,9 +404,19 @@ class VoiceWebSocketHandler:
     async def _send(
         self, websocket: WebSocket, msg_type: MessageType, data: dict[str, Any]
     ) -> None:
-        """Send a typed message to the client."""
-        message = {"type": msg_type.value, **data}
-        await websocket.send_json(message)
+        """Send a typed message to the client.
+
+        Safely handles cases where the connection may have been closed.
+        """
+        try:
+            message = {"type": msg_type.value, **data}
+            await websocket.send_json(message)
+        except RuntimeError as e:
+            # Connection already closed - log but don't raise
+            if "close message has been sent" in str(e):
+                logger.debug("WebSocket already closed, skipping send: %s", msg_type.value)
+            else:
+                raise
 
 
 # Singleton handler instance (initialized in dependencies)

@@ -67,6 +67,8 @@ export MEM0_MCP_URL="http://localhost:8765"
 # MQTT broker
 export MQTT_HOST="${MQTT_HOST:-localhost}"
 export MQTT_BROKER="${MQTT_BROKER:-localhost}"
+# Tool registry path (absolute path for native process)
+export TOOL_REGISTRY_PATH="${REPO_ROOT}/config/tool_registry.yaml"
 log_info "Configured service hosts for native process (using localhost)"
 
 # Check if service directory exists

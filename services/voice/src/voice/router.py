@@ -152,51 +152,39 @@ class VoiceRouter:
             return
 
         if command["type"] == "routing":
-            # Use streaming response from brain orchestrator
-            # Collect routing result to extract tool events
-            routing_result = None
-            text_chunks = []
-
-            async for chunk in self._orchestrator.generate_response_stream(
+            # Use non-streaming response for voice interactions
+            # This ensures:
+            # 1. Proper tool execution (web_search, etc.)
+            # 2. Only final answer is returned (no reasoning shown)
+            # 3. Cleaner voice output without intermediate thoughts
+            result: RoutingResult = await self._orchestrator.generate_response(
                 conversation_id=conversation_id,
                 request_id=user_id,
                 prompt=command["prompt"],
                 user_id=user_id,
-            ):
-                # Transform brain chunk format to voice format
-                delta = chunk.get("delta", "")
-                is_done = chunk.get("done", False)
+            )
 
-                if delta:
-                    text_chunks.append(delta)
-                    yield {
-                        "type": "text",
-                        "delta": delta,
-                        "done": False,
-                    }
+            # Extract tool events from result metadata
+            tool_events = _extract_tool_events(result)
 
-                if is_done:
-                    routing_result = chunk.get("routing_result")
+            # Yield tool events first (for UI to show what tools were used)
+            for event in tool_events:
+                yield event
 
-            # After streaming completes, yield tool events if present
-            if routing_result:
-                tool_events = _extract_tool_events(routing_result)
-                for event in tool_events:
-                    yield event
+            # Yield the complete response as a single text chunk
+            yield {
+                "type": "text",
+                "delta": result.output,
+                "done": False,
+            }
 
-                # Yield final done event with tier info
-                yield {
-                    "type": "done",
-                    "tier": routing_result.tier.value,
-                    "tools_used": len([e for e in tool_events if e["type"] == "tool_call"]),
-                    "done": True,
-                }
-            else:
-                yield {
-                    "type": "done",
-                    "tier": "unknown",
-                    "done": True,
-                }
+            # Yield final done event with tier info
+            yield {
+                "type": "done",
+                "tier": result.tier.value,
+                "tools_used": len([e for e in tool_events if e["type"] == "tool_call"]),
+                "done": True,
+            }
             return
 
         if command["type"] == "note":
