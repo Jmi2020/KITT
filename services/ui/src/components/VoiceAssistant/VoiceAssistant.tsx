@@ -8,6 +8,9 @@ import { AudioVisualizer } from './AudioVisualizer';
 import { InputLevelMeter } from './InputLevelMeter';
 import { ConversationPanel } from './ConversationPanel';
 import { ConversationSelector } from './ConversationSelector';
+import { StreamingIndicator } from './StreamingIndicator';
+import { StatusBar } from './StatusBadge';
+import type { VoiceStatus } from './StatusBadge';
 
 interface VoiceAssistantProps {
   initialConversationId?: string;
@@ -320,20 +323,32 @@ export function VoiceAssistant({
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center">
                 <div className={`${isMobile ? 'text-4xl' : 'text-5xl'} mb-2`}>
-                  {status === 'error' ? '!' : status === 'responding' ? '...' : '🐱'}
+                  {status === 'error' ? '⚠️' : status === 'responding' ? '💭' : status === 'listening' ? '👂' : '🐱'}
                 </div>
-                <div className="text-cyan-400 text-xs md:text-sm uppercase tracking-wider">
-                  {isReconnecting && `Reconnecting (${reconnectAttempts})...`}
-                  {!isReconnecting && status === 'connecting' && 'Connecting...'}
-                  {!isReconnecting && status === 'connected' && 'Ready'}
-                  {!isReconnecting && status === 'listening' && 'Listening...'}
-                  {!isReconnecting && status === 'responding' && 'Thinking...'}
-                  {!isReconnecting && status === 'error' && 'Error'}
-                  {!isReconnecting && status === 'disconnected' && 'Offline'}
-                </div>
+                {/* Status badge with visual hierarchy */}
+                <StatusBar
+                  status={status as VoiceStatus}
+                  isReconnecting={isReconnecting}
+                  reconnectAttempts={reconnectAttempts}
+                  tier={tier || undefined}
+                  preferLocal={preferLocal}
+                  compact={isMobile}
+                />
               </div>
             </div>
           </div>
+
+          {/* Streaming indicator - show when generating */}
+          {status === 'responding' && (
+            <div className="flex justify-center mb-4">
+              <StreamingIndicator
+                isStreaming={true}
+                label="Generating response"
+                showTime={true}
+                compact={isMobile}
+              />
+            </div>
+          )}
 
           {/* Current exchange - only show if not in history view */}
           {!showHistoryPanel && (
