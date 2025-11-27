@@ -1,0 +1,27 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools>=68", "wheel"]
+
+[project]
+name = "kitty-settings"
+version = "0.1.0"
+description = "Settings management service for KITTY"
+requires-python = ">=3.11"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+  "fastapi>=0.111",
+  "pydantic>=2.7",
+  "uvicorn[standard]>=0.30",
+  "psycopg[binary]>=3.1",
+  "sqlalchemy>=2.0",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
