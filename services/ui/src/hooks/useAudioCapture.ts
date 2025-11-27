@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef, useState, useContext } from 'react';
+import { AudioContextContext } from './useAudioContext';
 
 interface UseAudioCaptureOptions {
   sampleRate?: number;
@@ -11,11 +12,13 @@ interface UseAudioCaptureReturn {
   startCapture: () => Promise<void>;
   stopCapture: () => void;
   error: string | null;
+  inputLevel: number;
 }
 
 /**
  * Hook for capturing audio from the microphone.
  * Uses AudioWorklet for high-quality, low-latency audio processing.
+ * Uses shared AudioContext when available, falls back to local context.
  */
 export function useAudioCapture(options: UseAudioCaptureOptions = {}): UseAudioCaptureReturn {
   const { sampleRate = 16000, onAudioChunk } = options;
@@ -23,10 +26,45 @@ export function useAudioCapture(options: UseAudioCaptureOptions = {}): UseAudioC
   const [isCapturing, setIsCapturing] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [localInputLevel, setLocalInputLevel] = useState(0);
 
-  const audioContextRef = useRef<AudioContext | null>(null);
+  // Try to get shared audio context (may be null if not in provider)
+  const sharedContext = useContext(AudioContextContext);
+
+  const localAudioContextRef = useRef<AudioContext | null>(null);
+  const localAnalyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+
+  // Setup local input level monitoring
+  const setupLocalAnalyser = useCallback((audioContext: AudioContext, source: MediaStreamAudioSourceNode) => {
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.5;
+    localAnalyserRef.current = analyser;
+    source.connect(analyser);
+
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    const updateLevel = () => {
+      if (!localAnalyserRef.current) return;
+      localAnalyserRef.current.getByteFrequencyData(dataArray);
+
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        sum += dataArray[i];
+      }
+      const average = sum / dataArray.length;
+      const normalized = Math.min(Math.pow(average / 128, 0.6) * 1.5, 1);
+      setLocalInputLevel(normalized);
+
+      animationFrameRef.current = requestAnimationFrame(updateLevel);
+    };
+
+    updateLevel();
+  }, []);
 
   const startCapture = useCallback(async () => {
     try {
@@ -46,9 +84,24 @@ export function useAudioCapture(options: UseAudioCaptureOptions = {}): UseAudioC
       streamRef.current = mediaStream;
       setStream(mediaStream);
 
-      // Create audio context
-      const audioContext = new AudioContext({ sampleRate });
-      audioContextRef.current = audioContext;
+      // Use shared context if available, otherwise create local
+      let audioContext: AudioContext;
+      if (sharedContext) {
+        audioContext = sharedContext.getOrCreateContext(sampleRate);
+      } else {
+        audioContext = new AudioContext({ sampleRate });
+        localAudioContextRef.current = audioContext;
+      }
+
+      // Create source and connect to analyser for input level monitoring
+      const source = audioContext.createMediaStreamSource(mediaStream);
+      sourceRef.current = source;
+
+      if (sharedContext) {
+        sharedContext.setupAnalyser(source);
+      } else {
+        setupLocalAnalyser(audioContext, source);
+      }
 
       // Load audio worklet
       try {
@@ -72,9 +125,8 @@ export function useAudioCapture(options: UseAudioCaptureOptions = {}): UseAudioC
         }
       };
 
-      // Connect microphone to worklet
-      const source = audioContext.createMediaStreamSource(mediaStream);
-      source.connect(workletNode);
+      // Connect source to worklet (source already created above)
+      sourceRef.current?.connect(workletNode);
 
       setIsCapturing(true);
     } catch (err) {
@@ -112,6 +164,12 @@ export function useAudioCapture(options: UseAudioCaptureOptions = {}): UseAudioC
   );
 
   const stopCapture = useCallback(() => {
+    // Stop animation frame
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+
     // Stop all media tracks
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -119,19 +177,38 @@ export function useAudioCapture(options: UseAudioCaptureOptions = {}): UseAudioC
       setStream(null);
     }
 
-    // Disconnect and close audio context
+    // Disconnect worklet node
     if (workletNodeRef.current) {
       workletNodeRef.current.disconnect();
       workletNodeRef.current = null;
     }
 
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
+    // Disconnect source
+    if (sourceRef.current) {
+      sourceRef.current.disconnect();
+      sourceRef.current = null;
     }
 
+    // Disconnect local analyser
+    if (localAnalyserRef.current) {
+      localAnalyserRef.current.disconnect();
+      localAnalyserRef.current = null;
+    }
+
+    // Close context (shared or local)
+    if (sharedContext) {
+      sharedContext.closeContext();
+    } else if (localAudioContextRef.current) {
+      localAudioContextRef.current.close();
+      localAudioContextRef.current = null;
+    }
+
+    setLocalInputLevel(0);
     setIsCapturing(false);
-  }, []);
+  }, [sharedContext]);
+
+  // Use shared input level if available, otherwise use local
+  const inputLevel = sharedContext?.inputLevel ?? localInputLevel;
 
   return {
     isCapturing,
@@ -139,5 +216,6 @@ export function useAudioCapture(options: UseAudioCaptureOptions = {}): UseAudioC
     startCapture,
     stopCapture,
     error,
+    inputLevel,
   };
 }

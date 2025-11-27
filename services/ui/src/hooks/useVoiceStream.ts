@@ -15,6 +15,10 @@ interface VoiceStreamState {
     tts: boolean;
     streaming: boolean;
   };
+  /** Whether auto-reconnect is active */
+  isReconnecting: boolean;
+  /** Number of reconnection attempts made */
+  reconnectAttempts: number;
 }
 
 interface VoiceStreamConfig {
@@ -24,6 +28,19 @@ interface VoiceStreamConfig {
   language?: string;
   sampleRate?: number;
   preferLocal?: boolean;
+}
+
+interface UseVoiceStreamOptions {
+  /** WebSocket endpoint (defaults to current host) */
+  endpoint?: string;
+  /** Enable auto-reconnect on disconnect (default: true) */
+  autoReconnect?: boolean;
+  /** Maximum reconnection attempts (default: 5) */
+  maxReconnectAttempts?: number;
+  /** Base delay in ms for reconnect backoff (default: 1000) */
+  reconnectBaseDelay?: number;
+  /** Maximum delay in ms for reconnect backoff (default: 30000) */
+  reconnectMaxDelay?: number;
 }
 
 interface UseVoiceStreamReturn extends VoiceStreamState {
@@ -39,8 +56,17 @@ interface UseVoiceStreamReturn extends VoiceStreamState {
 /**
  * Hook for managing WebSocket voice streaming connection.
  * Handles bidirectional audio/text communication with KITTY voice service.
+ * Supports auto-reconnect with exponential backoff.
  */
-export function useVoiceStream(endpoint?: string): UseVoiceStreamReturn {
+export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStreamReturn {
+  const {
+    endpoint,
+    autoReconnect = true,
+    maxReconnectAttempts = 5,
+    reconnectBaseDelay = 1000,
+    reconnectMaxDelay = 30000,
+  } = options;
+
   const wsEndpoint = endpoint || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/voice/stream`;
 
   const [state, setState] = useState<VoiceStreamState>({
@@ -52,12 +78,17 @@ export function useVoiceStream(endpoint?: string): UseVoiceStreamReturn {
     error: null,
     preferLocal: true,
     capabilities: { stt: false, tts: false, streaming: false },
+    isReconnecting: false,
+    reconnectAttempts: 0,
   });
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioQueueRef = useRef<AudioBuffer[]>([]);
   const isPlayingRef = useRef(false);
+  const lastConfigRef = useRef<VoiceStreamConfig | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intentionalDisconnectRef = useRef(false);
 
   // Play audio chunks from TTS
   const playAudioChunk = useCallback(async (base64Audio: string) => {
@@ -175,10 +206,54 @@ export function useVoiceStream(endpoint?: string): UseVoiceStreamReturn {
     }
   }, [playAudioChunk]);
 
+  // Schedule a reconnection attempt with exponential backoff
+  const scheduleReconnect = useCallback((attemptNumber: number) => {
+    if (attemptNumber >= maxReconnectAttempts) {
+      setState((prev) => ({
+        ...prev,
+        isReconnecting: false,
+        error: 'Failed to reconnect after multiple attempts',
+      }));
+      return;
+    }
+
+    // Calculate delay with exponential backoff and jitter
+    const baseDelay = Math.min(
+      reconnectBaseDelay * Math.pow(2, attemptNumber),
+      reconnectMaxDelay
+    );
+    const jitter = Math.random() * 0.3 * baseDelay;
+    const delay = baseDelay + jitter;
+
+    console.log(`[VoiceStream] Scheduling reconnect attempt ${attemptNumber + 1}/${maxReconnectAttempts} in ${Math.round(delay)}ms`);
+
+    setState((prev) => ({
+      ...prev,
+      isReconnecting: true,
+      reconnectAttempts: attemptNumber + 1,
+    }));
+
+    reconnectTimeoutRef.current = setTimeout(() => {
+      if (lastConfigRef.current && !intentionalDisconnectRef.current) {
+        connect(lastConfigRef.current);
+      }
+    }, delay);
+  }, [maxReconnectAttempts, reconnectBaseDelay, reconnectMaxDelay]);
+
   const connect = useCallback((config: VoiceStreamConfig = {}) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return;
     }
+
+    // Clear any pending reconnect
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
+    // Store config for reconnection
+    lastConfigRef.current = config;
+    intentionalDisconnectRef.current = false;
 
     setState((prev) => ({ ...prev, status: 'connecting', error: null }));
 
@@ -186,6 +261,13 @@ export function useVoiceStream(endpoint?: string): UseVoiceStreamReturn {
     wsRef.current = ws;
 
     ws.onopen = () => {
+      // Reset reconnect state on successful connection
+      setState((prev) => ({
+        ...prev,
+        isReconnecting: false,
+        reconnectAttempts: 0,
+      }));
+
       // Send configuration
       ws.send(JSON.stringify({
         type: 'config',
@@ -211,17 +293,43 @@ export function useVoiceStream(endpoint?: string): UseVoiceStreamReturn {
       }));
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      wsRef.current = null;
+
+      // Check if this was an unexpected close
+      const wasConnected = state.status === 'connected' || state.status === 'listening' || state.status === 'responding';
+      const shouldReconnect = autoReconnect && !intentionalDisconnectRef.current && (wasConnected || state.isReconnecting);
+
       setState((prev) => ({
         ...prev,
         status: 'disconnected',
         sessionId: null,
       }));
-      wsRef.current = null;
+
+      // Auto-reconnect if enabled and not intentionally disconnected
+      if (shouldReconnect) {
+        const attemptNumber = state.reconnectAttempts;
+        scheduleReconnect(attemptNumber);
+      } else {
+        setState((prev) => ({
+          ...prev,
+          isReconnecting: false,
+          reconnectAttempts: 0,
+        }));
+      }
     };
-  }, [wsEndpoint, handleMessage]);
+  }, [wsEndpoint, handleMessage, autoReconnect, state.status, state.isReconnecting, state.reconnectAttempts, scheduleReconnect]);
 
   const disconnect = useCallback(() => {
+    // Mark as intentional to prevent auto-reconnect
+    intentionalDisconnectRef.current = true;
+
+    // Clear any pending reconnect
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -245,6 +353,8 @@ export function useVoiceStream(endpoint?: string): UseVoiceStreamReturn {
       error: null,
       preferLocal: true,
       capabilities: { stt: false, tts: false, streaming: false },
+      isReconnecting: false,
+      reconnectAttempts: 0,
     });
   }, []);
 

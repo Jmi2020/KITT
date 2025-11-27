@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useContext } from 'react';
+import { AudioContextContext } from './useAudioContext';
 
 const FFT_BARS = 64;
 
@@ -9,15 +10,20 @@ interface UseAudioAnalyzerReturn {
 
 /**
  * Hook for real-time FFT audio analysis.
- * Analyzes audio stream and provides frequency data for visualization.
+ * Uses the shared AudioContext from AudioContextProvider when available.
+ * Falls back to creating its own context if not within provider.
  */
 export function useAudioAnalyzer(stream: MediaStream | null): UseAudioAnalyzerReturn {
   const [fftData, setFftData] = useState<number[]>(new Array(FFT_BARS).fill(0));
   const [audioLevel, setAudioLevel] = useState(0);
 
-  const audioContextRef = useRef<AudioContext | null>(null);
+  // Try to get shared context (may be null if not in provider)
+  const sharedContext = useContext(AudioContextContext);
+
+  const localAudioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
 
   useEffect(() => {
     if (!stream) {
@@ -26,19 +32,29 @@ export function useAudioAnalyzer(stream: MediaStream | null): UseAudioAnalyzerRe
       return;
     }
 
-    // Create audio context and analyser
-    const audioContext = new AudioContext();
-    audioContextRef.current = audioContext;
+    // Use shared analyser if available, otherwise create local context
+    let analyser: AnalyserNode;
+    let localContext: AudioContext | null = null;
 
-    const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 512;
-    analyser.smoothingTimeConstant = 0.5;
+    if (sharedContext?.analyserNode) {
+      // Use existing shared analyser
+      analyser = sharedContext.analyserNode;
+    } else {
+      // Fallback: create local context
+      localContext = new AudioContext();
+      localAudioContextRef.current = localContext;
+
+      analyser = localContext.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.5;
+
+      // Connect stream to analyser
+      const source = localContext.createMediaStreamSource(stream);
+      sourceRef.current = source;
+      source.connect(analyser);
+    }
+
     analyserRef.current = analyser;
-
-    // Connect stream to analyser
-    const source = audioContext.createMediaStreamSource(stream);
-    source.connect(analyser);
-
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
     const updateAnalysis = () => {
@@ -88,13 +104,20 @@ export function useAudioAnalyzer(stream: MediaStream | null): UseAudioAnalyzerRe
         cancelAnimationFrame(animationFrameRef.current);
         animationFrameRef.current = null;
       }
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-        audioContextRef.current = null;
+
+      // Only close local context if we created one
+      if (localAudioContextRef.current) {
+        if (sourceRef.current) {
+          sourceRef.current.disconnect();
+          sourceRef.current = null;
+        }
+        localAudioContextRef.current.close();
+        localAudioContextRef.current = null;
       }
+
       analyserRef.current = null;
     };
-  }, [stream]);
+  }, [stream, sharedContext?.analyserNode]);
 
   return { fftData, audioLevel };
 }

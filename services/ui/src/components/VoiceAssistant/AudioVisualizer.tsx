@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 
 const FFT_BARS = 64;
+const PARTICLE_COUNT = 12;
 
 interface AudioVisualizerProps {
   fftData: number[];
@@ -8,11 +9,13 @@ interface AudioVisualizerProps {
   status: 'idle' | 'listening' | 'responding' | 'error';
   isProcessing?: boolean;
   progress?: number | null;
+  /** Size in pixels (default: 280) */
+  size?: number;
 }
 
 /**
- * FFT ring visualizer for audio levels.
- * Displays frequency data as bars arranged in a circle.
+ * Jarvis-style FFT ring visualizer for audio levels.
+ * Features: rotating rings, FFT bars, scanning effects, and particle system.
  */
 export function AudioVisualizer({
   fftData,
@@ -20,11 +23,25 @@ export function AudioVisualizer({
   status,
   isProcessing = false,
   progress = null,
+  size = 280,
 }: AudioVisualizerProps) {
   const [ring1Rotation, setRing1Rotation] = useState(0);
   const [ring2Rotation, setRing2Rotation] = useState(0);
+  const [ring3Rotation, setRing3Rotation] = useState(0);
+  const [scanAngle, setScanAngle] = useState(0);
+  const [pulsePhase, setPulsePhase] = useState(0);
   const rotationFrameRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(Date.now());
+
+  // Generate stable particle positions
+  const particles = useMemo(() => {
+    return Array.from({ length: PARTICLE_COUNT }, (_, i) => ({
+      angle: (i / PARTICLE_COUNT) * Math.PI * 2,
+      radius: 0.35 + Math.random() * 0.15,
+      speed: 0.5 + Math.random() * 0.5,
+      size: 2 + Math.random() * 3,
+    }));
+  }, []);
 
   // Continuous rotation for rings
   useEffect(() => {
@@ -33,8 +50,11 @@ export function AudioVisualizer({
       const delta = (now - lastTimeRef.current) / 1000;
       lastTimeRef.current = now;
 
-      setRing1Rotation((prev) => (prev + 40 * delta) % 360);
-      setRing2Rotation((prev) => (prev - 20 * delta) % 360);
+      setRing1Rotation((prev) => (prev + 50 * delta) % 360);
+      setRing2Rotation((prev) => (prev - 30 * delta) % 360);
+      setRing3Rotation((prev) => (prev + 15 * delta) % 360);
+      setScanAngle((prev) => (prev + 120 * delta) % 360);
+      setPulsePhase((prev) => prev + delta * 3);
 
       rotationFrameRef.current = requestAnimationFrame(rotate);
     };
@@ -47,13 +67,74 @@ export function AudioVisualizer({
     };
   }, []);
 
-  const ring1Scale = 1 + audioLevel * 0.08;
-  const ring2Scale = 1 + audioLevel * 0.05;
+  const ring1Scale = 1 + audioLevel * 0.1;
+  const ring2Scale = 1 + audioLevel * 0.06;
+  const ring3Scale = 1 + audioLevel * 0.04;
   const isActive = status === 'listening' || status === 'responding';
+  const isError = status === 'error';
+
+  // Color based on status
+  const primaryColor = isError ? '#ef4444' : '#22d3ee';
+  const primaryRgba = isError ? 'rgba(239, 68, 68,' : 'rgba(34, 211, 238,';
+  const pulseIntensity = Math.sin(pulsePhase) * 0.5 + 0.5;
 
   return (
-    <div className="relative flex items-center justify-center w-full max-w-xl aspect-square">
-      {/* Ring 2 - Outer */}
+    <div
+      className="relative flex items-center justify-center"
+      style={{ width: size, height: size }}
+    >
+      {/* Background glow */}
+      <div
+        className="absolute inset-0 rounded-full transition-opacity duration-500 pointer-events-none"
+        style={{
+          background: `radial-gradient(circle, ${primaryRgba}${isActive ? 0.15 + audioLevel * 0.2 : 0.05}) 0%, transparent 70%)`,
+          transform: `scale(${1.2 + audioLevel * 0.3})`,
+          filter: 'blur(20px)',
+        }}
+      />
+
+      {/* Ring 3 - Outermost (tech ring) */}
+      <div
+        className="absolute inset-0 flex items-center justify-center"
+        style={{
+          transform: `rotate(${ring3Rotation}deg) scale(${ring3Scale})`,
+          opacity: isActive ? 0.8 : 0.2,
+          transition: 'opacity 300ms',
+        }}
+      >
+        <svg viewBox="0 0 200 200" className="w-full h-full">
+          {/* Outer tech ring with segments */}
+          <circle
+            cx="100"
+            cy="100"
+            r="98"
+            fill="none"
+            stroke={`${primaryRgba}0.2)`}
+            strokeWidth="1"
+          />
+          {/* Tech marks */}
+          {Array.from({ length: 24 }).map((_, i) => {
+            const angle = (i / 24) * Math.PI * 2;
+            const x1 = 100 + Math.cos(angle) * 94;
+            const y1 = 100 + Math.sin(angle) * 94;
+            const x2 = 100 + Math.cos(angle) * (i % 3 === 0 ? 88 : 91);
+            const y2 = 100 + Math.sin(angle) * (i % 3 === 0 ? 88 : 91);
+            return (
+              <line
+                key={i}
+                x1={x1}
+                y1={y1}
+                x2={x2}
+                y2={y2}
+                stroke={`${primaryRgba}${i % 3 === 0 ? 0.6 : 0.3})`}
+                strokeWidth={i % 3 === 0 ? 2 : 1}
+              />
+            );
+          })}
+        </svg>
+      </div>
+
+      {/* Ring 2 - Middle */}
       <div
         className="absolute inset-0 flex items-center justify-center"
         style={{
@@ -62,30 +143,49 @@ export function AudioVisualizer({
           transition: 'opacity 300ms',
         }}
       >
-        <svg viewBox="0 0 200 200" className="w-full h-full">
+        <svg viewBox="0 0 200 200" className="w-[85%] h-[85%]">
           <circle
             cx="100"
             cy="100"
             r="95"
             fill="none"
-            stroke="rgba(34, 211, 238, 0.3)"
+            stroke={`${primaryRgba}0.3)`}
             strokeWidth="2"
-            strokeDasharray="8 4"
+            strokeDasharray="12 6"
           />
           <circle
             cx="100"
             cy="100"
-            r="90"
+            r="88"
             fill="none"
-            stroke="rgba(34, 211, 238, 0.5)"
+            stroke={`${primaryRgba}0.5)`}
             strokeWidth="1"
           />
         </svg>
       </div>
 
+      {/* Scanning line effect */}
+      {isActive && (
+        <div
+          className="absolute inset-0 flex items-center justify-center pointer-events-none"
+          style={{ transform: `rotate(${scanAngle}deg)` }}
+        >
+          <svg viewBox="0 0 200 200" className="w-[75%] h-[75%]">
+            <defs>
+              <linearGradient id="scanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor={primaryColor} stopOpacity="0" />
+                <stop offset="50%" stopColor={primaryColor} stopOpacity="0.8" />
+                <stop offset="100%" stopColor={primaryColor} stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            <line x1="100" y1="100" x2="100" y2="20" stroke="url(#scanGrad)" strokeWidth="2" />
+          </svg>
+        </div>
+      )}
+
       {/* FFT Visualizer Ring */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <svg className="w-2/3 h-2/3" viewBox="0 0 400 400" style={{ overflow: 'visible' }}>
+        <svg className="w-[65%] h-[65%]" viewBox="0 0 400 400" style={{ overflow: 'visible' }}>
           {fftData.map((value, index) => {
             const angle = (index / FFT_BARS) * Math.PI * 2;
             const radius = 180;
@@ -93,33 +193,33 @@ export function AudioVisualizer({
             const centerY = 200;
             const x = centerX + Math.cos(angle) * radius;
             const y = centerY + Math.sin(angle) * radius;
-            const barWidth = 5;
-            const baseHeight = 6;
+            const barWidth = 4;
+            const baseHeight = 4;
 
             let barHeight: number;
             let opacity: number;
 
-            // Progress animation (for loading states)
+            // Progress animation
             if (progress !== null) {
               const progressAngle = (progress / 100) * Math.PI * 2;
               const barAngle = (index / FFT_BARS) * Math.PI * 2;
               const isFilled = barAngle <= progressAngle;
               const isEdge = Math.abs(barAngle - progressAngle) < (Math.PI * 2 / FFT_BARS * 2);
-              const pulse = isEdge ? Math.sin(Date.now() / 150) * 0.3 + 0.7 : 1;
+              const pulse = isEdge ? pulseIntensity : 1;
 
-              barHeight = isFilled ? baseHeight + 20 * pulse : baseHeight;
-              opacity = isFilled ? 0.9 * pulse : 0.2;
+              barHeight = isFilled ? baseHeight + 25 * pulse : baseHeight;
+              opacity = isFilled ? 0.9 * pulse : 0.15;
             }
             // Wave animation when processing
             else if (isProcessing) {
-              const waveOffset = Math.sin((Date.now() / 200) + (index * 0.3)) * 15;
+              const waveOffset = Math.sin(pulsePhase + index * 0.25) * 20;
               barHeight = baseHeight + Math.abs(waveOffset);
-              opacity = 0.6 + (Math.abs(waveOffset) / 15) * 0.4;
+              opacity = 0.5 + (Math.abs(waveOffset) / 20) * 0.5;
             }
             // Normal audio visualization
             else {
-              barHeight = baseHeight + value * 25;
-              opacity = isActive ? 0.4 + value * 0.6 : 0.1;
+              barHeight = baseHeight + value * 30;
+              opacity = isActive ? 0.3 + value * 0.7 : 0.08;
             }
 
             const rotation = (angle * 180) / Math.PI + 90;
@@ -131,9 +231,9 @@ export function AudioVisualizer({
                   y={-barHeight / 2}
                   width={barWidth}
                   height={barHeight}
-                  fill="#22d3ee"
+                  fill={primaryColor}
                   opacity={opacity}
-                  rx={2.5}
+                  rx={2}
                 />
               </g>
             );
@@ -141,46 +241,72 @@ export function AudioVisualizer({
         </svg>
       </div>
 
+      {/* Floating particles */}
+      {isActive && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <svg className="w-full h-full" viewBox="0 0 200 200">
+            {particles.map((particle, i) => {
+              const animatedAngle = particle.angle + pulsePhase * particle.speed;
+              const animatedRadius = particle.radius * 100 + audioLevel * 15;
+              const x = 100 + Math.cos(animatedAngle) * animatedRadius;
+              const y = 100 + Math.sin(animatedAngle) * animatedRadius;
+
+              return (
+                <circle
+                  key={i}
+                  cx={x}
+                  cy={y}
+                  r={particle.size * (0.5 + audioLevel * 0.5)}
+                  fill={primaryColor}
+                  opacity={0.4 + audioLevel * 0.4}
+                />
+              );
+            })}
+          </svg>
+        </div>
+      )}
+
       {/* Ring 1 - Inner */}
       <div
         className="absolute inset-0 flex items-center justify-center"
         style={{
           transform: `rotate(${ring1Rotation}deg) scale(${ring1Scale})`,
-          opacity: isActive ? 1 : 0.5,
+          opacity: isActive ? 1 : 0.4,
           transition: 'opacity 200ms',
         }}
       >
-        <svg viewBox="0 0 200 200" className="w-4/5 h-4/5">
+        <svg viewBox="0 0 200 200" className="w-[50%] h-[50%]">
           <circle
             cx="100"
             cy="100"
-            r="75"
+            r="90"
             fill="none"
-            stroke="rgba(34, 211, 238, 0.6)"
+            stroke={`${primaryRgba}0.5)`}
             strokeWidth="2"
-            strokeDasharray="4 8"
+            strokeDasharray="6 10"
           />
           <circle
             cx="100"
             cy="100"
-            r="70"
+            r="80"
             fill="none"
-            stroke="rgba(34, 211, 238, 0.8)"
+            stroke={`${primaryRgba}0.8)`}
             strokeWidth="1"
           />
         </svg>
       </div>
 
-      {/* Status Ring Glow */}
-      {isActive && (
-        <div
-          className="absolute inset-0 rounded-full transition-opacity duration-300 pointer-events-none"
-          style={{
-            background: `radial-gradient(circle, rgba(34,211,238,${audioLevel * 0.3}) 0%, transparent 70%)`,
-            transform: `scale(${1 + audioLevel * 0.5})`,
-          }}
-        />
-      )}
+      {/* Core pulse */}
+      <div
+        className="absolute rounded-full pointer-events-none"
+        style={{
+          width: size * 0.25,
+          height: size * 0.25,
+          background: `radial-gradient(circle, ${primaryRgba}${isActive ? 0.3 + pulseIntensity * 0.2 : 0.1}) 0%, ${primaryRgba}0.05) 60%, transparent 100%)`,
+          boxShadow: isActive ? `0 0 ${20 + audioLevel * 30}px ${primaryRgba}0.4)` : 'none',
+          transition: 'box-shadow 100ms',
+        }}
+      />
     </div>
   );
 }

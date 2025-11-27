@@ -1,2 +1,10 @@
 export { VoiceAssistant } from './VoiceAssistant';
 export { AudioVisualizer } from './AudioVisualizer';
+export { InputLevelMeter } from './InputLevelMeter';
+export { ConversationPanel } from './ConversationPanel';
+export { ConversationMessage } from './ConversationMessage';
+export { ConversationSelector } from './ConversationSelector';
+export { ToolExecutionCard, ToolExecutionList } from './ToolExecutionCard';
+export type { Message, MessageRole, ToolCall } from './ConversationMessage';
+export type { ToolExecution, ToolStatus } from './ToolExecutionCard';
+export type { ConversationSummary } from './ConversationSelector';
