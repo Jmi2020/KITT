@@ -55,6 +55,20 @@ set -a
 source "${REPO_ROOT}/.env"
 set +a
 
+# Override Docker-specific hostnames for native process
+# (Docker hostnames don't resolve outside Docker)
+export OLLAMA_HOST="${OLLAMA_HOST//host.docker.internal/localhost}"
+export LLAMACPP_HOST="${LLAMACPP_HOST//host.docker.internal/localhost}"
+export LLAMACPP_Q4_HOST="${LLAMACPP_Q4_HOST//host.docker.internal/localhost}"
+export LLAMACPP_F16_HOST="${LLAMACPP_F16_HOST//host.docker.internal/localhost}"
+export LLAMACPP_SUMMARY_HOST="${LLAMACPP_SUMMARY_HOST//host.docker.internal/localhost}"
+# Memory service (mem0-mcp is a Docker service name)
+export MEM0_MCP_URL="http://localhost:8765"
+# MQTT broker
+export MQTT_HOST="${MQTT_HOST:-localhost}"
+export MQTT_BROKER="${MQTT_BROKER:-localhost}"
+log_info "Configured service hosts for native process (using localhost)"
+
 # Check if service directory exists
 if [[ ! -d "${SERVICE_DIR}" ]]; then
     log_error "Voice service directory not found: ${SERVICE_DIR}"

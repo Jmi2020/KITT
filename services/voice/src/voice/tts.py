@@ -343,12 +343,62 @@ class StreamingTTS:
         self._local_failures = 0
         self._max_local_failures = 3
 
+    def _strip_markdown(self, text: str) -> str:
+        """Remove markdown formatting for clean TTS output.
+
+        Strips characters like *, #, backticks, etc. that would otherwise
+        be spoken aloud by the TTS engine.
+        """
+        # Remove code blocks (```...```)
+        text = re.sub(r'```[\s\S]*?```', '', text)
+
+        # Remove inline code (`...`)
+        text = re.sub(r'`([^`]+)`', r'\1', text)
+
+        # Remove bold (**text** or __text__)
+        text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+        text = re.sub(r'__([^_]+)__', r'\1', text)
+
+        # Remove italic (*text* or _text_)
+        text = re.sub(r'\*([^*]+)\*', r'\1', text)
+        text = re.sub(r'(?<!\w)_([^_]+)_(?!\w)', r'\1', text)
+
+        # Remove headers (# ## ### etc.)
+        text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+
+        # Remove links [text](url) -> text
+        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+
+        # Remove images ![alt](url)
+        text = re.sub(r'!\[([^\]]*)\]\([^)]+\)', r'\1', text)
+
+        # Remove horizontal rules (---, ***, ___)
+        text = re.sub(r'^[\-\*_]{3,}\s*$', '', text, flags=re.MULTILINE)
+
+        # Remove bullet points (- or * at start of line)
+        text = re.sub(r'^\s*[\-\*]\s+', '', text, flags=re.MULTILINE)
+
+        # Remove numbered lists (1. 2. etc.)
+        text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+
+        # Remove blockquotes (>)
+        text = re.sub(r'^\s*>\s*', '', text, flags=re.MULTILINE)
+
+        # Clean up extra whitespace
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        text = text.strip()
+
+        return text
+
     async def synthesize(
         self,
         text: str,
         voice: str = "alloy",
     ) -> bytes:
         """Synthesize text to audio with automatic fallback."""
+        # Strip markdown formatting before TTS
+        text = self._strip_markdown(text)
+
         providers = self._get_provider_order()
 
         last_error: Exception | None = None
@@ -383,6 +433,9 @@ class StreamingTTS:
         voice: str = "alloy",
     ) -> AsyncIterator[bytes]:
         """Stream audio chunks with automatic fallback."""
+        # Strip markdown formatting before TTS
+        text = self._strip_markdown(text)
+
         providers = self._get_provider_order()
 
         for provider in providers:

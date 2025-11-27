@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import Markdown from 'react-markdown';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 
@@ -66,10 +67,10 @@ export const ConversationMessage = memo(function ConversationMessage({
         )}
       </div>
 
-      <div className={`text-white whitespace-pre-wrap ${message.isStreaming ? 'animate-pulse' : ''}`}>
-        {message.content}
+      <div className={`markdown-content ${message.isStreaming ? 'streaming' : ''}`}>
+        <Markdown>{message.content}</Markdown>
         {message.isStreaming && (
-          <span className="inline-block w-2 h-4 ml-1 bg-cyan-400 animate-pulse" />
+          <span className="typing-cursor" />
         )}
       </div>
 
