@@ -303,12 +303,44 @@ class VoiceWebSocketHandler:
                             {"delta": delta, "done": False},
                         )
 
+                elif chunk_type == "tool_call":
+                    # Tool/function invocation started
+                    await self._send(
+                        websocket,
+                        MessageType.FUNCTION_CALL,
+                        {
+                            "id": chunk.get("id"),
+                            "name": chunk.get("name"),
+                            "args": chunk.get("args", {}),
+                            "step": chunk.get("step"),
+                        },
+                    )
+
+                elif chunk_type == "tool_result":
+                    # Tool/function execution result
+                    await self._send(
+                        websocket,
+                        MessageType.FUNCTION_RESULT,
+                        {
+                            "id": chunk.get("id"),
+                            "name": chunk.get("name"),
+                            "result": chunk.get("result"),
+                            "status": chunk.get("status", "completed"),
+                            "step": chunk.get("step"),
+                        },
+                    )
+
                 elif chunk_type == "done":
                     # Response complete
                     await self._send(
                         websocket,
                         MessageType.RESPONSE_TEXT,
-                        {"delta": "", "done": True, "tier": chunk.get("tier")},
+                        {
+                            "delta": "",
+                            "done": True,
+                            "tier": chunk.get("tier"),
+                            "tools_used": chunk.get("tools_used", 0),
+                        },
                     )
 
                 elif chunk_type == "error":

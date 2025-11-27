@@ -10,6 +10,7 @@ import { ConversationPanel } from './ConversationPanel';
 import { ConversationSelector } from './ConversationSelector';
 import { StreamingIndicator } from './StreamingIndicator';
 import { StatusBar } from './StatusBadge';
+import { ToolExecutionList } from './ToolExecutionCard';
 import type { VoiceStatus } from './StatusBadge';
 
 interface VoiceAssistantProps {
@@ -55,6 +56,8 @@ export function VoiceAssistant({
     preferLocal,
     isReconnecting,
     reconnectAttempts,
+    toolExecutions,
+    toolsUsed,
     connect,
     disconnect,
     sendAudio,
@@ -343,9 +346,30 @@ export function VoiceAssistant({
             <div className="flex justify-center mb-4">
               <StreamingIndicator
                 isStreaming={true}
-                label="Generating response"
+                label={toolExecutions.length > 0 ? 'Executing tools' : 'Generating response'}
                 showTime={true}
                 compact={isMobile}
+              />
+            </div>
+          )}
+
+          {/* Tool Executions - show when tools are being used */}
+          {toolExecutions.length > 0 && (
+            <div className="w-full mb-4 p-3 bg-gray-800/30 rounded-xl border border-gray-700/50">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-gray-400 text-xs uppercase tracking-wider">
+                  Tool Execution{toolExecutions.length > 1 ? 's' : ''}
+                </span>
+                {toolsUsed > 0 && (
+                  <span className="text-xs px-2 py-0.5 bg-cyan-500/20 rounded-full text-cyan-400">
+                    {toolsUsed} tool{toolsUsed !== 1 ? 's' : ''} used
+                  </span>
+                )}
+              </div>
+              <ToolExecutionList
+                tools={toolExecutions}
+                compact={isMobile}
+                maxVisible={isMobile ? 3 : 5}
               />
             </div>
           )}

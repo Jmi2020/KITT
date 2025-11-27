@@ -145,6 +145,25 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
         </div>
       </div>
 
+      {/* Progress bar for running tools */}
+      {tool.status === 'running' && (
+        <div className="mt-2 h-1 bg-gray-700 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-gradient-to-r from-yellow-400 via-cyan-400 to-yellow-400 rounded-full animate-progress"
+            style={{
+              width: '40%',
+              animation: 'progressIndeterminate 1.5s ease-in-out infinite',
+            }}
+          />
+          <style>{`
+            @keyframes progressIndeterminate {
+              0% { transform: translateX(-100%); }
+              100% { transform: translateX(350%); }
+            }
+          `}</style>
+        </div>
+      )}
+
       {/* Duration */}
       {tool.startedAt && (
         <div className={`mt-1 text-xs text-gray-500 ${compact ? 'hidden' : ''}`}>

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import AsyncIterator, Dict
+import uuid
+from typing import AsyncIterator, Dict, List, Any
 
 from common.mqtt import MQTTClient, PublishOptions
 from brain.orchestrator import BrainOrchestrator
@@ -11,6 +12,58 @@ from common.cache import SemanticCache
 from common.db.projects import upsert_project
 
 from .parser import VoiceParser
+
+
+def _extract_tool_events(routing_result: RoutingResult) -> List[Dict[str, Any]]:
+    """Extract tool execution events from agent steps metadata.
+
+    Returns list of events in format:
+    [
+        {"type": "tool_call", "id": str, "name": str, "args": dict, "timestamp": str},
+        {"type": "tool_result", "id": str, "name": str, "result": str, "status": str},
+        ...
+    ]
+    """
+    events = []
+    metadata = routing_result.metadata or {}
+    agent_steps = metadata.get("agent_steps", [])
+
+    for i, step in enumerate(agent_steps):
+        tool_id = str(uuid.uuid4())[:8]
+
+        # Extract action (tool call)
+        action = step.get("action")
+        if action:
+            action_input = step.get("action_input", {})
+            events.append({
+                "type": "tool_call",
+                "id": tool_id,
+                "name": action,
+                "args": action_input if isinstance(action_input, dict) else {"input": action_input},
+                "step": i + 1,
+            })
+
+            # Extract observation (tool result)
+            observation = step.get("observation")
+            if observation is not None:
+                # Determine status based on observation content
+                status = "completed"
+                if isinstance(observation, str):
+                    if "error" in observation.lower() or "failed" in observation.lower():
+                        status = "error"
+                    elif "blocked" in observation.lower() or "requires confirmation" in observation.lower():
+                        status = "blocked"
+
+                events.append({
+                    "type": "tool_result",
+                    "id": tool_id,
+                    "name": action,
+                    "result": str(observation)[:500] if observation else "",  # Truncate long results
+                    "status": status,
+                    "step": i + 1,
+                })
+
+    return events
 
 
 class VoiceRouter:
@@ -100,6 +153,10 @@ class VoiceRouter:
 
         if command["type"] == "routing":
             # Use streaming response from brain orchestrator
+            # Collect routing result to extract tool events
+            routing_result = None
+            text_chunks = []
+
             async for chunk in self._orchestrator.generate_response_stream(
                 conversation_id=conversation_id,
                 request_id=user_id,
@@ -111,6 +168,7 @@ class VoiceRouter:
                 is_done = chunk.get("done", False)
 
                 if delta:
+                    text_chunks.append(delta)
                     yield {
                         "type": "text",
                         "delta": delta,
@@ -119,11 +177,26 @@ class VoiceRouter:
 
                 if is_done:
                     routing_result = chunk.get("routing_result")
-                    yield {
-                        "type": "done",
-                        "tier": routing_result.tier.value if routing_result else "unknown",
-                        "done": True,
-                    }
+
+            # After streaming completes, yield tool events if present
+            if routing_result:
+                tool_events = _extract_tool_events(routing_result)
+                for event in tool_events:
+                    yield event
+
+                # Yield final done event with tier info
+                yield {
+                    "type": "done",
+                    "tier": routing_result.tier.value,
+                    "tools_used": len([e for e in tool_events if e["type"] == "tool_call"]),
+                    "done": True,
+                }
+            else:
+                yield {
+                    "type": "done",
+                    "tier": "unknown",
+                    "done": True,
+                }
             return
 
         if command["type"] == "note":

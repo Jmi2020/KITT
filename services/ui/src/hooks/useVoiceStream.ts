@@ -1,6 +1,33 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ToolExecution, ToolStatus } from '../components/VoiceAssistant/ToolExecutionCard';
 
 type VoiceStatus = 'disconnected' | 'connecting' | 'connected' | 'listening' | 'responding' | 'error';
+
+/**
+ * Format tool name for display (snake_case → Title Case)
+ */
+function formatToolName(name: string): string {
+  return name
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+/**
+ * Map backend status to ToolStatus type
+ */
+function mapToolStatus(status: string): ToolStatus {
+  switch (status) {
+    case 'completed':
+      return 'completed';
+    case 'error':
+    case 'blocked':
+      return 'error';
+    case 'running':
+      return 'running';
+    default:
+      return 'pending';
+  }
+}
 
 interface VoiceStreamState {
   status: VoiceStatus;
@@ -19,6 +46,10 @@ interface VoiceStreamState {
   isReconnecting: boolean;
   /** Number of reconnection attempts made */
   reconnectAttempts: number;
+  /** Active tool executions for current response */
+  toolExecutions: ToolExecution[];
+  /** Total tools used in last response */
+  toolsUsed: number;
 }
 
 interface VoiceStreamConfig {
@@ -80,6 +111,8 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
     capabilities: { stt: false, tts: false, streaming: false },
     isReconnecting: false,
     reconnectAttempts: 0,
+    toolExecutions: [],
+    toolsUsed: 0,
   });
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -168,6 +201,8 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
             ...prev,
             response: '',
             status: 'responding',
+            toolExecutions: [], // Clear previous tools
+            toolsUsed: 0,
           }));
           break;
 
@@ -176,10 +211,49 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
             ...prev,
             response: prev.response + (msg.delta || ''),
             tier: msg.tier || prev.tier,
+            toolsUsed: msg.tools_used ?? prev.toolsUsed,
           }));
           if (msg.done) {
             setState((prev) => ({ ...prev, status: 'connected' }));
           }
+          break;
+
+        case 'function.call':
+          // Tool invocation started
+          setState((prev) => {
+            const newTool: ToolExecution = {
+              id: msg.id,
+              name: msg.name,
+              displayName: formatToolName(msg.name),
+              args: msg.args,
+              status: 'running',
+              startedAt: new Date(),
+            };
+            return {
+              ...prev,
+              toolExecutions: [...prev.toolExecutions, newTool],
+            };
+          });
+          break;
+
+        case 'function.result':
+          // Tool execution completed
+          setState((prev) => {
+            const updatedTools = prev.toolExecutions.map((tool) =>
+              tool.id === msg.id
+                ? {
+                    ...tool,
+                    result: msg.result,
+                    status: mapToolStatus(msg.status),
+                    completedAt: new Date(),
+                  }
+                : tool
+            );
+            return {
+              ...prev,
+              toolExecutions: updatedTools,
+            };
+          });
           break;
 
         case 'response.audio':
@@ -355,6 +429,8 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
       capabilities: { stt: false, tts: false, streaming: false },
       isReconnecting: false,
       reconnectAttempts: 0,
+      toolExecutions: [],
+      toolsUsed: 0,
     });
   }, []);
 
