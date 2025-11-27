@@ -299,14 +299,15 @@ services:
     env_file:
       - .env
     environment:
-      API_BASE_URL: http://gateway:8080
+      API_BASE_URL: http://load-balancer:8080
       MQTT_URL: ws://mosquitto:9001
     depends_on:
-      - gateway
+      - load-balancer
     ports:
       - "4173:4173"
     networks:
       - kitty
+    restart: unless-stopped
 
   mosquitto:
     image: eclipse-mosquitto:2.0
