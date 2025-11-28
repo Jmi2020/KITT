@@ -62,34 +62,34 @@ class ModelCard:
 # LOCAL MODELS
 # =============================================================================
 
-LLAMA_3_3_70B = ModelCard(
+GPT_OSS_120B = ModelCard(
     id="gpt-oss",
-    name="Llama 3.3 70B Instruct",
+    name="GPT-OSS 120B",
     short_description="Primary reasoner with thinking mode",
     description=(
-        "Meta's Llama 3.3 is an instruction-tuned generative model with 70 billion "
-        "parameters designed for multilingual dialogue applications. Released December 2024, "
-        "it outperforms many open-source and proprietary chat models on industry benchmarks."
+        "GPT-OSS is KITTY's primary reasoning engine running on Ollama with 120 billion "
+        "parameters and built-in thinking mode for deep analysis. Optimized for deliberative "
+        "reasoning, synthesis, and complex multi-step problem solving with full tool access."
     ),
     capabilities=[
-        "Multilingual support (8 languages)",
+        "Deep reasoning with thinking mode",
         "Tool use and function calling",
-        "Strong code generation (88.4% HumanEval)",
-        "Enhanced mathematical reasoning (77.0 MATH)",
+        "Synthesis and deliberation",
         "Long context handling (128K tokens)",
-        "86.0 MMLU score",
+        "Multi-step problem solving",
+        "Evidence-based analysis",
     ],
-    parameters="70B",
+    parameters="120B",
     context_length="128,000 tokens",
-    architecture="Optimized Transformer with Grouped-Query Attention (GQA)",
-    developer="Meta AI",
-    license="Llama 3.3 Community License",
-    huggingface_url="https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct",
-    docs_url="https://llama.meta.com/",
-    release_date="December 2024",
-    quantization="F16 (full precision)",
+    architecture="Transformer with extended context",
+    developer="KITTY Project",
+    license="Local deployment",
+    huggingface_url=None,
+    docs_url=None,
+    release_date="2024",
+    quantization="Native (Ollama)",
     supports_tools=True,
-    languages=["English", "German", "French", "Italian", "Portuguese", "Hindi", "Spanish", "Thai"],
+    languages=["English"],
 )
 
 ATHENE_V2_AGENT = ModelCard(
@@ -322,7 +322,7 @@ GEMINI = ModelCard(
 
 MODEL_CARDS: Dict[str, ModelCard] = {
     # Local models
-    "gpt-oss": LLAMA_3_3_70B,
+    "gpt-oss": GPT_OSS_120B,
     "athene-q4": ATHENE_V2_AGENT,
     "gemma-vision": GEMMA_3_27B,
     "hermes-summary": HERMES_3_8B,

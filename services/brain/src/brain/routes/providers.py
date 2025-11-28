@@ -80,7 +80,7 @@ async def get_available_models() -> ModelsResponse:
         # =====================================================================
         ModelInfo(
             id="gpt-oss",
-            name="Llama 3.3 70B",
+            name="GPT-OSS 120B",
             type="local",
             provider="ollama",
             enabled=True,
