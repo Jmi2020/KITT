@@ -88,11 +88,25 @@ export function SettingsDrawer({
           maxWidth: '95vw',
           zIndex: 9999,
           transform: isOpen ? 'translateX(0)' : 'translateX(100%)',
-          transition: 'transform 300ms ease-out',
+          transition: 'transform 400ms cubic-bezier(0.16, 1, 0.3, 1)', // Smoother spring-like cubic-bezier
         }}
       >
         {/* Glassmorphism background */}
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-900/98 via-gray-900/95 to-gray-800/98 backdrop-blur-xl" />
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-900/95 via-gray-900/98 to-gray-950/98 backdrop-blur-2xl" />
+
+        {/* Tech Grid Background Pattern */}
+        <div
+          className="absolute inset-0 opacity-20 pointer-events-none"
+          style={{
+            backgroundImage: `
+              linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px),
+              linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px)
+            `,
+            backgroundSize: '40px 40px',
+            maskImage: 'linear-gradient(to bottom, black, transparent)',
+            WebkitMaskImage: 'linear-gradient(to bottom, black, transparent)',
+          }}
+        />
 
         {/* Animated border gradient */}
         <div className="absolute inset-y-0 left-0 w-[2px] bg-gradient-to-b from-cyan-400 via-purple-500 to-cyan-400 opacity-80"
@@ -199,6 +213,7 @@ function ModeCard({ mode, isSelected, onClick, disabled }: ModeCardProps) {
     <button
       onClick={onClick}
       disabled={disabled}
+      className="group"
       style={{
         width: '100%',
         padding: '16px',
@@ -219,6 +234,7 @@ function ModeCard({ mode, isSelected, onClick, disabled }: ModeCardProps) {
           e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
           e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)';
           e.currentTarget.style.transform = 'scale(1.02)';
+          e.currentTarget.style.boxShadow = `0 0 15px ${colors.accent}40`;
         }
       }}
       onMouseLeave={(e) => {
@@ -226,6 +242,7 @@ function ModeCard({ mode, isSelected, onClick, disabled }: ModeCardProps) {
           e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
           e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)';
           e.currentTarget.style.transform = 'scale(1)';
+          e.currentTarget.style.boxShadow = 'none';
         }
       }}
     >
@@ -244,7 +261,9 @@ function ModeCard({ mode, isSelected, onClick, disabled }: ModeCardProps) {
 
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
         {/* Icon with background */}
-        <div style={{
+        <div 
+          className="transition-transform duration-300 group-hover:scale-110"
+          style={{
           width: '48px',
           height: '48px',
           borderRadius: '12px',

@@ -127,9 +127,17 @@ export function KittyBadge({
           {/* Cat head outline */}
           <ellipse className="cat-path" cx="60" cy="52" rx="22" ry="18" />
 
-          {/* Cat eyes */}
-          <ellipse className="cat-path" cx="50" cy="50" rx="4" ry="5" />
-          <ellipse className="cat-path" cx="70" cy="50" rx="4" ry="5" />
+          {/* Cat eyes with Blinking and Pupils */}
+          <g className="eye-group">
+             <g className="eye-l" style={{ transformOrigin: '50px 50px' }}>
+                <ellipse className="cat-path" cx="50" cy="50" rx="4" ry="5" />
+                <circle className="pupil" cx="50" cy="50" r="2" />
+             </g>
+             <g className="eye-r" style={{ transformOrigin: '70px 50px' }}>
+                <ellipse className="cat-path" cx="70" cy="50" rx="4" ry="5" />
+                <circle className="pupil" cx="70" cy="50" r="2" />
+             </g>
+          </g>
 
           {/* Cat nose */}
           <path className="cat-path" d="M 58 56 L 60 59 L 62 56" />

@@ -250,6 +250,22 @@ When using React Portals (`createPortal`), Tailwind classes may not apply correc
 <div className="absolute inset-0 bg-gradient-to-br from-gray-900/98 via-gray-900/95 to-gray-800/98 backdrop-blur-xl" />
 ```
 
+**Tech Grid Background (Fun/Sci-Fi):**
+```typescript
+<div
+  className="absolute inset-0 opacity-20 pointer-events-none"
+  style={{
+    backgroundImage: `
+      linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px)
+    `,
+    backgroundSize: '40px 40px',
+    maskImage: 'linear-gradient(to bottom, black, transparent)',
+    WebkitMaskImage: 'linear-gradient(to bottom, black, transparent)',
+  }}
+/>
+```
+
 **Animated Gradient Border:**
 ```typescript
 <div

@@ -1,6 +1,7 @@
 /* --- KITTY Badge Configuration --- */
 .kitty-badge-wrapper {
   --neon-cyan: #00f3ff;
+  --neon-pink: #ff0099; /* Added for glitch/accent */
   --neon-glow-filter: drop-shadow(0 0 2px var(--neon-cyan))
                       drop-shadow(0 0 5px var(--neon-cyan))
                       drop-shadow(0 0 15px rgba(0, 243, 255, 0.6));
@@ -26,6 +27,10 @@
 .kitty-badge-wrapper.hovered {
   animation-play-state: paused;
   transform: scale(1.15) !important;
+}
+
+.kitty-badge-wrapper:active {
+  transform: scale(0.95) !important;
 }
 
 /* --- SVG General Styling --- */
@@ -87,6 +92,30 @@
   opacity: 0.7;
 }
 
+/* Eyes Container */
+.eye-group {
+  /* Container for pupils if we added them, currently managing blink on ellipses */
+}
+
+/* Blinking Animation on Eyes */
+.eye-l, .eye-r {
+  transform-origin: center;
+  animation: kitty-blink 4s infinite;
+}
+
+/* Slight delay for a more natural feel */
+.eye-r {
+  animation-delay: 0.1s;
+}
+
+/* Pupils (if added later) */
+.pupil {
+  fill: var(--neon-cyan);
+  opacity: 0.8;
+  stroke: none;
+  animation: kitty-look 8s infinite;
+}
+
 /* --- Text Styling --- */
 .kitty-text {
   font-family: 'Orbitron', 'Arial Black', sans-serif;
@@ -96,6 +125,7 @@
   letter-spacing: 2px;
   fill: rgba(0, 243, 255, 0.15);
   stroke-width: 1;
+  animation: text-glitch 5s infinite;
 }
 
 /* --- Animations --- */
@@ -139,6 +169,32 @@
 @keyframes kitty-float {
   0%, 100% { transform: translateY(0px); }
   50% { transform: translateY(-8px); }
+}
+
+/* Blinking */
+@keyframes kitty-blink {
+  0%, 48%, 52%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.1); }
+}
+
+/* Looking Around (Pupils) */
+@keyframes kitty-look {
+  0%, 40% { transform: translate(0, 0); }
+  45% { transform: translate(-3px, 1px); }
+  50% { transform: translate(-3px, 1px); }
+  55% { transform: translate(0, 0); }
+  80% { transform: translate(3px, -2px); }
+  85% { transform: translate(3px, -2px); }
+  90% { transform: translate(0, 0); }
+}
+
+/* Text Glitch */
+@keyframes text-glitch {
+  0%, 90%, 100% { opacity: 1; transform: skewX(0); }
+  91% { opacity: 0.8; transform: skewX(10deg); }
+  92% { opacity: 1; transform: skewX(-10deg); }
+  93% { opacity: 0.9; transform: skewX(5deg); }
+  94% { opacity: 1; transform: skewX(0); }
 }
 
 /* --- Responsive --- */
