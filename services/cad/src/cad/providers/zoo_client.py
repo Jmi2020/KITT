@@ -102,8 +102,8 @@ class ZooClient:
         geometry_url = None
         geometry_format = None
 
-        # Priority order: GLTF (for preview), then STEP (for CAD)
-        format_priority = ["gltf", "glb", "step", "obj"]
+        # Priority order: STEP (for CAD/fabrication), then GLTF (for preview)
+        format_priority = ["step", "gltf", "glb", "obj"]
 
         for target_fmt in format_priority:
             for key, data in outputs.items():
@@ -125,7 +125,9 @@ class ZooClient:
                 # Assume base64-encoded data (current Zoo API)
                 elif isinstance(data, str) and len(data) > 100:
                     try:
-                        geometry_data = base64.b64decode(data)
+                        # Add padding if needed (Zoo sometimes returns unpadded base64)
+                        padded_data = data + "=" * (-len(data) % 4)
+                        geometry_data = base64.b64decode(padded_data)
                         geometry_format = target_fmt
                         LOGGER.info(
                             "Decoded Zoo output",
