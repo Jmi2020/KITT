@@ -38,7 +38,7 @@ class BrainOrchestrator:
     def __init__(
         self,
         context_store: MQTTContextStore,
-        ha_credentials: HomeAssistantCredentials,
+        ha_credentials: HomeAssistantCredentials | None,
         router: BrainRouter,
         safety_workflow: Any | None = None,
         memory_client: MemoryClient | None = None,
@@ -46,7 +46,7 @@ class BrainOrchestrator:
         state_manager: Any | None = None,
     ) -> None:
         self._context_store = context_store
-        self._ha_skill = HomeAssistantSkill(ha_credentials)
+        self._ha_skill = HomeAssistantSkill(ha_credentials) if ha_credentials else None
         self._router = router
         self._safety = safety_workflow
         self._memory = memory_client or MemoryClient()
@@ -96,6 +96,11 @@ class BrainOrchestrator:
             if not allowed:
                 return response
 
+        if not self._ha_skill:
+            return {
+                "status": "error",
+                "message": "Home Assistant not configured - device control unavailable",
+            }
         return await self._ha_skill.execute(context, intent, payload)
 
     async def generate_response(

@@ -418,6 +418,16 @@ You have access to the following tools. Use them when needed to accomplish user 
 - Your knowledge cutoff prevents accurate answer → Use web_search
 - User explicitly requests a tool by name → Use that tool
 
+**CAD Generation Guidelines (generate_cad_model)**:
+CAD trigger phrases: "design me", "make a model", "create a", "3D print", "fabricate", "generate a [object]"
+- **Required parameter**: `prompt` - describe the object clearly (shape, dimensions, purpose)
+- **Optional parameters**: `mode` (auto/organic/parametric), `imageRefs` (reference images)
+- **Good prompts**: Include dimensions ("2 inch cube"), features ("with 4 mounting holes"), and purpose ("phone stand for desk")
+- **Mode selection**:
+  - `parametric` (default): Geometric shapes, mechanical parts, precise dimensions → Zoo.dev
+  - `organic`: Natural forms, sculptures, complex curves, image-based → Tripo
+- **Example**: "design me a 3 inch phone stand with a 45 degree angle" → `generate_cad_model(prompt="phone stand, 3 inches tall, 45 degree viewing angle, slot for phone")`
+
 **When NOT to Use Tools**:
 - Question can be answered from your training data
 - No tool clearly matches the request
@@ -452,7 +462,15 @@ You have access to the following tools. Use them when needed to accomplish user 
 - Bullet points (say "first", "second" instead)
 - URLs (describe the source instead: "according to the latest research")
 - Code blocks (describe in words: "the function takes two parameters")
-- Tables or structured data (convert to narrative)"""
+- Tables or structured data (convert to narrative)
+
+**Voice CAD Interactions**:
+When the user asks to design or create something via voice:
+1. Acknowledge their request naturally: "I'll design that for you"
+2. Call `generate_cad_model` with a clear, detailed prompt
+3. After generation, describe what was created: "I've generated a 3-inch phone stand with a 45 degree angle. The model is ready in your artifacts folder."
+4. If dimensions weren't specified, ask: "What size would you like that to be?"
+5. For complex requests, confirm understanding before generating"""
 
     def _build_cli_ux(self, verbosity: int) -> str:
         """Build CLI-specific UX instructions.

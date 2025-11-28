@@ -78,6 +78,7 @@ services:
       IMAGE_SEARCH_SAFESEARCH: ${IMAGE_SEARCH_SAFESEARCH:-moderate}
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
       BRAVE_SEARCH_ENDPOINT: ${BRAVE_SEARCH_ENDPOINT:-https://api.search.brave.com/res/v1/images/search}
+      VOICE_BASE_URL: http://host.docker.internal:8550
     depends_on:
       - brain
       - fabrication

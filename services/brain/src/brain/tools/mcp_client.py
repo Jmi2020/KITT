@@ -82,7 +82,7 @@ class MCPClient:
             if callable(CADMCPServer):
                 self._servers["cad"] = CADMCPServer(
                     cad_service_url=cad_service_url
-                    or os.getenv("CAD_SERVICE_URL", "http://cad:8000")
+                    or os.getenv("CAD_SERVICE_URL", "http://cad:8200")
                 )
 
             # Memory server

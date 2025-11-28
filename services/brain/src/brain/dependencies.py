@@ -26,10 +26,17 @@ logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
-def get_home_assistant_credentials() -> HomeAssistantCredentials:
+def get_home_assistant_credentials() -> Optional[HomeAssistantCredentials]:
+    """Get Home Assistant credentials if configured.
+
+    Returns:
+        HomeAssistantCredentials if token is configured, None otherwise.
+        Home Assistant integration is optional - CAD, web search, etc. work without it.
+    """
     token = settings.home_assistant_token
     if not token:
-        raise RuntimeError("HOME_ASSISTANT_TOKEN not configured")
+        logger.info("HOME_ASSISTANT_TOKEN not configured - Home Assistant features disabled")
+        return None
     return HomeAssistantCredentials(
         token=SecretStr(token), base_url=settings.home_assistant_base_url
     )

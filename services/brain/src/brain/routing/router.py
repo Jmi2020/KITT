@@ -409,8 +409,8 @@ class BrainRouter:
 
     async def _invoke_local(self, request: RoutingRequest) -> RoutingResult:
         start = time.perf_counter()
-        # Default to F16 model for tool calling (more capable)
-        model_alias = request.model_hint or "kitty-f16"
+        # Default to Q4 model for tool calling (F16 often not running)
+        model_alias = request.model_hint or "kitty-q4"
         model_format = detect_model_format(model_alias)
 
         # Get tools based on prompt and mode (semantic or keyword-based)
@@ -474,12 +474,9 @@ class BrainRouter:
 
         # Log confidence analysis if warnings exist
         if confidence_result.warnings:
-            log_confidence_analysis(
-                logger=logger,
-                confidence=confidence,
-                factors=confidence_result.factors.to_dict(),
-                explanation=confidence_result.explanation,
-                warnings=confidence_result.warnings,
+            logger.warning(
+                f"Confidence warnings: {confidence_result.warnings} "
+                f"(confidence={confidence:.2f}, explanation={confidence_result.explanation})"
             )
 
         # Extract token usage from response
@@ -756,7 +753,7 @@ class BrainRouter:
 
                     if self._tool_mcp:
                         try:
-                            result = await self._tool_mcp.execute(
+                            result = await self._tool_mcp.execute_tool(
                                 "generate_cad_model",
                                 {
                                     "prompt": prompt,
