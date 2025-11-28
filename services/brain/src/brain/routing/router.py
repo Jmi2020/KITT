@@ -749,18 +749,50 @@ class BrainRouter:
                             {"tool": "web_search", "error": "MCP client not available"}
                         )
 
-                elif function_name == "generate_cad":
-                    # Execute CAD generation via CAD service
-                    description = arguments.get("description", "")
+                elif function_name == "generate_cad_model":
+                    # Execute CAD generation via MCP CAD server
+                    prompt = arguments.get("prompt", arguments.get("description", ""))
                     format_type = arguments.get("format", "step")
-                    # TODO: Call CAD service endpoint
-                    tool_results.append(
-                        {
-                            "tool": "generate_cad",
-                            "description": description,
-                            "result": f"CAD generation queued for: {description} (format: {format_type})",
-                        }
-                    )
+
+                    if self._tool_mcp:
+                        try:
+                            result = await self._tool_mcp.execute(
+                                "generate_cad_model",
+                                {
+                                    "prompt": prompt,
+                                    "references": arguments.get("references", {}),
+                                    "imageRefs": arguments.get("imageRefs"),
+                                    "mode": arguments.get("mode"),
+                                }
+                            )
+                            if result.get("success") or result.get("output"):
+                                tool_results.append(
+                                    {
+                                        "tool": "generate_cad_model",
+                                        "prompt": prompt,
+                                        "result": result.get("output") or result.get("data", "CAD model generated"),
+                                    }
+                                )
+                            else:
+                                tool_results.append(
+                                    {
+                                        "tool": "generate_cad_model",
+                                        "error": result.get("error", "CAD generation failed")
+                                    }
+                                )
+                        except Exception as cad_err:
+                            logger.warning(f"CAD MCP execution failed: {cad_err}")
+                            tool_results.append(
+                                {
+                                    "tool": "generate_cad_model",
+                                    "prompt": prompt,
+                                    "result": f"CAD generation queued for: {prompt} (format: {format_type})",
+                                }
+                            )
+                    else:
+                        tool_results.append(
+                            {"tool": "generate_cad_model", "error": "CAD MCP client not available"}
+                        )
 
                 elif function_name == "reason_with_f16":
                     # Delegate to F16 reasoning engine

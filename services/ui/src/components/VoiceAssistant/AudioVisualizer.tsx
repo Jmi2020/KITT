@@ -3,6 +3,16 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 const FFT_BARS = 64;
 const PARTICLE_COUNT = 12;
 
+/** Color theme definitions for different voice modes */
+const MODE_COLORS = {
+  cyan: { hex: '#22d3ee', rgb: '34, 211, 238' },
+  orange: { hex: '#f97316', rgb: '249, 115, 22' },
+  purple: { hex: '#a855f7', rgb: '168, 85, 247' },
+  green: { hex: '#22c55e', rgb: '34, 197, 94' },
+  pink: { hex: '#ec4899', rgb: '236, 72, 153' },
+  red: { hex: '#ef4444', rgb: '239, 68, 68' },
+};
+
 interface AudioVisualizerProps {
   fftData: number[];
   audioLevel: number;
@@ -11,6 +21,8 @@ interface AudioVisualizerProps {
   progress?: number | null;
   /** Size in pixels (default: 280) */
   size?: number;
+  /** Color theme based on voice mode (default: cyan) */
+  modeColor?: 'cyan' | 'orange' | 'purple' | 'green' | 'pink';
 }
 
 /**
@@ -24,6 +36,7 @@ export function AudioVisualizer({
   isProcessing = false,
   progress = null,
   size = 280,
+  modeColor = 'cyan',
 }: AudioVisualizerProps) {
   const [ring1Rotation, setRing1Rotation] = useState(0);
   const [ring2Rotation, setRing2Rotation] = useState(0);
@@ -73,9 +86,10 @@ export function AudioVisualizer({
   const isActive = status === 'listening' || status === 'responding';
   const isError = status === 'error';
 
-  // Color based on status
-  const primaryColor = isError ? '#ef4444' : '#22d3ee';
-  const primaryRgba = isError ? 'rgba(239, 68, 68,' : 'rgba(34, 211, 238,';
+  // Color based on status and mode
+  const colorTheme = isError ? MODE_COLORS.red : (MODE_COLORS[modeColor] || MODE_COLORS.cyan);
+  const primaryColor = colorTheme.hex;
+  const primaryRgba = `rgba(${colorTheme.rgb},`;
   const pulseIntensity = Math.sin(pulsePhase) * 0.5 + 0.5;
 
   return (

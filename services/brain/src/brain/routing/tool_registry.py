@@ -28,15 +28,15 @@ TOOL_DEFINITIONS = {
             }
         }
     },
-    "generate_cad": {
+    "generate_cad_model": {
         "type": "function",
         "function": {
-            "name": "generate_cad",
+            "name": "generate_cad_model",
             "description": "Generate a 3D CAD model based on a text description. Use this when the user wants to design, model, or create a physical object or part.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "description": {
+                    "prompt": {
                         "type": "string",
                         "description": "Detailed description of the object to design"
                     },
@@ -46,7 +46,7 @@ TOOL_DEFINITIONS = {
                         "description": "Output format for the CAD file"
                     }
                 },
-                "required": ["description"]
+                "required": ["prompt"]
             }
         }
     },
@@ -81,9 +81,10 @@ TOOL_KEYWORDS = {
         "google", "what is the latest", "current", "today",
         "recent", "news about", "price of", "cost of"
     ],
-    "generate_cad": [
+    "generate_cad_model": [
         "design", "model", "cad", "generate model",
-        "create a design", "draw", "design me", "make a model"
+        "create a design", "draw", "design me", "make a model",
+        "3d print", "fabricate", "griffon", "griffin", "gryffon"
     ],
     "reason_with_f16": [
         "explain in detail", "analyze", "deep dive", "comprehensive",

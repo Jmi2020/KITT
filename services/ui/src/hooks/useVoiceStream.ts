@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ToolExecution, ToolStatus } from '../components/VoiceAssistant/ToolExecutionCard';
+import { getModeById } from '../types/voiceModes';
 
 type VoiceStatus = 'disconnected' | 'connecting' | 'connected' | 'listening' | 'responding' | 'error';
 
@@ -50,6 +51,10 @@ interface VoiceStreamState {
   toolExecutions: ToolExecution[];
   /** Total tools used in last response */
   toolsUsed: number;
+  /** Current voice mode (basic, maker, research, home, creative) */
+  mode: string;
+  /** Whether paid API calls are allowed */
+  allowPaid: boolean;
 }
 
 interface VoiceStreamConfig {
@@ -59,6 +64,12 @@ interface VoiceStreamConfig {
   language?: string;
   sampleRate?: number;
   preferLocal?: boolean;
+  /** Voice mode (basic, maker, research, home, creative) */
+  mode?: string;
+  /** Allow paid API calls */
+  allowPaid?: boolean;
+  /** Enabled tool names for this mode */
+  enabledTools?: string[];
 }
 
 interface UseVoiceStreamOptions {
@@ -82,6 +93,8 @@ interface UseVoiceStreamReturn extends VoiceStreamState {
   endAudio: () => void;
   cancel: () => void;
   setPreferLocal: (prefer: boolean) => void;
+  /** Set voice mode (basic, maker, research, home, creative) */
+  setMode: (modeId: string) => void;
 }
 
 /**
@@ -113,6 +126,8 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
     reconnectAttempts: 0,
     toolExecutions: [],
     toolsUsed: 0,
+    mode: 'basic',
+    allowPaid: false,
   });
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -355,9 +370,17 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
           language: config.language || 'en',
           sample_rate: config.sampleRate || 16000,
           prefer_local: config.preferLocal ?? true,
+          mode: config.mode || 'basic',
+          allow_paid: config.allowPaid ?? false,
+          enabled_tools: config.enabledTools || [],
         },
       }));
-      setState((prev) => ({ ...prev, preferLocal: config.preferLocal ?? true }));
+      setState((prev) => ({
+        ...prev,
+        preferLocal: config.preferLocal ?? true,
+        mode: config.mode || 'basic',
+        allowPaid: config.allowPaid ?? false,
+      }));
     };
 
     ws.onmessage = handleMessage;
@@ -435,6 +458,8 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
       reconnectAttempts: 0,
       toolExecutions: [],
       toolsUsed: 0,
+      mode: 'basic',
+      allowPaid: false,
     });
   }, []);
 
@@ -492,6 +517,31 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
     }
   }, []);
 
+  const setMode = useCallback((modeId: string) => {
+    const modeConfig = getModeById(modeId);
+    if (!modeConfig) return;
+
+    setState((prev) => ({
+      ...prev,
+      mode: modeId,
+      allowPaid: modeConfig.allowPaid,
+      preferLocal: modeConfig.preferLocal,
+    }));
+
+    // Send config update to server
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'config',
+        config: {
+          mode: modeId,
+          allow_paid: modeConfig.allowPaid,
+          prefer_local: modeConfig.preferLocal,
+          enabled_tools: modeConfig.enabledTools,
+        },
+      }));
+    }
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -508,5 +558,6 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
     endAudio,
     cancel,
     setPreferLocal,
+    setMode,
   };
 }

@@ -110,6 +110,7 @@ class BrainOrchestrator:
         model_hint: str | None = None,
         use_agent: bool = False,
         tool_mode: str = "auto",
+        allow_paid: bool = False,  # Explicit allow_paid from UI/voice mode
     ) -> RoutingResult:
         # Get or create conversation state
         conv_state = self._state_manager.get_or_create(conversation_id, user_id or "unknown")
@@ -174,13 +175,13 @@ class BrainOrchestrator:
                     latency_ms=0,
                 )
 
+        # allow_paid can come from: UI mode setting (parameter), or override token in prompt
         override_token = os.getenv("API_OVERRIDE_PASSWORD", "omega") or ""
-        allow_paid = False
         cleaned_prompt = prompt
         if override_token:
             token_pattern = re.compile(rf"\b{re.escape(override_token)}\b", re.IGNORECASE)
             if token_pattern.search(prompt):
-                allow_paid = True
+                allow_paid = True  # Override token in prompt enables paid
                 cleaned_prompt = token_pattern.sub("", prompt).strip()
 
         # Retrieve relevant memories
@@ -279,6 +280,7 @@ class BrainOrchestrator:
         model_hint: str | None = None,
         use_agent: bool = False,
         tool_mode: str = "auto",
+        allow_paid: bool = False,  # Explicit allow_paid from UI/voice mode
     ):
         """Generate streaming response with real-time thinking traces.
 
@@ -399,13 +401,13 @@ class BrainOrchestrator:
                 }
                 return
 
+        # allow_paid can come from: UI mode setting (parameter), or override token in prompt
         override_token = os.getenv("API_OVERRIDE_PASSWORD", "omega") or ""
-        allow_paid = False
         cleaned_prompt = prompt
         if override_token:
             token_pattern = re.compile(rf"\b{re.escape(override_token)}\b", re.IGNORECASE)
             if token_pattern.search(prompt):
-                allow_paid = True
+                allow_paid = True  # Override token in prompt enables paid
                 cleaned_prompt = token_pattern.sub("", prompt).strip()
 
         # Retrieve relevant memories

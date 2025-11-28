@@ -65,6 +65,11 @@ class VoiceSession:
     channels: int = 1  # Mono audio
     prefer_local: bool = True  # Prefer local STT/TTS over cloud
 
+    # Mode and tool settings
+    mode: str = "basic"  # Voice mode: basic, maker, research, home, creative
+    allow_paid: bool = False  # Allow paid API calls (CAD, deep research)
+    enabled_tools: list = field(default_factory=list)  # Enabled tool names
+
 
 class VoiceWebSocketHandler:
     """Handles WebSocket connections for real-time voice interaction."""
@@ -159,6 +164,19 @@ class VoiceWebSocketHandler:
             if "prefer_local" in config:
                 session.prefer_local = config.get("prefer_local", True)
 
+            # Mode and tool settings
+            if "mode" in config:
+                session.mode = config.get("mode", "basic")
+            if "allow_paid" in config:
+                session.allow_paid = config.get("allow_paid", False)
+            if "enabled_tools" in config:
+                session.enabled_tools = config.get("enabled_tools", [])
+
+            logger.info(
+                f"Session {session.session_id} configured: "
+                f"mode={session.mode}, allow_paid={session.allow_paid}"
+            )
+
             await self._send(
                 websocket,
                 MessageType.STATUS,
@@ -166,6 +184,8 @@ class VoiceWebSocketHandler:
                     "status": "configured",
                     "session_id": session.session_id,
                     "prefer_local": session.prefer_local,
+                    "mode": session.mode,
+                    "allow_paid": session.allow_paid,
                 },
             )
 
@@ -275,7 +295,11 @@ class VoiceWebSocketHandler:
             full_response = ""
 
             async for chunk in self._router.handle_transcript_stream(
-                session.conversation_id, session.user_id, text
+                session.conversation_id,
+                session.user_id,
+                text,
+                allow_paid=session.allow_paid,
+                mode=session.mode,
             ):
                 if session.cancelled:
                     break

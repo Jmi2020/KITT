@@ -11,6 +11,8 @@ import { ConversationSelector } from './ConversationSelector';
 import { StreamingIndicator } from './StreamingIndicator';
 import { StatusBar } from './StatusBadge';
 import { ToolExecutionList } from './ToolExecutionCard';
+import { SettingsDrawer, SettingsButton } from './SettingsDrawer';
+import { getModeById } from '../../types/voiceModes';
 import type { VoiceStatus } from './StatusBadge';
 
 interface VoiceAssistantProps {
@@ -39,6 +41,7 @@ export function VoiceAssistant({
   const [isPushToTalk, setIsPushToTalk] = useState(false);
   const [textInput, setTextInput] = useState('');
   const [showHistoryPanel, setShowHistoryPanel] = useState(showHistory);
+  const [showSettingsDrawer, setShowSettingsDrawer] = useState(false);
   const [conversationId, setConversationId] = useState<string>(
     initialConversationId || crypto.randomUUID()
   );
@@ -58,6 +61,8 @@ export function VoiceAssistant({
     reconnectAttempts,
     toolExecutions,
     toolsUsed,
+    mode,
+    allowPaid,
     connect,
     disconnect,
     sendAudio,
@@ -65,7 +70,11 @@ export function VoiceAssistant({
     endAudio,
     cancel,
     setPreferLocal,
+    setMode,
   } = voiceStream;
+
+  // Get current mode configuration for colors
+  const currentModeConfig = getModeById(mode);
 
   // Audio capture hook
   const audioCapture = useAudioCapture({
@@ -145,9 +154,17 @@ export function VoiceAssistant({
     }
   }, [status, updateMessage]);
 
-  // Connect on mount
+  // Connect on mount with initial mode
   useEffect(() => {
-    connect({ conversationId, userId });
+    const initialMode = getModeById('basic');
+    connect({
+      conversationId,
+      userId,
+      mode: 'basic',
+      allowPaid: initialMode?.allowPaid ?? false,
+      preferLocal: initialMode?.preferLocal ?? true,
+      enabledTools: initialMode?.enabledTools ?? [],
+    });
     return () => disconnect();
   }, [connect, disconnect, conversationId, userId]);
 
@@ -270,6 +287,13 @@ export function VoiceAssistant({
               </span>
             )}
           </button>
+
+          {/* Settings/Mode button */}
+          <SettingsButton
+            currentMode={mode}
+            onClick={() => setShowSettingsDrawer(true)}
+            compact={isMobile}
+          />
         </div>
 
         {onClose && (
@@ -320,6 +344,7 @@ export function VoiceAssistant({
               status={visualizerStatus}
               isProcessing={status === 'responding'}
               size={isMobile ? 200 : 280}
+              modeColor={currentModeConfig?.color as 'cyan' | 'orange' | 'purple' | 'green' | 'pink' | undefined}
             />
 
             {/* Center content */}
@@ -336,6 +361,7 @@ export function VoiceAssistant({
                   tier={tier || undefined}
                   preferLocal={preferLocal}
                   compact={isMobile}
+                  mode={mode}
                 />
               </div>
             </div>
@@ -542,6 +568,15 @@ export function VoiceAssistant({
           )}
         </div>
       </div>
+
+      {/* Settings Drawer */}
+      <SettingsDrawer
+        isOpen={showSettingsDrawer}
+        onClose={() => setShowSettingsDrawer(false)}
+        currentMode={mode}
+        onModeChange={setMode}
+        isConnected={status !== 'disconnected' && status !== 'connecting'}
+      />
     </div>
   );
 }

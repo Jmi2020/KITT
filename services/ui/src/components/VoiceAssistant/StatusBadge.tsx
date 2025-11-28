@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { getModeById } from '../../types/voiceModes';
 
 export type VoiceStatus =
   | 'disconnected'
@@ -131,6 +132,8 @@ interface StatusBarProps {
   tier?: string;
   preferLocal?: boolean;
   compact?: boolean;
+  /** Current voice mode ID */
+  mode?: string;
 }
 
 export const StatusBar = memo(function StatusBar({
@@ -140,7 +143,10 @@ export const StatusBar = memo(function StatusBar({
   tier,
   preferLocal,
   compact = false,
+  mode = 'basic',
 }: StatusBarProps) {
+  const modeConfig = getModeById(mode);
+
   return (
     <div className={`flex items-center justify-center gap-2 flex-wrap ${compact ? 'text-xs' : 'text-sm'}`}>
       {/* Main status */}
@@ -150,6 +156,16 @@ export const StatusBar = memo(function StatusBar({
         reconnectAttempts={reconnectAttempts}
         compact={compact}
       />
+
+      {/* Mode indicator */}
+      {modeConfig && status !== 'disconnected' && (
+        <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full ${modeConfig.bgClass} ${modeConfig.borderClass} border`}>
+          <span className="text-xs">{modeConfig.icon}</span>
+          {!compact && (
+            <span className="font-medium text-white">{modeConfig.name}</span>
+          )}
+        </div>
+      )}
 
       {/* Tier indicator */}
       {tier && status !== 'disconnected' && (

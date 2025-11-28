@@ -120,9 +120,21 @@ class VoiceRouter:
         return {"status": "error", "message": "Unhandled command"}
 
     async def handle_transcript_stream(
-        self, conversation_id: str, user_id: str, transcript: str
+        self,
+        conversation_id: str,
+        user_id: str,
+        transcript: str,
+        allow_paid: bool = False,
+        mode: str = "basic",
     ) -> AsyncIterator[Dict]:
         """Handle a voice transcript with streaming response.
+
+        Args:
+            conversation_id: Conversation ID
+            user_id: User ID
+            transcript: Voice transcript text
+            allow_paid: Whether to allow paid API calls (CAD, deep research)
+            mode: Voice mode (basic, maker, research, home, creative)
 
         Yields chunks in format:
         {
@@ -162,6 +174,7 @@ class VoiceRouter:
                 request_id=user_id,
                 prompt=command["prompt"],
                 user_id=user_id,
+                allow_paid=allow_paid,  # Pass through from voice mode settings
             )
 
             # Extract tool events from result metadata
