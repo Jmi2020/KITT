@@ -11,6 +11,7 @@ import { ConversationSelector } from './ConversationSelector';
 import { StreamingIndicator } from './StreamingIndicator';
 import { StatusBar } from './StatusBadge';
 import { ToolExecutionList } from './ToolExecutionCard';
+import { HUDFrame } from './HUDFrame';
 import { SettingsDrawer, SettingsButton } from './SettingsDrawer';
 import { getModeById } from '../../types/voiceModes';
 import type { VoiceStatus } from './StatusBadge';
@@ -436,125 +437,135 @@ export function VoiceAssistant({
           )}
 
           {/* Controls */}
-          <div className="w-full space-y-3">
-            {/* Input Level Meter */}
-            <div className="flex justify-center">
-              <InputLevelMeter level={inputLevel} active={isCapturing} compact={isMobile} />
-            </div>
+          <HUDFrame
+            color={currentModeConfig?.color}
+            corners={true}
+            glow="subtle"
+            className="w-full p-4 bg-black/40 backdrop-blur-md mt-auto"
+          >
+            <div className="space-y-3">
+              {/* Input Level Meter */}
+              <div className="flex justify-center">
+                <InputLevelMeter level={inputLevel} active={isCapturing} compact={isMobile} />
+              </div>
 
-            {/* Push to Talk Button */}
-            <button
-              onMouseDown={handlePushToTalkStart}
-              onMouseUp={handlePushToTalkEnd}
-              onMouseLeave={handlePushToTalkEnd}
-              onTouchStart={handlePushToTalkStart}
-              onTouchEnd={handlePushToTalkEnd}
-              disabled={status === 'disconnected' || status === 'connecting'}
-              className={`w-full py-3 md:py-4 rounded-xl font-semibold transition-all text-sm md:text-base ${
-                isCapturing
-                  ? 'bg-cyan-500 text-gray-900 shadow-[0_0_30px_rgba(34,211,238,0.5)]'
-                  : status === 'disconnected' || status === 'connecting'
-                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                  : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/50 hover:bg-cyan-500/30'
-              }`}
-            >
-              {isCapturing ? 'Release to Send' : isMobile ? 'Hold to Talk' : 'Hold to Talk (Space)'}
-            </button>
-
-            {/* Text Input (fallback) */}
-            <form onSubmit={handleTextSubmit} className="flex gap-2">
-              <input
-                type="text"
-                value={textInput}
-                onChange={(e) => setTextInput(e.target.value)}
-                placeholder={isMobile ? 'Type message...' : 'Or type your message...'}
+              {/* Push to Talk Button */}
+              <button
+                onMouseDown={handlePushToTalkStart}
+                onMouseUp={handlePushToTalkEnd}
+                onMouseLeave={handlePushToTalkEnd}
+                onTouchStart={handlePushToTalkStart}
+                onTouchEnd={handlePushToTalkEnd}
                 disabled={status === 'disconnected' || status === 'connecting'}
-                className="flex-1 px-3 md:px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500 text-sm"
-              />
-              <button
-                type="submit"
-                disabled={!textInput.trim() || status === 'disconnected' || status === 'connecting'}
-                className="px-4 md:px-6 py-2 bg-cyan-500/20 text-cyan-400 border border-cyan-500/50 rounded-lg hover:bg-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                className={`w-full py-3 md:py-4 rounded-xl font-semibold transition-all text-sm md:text-base ${
+                  isCapturing
+                    ? 'bg-cyan-500 text-gray-900 shadow-[0_0_30px_rgba(34,211,238,0.5)]'
+                    : status === 'disconnected' || status === 'connecting'
+                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                    : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/20 hover:border-cyan-500/60 hover:shadow-[0_0_15px_rgba(34,211,238,0.15)]'
+                }`}
               >
-                Send
+                {isCapturing ? 'Release to Send' : isMobile ? 'Hold to Talk' : 'Hold to Talk (Space)'}
               </button>
-            </form>
 
-            {/* Cancel Button */}
-            {status === 'responding' && (
-              <button
-                onClick={cancel}
-                className="w-full py-2 bg-red-500/20 text-red-400 border border-red-500/50 rounded-lg hover:bg-red-500/30 text-sm"
-              >
-                Cancel
-              </button>
-            )}
-
-            {/* Connection & Settings Row */}
-            <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-              {/* Connection button */}
-              {status === 'disconnected' ? (
+              {/* Text Input (fallback) */}
+              <form onSubmit={handleTextSubmit} className="flex gap-2">
+                <input
+                  type="text"
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  placeholder={isMobile ? 'Type message...' : 'Or type your message...'}
+                  disabled={status === 'disconnected' || status === 'connecting'}
+                  className="flex-1 px-3 md:px-4 py-2 bg-gray-900/50 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 text-sm font-mono"
+                />
                 <button
-                  onClick={() => connect({ conversationId, userId })}
-                  className="px-3 py-1.5 bg-green-500/20 text-green-400 border border-green-500/50 rounded-lg hover:bg-green-500/30 text-sm"
+                  type="submit"
+                  disabled={!textInput.trim() || status === 'disconnected' || status === 'connecting'}
+                  className="px-4 md:px-6 py-2 bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 rounded-lg hover:bg-cyan-500/20 hover:shadow-[0_0_10px_rgba(34,211,238,0.1)] disabled:opacity-50 disabled:cursor-not-allowed text-sm uppercase tracking-wider font-semibold"
                 >
-                  Connect
+                  Send
                 </button>
-              ) : (
+              </form>
+
+              {/* Cancel Button */}
+              {status === 'responding' && (
                 <button
-                  onClick={disconnect}
-                  className="px-3 py-1.5 bg-gray-500/20 text-gray-400 border border-gray-500/50 rounded-lg hover:bg-gray-500/30 text-sm"
+                  onClick={cancel}
+                  className="w-full py-2 bg-red-500/10 text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/20 text-sm uppercase tracking-wider"
                 >
-                  Disconnect
+                  Cancel Generation
                 </button>
               )}
 
-              {/* Local/Cloud Toggle */}
+              {/* Connection & Settings Row */}
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-2 border-t border-white/5 mt-2">
+                {/* Connection button */}
+                {status === 'disconnected' ? (
+                  <button
+                    onClick={() => connect({ conversationId, userId })}
+                    className="px-3 py-1.5 bg-green-500/10 text-green-400 border border-green-500/30 rounded-lg hover:bg-green-500/20 text-xs uppercase tracking-wide"
+                  >
+                    Initialize System
+                  </button>
+                ) : (
+                  <button
+                    onClick={disconnect}
+                    className="px-3 py-1.5 bg-gray-500/10 text-gray-400 border border-gray-500/30 rounded-lg hover:bg-gray-500/20 text-xs uppercase tracking-wide"
+                  >
+                    Terminate Link
+                  </button>
+                )}
+
+                {/* Local/Cloud Toggle */}
+                {status !== 'disconnected' && (
+                  <div className="inline-flex rounded-lg border border-gray-700/50 overflow-hidden p-0.5 bg-gray-900/50">
+                    <button
+                      type="button"
+                      onClick={() => setPreferLocal(true)}
+                      className={`px-3 py-1 text-[10px] uppercase tracking-wider font-bold transition-all rounded-md ${
+                        preferLocal
+                          ? 'bg-cyan-500/20 text-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.2)]'
+                          : 'text-gray-500 hover:text-gray-300'
+                      }`}
+                    >
+                      Local
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreferLocal(false)}
+                      className={`px-3 py-1 text-[10px] uppercase tracking-wider font-bold transition-all rounded-md ${
+                        !preferLocal
+                          ? 'bg-purple-500/20 text-purple-300 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
+                          : 'text-gray-500 hover:text-gray-300'
+                      }`}
+                    >
+                      Cloud
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Capabilities indicator - compact on mobile */}
               {status !== 'disconnected' && (
-                <div className="inline-flex rounded-lg border border-gray-600 overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => setPreferLocal(true)}
-                    className={`px-3 py-1.5 text-xs font-medium transition-all ${
-                      preferLocal
-                        ? 'bg-cyan-500 text-gray-900'
-                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                    }`}
-                  >
-                    Local
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreferLocal(false)}
-                    className={`px-3 py-1.5 text-xs font-medium transition-all ${
-                      !preferLocal
-                        ? 'bg-purple-500 text-white'
-                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                    }`}
-                  >
-                    Cloud
-                  </button>
+                <div className="flex justify-center gap-4 text-[10px] uppercase tracking-wider font-mono text-gray-500">
+                  <span className={`flex items-center gap-1 ${capabilities.stt ? 'text-green-400/80' : 'opacity-50'}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${capabilities.stt ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
+                    STT
+                  </span>
+                  <span className={`flex items-center gap-1 ${capabilities.tts ? 'text-green-400/80' : 'opacity-50'}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${capabilities.tts ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
+                    TTS
+                  </span>
+                  {!isMobile && (
+                    <span className={`flex items-center gap-1 ${capabilities.streaming ? 'text-green-400/80' : 'opacity-50'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${capabilities.streaming ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
+                      Stream
+                    </span>
+                  )}
                 </div>
               )}
             </div>
-
-            {/* Capabilities indicator - compact on mobile */}
-            {status !== 'disconnected' && (
-              <div className="flex justify-center gap-3 text-xs text-gray-500">
-                <span className={capabilities.stt ? 'text-green-400' : 'text-gray-600'}>
-                  STT {capabilities.stt ? '✓' : '✗'}
-                </span>
-                <span className={capabilities.tts ? 'text-green-400' : 'text-gray-600'}>
-                  TTS {capabilities.tts ? '✓' : '✗'}
-                </span>
-                {!isMobile && (
-                  <span className={capabilities.streaming ? 'text-green-400' : 'text-gray-600'}>
-                    Stream {capabilities.streaming ? '✓' : '✗'}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
+          </HUDFrame>
 
           {/* Instructions - hidden on mobile for space */}
           {!isMobile && (
