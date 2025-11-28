@@ -144,7 +144,8 @@ class CADMCPServer(MCPServer):
             if mode:
                 payload["mode"] = mode
 
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            # Tripo generation can take up to 5 minutes, so use 360s timeout
+            async with httpx.AsyncClient(timeout=360.0) as client:
                 response = await client.post(
                     f"{self._cad_url}/api/cad/generate",
                     json=payload,
