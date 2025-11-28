@@ -74,6 +74,7 @@ class ArtifactRenameWorker:
         stl_location: Optional[str],
         thumbnail_url: Optional[str],
         user_prompt: Optional[str],
+        step_location: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Process and rename artifact files.
 
@@ -82,6 +83,7 @@ class ArtifactRenameWorker:
             stl_location: Path to STL file (or None)
             thumbnail_url: URL to thumbnail image for vision analysis
             user_prompt: Original user request for context
+            step_location: Path to STEP file (or None) - uses prompt-only rename
 
         Returns:
             Dict with success status and new file paths
@@ -90,6 +92,7 @@ class ArtifactRenameWorker:
             "success": False,
             "glb_new": None,
             "stl_new": None,
+            "step_new": None,
             "description": None,
         }
 
@@ -97,20 +100,28 @@ class ArtifactRenameWorker:
             LOGGER.debug("Artifact renaming disabled via ARTIFACT_RENAME_ENABLED")
             return result
 
-        if not thumbnail_url:
-            LOGGER.warning("No thumbnail URL provided for rename")
-            return result
-
         # Check if at least one file exists
         glb_exists = glb_location and Path(glb_location).exists()
         stl_exists = stl_location and Path(stl_location).exists()
+        step_exists = step_location and Path(step_location).exists()
 
-        if not glb_exists and not stl_exists:
+        if not glb_exists and not stl_exists and not step_exists:
             LOGGER.warning(
                 "No artifact files found for rename",
                 glb=glb_location,
                 stl=stl_location,
+                step=step_location,
             )
+            return result
+
+        # For STEP-only files (no thumbnail available), require prompt
+        if step_exists and not glb_exists and not stl_exists and not user_prompt:
+            LOGGER.warning("STEP file rename requires a prompt (no thumbnail available)")
+            return result
+
+        # For GLB/STL, require thumbnail or prompt
+        if (glb_exists or stl_exists) and not thumbnail_url and not user_prompt:
+            LOGGER.warning("No thumbnail or prompt provided for rename")
             return result
 
         # Strategy 1: Extract filename from user prompt (most accurate)
@@ -122,7 +133,7 @@ class ArtifactRenameWorker:
                 description=description,
             )
         else:
-            # Strategy 2: Fall back to vision analysis
+            # Strategy 2: Fall back to vision analysis (only if thumbnail available)
             if thumbnail_url:
                 LOGGER.info("No prompt available, falling back to vision")
                 description = await self.vision_client.generate_filename(
@@ -156,7 +167,14 @@ class ArtifactRenameWorker:
             if actual_new:
                 result["stl_new"] = actual_new
 
-        result["success"] = bool(result["glb_new"] or result["stl_new"])
+        # Rename STEP file (use same description for consistency)
+        if step_exists:
+            new_step = self.renamer.generate_new_path(step_location, description)
+            actual_new = self.renamer.rename_file(step_location, new_step)
+            if actual_new:
+                result["step_new"] = actual_new
+
+        result["success"] = bool(result["glb_new"] or result["stl_new"] or result["step_new"])
 
         if result["success"]:
             LOGGER.info(
@@ -164,6 +182,7 @@ class ArtifactRenameWorker:
                 description=description,
                 glb_new=result["glb_new"],
                 stl_new=result["stl_new"],
+                step_new=result["step_new"],
             )
 
         return result
@@ -185,11 +204,11 @@ async def handle_artifact_saved(event_data: Dict[str, Any]) -> Dict[str, Any]:
     """Event handler for artifact saved events.
 
     Called asynchronously after artifacts are saved to trigger
-    vision-based renaming.
+    prompt-based or vision-based renaming.
 
     Args:
         event_data: Dict containing glb_location, stl_location,
-                   thumbnail, and prompt
+                   step_location, thumbnail, and prompt
 
     Returns:
         Result dict from worker processing
@@ -200,4 +219,5 @@ async def handle_artifact_saved(event_data: Dict[str, Any]) -> Dict[str, Any]:
         stl_location=event_data.get("stl_location"),
         thumbnail_url=event_data.get("thumbnail"),
         user_prompt=event_data.get("prompt"),
+        step_location=event_data.get("step_location"),
     )

@@ -146,6 +146,18 @@ class CADCycler:
                             },
                         )
                     )
+                    # Emit rename event for Zoo artifacts (STEP uses prompt-only)
+                    step_loc = stored if geo_format == "step" else None
+                    glb_loc = stored if geo_format in ("gltf", "glb") else None
+                    asyncio.create_task(
+                        self._emit_rename_event(
+                            glb_location=glb_loc,
+                            stl_location=None,
+                            thumbnail=None,  # Zoo doesn't provide thumbnails
+                            prompt=prompt,
+                            step_location=step_loc,
+                        )
+                    )
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning("Zoo generation failed", error=str(exc))
 
@@ -716,14 +728,29 @@ class CADCycler:
         stl_location: Optional[str],
         thumbnail: Optional[str],
         prompt: Optional[str],
+        step_location: Optional[str] = None,
     ) -> None:
-        """Emit event for background rename processing using Gemma 3 vision.
+        """Emit event for background rename processing.
+
+        For GLB/STL: Uses prompt extraction first, falls back to vision if thumbnail available.
+        For STEP: Uses prompt extraction only (no vision, STEP files can't be previewed).
 
         This runs in the background and does not block artifact creation.
         If renaming fails, the original UUID-based filename is preserved.
         """
-        if not thumbnail:
-            LOGGER.debug("Skipping rename - no thumbnail available")
+        # Skip if no files and no prompt to work with
+        if not (glb_location or stl_location or step_location):
+            LOGGER.debug("Skipping rename - no files to rename")
+            return
+
+        # For STEP-only, we need a prompt (no thumbnail fallback)
+        if step_location and not glb_location and not stl_location and not prompt:
+            LOGGER.debug("Skipping STEP rename - no prompt available")
+            return
+
+        # For GLB/STL, we need either thumbnail or prompt
+        if (glb_location or stl_location) and not thumbnail and not prompt:
+            LOGGER.debug("Skipping rename - no thumbnail or prompt available")
             return
 
         try:
@@ -732,6 +759,7 @@ class CADCycler:
             result = await handle_artifact_saved({
                 "glb_location": glb_location,
                 "stl_location": stl_location,
+                "step_location": step_location,
                 "thumbnail": thumbnail,
                 "prompt": prompt,
             })
@@ -740,6 +768,7 @@ class CADCycler:
                     "Artifact rename completed",
                     glb_new=result.get("glb_new"),
                     stl_new=result.get("stl_new"),
+                    step_new=result.get("step_new"),
                 )
         except Exception as e:
             LOGGER.warning("Failed to emit rename event", error=str(e))
