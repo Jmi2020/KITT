@@ -52,6 +52,12 @@ class RoutingConfig(BaseModel):
     mlx_endpoint: str = Field(default="http://localhost:8081")
     semantic_cache_enabled: bool = _performance.semantic_cache_enabled
 
+    # Semantic tool selection - reduces context usage by ~90% for large tool sets
+    use_semantic_tool_selection: bool = Field(default=True)
+    embedding_model: str = Field(default="all-MiniLM-L6-v2")
+    tool_search_top_k: int = Field(default=5, ge=1, le=20)
+    tool_search_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+
 
 @lru_cache(maxsize=1)
 def get_routing_config() -> RoutingConfig:
@@ -90,11 +96,23 @@ def get_routing_config() -> RoutingConfig:
     # Router provider selection
     local_reasoner_provider = os.getenv("LOCAL_REASONER_PROVIDER", settings.local_reasoner_provider)
 
+    # Semantic tool selection config
+    use_semantic_tool_selection = os.getenv(
+        "USE_SEMANTIC_TOOL_SELECTION", "true"
+    ).lower() in {"1", "true", "yes", "on"}
+    embedding_model = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+    tool_search_top_k = int(os.getenv("TOOL_SEARCH_TOP_K", "5"))
+    tool_search_threshold = float(os.getenv("TOOL_SEARCH_THRESHOLD", "0.3"))
+
     return RoutingConfig(
         local_models=local_models,
         llamacpp=llama_cfg,
         ollama=ollama_cfg,
-        local_reasoner_provider=local_reasoner_provider
+        local_reasoner_provider=local_reasoner_provider,
+        use_semantic_tool_selection=use_semantic_tool_selection,
+        embedding_model=embedding_model,
+        tool_search_top_k=tool_search_top_k,
+        tool_search_threshold=tool_search_threshold,
     )
 
 

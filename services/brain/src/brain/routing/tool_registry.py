@@ -218,10 +218,93 @@ def get_tools_for_prompt(
     return []
 
 
+def get_tools_for_prompt_semantic(
+    prompt: str,
+    all_tools: List[Dict[str, Any]],
+    mode: str = "auto",
+    top_k: int = 5,
+    threshold: float = 0.3,
+    forced_tools: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Semantic tool selection using embeddings.
+
+    Falls back to keyword-based selection if embedding fails.
+
+    Args:
+        prompt: User's input prompt
+        all_tools: List of all available tool definitions
+        mode: "auto" (smart detection), "on" (always all), "off" (never)
+        top_k: Maximum number of tools to return
+        threshold: Minimum similarity score (0-1)
+        forced_tools: Specific tool names to always include
+
+    Returns:
+        List of tool definitions in OpenAI format
+    """
+    if mode == "off":
+        return []
+
+    if mode == "on":
+        logger.info("Tool mode 'on' - returning all tools")
+        return all_tools
+
+    # Import here to avoid circular imports and allow lazy loading
+    try:
+        from brain.tools.embeddings import get_embedding_manager
+    except ImportError as e:
+        logger.warning(f"Embeddings module not available: {e}, falling back to keyword-based")
+        return get_tools_for_prompt(prompt, mode=mode, forced_tools=forced_tools)
+
+    try:
+        # Get embedding manager and ensure embeddings are computed
+        manager = get_embedding_manager()
+        manager.compute_embeddings(all_tools)
+
+        # Search for relevant tools
+        relevant_tools = manager.search(prompt, top_k=top_k, threshold=threshold)
+        selected_names = {_get_tool_name(t) for t in relevant_tools}
+
+        # Always include keyword-triggered tools
+        forced_tool = detect_forced_tool(prompt)
+        if forced_tool:
+            logger.info(f"Adding keyword-triggered tool: {forced_tool}")
+            for tool in all_tools:
+                if _get_tool_name(tool) == forced_tool and forced_tool not in selected_names:
+                    relevant_tools.append(tool)
+                    selected_names.add(forced_tool)
+
+        # Include explicitly forced tools
+        if forced_tools:
+            for tool_name in forced_tools:
+                if tool_name not in selected_names:
+                    for tool in all_tools:
+                        if _get_tool_name(tool) == tool_name:
+                            relevant_tools.append(tool)
+                            selected_names.add(tool_name)
+                            break
+
+        logger.info(
+            f"Semantic tool selection returned {len(relevant_tools)} tools: "
+            f"{sorted(selected_names)}"
+        )
+        return relevant_tools
+
+    except Exception as exc:
+        logger.warning(f"Semantic tool selection failed: {exc}, falling back to keyword-based")
+        return get_tools_for_prompt(prompt, mode=mode, forced_tools=forced_tools)
+
+
+def _get_tool_name(tool: Dict[str, Any]) -> str:
+    """Extract tool name from definition."""
+    func = tool.get("function", tool)
+    return func.get("name", "")
+
+
 __all__ = [
     "TOOL_DEFINITIONS",
     "TOOL_KEYWORDS",
     "detect_forced_tool",
     "should_enable_tools_auto",
     "get_tools_for_prompt",
+    "get_tools_for_prompt_semantic",
 ]

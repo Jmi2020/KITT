@@ -511,6 +511,32 @@ LLAMACPP_VISION_MMPROJ=gemma3_27b_mmproj/mmproj-model-f16.gguf
 LLAMACPP_VISION_PORT=8086
 ```
 
+### Semantic Tool Selection
+
+KITTY uses **embedding-based semantic search** to intelligently select relevant tools for each query, reducing context usage by ~90% when many tools are available.
+
+**How it works:**
+1. Tool definitions are converted to text embeddings using `all-MiniLM-L6-v2` (384 dimensions)
+2. Embeddings are cached in Redis for cluster-wide sharing
+3. For each query, cosine similarity finds the most relevant tools
+4. Only top-k matching tools are passed to the model (instead of all 50+)
+
+**Benefits:**
+- **Context savings**: ~90% reduction (e.g., 600 tokens vs 7,500 for 50 tools)
+- **Better tool selection**: Semantic matching beats keyword heuristics
+- **Cluster-ready**: Redis caching shares embeddings across nodes
+- **Fast**: ~10-15ms per search after initial model load
+
+```bash
+# Semantic tool selection (default: enabled)
+USE_SEMANTIC_TOOL_SELECTION=true
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+TOOL_SEARCH_TOP_K=5
+TOOL_SEARCH_THRESHOLD=0.3
+```
+
+**Disabling**: Set `USE_SEMANTIC_TOOL_SELECTION=false` to fall back to keyword-based selection.
+
 ### Voice Settings
 
 ```bash

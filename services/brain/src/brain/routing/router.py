@@ -29,7 +29,7 @@ from .multi_server_client import MultiServerLlamaCppClient
 from .ml_local_client import MLXLocalClient
 from .permission import PermissionManager
 from .pricing import estimate_cost
-from .tool_registry import get_tools_for_prompt
+from .tool_registry import get_tools_for_prompt, get_tools_for_prompt_semantic, TOOL_DEFINITIONS
 from .summarizer import HermesSummarizer
 from ..tools.model_config import detect_model_format
 from ..usage_stats import UsageStats
@@ -127,6 +127,61 @@ class BrainRouter:
             max_iterations=10,
             model_alias="kitty-f16",
         )
+
+        # Cache for all available tools (registry + MCP)
+        self._all_tools_cache: Optional[List[Dict[str, Any]]] = None
+
+    def _get_all_available_tools(self) -> List[Dict[str, Any]]:
+        """Get all available tools from registry and MCP servers.
+
+        Returns:
+            Combined list of tool definitions in OpenAI format
+        """
+        if self._all_tools_cache is not None:
+            return self._all_tools_cache
+
+        all_tools = list(TOOL_DEFINITIONS.values())
+
+        # Add MCP tools if available
+        if self._tool_mcp:
+            try:
+                mcp_tools = self._tool_mcp.list_tools()
+                all_tools.extend(mcp_tools)
+                logger.info(f"Loaded {len(mcp_tools)} MCP tools, total: {len(all_tools)}")
+            except Exception as exc:
+                logger.warning(f"Failed to load MCP tools: {exc}")
+
+        self._all_tools_cache = all_tools
+        return all_tools
+
+    def _select_tools(
+        self,
+        prompt: str,
+        mode: str = "auto",
+        forced_tools: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Select relevant tools using semantic or keyword-based selection.
+
+        Args:
+            prompt: User's input prompt
+            mode: Tool selection mode ("auto", "on", "off")
+            forced_tools: Specific tools to always include
+
+        Returns:
+            List of relevant tool definitions
+        """
+        if self._config.use_semantic_tool_selection:
+            all_tools = self._get_all_available_tools()
+            return get_tools_for_prompt_semantic(
+                prompt=prompt,
+                all_tools=all_tools,
+                mode=mode,
+                top_k=self._config.tool_search_top_k,
+                threshold=self._config.tool_search_threshold,
+                forced_tools=forced_tools,
+            )
+        else:
+            return get_tools_for_prompt(prompt, mode=mode, forced_tools=forced_tools)
 
     async def route(self, request: RoutingRequest) -> RoutingResult:
         cache_key = _hash_prompt(request.prompt)
@@ -268,8 +323,8 @@ class BrainRouter:
         model_alias = request.model_hint or "kitty-f16"
         model_format = detect_model_format(model_alias)
 
-        # Get tools based on prompt and mode
-        tools = get_tools_for_prompt(request.prompt, mode=request.tool_mode)
+        # Get tools based on prompt and mode (semantic or keyword-based)
+        tools = self._select_tools(request.prompt, mode=request.tool_mode)
         if not request.allow_paid:
             tools = [
                 tool
@@ -358,8 +413,8 @@ class BrainRouter:
         model_alias = request.model_hint or "kitty-f16"
         model_format = detect_model_format(model_alias)
 
-        # Get tools based on prompt and mode
-        tools = get_tools_for_prompt(request.prompt, mode=request.tool_mode)
+        # Get tools based on prompt and mode (semantic or keyword-based)
+        tools = self._select_tools(request.prompt, mode=request.tool_mode)
         if not request.allow_paid:
             tools = [
                 tool
