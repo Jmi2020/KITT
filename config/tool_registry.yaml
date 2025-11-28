@@ -107,6 +107,17 @@ tools:
   # CAD Tools (paid/premium, low-medium hazard)
   # ==============================================================================
 
+  # Alias for LLM tool calling (matches tool_registry.py definition)
+  generate_cad_model:
+    server: cad
+    description: "Generate a 3D CAD model based on a text description"
+    hazard_class: low
+    requires_confirmation: false
+    budget_tier: premium
+    enabled: true
+    requires_override: false  # Allow in Maker mode without override
+    note: "Alias for cad.generate_model - used by LLM tool calling"
+
   cad.generate_model:
     server: cad
     description: "Generate CAD model using Zoo.dev KittyCAD API (parametric)"
@@ -455,7 +466,7 @@ categories:
   research: [web_search, fetch_webpage, research_deep]
   vision: [image_search, image_filter, store_selection]
   memory: [remember, search_memories]
-  cad: [cad.generate_model, cad.image_to_mesh, cad.local_generate]
+  cad: [generate_cad_model, cad.generate_model, cad.image_to_mesh, cad.local_generate]
   coding: [coding.generate]
   fabrication: [fabrication.open_in_slicer, fabrication.prepare_print, fabrication.analyze_model, fabrication.printer_status]
   discovery: [discovery.scan_network, discovery.list_devices, discovery.find_printers, discovery.approve_device]
