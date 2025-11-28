@@ -107,25 +107,45 @@ class CADCycler:
         # Zoo parametric generation
         if run_zoo:
             try:
-                zoo_job = await self._zoo.create_model(
+                # Use create_and_poll for proper polling loop
+                status = await self._zoo.create_and_poll(
                     name="kitty-job", prompt=prompt, parameters=references
                 )
-                status_url = zoo_job.get("polling_url") or zoo_job.get("status_url")
-                if status_url:
-                    status = await self._zoo.poll_status(status_url)
-                    geometry = status.get("geometry", {})
-                    if geometry.get("url"):
-                        stored = await self._store.save_from_url(geometry["url"], ".gltf")
-                        artifacts.append(
-                            CADArtifact(
-                                provider="zoo",
-                                artifact_type=geometry.get("format", "gltf"),
-                                location=stored,
-                                metadata={
-                                    "credits_used": str(status.get("credits_used", 0))
-                                },
-                            )
+                geometry = status.get("geometry", {})
+                stored = None
+                geo_format = geometry.get("format", "gltf")
+
+                # Handle raw bytes from Zoo API (base64 decoded)
+                if geometry.get("data"):
+                    ext = f".{geo_format}" if geo_format else ".gltf"
+                    stored = await asyncio.to_thread(
+                        self._store.save_bytes,
+                        geometry["data"],
+                        ext,
+                        geo_format,
+                    )
+                    LOGGER.info(
+                        "Zoo model saved from bytes",
+                        location=stored,
+                        format=geo_format,
+                    )
+                # Fallback: download from URL (legacy behavior)
+                elif geometry.get("url"):
+                    stored = await self._store.save_from_url(
+                        geometry["url"], f".{geo_format}"
+                    )
+
+                if stored:
+                    artifacts.append(
+                        CADArtifact(
+                            provider="zoo",
+                            artifact_type=geo_format,
+                            location=stored,
+                            metadata={
+                                "credits_used": str(status.get("credits_used", 0))
+                            },
                         )
+                    )
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning("Zoo generation failed", error=str(exc))
 
