@@ -75,14 +75,14 @@ class SemanticCache:
             f"max_entries={self._max_entries}"
         )
 
-    def store(self, record: CacheRecord) -> str:
+    def store(self, record: CacheRecord) -> Optional[str]:
         """Store cache entry with TTL and size limiting.
 
         Args:
             record: Cache record to store
 
         Returns:
-            Entry ID in stream
+            Entry ID in stream, or None if Redis unavailable
         """
         payload = {
             "prompt": record.prompt,
@@ -90,18 +90,23 @@ class SemanticCache:
             "confidence": record.confidence,
         }
 
-        # Add to stream with MAXLEN trimming to prevent unbounded growth
-        entry_id = self._client.xadd(
-            self.STREAM_KEY,
-            {record.key: json.dumps(payload)},
-            maxlen=self._max_entries,
-            approximate=True  # ~= allows faster trimming
-        )
+        try:
+            # Add to stream with MAXLEN trimming to prevent unbounded growth
+            entry_id = self._client.xadd(
+                self.STREAM_KEY,
+                {record.key: json.dumps(payload)},
+                maxlen=self._max_entries,
+                approximate=True  # ~= allows faster trimming
+            )
 
-        # Set TTL on the stream itself (resets on each write)
-        self._client.expire(self.STREAM_KEY, self._ttl_seconds)
+            # Set TTL on the stream itself (resets on each write)
+            self._client.expire(self.STREAM_KEY, self._ttl_seconds)
 
-        return entry_id
+            return entry_id
+        except redis.ConnectionError:
+            # Redis unavailable - skip caching, don't crash
+            logger.warning("Redis unavailable for cache store, skipping")
+            return None
 
     def fetch(self, key: str) -> Optional[CacheRecord]:
         """Fetch cache entry and track hit/miss.
@@ -118,6 +123,10 @@ class SemanticCache:
         except redis.ResponseError:
             # Stream doesn't exist
             self._increment_stat("misses")
+            return None
+        except redis.ConnectionError:
+            # Redis unavailable - treat as cache miss, don't crash
+            logger.warning("Redis unavailable for cache fetch, treating as miss")
             return None
 
         for _, fields in entries:
@@ -177,8 +186,8 @@ class SemanticCache:
                 ttl_seconds=self._ttl_seconds
             )
 
-        except redis.ResponseError:
-            # Stream doesn't exist yet
+        except (redis.ResponseError, redis.ConnectionError):
+            # Stream doesn't exist yet or Redis unavailable
             return CacheStats(
                 size_bytes=0,
                 entry_count=0,
@@ -232,9 +241,13 @@ class SemanticCache:
         Args:
             stat_name: Name of stat to increment (hits/misses)
         """
-        self._client.hincrby(self.STATS_KEY, stat_name, 1)
-        # Set TTL on stats hash
-        self._client.expire(self.STATS_KEY, self._ttl_seconds)
+        try:
+            self._client.hincrby(self.STATS_KEY, stat_name, 1)
+            # Set TTL on stats hash
+            self._client.expire(self.STATS_KEY, self._ttl_seconds)
+        except redis.ConnectionError:
+            # Redis unavailable - skip stat tracking, don't crash
+            pass
 
 
 __all__ = ["SemanticCache", "CacheRecord", "CacheStats"]

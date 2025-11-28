@@ -127,15 +127,19 @@ class ToolEmbeddingManager:
         Returns:
             True if all embeddings were found in cache
         """
-        all_found = True
-        for name in tool_names:
-            key = f"{self.REDIS_PREFIX}{name}"
-            data = self._redis.get(key)
-            if data:
-                self._tool_embeddings[name] = np.frombuffer(data, dtype=np.float32)
-            else:
-                all_found = False
-        return all_found
+        try:
+            all_found = True
+            for name in tool_names:
+                key = f"{self.REDIS_PREFIX}{name}"
+                data = self._redis.get(key)
+                if data:
+                    self._tool_embeddings[name] = np.frombuffer(data, dtype=np.float32)
+                else:
+                    all_found = False
+            return all_found
+        except redis.ConnectionError:
+            logger.warning("Redis unavailable for embedding cache load")
+            return False
 
     def _save_to_redis(self, tool_name: str, embedding: np.ndarray) -> None:
         """Save embedding to Redis.
@@ -144,25 +148,36 @@ class ToolEmbeddingManager:
             tool_name: Tool name
             embedding: Embedding vector
         """
-        key = f"{self.REDIS_PREFIX}{tool_name}"
-        self._redis.set(key, embedding.astype(np.float32).tobytes())
+        try:
+            key = f"{self.REDIS_PREFIX}{tool_name}"
+            self._redis.set(key, embedding.astype(np.float32).tobytes())
+        except redis.ConnectionError:
+            # Redis unavailable - skip caching, embedding still available in memory
+            pass
 
     def _save_meta(self, tools_hash: str, count: int) -> None:
         """Save metadata to Redis for cache validation."""
-        meta = {
-            "version": "v1",
-            "model": self._model_name,
-            "count": count,
-            "hash": tools_hash,
-        }
-        self._redis.set(self.META_KEY, json.dumps(meta).encode())
+        try:
+            meta = {
+                "version": "v1",
+                "model": self._model_name,
+                "count": count,
+                "hash": tools_hash,
+            }
+            self._redis.set(self.META_KEY, json.dumps(meta).encode())
+        except redis.ConnectionError:
+            # Redis unavailable - skip metadata caching
+            pass
 
     def _get_meta(self) -> Optional[Dict[str, Any]]:
         """Get metadata from Redis."""
-        data = self._redis.get(self.META_KEY)
-        if data:
-            return json.loads(data.decode())
-        return None
+        try:
+            data = self._redis.get(self.META_KEY)
+            if data:
+                return json.loads(data.decode())
+            return None
+        except redis.ConnectionError:
+            return None
 
     def compute_embeddings(self, tools: List[Dict[str, Any]]) -> None:
         """Pre-compute embeddings for all tools, using Redis cache.
@@ -290,12 +305,16 @@ class ToolEmbeddingManager:
         Returns:
             Number of keys deleted
         """
-        keys = list(self._redis.scan_iter(f"{self.REDIS_PREFIX}*"))
-        if keys:
-            deleted = self._redis.delete(*keys)
-            logger.info(f"Cleared {deleted} embedding cache keys")
-            return deleted
-        return 0
+        try:
+            keys = list(self._redis.scan_iter(f"{self.REDIS_PREFIX}*"))
+            if keys:
+                deleted = self._redis.delete(*keys)
+                logger.info(f"Cleared {deleted} embedding cache keys")
+                return deleted
+            return 0
+        except redis.ConnectionError:
+            logger.warning("Redis unavailable for cache clear")
+            return 0
 
 
 def get_embedding_manager() -> ToolEmbeddingManager:

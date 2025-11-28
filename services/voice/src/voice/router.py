@@ -78,7 +78,22 @@ class VoiceRouter:
         self._mqtt = mqtt_client
         self._orchestrator = orchestrator
         self._cache = cache
-        self._mqtt.connect()
+        self._mqtt_connected = False
+
+    def _ensure_mqtt_connected(self) -> bool:
+        """Lazily connect to MQTT broker when needed.
+
+        Returns:
+            True if connected, False if connection failed
+        """
+        if not self._mqtt_connected:
+            try:
+                self._mqtt.connect()
+                self._mqtt_connected = True
+            except Exception:
+                # MQTT unavailable - device commands won't work but routing still will
+                return False
+        return True
 
     async def handle_transcript(
         self, conversation_id: str, user_id: str, transcript: str
@@ -87,6 +102,8 @@ class VoiceRouter:
         command = self._parser.parse(transcript)
         if command["type"] == "device":
             payload = command.get("payload", {})
+            if not self._ensure_mqtt_connected():
+                return {"status": "error", "message": "MQTT broker unavailable for device control"}
             self._mqtt.publish(
                 f"kitty/devices/{payload.get('deviceId', 'unknown')}/cmd",
                 {**payload, "intent": command["intent"], "initiatedBy": user_id},
@@ -150,6 +167,9 @@ class VoiceRouter:
         if command["type"] == "device":
             payload = command.get("payload", {})
             device_id = payload.get("deviceId", "unknown")
+            if not self._ensure_mqtt_connected():
+                yield {"type": "error", "message": "MQTT broker unavailable for device control", "done": True}
+                return
             self._mqtt.publish(
                 f"kitty/devices/{device_id}/cmd",
                 {**payload, "intent": command["intent"], "initiatedBy": user_id},
