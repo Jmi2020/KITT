@@ -189,6 +189,14 @@ class ToolEmbeddingManager:
                 )
                 return
 
+        # Hash changed or cache miss - clear stale embeddings before recomputing
+        if meta and meta.get("hash") != tools_hash:
+            logger.info(
+                f"Tool set changed (hash {meta.get('hash')[:8]}... → {tools_hash[:8]}...), "
+                "clearing stale cache"
+            )
+            self.clear_cache()
+
         # Need to compute embeddings
         logger.info(f"Computing embeddings for {len(tools)} tools")
         model = self._load_model()
