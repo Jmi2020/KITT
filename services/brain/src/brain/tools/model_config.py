@@ -57,7 +57,9 @@ def detect_model_format(model_path_or_alias: str) -> ToolCallFormat:
     # refers to GPTOSS 120B (Ollama), not the original Llama 3.3 70B F16 model.
     if "kitty-f16" in model_lower:
         return ToolCallFormat.GPTOSS_JSON
-    # kitty-primary = Legacy Llama-3.3-70B (from LLAMACPP_PRIMARY_MODEL)
+    # kitty-primary = Llama-3.3-70B (from LLAMACPP_PRIMARY_MODEL)
+    # NOTE: Despite the name, 'kitty-primary' is NOT the primary reasoning model anymore.
+    # The name is retained for backward compatibility. The actual primary is GPTOSS 120B.
     elif "kitty-primary" in model_lower:
         return ToolCallFormat.LLAMA_JSON
     # kitty-coder = Qwen2.5-Coder (from LLAMACPP_CODER_MODEL)
