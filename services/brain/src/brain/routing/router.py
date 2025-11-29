@@ -38,6 +38,7 @@ from ..usage_stats import UsageStats
 from ..agents import ReActAgent
 from ..tools.mcp_client import MCPClient as ToolMCPClient
 from ..conversation.safety import SafetyChecker
+from ..cad.prompt_enhancer import process_cad_prompt
 
 logger = logging.getLogger("brain.routing")
 
@@ -747,16 +748,57 @@ class BrainRouter:
                         )
 
                 elif function_name == "generate_cad_model":
-                    # Execute CAD generation via MCP CAD server
-                    prompt = arguments.get("prompt", arguments.get("description", ""))
+                    # Execute CAD generation via MCP CAD server with prompt enhancement
+                    original_prompt = arguments.get("prompt", arguments.get("description", ""))
                     format_type = arguments.get("format", "step")
+                    skip_enhancement = arguments.get("_skip_enhancement", False)
+                    user_answers = arguments.get("_user_answers")
 
+                    # Step 1: Enhance prompt unless explicitly skipped
+                    final_prompt = original_prompt
+                    if not skip_enhancement:
+                        try:
+                            enhancement_result = await process_cad_prompt(
+                                original_prompt,
+                                user_answers=user_answers,
+                                skip_confirmation=False,
+                            )
+
+                            # If clarification is needed, return questions instead of executing
+                            if enhancement_result.get("needs_clarification"):
+                                questions = enhancement_result.get("questions", [])
+                                question_text = "\n".join(
+                                    f"- {q['question']}" + (f" ({q['example']})" if q.get('example') else "")
+                                    for q in questions
+                                )
+                                tool_results.append(
+                                    {
+                                        "tool": "generate_cad_model",
+                                        "needs_clarification": True,
+                                        "result": f"To create this CAD model, I need a few more details:\n\n{question_text}",
+                                        "questions": questions,
+                                        "original_prompt": original_prompt,
+                                    }
+                                )
+                                continue  # Skip CAD execution, wait for user input
+
+                            # Use enhanced prompt if available
+                            if enhancement_result.get("enhanced_prompt"):
+                                final_prompt = enhancement_result["enhanced_prompt"]
+                                logger.info(
+                                    f"CAD prompt enhanced: '{original_prompt[:50]}...' -> '{final_prompt[:50]}...'"
+                                )
+
+                        except Exception as enhance_err:
+                            logger.warning(f"CAD prompt enhancement failed: {enhance_err}, using original")
+
+                    # Step 2: Execute CAD generation with (potentially enhanced) prompt
                     if self._tool_mcp:
                         try:
                             result = await self._tool_mcp.execute_tool(
                                 "generate_cad_model",
                                 {
-                                    "prompt": prompt,
+                                    "prompt": final_prompt,
                                     "references": arguments.get("references", {}),
                                     "imageRefs": arguments.get("imageRefs"),
                                     "mode": arguments.get("mode"),
@@ -766,7 +808,8 @@ class BrainRouter:
                                 tool_results.append(
                                     {
                                         "tool": "generate_cad_model",
-                                        "prompt": prompt,
+                                        "original_prompt": original_prompt,
+                                        "enhanced_prompt": final_prompt if final_prompt != original_prompt else None,
                                         "result": result.get("output") or result.get("data", "CAD model generated"),
                                     }
                                 )
@@ -782,8 +825,8 @@ class BrainRouter:
                             tool_results.append(
                                 {
                                     "tool": "generate_cad_model",
-                                    "prompt": prompt,
-                                    "result": f"CAD generation queued for: {prompt} (format: {format_type})",
+                                    "prompt": final_prompt,
+                                    "result": f"CAD generation queued for: {final_prompt} (format: {format_type})",
                                 }
                             )
                     else:
