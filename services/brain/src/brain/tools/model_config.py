@@ -14,7 +14,8 @@ class ToolCallFormat(Enum):
     QWEN_XML = "qwen_xml"  # Qwen2.5/3: <tool_call>{...}</tool_call>
     MISTRAL_JSON = "mistral_json"  # Mistral: [TOOL_CALLS] {...}
     GEMMA_FUNCTION = "gemma_function"  # Gemma: <function_call>...</function_call>
-    LLAMA_JSON = "llama_json"  # Llama 3.1+/3.3: JSON tool calls
+    LLAMA_JSON = "llama_json"  # Llama 3.1+/3.3: JSON tool calls (deprecated for reasoning)
+    GPTOSS_JSON = "gptoss_json"  # GPTOSS 120B (Ollama): OpenAI-compatible JSON tool calls
     ATHENE_JSON = "athene_json"  # Athene V2: {"tool": "...", "parameters": {...}}
     GENERIC_XML = "generic_xml"  # Generic fallback
 
@@ -51,8 +52,11 @@ def detect_model_format(model_path_or_alias: str) -> ToolCallFormat:
     model_lower = model_path_or_alias.lower()
 
     # Check for known KITTY aliases first (based on .env configuration)
-    # kitty-primary = Llama-3.3-70B (from LLAMACPP_PRIMARY_MODEL)
-    if "kitty-primary" in model_lower:
+    # kitty-f16 = GPTOSS 120B via Ollama (primary reasoning model)
+    if "kitty-f16" in model_lower:
+        return ToolCallFormat.GPTOSS_JSON
+    # kitty-primary = Legacy Llama-3.3-70B (from LLAMACPP_PRIMARY_MODEL)
+    elif "kitty-primary" in model_lower:
         return ToolCallFormat.LLAMA_JSON
     # kitty-coder = Qwen2.5-Coder (from LLAMACPP_CODER_MODEL)
     elif "kitty-coder" in model_lower:
@@ -60,6 +64,9 @@ def detect_model_format(model_path_or_alias: str) -> ToolCallFormat:
     # kitty-q4 = Athene V2 Agent (from LLAMACPP_Q4_MODEL)
     elif "kitty-q4" in model_lower or "athene" in model_lower:
         return ToolCallFormat.ATHENE_JSON
+    # GPTOSS 120B (Ollama) - primary reasoning model
+    elif "gpt-oss" in model_lower or "gptoss" in model_lower:
+        return ToolCallFormat.GPTOSS_JSON
     # Model path-based detection
     elif "qwen" in model_lower or "qwen2.5" in model_lower or "qwen3" in model_lower:
         return ToolCallFormat.QWEN_XML
@@ -85,7 +92,14 @@ def get_model_config(model_path_or_alias: str) -> ModelConfig:
     """
     format_type = detect_model_format(model_path_or_alias)
 
-    if format_type == ToolCallFormat.QWEN_XML:
+    if format_type == ToolCallFormat.GPTOSS_JSON:
+        return ModelConfig(
+            format=ToolCallFormat.GPTOSS_JSON,
+            requires_jinja=False,  # Ollama handles templating
+            requires_function_auth=False,  # Not applicable for Ollama
+            supports_parallel_calls=True,  # GPTOSS supports parallel tool calls
+        )
+    elif format_type == ToolCallFormat.QWEN_XML:
         return ModelConfig(
             format=ToolCallFormat.QWEN_XML,
             requires_jinja=True,

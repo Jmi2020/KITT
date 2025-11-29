@@ -411,14 +411,24 @@ tools:
   # Reasoning Delegation (for dual-model architecture)
   # ==============================================================================
 
-  reason_with_f16:
+  reason_deep:
     server: reasoning
-    description: "Delegate complex reasoning to F16 high-precision model (Llama 3.3 70B)"
+    description: "Delegate complex reasoning to GPTOSS 120B deep reasoning model (Ollama)"
     hazard_class: none
     requires_confirmation: false
     budget_tier: free
     enabled: true
-    note: "Used by Q4 agent to request deep analysis from F16 reasoning engine."
+    note: "Used by Q4 agent to request deep analysis from the reasoning engine. Supports thinking mode for detailed reasoning traces."
+
+  # DEPRECATED: Legacy alias for reason_deep (will be removed in future release)
+  reason_with_f16:
+    server: reasoning
+    description: "[DEPRECATED] Use reason_deep instead. Alias for backward compatibility."
+    hazard_class: none
+    requires_confirmation: false
+    budget_tier: free
+    enabled: true
+    note: "DEPRECATED: This tool name references the old Llama 3.3 70B F16 model. Use reason_deep instead."
 
   # ==============================================================================
   # Collective Meta-Agent (multi-agent collaboration patterns)
@@ -472,7 +482,7 @@ categories:
   discovery: [discovery.scan_network, discovery.list_devices, discovery.find_printers, discovery.approve_device]
   homeassistant: [homeassistant.turn_on, homeassistant.turn_off, homeassistant.activate_scene, homeassistant.unlock_door, homeassistant.lock_door, homeassistant.enable_power]
   broker: [broker.execute_command]
-  reasoning: [reason_with_f16]
+  reasoning: [reason_deep, reason_with_f16]  # reason_with_f16 is deprecated alias
   collective: [collective.run]
 
 # ==============================================================================

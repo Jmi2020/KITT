@@ -30,7 +30,8 @@ cd /Users/Shared/Coding/KITT
 ```
 
 **What it does**: Starts entire KITTY stack with health checks and sequential validation.
-- Starts llama.cpp servers (Q4, F16, summary, vision)
+- Starts Ollama (GPTOSS 120B primary reasoner)
+- Starts llama.cpp servers (Q4, summary, vision; F16 only if `LOCAL_REASONER_PROVIDER=llamacpp`)
 - Starts all Docker services (brain, gateway, fabrication, RabbitMQ, etc.)
 - Validates health of critical services
 - Shows startup summary with URLs
@@ -55,7 +56,8 @@ docker compose -f infra/compose/docker-compose.yml ps
 
 # View logs
 tail -f .logs/llamacpp-q4.log        # Q4 tool orchestrator
-tail -f .logs/llamacpp-f16.log       # F16 reasoning engine
+tail -f .logs/ollama.log             # GPTOSS 120B reasoning engine (primary)
+tail -f .logs/llamacpp-f16.log       # F16 reasoning engine (deprecated fallback)
 tail -f .logs/llamacpp-summary.log   # Hermes summarizer
 tail -f .logs/llamacpp-vision.log    # Gemma vision server
 ```
@@ -73,9 +75,12 @@ KITTY operates as a **multi-tier architecture** with the following components:
 │                    HOST MACHINE (macOS)                     │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
+│  Ollama (Primary Reasoner)                                   │
+│  └─ GPTOSS 120B (Port 11434) - Deep reasoning with thinking │
+│                                                              │
 │  llama.cpp Servers (Native Metal Acceleration)              │
 │  ├─ Q4 Server (Port 8083)   - Athene V2 Agent Q4_K_M        │
-│  ├─ F16 Server (Port 8082)  - Llama 3.3 70B F16             │
+│  ├─ F16 Server (Port 8082)  - [DEPRECATED] Llama 3.3 70B    │
 │  ├─ Summary Server (Port 8085) - Hermes Summarizer          │
 │  └─ Vision Server (Port 8086)  - Gemma 3 27B Q4_K_M Vision  │
 │                                                              │
@@ -117,11 +122,12 @@ KITTY operates as a **multi-tier architecture** with the following components:
 - **Portability**: Easy deployment across development and production
 - **Resource Management**: CPU/memory limits per container
 
-**3. Dual-Model Architecture (Q4 + F16)**
+**3. Multi-Model Architecture (Q4 + GPTOSS 120B)**
 - **Q4 (Athene V2)**: Fast tool calling, function execution, device control
-- **F16 (Llama 3.3 70B)**: Deep reasoning, complex analysis, high-quality responses
+- **GPTOSS 120B (Ollama)**: Deep reasoning with thinking mode, complex analysis
 - **Routing Logic**: Brain service selects model based on task complexity
-- **Cost Efficiency**: Use Q4 for 70% of requests, reserve F16 for complex reasoning
+- **Cost Efficiency**: Use Q4 for 70% of requests, reserve GPTOSS for complex reasoning
+- **DEPRECATED**: F16 (Llama 3.3 70B) is kept as fallback when `LOCAL_REASONER_PROVIDER=llamacpp`
 
 ---
 
@@ -150,9 +156,12 @@ cat .env | grep -E "(LLAMACPP_|ADMIN_|API_KEY)"
 - Service endpoints and ports
 
 **Critical Variables**:
+- `LOCAL_REASONER_PROVIDER`: Reasoning model provider (`ollama` default, `llamacpp` deprecated)
+- `OLLAMA_MODEL`: GPTOSS 120B model name for deep reasoning
+- `OLLAMA_THINK`: Thinking effort level (`low`, `medium`, `high`)
 - `LLAMACPP_MODELS_DIR`: Base directory for GGUF models (default: `/Users/Shared/Coding/models`)
 - `LLAMACPP_Q4_MODEL`: Path to Q4 quantized model (fast tool orchestration)
-- `LLAMACPP_F16_MODEL`: Path to F16 full-precision model (deep reasoning)
+- `LLAMACPP_F16_MODEL`: **[DEPRECATED]** Path to F16 model (fallback only)
 - `LLAMACPP_VISION_MODEL`: Path to Gemma 3 27B vision model
 - `LLAMACPP_VISION_MMPROJ`: Path to mmproj file for vision capabilities
 - `ADMIN_USERS`: Bcrypt-hashed admin credentials

@@ -151,11 +151,11 @@ SUMMARY_ALIAS="${LLAMACPP_SUMMARY_ALIAS:-kitty-summary}"
 VISION_PORT="${LLAMACPP_VISION_PORT:-8086}"
 VISION_ALIAS="${LLAMACPP_VISION_ALIAS:-kitty-vision}"
 
-# Determine if we should start Ollama instead of llama.cpp F16
-LOCAL_REASONER_PROVIDER="${LOCAL_REASONER_PROVIDER:-llamacpp}"
+# Determine reasoning provider: ollama (GPTOSS 120B - default) or llamacpp (deprecated Llama 3.3 F16)
+LOCAL_REASONER_PROVIDER="${LOCAL_REASONER_PROVIDER:-ollama}"
 
 if [ "$LOCAL_REASONER_PROVIDER" == "ollama" ]; then
-    log "Phase 1a: Starting Ollama (GPT-OSS reasoner)"
+    log "Phase 1a: Starting Ollama (GPTOSS 120B - primary reasoning model)"
 
     if ! "$SCRIPT_DIR/ollama/start.sh"; then
         error "Failed to start Ollama"
@@ -194,12 +194,12 @@ if [ "$LOCAL_REASONER_PROVIDER" == "ollama" ]; then
     OLLAMA_PORT="${OLLAMA_HOST##*:}"
     OLLAMA_PORT="${OLLAMA_PORT:-11434}"
     PORTS_TO_CHECK+=("$OLLAMA_PORT")
-    PORT_LABELS+=("Ollama (GPT-OSS reasoner)")
+    PORT_LABELS+=("Ollama (GPTOSS 120B reasoner)")
     HEALTH_ENDPOINTS+=("/api/tags")
 else
-    # llama.cpp F16 health check
+    # DEPRECATED: llama.cpp F16 health check (Llama 3.3 70B - legacy fallback)
     PORTS_TO_CHECK+=("$F16_PORT")
-    PORT_LABELS+=("$F16_ALIAS (F16)")
+    PORT_LABELS+=("$F16_ALIAS (F16 - deprecated)")
     HEALTH_ENDPOINTS+=("/health")
 fi
 

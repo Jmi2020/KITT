@@ -37,7 +37,7 @@ KITTY is a **technical AI habitat** - a maker space purpose-built for AI models 
 |-----------|---------|------------|
 | **Q4 Tool Orchestrator** | Fast tool calling, ReAct agent | llama.cpp (Athene V2 Agent Q4_K_M) @ port 8083 |
 | **Primary Reasoner** | Deep reasoning with thinking mode | Ollama (GPT-OSS 120B) @ port 11434 |
-| **Fallback Reasoner** | Deep reasoning (when Ollama unavailable) | llama.cpp (Llama 3.3 70B F16) @ port 8082 |
+| **Fallback Reasoner** | *(DEPRECATED)* Legacy fallback only | llama.cpp (Llama 3.3 70B F16) @ port 8082 |
 | **Vision Model** | Image understanding, multimodal | llama.cpp (Gemma 3 27B Q4_K_M) @ port 8086 |
 | **Summary Model** | Response compression | llama.cpp (Hermes 3 8B Q4_K_M) @ port 8084 |
 | **Coder Model** | Code generation specialist | llama.cpp (Qwen2.5 Coder 32B Q8) @ port 8085 |
@@ -419,9 +419,9 @@ Multi-printer coordination with intelligent scheduling:
 │  │  ┌────────────────────────────────────────────────────────────────────┐ │ │
 │  │  │                  llama.cpp Servers (Metal GPU)                      │ │ │
 │  │  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ │ │ │
-│  │  │  │Q4 Tool   │ │F16 Reason│ │Vision    │ │Summary   │ │Coder     │ │ │ │
+│  │  │  │Q4 Tool   │ │F16 DEPR  │ │Vision    │ │Summary   │ │Coder     │ │ │ │
 │  │  │  │:8083     │ │:8082     │ │:8086     │ │:8084     │ │:8085     │ │ │ │
-│  │  │  │Athene V2 │ │Llama 70B │ │Gemma 27B │ │Hermes 8B │ │Qwen 32B  │ │ │ │
+│  │  │  │Athene V2 │ │(Fallback)│ │Gemma 27B │ │Hermes 8B │ │Qwen 32B  │ │ │ │
 │  │  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ │ │ │
 │  │  └────────────────────────────────────────────────────────────────────┘ │ │
 │  └─────────────────────────────────────────────────────────────────────────┘ │
@@ -500,10 +500,10 @@ LLAMACPP_Q4_HOST=http://host.docker.internal:8083
 LLAMACPP_Q4_MODEL=athene-v2-agent/Athene-V2-Agent-Q4_K_M.gguf
 LLAMACPP_Q4_PORT=8083
 
-# llama.cpp F16 (Fallback Reasoner)
-LLAMACPP_F16_HOST=http://host.docker.internal:8082
-LLAMACPP_F16_MODEL=llama-3-70b/Llama-3.3-70B-Instruct-F16/...gguf
-LLAMACPP_F16_PORT=8082
+# DEPRECATED: llama.cpp F16 (Legacy Fallback - only used when LOCAL_REASONER_PROVIDER=llamacpp)
+# LLAMACPP_F16_HOST=http://host.docker.internal:8082
+# LLAMACPP_F16_MODEL=llama-3-70b/Llama-3.3-70B-Instruct-F16/...gguf
+# LLAMACPP_F16_PORT=8082
 
 # Vision
 LLAMACPP_VISION_MODEL=gemma-3-27b-it-GGUF/gemma-3-27b-it-q4_k_m.gguf
