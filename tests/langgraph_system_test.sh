@@ -1,6 +1,7 @@
 #!/bin/bash
 # LangGraph Multi-Agent System Test Suite
-# Tests Q4/F16 routing, complexity analysis, tool execution, and metrics
+# Tests Q4/GPTOSS routing, complexity analysis, tool execution, and metrics
+# Note: GPTOSS 120B (Ollama) is now the primary reasoner; F16 (llama.cpp) is deprecated
 # Run from repository root: ./tests/langgraph_system_test.sh
 
 set -e
@@ -254,7 +255,9 @@ check_server() {
 }
 
 check_server "Q4 (Athene-V2)" "8083"
-check_server "F16 (Llama-3.3-70B)" "8082"
+# Note: GPTOSS 120B via Ollama (port 11434) is now the primary reasoner
+# F16 is deprecated but still checked for backward compatibility
+check_server "F16 (Deprecated Fallback)" "8082"
 check_server "Summary (Hermes-3)" "8085"
 check_server "Vision (Gemma-3)" "8086"
 

@@ -48,7 +48,11 @@ Q4_N_PARALLEL="${LLAMACPP_Q4_PARALLEL:-1}"
 Q4_LOG="$LOG_DIR/llamacpp-q4.log"
 Q4_PID="$LOG_DIR/llamacpp-q4.pid"
 
-# F16 Server (Deep Reasoning Engine - 128k context)
+# ==============================================================================
+# DEPRECATED: F16 Server (Llama 3.3 70B - legacy fallback only)
+# The primary reasoning model is now GPTOSS 120B via Ollama.
+# F16 is only started when LOCAL_REASONER_PROVIDER=llamacpp.
+# ==============================================================================
 F16_MODEL="${LLAMACPP_F16_MODEL:-llama-3.3-70b/Llama-3.3-70B-Instruct-F16.gguf}"
 F16_PORT="${LLAMACPP_F16_PORT:-8082}"
 F16_ALIAS="${LLAMACPP_F16_ALIAS:-kitty-f16}"
@@ -117,12 +121,13 @@ else
     log "  Logs: $Q4_LOG"
 fi
 
-# Skip F16 if using Ollama as the reasoner provider
-LOCAL_REASONER_PROVIDER="${LOCAL_REASONER_PROVIDER:-llamacpp}"
+# Skip F16 if using Ollama as the reasoner provider (default behavior)
+LOCAL_REASONER_PROVIDER="${LOCAL_REASONER_PROVIDER:-ollama}"
 
 if [ "$LOCAL_REASONER_PROVIDER" == "ollama" ]; then
-    log "Skipping F16 server (using Ollama as reasoner provider)"
+    log "Skipping F16 server (GPTOSS 120B via Ollama is the primary reasoner)"
 else
+    log "NOTICE: Using deprecated F16 llama.cpp server (Llama 3.3 70B)"
     if check_running $F16_PORT; then
         log "F16 server already running on port $F16_PORT"
     else
