@@ -25,6 +25,7 @@ try:  # noqa: WPS229
         BrokerMCPServer,
         CADMCPServer,
         DiscoveryMCPServer,
+        FabricationMCPServer,
         HomeAssistantMCPServer,
         MemoryMCPServer,
         ResearchMCPServer,
@@ -36,6 +37,8 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency
         CADMCPServer
     ) = (
         DiscoveryMCPServer
+    ) = (
+        FabricationMCPServer
     ) = (
         HomeAssistantMCPServer
     ) = (
@@ -112,6 +115,12 @@ class MCPClient:
             if callable(DiscoveryMCPServer):
                 self._servers["discovery"] = DiscoveryMCPServer(
                     discovery_service_url=os.getenv("DISCOVERY_SERVICE_URL", "http://discovery:8500")
+                )
+
+            # Fabrication server (mesh segmentation)
+            if callable(FabricationMCPServer):
+                self._servers["fabrication"] = FabricationMCPServer(
+                    fabrication_service_url=os.getenv("FABRICATION_SERVICE_URL", "http://fabrication:8300")
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Disabling MCP tools: %s", exc)

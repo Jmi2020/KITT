@@ -50,7 +50,7 @@ KITTY is a **technical AI habitat** - a maker space purpose-built for AI models 
 | **Brain** | 8000 | Core orchestrator, ReAct agent, intelligent routing |
 | **Gateway** | 8080 | REST API (HAProxy load-balanced, 3 replicas) |
 | **CAD** | 8200 | 3D model generation (Zoo, Tripo, local CadQuery) |
-| **Fabrication** | 8300 | Printer control, queue management, Bambu Labs integration |
+| **Fabrication** | 8300 | Printer control, queue management, mesh segmentation, Bambu Labs integration |
 | **Voice** | 8400 | Real-time STT/TTS with local Whisper + Piper |
 | **Discovery** | 8500 | Network device scanning (mDNS, SSDP, Bamboo/Snapmaker UDP) |
 | **Broker** | 8777 | Command execution with allow-list safety |
@@ -65,7 +65,7 @@ KITTY is a **technical AI habitat** - a maker space purpose-built for AI models 
 | **Voice** | Real-time voice assistant with Local/Cloud toggle |
 | **Shell** | Text chat with function calling and streaming |
 | **Projects** | CAD project management with artifact browser |
-| **Fabrication Console** | Printer status, queue management, job tracking |
+| **Fabrication Console** | Printer status, queue management, mesh segmentation, job tracking |
 | **Settings** | Bambu Labs login, preferences, API configuration |
 | **I/O Control** | Feature toggles and provider management |
 | **Research** | Autonomous research pipeline with real-time streaming |
@@ -304,6 +304,7 @@ kitty-cli shell
 > /voice                             # Toggle voice mode
 > /research <query>                  # Autonomous research
 > /cad Create a hex box              # Generate CAD model
+> /split /path/to/model.stl         # Split oversized model for printing
 > /remember Ordered more PLA         # Save long-term note
 > /memories PLA                      # Recall saved notes
 > /vision gandalf rubber duck        # Search reference images
@@ -399,6 +400,45 @@ Multi-printer coordination with intelligent scheduling:
 - Elegoo OrangeStorm Giga (Klipper)
 - Snapmaker Artisan (UDP)
 - Any OctoPrint/Moonraker instance
+
+### Mesh Segmentation
+
+Split oversized 3D models into printable parts (supports 3MF and STL):
+
+```bash
+# Via CLI
+kitty-cli shell
+> /split /path/to/large_model.3mf
+
+# Via API
+curl -X POST http://localhost:8300/api/segmentation/segment \
+  -H "Content-Type: application/json" \
+  -d '{"mesh_path": "/path/to/model.3mf", "printer_id": "bamboo_h2d"}'
+```
+
+**Features:**
+- **3MF native**: Prefers 3MF input/output for slicer compatibility (STL also supported)
+- **Automatic splitting**: Detects oversized models and splits into printer-fit parts
+- **SDF hollowing**: Reduce material usage with configurable wall thickness
+- **Alignment joints**: Dowel pin holes for accurate part assembly
+- **3MF assembly output**: Single file with all parts, colors, and metadata
+- **Configurable printers**: Load build volumes from `printer_config.yaml`
+
+**Segmentation Options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `printer_id` | Target printer for build volume | auto-detect |
+| `enable_hollowing` | Enable SDF-based hollowing | `true` |
+| `wall_thickness_mm` | Wall thickness for hollowing | `2.0` |
+| `joint_type` | Joint type: `dowel`, `dovetail`, `pyramid`, `none` | `dowel` |
+| `max_parts` | Maximum parts to generate | `10` |
+
+**Interfaces:**
+- **CLI**: `/split` command in kitty-cli shell
+- **Voice**: "Split this model for printing"
+- **Web UI**: MeshSegmenter component in Fabrication Console
+- **API**: `POST /api/segmentation/segment` on Fabrication service
 
 ---
 

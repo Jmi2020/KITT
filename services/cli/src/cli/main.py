@@ -500,6 +500,7 @@ class CommandCompleter(Completer):
             "generate": "Generate image with Stable Diffusion",
             "list": "List cached CAD artifacts",
             "queue": "Queue artifact to printer",
+            "split": "Segment large 3D model for multi-part printing",
             "usage": "Show provider usage dashboard",
             "vision": "Search + select reference images",
             "images": "List stored reference images",
@@ -1713,6 +1714,163 @@ def _prompt_for_selection(count: int, picks: Optional[str]) -> List[int]:
         else:
             console.print(f"[red]Selection {idx} out of range (1-{count})")
     return chosen
+
+
+def _run_split_command(stl_path: str, printer_id: Optional[str] = None) -> None:
+    """Segment a mesh for multi-part 3D printing."""
+    from pathlib import Path
+
+    # Validate file exists
+    path = Path(stl_path)
+    if not path.exists():
+        console.print(f"[red]File not found: {stl_path}")
+        return
+
+    if not path.suffix.lower() in {".stl", ".3mf"}:
+        console.print(f"[yellow]Warning: Expected .stl or .3mf file, got {path.suffix}")
+
+    # First check if segmentation is needed
+    console.print(f"\n[cyan]Analyzing mesh: {path.name}[/cyan]")
+
+    check_payload = {"stl_path": str(path.absolute())}
+    if printer_id:
+        check_payload["printer_id"] = printer_id
+
+    try:
+        spinner = Spinner("dots", text=Text("Checking dimensions...", style="cyan"))
+        with Live(spinner, console=console, transient=True):
+            with _client() as client:
+                response = client.post(
+                    f"{FABRICATION_BASE}/api/segmentation/check",
+                    json=check_payload,
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+                check_result = response.json()
+    except httpx.RequestError as exc:
+        console.print(f"[red]Failed to connect to Fabrication service: {exc}")
+        console.print("[dim]Make sure the Fabrication service is running on port 8300[/dim]")
+        return
+    except httpx.HTTPStatusError as exc:
+        console.print(f"[red]Check failed: {exc.response.text}")
+        return
+
+    # Display check results
+    dims = check_result.get("model_dimensions_mm", (0, 0, 0))
+    build_vol = check_result.get("build_volume_mm", (250, 250, 250))
+    exceeds = check_result.get("exceeds_by_mm", (0, 0, 0))
+    needs_seg = check_result.get("needs_segmentation", False)
+
+    console.print(f"\n[bold]Model Dimensions:[/bold] {dims[0]:.1f} × {dims[1]:.1f} × {dims[2]:.1f} mm")
+    console.print(f"[bold]Build Volume:[/bold] {build_vol[0]:.0f} × {build_vol[1]:.0f} × {build_vol[2]:.0f} mm")
+
+    if not needs_seg:
+        console.print("\n[green]✓ Model fits within build volume - no segmentation needed![/green]")
+        return
+
+    console.print(f"\n[yellow]Model exceeds build volume by: {exceeds[0]:.1f} × {exceeds[1]:.1f} × {exceeds[2]:.1f} mm[/yellow]")
+    console.print(f"[dim]Recommended cuts: {check_result.get('recommended_cuts', 1)}[/dim]")
+
+    # Prompt for segmentation
+    proceed = console.input("\n[cyan]Proceed with segmentation?[/] [dim](y/n)[/] [[dim]y[/dim]]: ").strip().lower()
+    if proceed not in ['', 'y', 'yes']:
+        console.print("[dim]Segmentation cancelled[/dim]")
+        return
+
+    # Configure segmentation options
+    console.print("\n[bold cyan]Configure Segmentation[/bold cyan]")
+    console.print("[dim](Press Enter to use defaults)[/dim]\n")
+
+    wall_input = console.input("[cyan]Wall thickness (mm)[/] [[dim]2.0[/dim]]: ").strip()
+    wall_thickness = float(wall_input) if wall_input else 2.0
+
+    hollow_input = console.input("[cyan]Enable hollowing?[/] [dim](y/n)[/] [[dim]y[/dim]]: ").strip().lower()
+    enable_hollowing = hollow_input not in ['n', 'no']
+
+    max_parts_input = console.input("[cyan]Maximum parts[/] [[dim]10[/dim]]: ").strip()
+    max_parts = int(max_parts_input) if max_parts_input else 10
+
+    # Run segmentation
+    segment_payload = {
+        "stl_path": str(path.absolute()),
+        "wall_thickness_mm": wall_thickness,
+        "enable_hollowing": enable_hollowing,
+        "max_parts": max_parts,
+        "joint_type": "dowel",
+    }
+    if printer_id:
+        segment_payload["printer_id"] = printer_id
+
+    console.print("\n[cyan]Segmenting mesh...[/cyan]")
+
+    try:
+        spinner = Spinner("dots", text=Text("This may take a few minutes...", style="cyan"))
+        with Live(spinner, console=console, transient=True):
+            with _client() as client:
+                response = client.post(
+                    f"{FABRICATION_BASE}/api/segmentation/segment",
+                    json=segment_payload,
+                    timeout=300.0,  # 5 minute timeout for large models
+                )
+                response.raise_for_status()
+                result = response.json()
+    except httpx.RequestError as exc:
+        console.print(f"[red]Segmentation failed: {exc}")
+        return
+    except httpx.HTTPStatusError as exc:
+        console.print(f"[red]Segmentation error: {exc.response.text}")
+        return
+
+    if not result.get("success"):
+        console.print(f"[red]Segmentation failed: {result.get('error', 'Unknown error')}")
+        return
+
+    # Display results
+    num_parts = result.get("num_parts", 0)
+    parts = result.get("parts", [])
+
+    console.print(f"\n[green]✓ Segmentation complete! Created {num_parts} parts[/green]\n")
+
+    # Parts table
+    table = Table(title="Segmented Parts", show_lines=False)
+    table.add_column("#", justify="right", style="cyan")
+    table.add_column("Name")
+    table.add_column("Dimensions (mm)")
+    table.add_column("Volume (cm³)")
+    table.add_column("Supports")
+
+    for part in parts:
+        dims = part.get("dimensions_mm", (0, 0, 0))
+        table.add_row(
+            str(part.get("index", 0) + 1),
+            part.get("name", ""),
+            f"{dims[0]:.1f} × {dims[1]:.1f} × {dims[2]:.1f}",
+            f"{part.get('volume_cm3', 0):.1f}",
+            "Yes" if part.get("requires_supports") else "No",
+        )
+
+    console.print(table)
+
+    # Hardware requirements
+    hardware = result.get("hardware_required", {})
+    if hardware:
+        console.print("\n[bold]Hardware Required:[/bold]")
+        if "dowel_pins" in hardware:
+            dp = hardware["dowel_pins"]
+            console.print(f"  • Dowel pins: {dp.get('quantity', 0)}× Ø{dp.get('diameter_mm', 4)}mm × {dp.get('length_mm', 20)}mm")
+        if "adhesive" in hardware:
+            adh = hardware["adhesive"]
+            console.print(f"  • Adhesive: {adh.get('type', 'CA glue')} (~{adh.get('estimated_ml', 0)}ml)")
+
+    # Output paths
+    output_3mf = result.get("combined_3mf_path")
+    if output_3mf:
+        console.print(f"\n[bold]Output:[/bold] {output_3mf}")
+
+    # Assembly notes
+    assembly_notes = result.get("assembly_notes", "")
+    if assembly_notes:
+        console.print("\n[dim]Assembly instructions included in 3MF file metadata[/dim]")
 
 
 def _run_vision_flow(
@@ -3413,6 +3571,7 @@ def shell(
                 console.print("  [cyan]/generate <prompt>[/cyan] - Generate image with Stable Diffusion")
                 console.print("  [cyan]/list[/cyan]             - List cached CAD artifacts")
                 console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact #idx to printer")
+                console.print("  [cyan]/split <path> [printer][/cyan] - Segment large model for printing")
                 console.print("  [cyan]/vision <query>[/cyan]   - Search/select reference images")
                 console.print("  [cyan]/images[/cyan]           - Show stored reference images")
 
@@ -4039,6 +4198,17 @@ def shell(
                         console.print("[red]Artifact index must be a number")
                         continue
                     queue(idx, args[1])
+                continue
+
+            if cmd == "split":
+                if not args:
+                    console.print("[yellow]Usage: /split <stl_path> [printer_id]")
+                    console.print("[dim]Example: /split /path/to/large_model.stl bamboo_h2d[/dim]")
+                    console.print("[dim]Segments models that exceed printer build volume[/dim]")
+                else:
+                    stl_path = args[0]
+                    printer_id = args[1] if len(args) > 1 else None
+                    _run_split_command(stl_path, printer_id)
                 continue
 
             console.print(f"[yellow]Unknown command: /{cmd}")

@@ -1,0 +1,271 @@
+.mesh-segmenter {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.mesh-segmenter .segmenter-header {
+  margin-bottom: 1.5rem;
+}
+
+.mesh-segmenter .segmenter-header h3 {
+  margin: 0 0 0.25rem 0;
+  font-size: 1.25rem;
+  color: var(--text-primary);
+}
+
+.mesh-segmenter .segmenter-header .text-muted {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.mesh-segmenter .segmenter-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.mesh-segmenter .form-row {
+  display: flex;
+  gap: 1rem;
+}
+
+.mesh-segmenter .form-row.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.mesh-segmenter .form-row.three-col {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  gap: 1rem;
+  align-items: end;
+}
+
+.mesh-segmenter .form-row label {
+  flex: 1;
+}
+
+.mesh-segmenter .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  padding-bottom: 0.5rem;
+}
+
+.mesh-segmenter .checkbox-label input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
+.mesh-segmenter .form-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.mesh-segmenter .form-actions button {
+  flex: 1;
+}
+
+/* Check Result */
+.mesh-segmenter .check-result,
+.mesh-segmenter .segment-result {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.mesh-segmenter .check-result h4,
+.mesh-segmenter .segment-result h4 {
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+}
+
+.mesh-segmenter .dimension-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.mesh-segmenter .dimension-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 1rem;
+  text-align: center;
+}
+
+.mesh-segmenter .dimension-card .label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.mesh-segmenter .dimension-card .value {
+  display: block;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Menlo', monospace;
+}
+
+.mesh-segmenter .segmentation-verdict {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.mesh-segmenter .segmentation-verdict.fits {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: var(--accent-success);
+}
+
+.mesh-segmenter .segmentation-verdict.needs-split {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: var(--accent-warning);
+}
+
+.mesh-segmenter .segmentation-verdict .icon {
+  font-size: 1.25rem;
+}
+
+.mesh-segmenter .exceeds-detail {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+/* Segment Result */
+.mesh-segmenter .result-summary {
+  display: flex;
+  gap: 2rem;
+  margin-bottom: 1.5rem;
+}
+
+.mesh-segmenter .summary-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+
+.mesh-segmenter .summary-stat .stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+}
+
+.mesh-segmenter .summary-stat .stat-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.mesh-segmenter .parts-list {
+  margin-top: 1rem;
+}
+
+.mesh-segmenter .parts-list h5 {
+  margin: 0 0 0.75rem 0;
+  font-size: 1rem;
+  color: var(--text-secondary);
+}
+
+.mesh-segmenter .parts-list table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.mesh-segmenter .parts-list th,
+.mesh-segmenter .parts-list td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.mesh-segmenter .parts-list th {
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+}
+
+.mesh-segmenter .parts-list td {
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 0.85rem;
+}
+
+.mesh-segmenter .parts-list tr:hover {
+  background: var(--bg-secondary);
+}
+
+.mesh-segmenter .download-link {
+  font-size: 1.25rem;
+  text-decoration: none;
+}
+
+.mesh-segmenter .combined-download {
+  margin-top: 1.5rem;
+  text-align: center;
+}
+
+.mesh-segmenter .download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.5rem;
+  font-size: 1rem;
+}
+
+.mesh-segmenter .assembly-notes {
+  margin-top: 1rem;
+}
+
+.mesh-segmenter .assembly-notes pre {
+  margin: 0.75rem 0 0 0;
+  white-space: pre-wrap;
+  font-size: 0.85rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .mesh-segmenter .form-row.two-col,
+  .mesh-segmenter .form-row.three-col {
+    grid-template-columns: 1fr;
+  }
+
+  .mesh-segmenter .dimension-comparison {
+    grid-template-columns: 1fr;
+  }
+
+  .mesh-segmenter .result-summary {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .mesh-segmenter .parts-list {
+    overflow-x: auto;
+  }
+
+  .mesh-segmenter .parts-list table {
+    min-width: 500px;
+  }
+}

@@ -38,6 +38,7 @@ from .coordinator.queue_optimizer import QueueOptimizer
 from .coordinator.scheduler import ParallelJobScheduler
 from .coordinator.distributor import JobDistributor
 from .routes.bambu import router as bambu_router
+from .routes.segmentation import router as segmentation_router
 
 # Configure logging
 configure_logging()
@@ -253,6 +254,9 @@ if static_dir.exists():
 
 # Include Bambu Labs printer routes
 app.include_router(bambu_router)
+
+# Include mesh segmentation routes
+app.include_router(segmentation_router)
 
 
 # ============================================================================

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import useKittyContext from '../hooks/useKittyContext';
+import MeshSegmenter from '../components/MeshSegmenter';
 import './FabricationConsole.css';
 
 type LocalModelResponse = {
@@ -420,6 +421,13 @@ const FabricationConsole = () => {
             </ul>
           </div>
         )}
+      </div>
+
+      {/* Mesh Segmentation - for splitting oversized models */}
+      <div className="panel">
+        <MeshSegmenter
+          artifactPath={selectedArtifact ? translateArtifactPath(selectedArtifact) : undefined}
+        />
       </div>
 
       <div className="panel">
