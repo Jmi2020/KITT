@@ -39,16 +39,25 @@ class PlanarSegmentationEngine(SegmentationEngine):
             )
             self.hollower = SdfHollower(hollow_config)
 
-    def segment(self, mesh: MeshWrapper) -> SegmentationResult:
+    def segment(
+        self, mesh: MeshWrapper, output_dir: Optional[str] = None
+    ) -> SegmentationResult:
         """
         Segment mesh into parts fitting build volume.
 
         Uses iterative axis-aligned cuts until all parts fit.
+
+        Args:
+            mesh: The mesh to segment
+            output_dir: Optional directory to export parts to (creates 3MF files)
+
+        Returns:
+            SegmentationResult with part info and optional file paths
         """
         # Check if segmentation needed
         if not self.needs_segmentation(mesh):
             LOGGER.info("Mesh fits build volume, no segmentation needed")
-            return self._create_single_part_result(mesh)
+            return self._create_single_part_result(mesh, output_dir)
 
         LOGGER.info(
             f"Starting segmentation: mesh dims {mesh.dimensions}, "
@@ -108,8 +117,8 @@ class PlanarSegmentationEngine(SegmentationEngine):
         if self.hollower:
             state.parts = self._apply_hollowing(state.parts)
 
-        # Create result
-        return self._create_result(state.parts, cut_planes)
+        # Create result and optionally export
+        return self._create_result(state.parts, cut_planes, output_dir)
 
     def find_best_cut(
         self, mesh: MeshWrapper, state: SegmentationState
@@ -166,18 +175,34 @@ class PlanarSegmentationEngine(SegmentationEngine):
         axis_length = max_val - min_val
         build_limit = self.build_volume[axis]
 
-        # Determine number of cuts needed
+        # Determine number of pieces needed
         num_pieces = int(np.ceil(axis_length / build_limit))
         if num_pieces < 2:
             num_pieces = 2
 
-        # Generate evenly-spaced cut positions
-        margin = axis_length * 0.1  # 10% margin from edges
-        cut_positions = np.linspace(
+        # Generate candidate cut positions
+        # Include positions at build_limit intervals for optimal fitting
+        margin = min(axis_length * 0.05, 10.0)  # 5% margin or 10mm max
+
+        cut_positions = set()
+
+        # Add cuts at build_limit intervals from each end
+        for i in range(1, num_pieces):
+            pos_from_min = min_val + i * build_limit
+            pos_from_max = max_val - i * build_limit
+            if min_val + margin < pos_from_min < max_val - margin:
+                cut_positions.add(pos_from_min)
+            if min_val + margin < pos_from_max < max_val - margin:
+                cut_positions.add(pos_from_max)
+
+        # Add evenly-spaced positions for evaluation
+        even_positions = np.linspace(
             min_val + margin,
             max_val - margin,
-            num_pieces + 1,  # More positions to evaluate
-        )[1:-1]  # Exclude endpoints
+            num_pieces + 1,
+        )[1:-1]
+        for pos in even_positions:
+            cut_positions.add(pos)
 
         for pos in cut_positions:
             plane = CuttingPlane.from_axis(axis, pos)
@@ -186,13 +211,24 @@ class PlanarSegmentationEngine(SegmentationEngine):
             size_before = pos - min_val
             size_after = max_val - pos
 
-            # Score based on balance and fit
-            balance = 1.0 - abs(size_before - size_after) / axis_length
+            # Score prioritizing fit over balance
+            # A piece that fits perfectly scores 1.0
+            # A piece at exactly build_limit scores high (optimal use of space)
             fits_before = 1.0 if size_before <= build_limit else build_limit / size_before
             fits_after = 1.0 if size_after <= build_limit else build_limit / size_after
-            fit_score = (fits_before + fits_after) / 2
 
-            score = balance * 0.3 + fit_score * 0.7
+            # Bonus for pieces close to build_limit (better material utilization)
+            # Optimal piece is ~90% of build_limit
+            optimal_size = build_limit * 0.9
+            utilization_before = 1.0 - abs(size_before - optimal_size) / build_limit if size_before <= build_limit else 0.0
+            utilization_after = 1.0 - abs(size_after - optimal_size) / build_limit if size_after <= build_limit else 0.0
+            utilization_score = (utilization_before + utilization_after) / 2
+
+            fit_score = (fits_before + fits_after) / 2
+            balance = 1.0 - abs(size_before - size_after) / axis_length
+
+            # Prioritize: fit (must fit) > utilization (use space well) > balance
+            score = fit_score * 0.5 + utilization_score * 0.35 + balance * 0.15
 
             candidates.append(
                 CutCandidate(
@@ -246,15 +282,29 @@ class PlanarSegmentationEngine(SegmentationEngine):
 
         return hollowed_parts
 
-    def _create_single_part_result(self, mesh: MeshWrapper) -> SegmentationResult:
+    def _create_single_part_result(
+        self, mesh: MeshWrapper, output_dir: Optional[str] = None
+    ) -> SegmentationResult:
         """Create result for mesh that doesn't need segmentation."""
+        from pathlib import Path
+        from ..output.threemf_writer import ThreeMFWriter
+
         # Apply hollowing if enabled
         if self.hollower:
             result = self.hollower.hollow(mesh)
             if result.success and result.mesh is not None:
                 mesh = result.mesh
 
-        part_info = self.create_part_info(mesh, 0)
+        # Export if output_dir provided
+        file_path = ""
+        if output_dir:
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            file_path = str(output_path / "part_00.3mf")
+            mesh.export(file_path)
+            LOGGER.info(f"Exported single part to {file_path}")
+
+        part_info = self.create_part_info(mesh, 0, file_path)
 
         return SegmentationResult(
             success=True,
@@ -262,19 +312,50 @@ class PlanarSegmentationEngine(SegmentationEngine):
             num_parts=1,
             parts=[part_info],
             cut_planes=[],
+            combined_3mf_path=file_path,
             hardware_required={},
             assembly_notes="Single part, no assembly required.",
         )
 
     def _create_result(
-        self, parts: List[MeshWrapper], cut_planes: List[CuttingPlane]
+        self,
+        parts: List[MeshWrapper],
+        cut_planes: List[CuttingPlane],
+        output_dir: Optional[str] = None,
     ) -> SegmentationResult:
         """Create segmentation result from parts."""
-        part_infos: List[SegmentedPart] = []
+        from pathlib import Path
+        from ..output.threemf_writer import ThreeMFWriter
 
-        for i, part in enumerate(parts):
-            info = self.create_part_info(part, i)
-            part_infos.append(info)
+        part_infos: List[SegmentedPart] = []
+        combined_3mf_path = ""
+
+        # Export parts if output_dir provided
+        if output_dir:
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+
+            # Export individual parts
+            for i, part in enumerate(parts):
+                file_path = str(output_path / f"part_{i:02d}.3mf")
+                part.export(file_path)
+                info = self.create_part_info(part, i, file_path)
+                part_infos.append(info)
+                LOGGER.info(f"Exported part {i} to {file_path}")
+
+            # Export combined 3MF with all parts
+            try:
+                writer = ThreeMFWriter()
+                combined_3mf_path = str(output_path / "combined_assembly.3mf")
+                writer.write(parts, Path(combined_3mf_path))
+                LOGGER.info(f"Exported combined assembly to {combined_3mf_path}")
+            except Exception as e:
+                LOGGER.warning(f"Failed to create combined 3MF: {e}")
+        else:
+            # No export, just create part info
+            for i, part in enumerate(parts):
+                info = self.create_part_info(part, i)
+                part_infos.append(info)
 
         # Calculate hardware requirements
         hardware = self._calculate_hardware(len(parts))
@@ -288,6 +369,7 @@ class PlanarSegmentationEngine(SegmentationEngine):
             num_parts=len(parts),
             parts=part_infos,
             cut_planes=cut_planes,
+            combined_3mf_path=combined_3mf_path,
             hardware_required=hardware,
             assembly_notes=assembly_notes,
         )

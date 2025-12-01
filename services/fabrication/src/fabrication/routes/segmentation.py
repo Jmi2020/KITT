@@ -16,7 +16,6 @@ from ..segmentation import (
     MeshWrapper,
     PlanarSegmentationEngine,
     SegmentationConfig,
-    ThreeMFWriter,
     JointType,
 )
 from ..segmentation.schemas import (
@@ -114,19 +113,18 @@ async def segment_mesh(request: SegmentMeshRequest) -> SegmentMeshResponse:
             max_parts=request.max_parts,
         )
 
-        # Run segmentation
+        # Get output directory for exported parts
+        output_dir = _get_output_directory(mesh_path)
+
+        # Run segmentation with file export
         engine = PlanarSegmentationEngine(config)
-        result = engine.segment(mesh)
+        result = engine.segment(mesh, output_dir=str(output_dir))
 
         if not result.success:
             raise HTTPException(status_code=500, detail=result.error or "Segmentation failed")
 
-        # Export parts to 3MF
-        output_dir = _get_output_directory(mesh_path)
-        writer = ThreeMFWriter()
+        logger.info(f"Segmentation complete: {result.num_parts} parts exported to {output_dir}")
 
-        # Get mesh parts from engine (need to store them in result)
-        # For now, return result without file paths
         part_responses = [
             SegmentedPartResponse(
                 index=p.index,
@@ -267,11 +265,15 @@ async def _run_segmentation_job(job_id: str, request: SegmentMeshRequest) -> Non
         _segmentation_jobs[job_id]["progress"] = 0.1
 
         # Load mesh (supports both 3MF and STL)
-        mesh = MeshWrapper(Path(request.mesh_path))
+        mesh_path = Path(request.mesh_path)
+        mesh = MeshWrapper(mesh_path)
         _segmentation_jobs[job_id]["progress"] = 0.2
 
         # Get build volume
         build_volume = _get_build_volume(request.printer_id)
+
+        # Get output directory for exported parts
+        output_dir = _get_output_directory(mesh_path)
 
         # Configure and run
         config = SegmentationConfig(
@@ -286,7 +288,7 @@ async def _run_segmentation_job(job_id: str, request: SegmentMeshRequest) -> Non
         engine = PlanarSegmentationEngine(config)
         _segmentation_jobs[job_id]["progress"] = 0.3
 
-        result = engine.segment(mesh)
+        result = engine.segment(mesh, output_dir=str(output_dir))
         _segmentation_jobs[job_id]["progress"] = 0.9
 
         if result.success:

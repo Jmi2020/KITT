@@ -145,7 +145,7 @@ class SegmentMeshRequest(BaseModel):
     )
     enable_hollowing: bool = Field(
         default=True,
-        description="Enable mesh hollowing to save material",
+        description="Enable mesh hollowing to save material (applied after segmentation to each part)",
     )
 
 
