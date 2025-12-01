@@ -297,9 +297,23 @@ class PlanarSegmentationEngine(SegmentationEngine):
     def _calculate_hardware(self, num_parts: int) -> dict:
         """Calculate required hardware for assembly."""
         if self.config.joint_type.value == "none":
-            return {}
+            return {"adhesive": {"type": "CA glue or epoxy", "estimated_ml": (num_parts - 1) * 2}}
 
-        # Each cut creates a seam requiring joints
+        if self.config.joint_type.value == "integrated":
+            # Integrated pins are printed, no external hardware needed
+            return {
+                "integrated_pins": {
+                    "note": "Pins are printed directly on parts - no external hardware needed",
+                    "pins_per_seam": 3,
+                    "total_pins": (num_parts - 1) * 3,
+                },
+                "adhesive": {
+                    "type": "CA glue or epoxy (optional for extra strength)",
+                    "estimated_ml": (num_parts - 1) * 1,
+                },
+            }
+
+        # Dowel joints require external pins
         num_seams = num_parts - 1
         joints_per_seam = 3  # Typical number of dowels per seam
 
@@ -352,6 +366,15 @@ class PlanarSegmentationEngine(SegmentationEngine):
                 "4. Insert dowel pins into pre-drilled holes",
                 "5. Apply adhesive to seam surfaces",
                 "6. Press parts together and clamp until cured",
+            ])
+        elif self.config.joint_type.value == "integrated":
+            notes.extend([
+                "4. Align integrated pins with matching holes",
+                "5. Apply small amount of adhesive around pins (optional)",
+                "6. Press parts together - pins provide alignment",
+                "",
+                "Note: Integrated pins are printed directly on parts.",
+                "No external hardware needed!",
             ])
         else:
             notes.extend([

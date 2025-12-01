@@ -61,9 +61,14 @@ class FabricationMCPServer(MCPServer):
                         },
                         "joint_type": {
                             "type": "string",
-                            "description": "Joint type for part assembly",
-                            "enum": ["dowel", "dovetail", "pyramid", "none"],
+                            "description": "Joint type for part assembly. 'integrated' prints pins directly on parts (no external hardware needed)",
+                            "enum": ["dowel", "integrated", "dovetail", "pyramid", "none"],
                             "default": "dowel",
+                        },
+                        "joint_tolerance_mm": {
+                            "type": "number",
+                            "description": "Joint clearance/tolerance in mm (default: 0.3, recommended for FDM prints)",
+                            "default": 0.3,
                         },
                         "max_parts": {
                             "type": "integer",
@@ -176,6 +181,7 @@ class FabricationMCPServer(MCPServer):
                 "wall_thickness_mm": arguments.get("wall_thickness_mm", 2.0),
                 "enable_hollowing": arguments.get("enable_hollowing", True),
                 "joint_type": arguments.get("joint_type", "dowel"),
+                "joint_tolerance_mm": arguments.get("joint_tolerance_mm", 0.3),
                 "max_parts": arguments.get("max_parts", 10),
             }
 

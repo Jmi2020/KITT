@@ -12,6 +12,7 @@ class JointType(str, Enum):
     """Joint type for part assembly."""
 
     DOWEL = "dowel"  # Cylindrical holes for external pins
+    INTEGRATED = "integrated"  # Printed pins on one part, holes on other (no hardware)
     DOVETAIL = "dovetail"  # Trapezoidal key/slot (Phase 2)
     PYRAMID = "pyramid"  # Self-centering cones (Phase 2)
     NONE = "none"  # No joints, glue only
@@ -60,7 +61,7 @@ class SegmentationConfig:
 
     # Joints
     joint_type: JointType = JointType.DOWEL
-    joint_tolerance_mm: float = 0.2
+    joint_tolerance_mm: float = 0.3  # Clearance for joint fit (0.3mm works for printed pins)
     dowel_diameter_mm: float = 4.0
     dowel_depth_mm: float = 10.0
 
