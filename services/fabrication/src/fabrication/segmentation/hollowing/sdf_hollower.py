@@ -200,31 +200,48 @@ class SdfHollower:
 
             tm = mesh.as_trimesh
 
-            # Use voxelization approach as fallback
-            voxel_size = min(
-                self.config.voxel_size_mm * 2,  # Coarser for speed
-                mesh.max_dimension / 100.0,
+            # Adaptive voxel size: limit to ~200 voxels per dimension for performance
+            # while ensuring we can achieve the wall thickness
+            max_dim = mesh.max_dimension
+            target_voxels_per_dim = 200
+            min_voxel_for_performance = max_dim / target_voxels_per_dim
+
+            # Need at least 2 voxels for wall thickness erosion
+            max_voxel_for_thickness = self.config.wall_thickness_mm / 2
+
+            voxel_size = max(min_voxel_for_performance, max_voxel_for_thickness)
+            LOGGER.info(
+                f"Voxel hollowing: {int(max_dim/voxel_size)} voxels/dim, "
+                f"voxel_size={voxel_size:.1f}mm"
             )
 
             # Voxelize the mesh
             voxelized = tm.voxelized(voxel_size)
 
             # Hollow by eroding the voxel grid
-            # This is a simplified approach
             from scipy import ndimage
 
             filled = voxelized.matrix.copy()
+
+            # Calculate erosion iterations - need enough to create wall thickness
+            erosion_iterations = max(1, int(self.config.wall_thickness_mm / voxel_size))
+
             eroded = ndimage.binary_erosion(
                 filled,
-                iterations=int(self.config.wall_thickness_mm / voxel_size),
+                iterations=erosion_iterations,
             )
             shell = filled & ~eroded
 
-            # Convert shell back to mesh
-            shell_voxels = voxelized.copy()
-            shell_voxels.matrix = shell
+            # Convert shell back to mesh using trimesh's VoxelGrid
+            from trimesh.voxel import VoxelGrid
+
+            # Create new voxel grid from the shell boolean array
+            shell_voxels = VoxelGrid(shell, voxelized.transform)
 
             hollowed_mesh = shell_voxels.marching_cubes
+
+            # marching_cubes returns mesh in voxel coordinates - apply transform
+            hollowed_mesh.apply_transform(voxelized.transform)
 
             if hollowed_mesh.vertices.shape[0] == 0:
                 LOGGER.warning("Fallback hollowing produced empty mesh")

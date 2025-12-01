@@ -19,6 +19,7 @@ from ..segmentation import (
     JointType,
 )
 from ..segmentation.schemas import (
+    HollowingStrategy,
     SegmentMeshRequest,
     SegmentMeshResponse,
     SegmentedPartResponse,
@@ -108,6 +109,7 @@ async def segment_mesh(request: SegmentMeshRequest) -> SegmentMeshResponse:
             build_volume=build_volume,
             wall_thickness_mm=request.wall_thickness_mm,
             enable_hollowing=request.enable_hollowing,
+            hollowing_strategy=request.hollowing_strategy,
             joint_type=request.joint_type,
             joint_tolerance_mm=request.joint_tolerance_mm,
             max_parts=request.max_parts,
@@ -280,6 +282,7 @@ async def _run_segmentation_job(job_id: str, request: SegmentMeshRequest) -> Non
             build_volume=build_volume,
             wall_thickness_mm=request.wall_thickness_mm,
             enable_hollowing=request.enable_hollowing,
+            hollowing_strategy=request.hollowing_strategy,
             joint_type=request.joint_type,
             joint_tolerance_mm=request.joint_tolerance_mm,
             max_parts=request.max_parts,

@@ -18,6 +18,14 @@ class JointType(str, Enum):
     NONE = "none"  # No joints, glue only
 
 
+class HollowingStrategy(str, Enum):
+    """When to apply hollowing during segmentation."""
+
+    HOLLOW_THEN_SEGMENT = "hollow_then_segment"  # Hollow first, then segment shell (default)
+    SEGMENT_THEN_HOLLOW = "segment_then_hollow"  # Segment solid, then hollow each piece
+    NONE = "none"  # No hollowing
+
+
 @dataclass
 class CuttingPlane:
     """Represents a cutting plane in 3D space."""
@@ -58,6 +66,7 @@ class SegmentationConfig:
     wall_thickness_mm: float = 2.0
     enable_hollowing: bool = True
     min_wall_thickness_mm: float = 1.2
+    hollowing_strategy: HollowingStrategy = HollowingStrategy.HOLLOW_THEN_SEGMENT
 
     # Joints
     joint_type: JointType = JointType.DOWEL
@@ -145,7 +154,12 @@ class SegmentMeshRequest(BaseModel):
     )
     enable_hollowing: bool = Field(
         default=True,
-        description="Enable mesh hollowing to save material (applied after segmentation to each part)",
+        description="Enable mesh hollowing to save material",
+    )
+    hollowing_strategy: HollowingStrategy = Field(
+        default=HollowingStrategy.HOLLOW_THEN_SEGMENT,
+        description="When to hollow: 'hollow_then_segment' (default) creates shell first for wall panels, "
+        "'segment_then_hollow' hollows each piece after cutting",
     )
 
 

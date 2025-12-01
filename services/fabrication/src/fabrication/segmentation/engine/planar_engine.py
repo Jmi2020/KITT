@@ -11,7 +11,7 @@ from ..geometry.mesh_wrapper import MeshWrapper
 from ..geometry.plane import CuttingPlane
 from ..hollowing import SdfHollower
 from ..hollowing.sdf_hollower import HollowingConfig
-from ..schemas import SegmentationConfig, SegmentedPart, SegmentationResult
+from ..schemas import HollowingStrategy, SegmentationConfig, SegmentedPart, SegmentationResult
 from .base import CutCandidate, SegmentationEngine, SegmentationState
 
 LOGGER = get_logger(__name__)
@@ -46,6 +46,9 @@ class PlanarSegmentationEngine(SegmentationEngine):
         Segment mesh into parts fitting build volume.
 
         Uses iterative axis-aligned cuts until all parts fit.
+        Hollowing strategy determines when hollowing is applied:
+        - HOLLOW_THEN_SEGMENT: Hollow first, then segment the shell (wall panels)
+        - SEGMENT_THEN_HOLLOW: Segment solid, then hollow each piece (hollow boxes)
 
         Args:
             mesh: The mesh to segment
@@ -54,7 +57,30 @@ class PlanarSegmentationEngine(SegmentationEngine):
         Returns:
             SegmentationResult with part info and optional file paths
         """
-        # Check if segmentation needed
+        strategy = self.config.hollowing_strategy
+
+        # HOLLOW FIRST if strategy is HOLLOW_THEN_SEGMENT
+        # Handle both enum and string values
+        should_hollow_first = (
+            strategy == HollowingStrategy.HOLLOW_THEN_SEGMENT
+            or strategy == "hollow_then_segment"
+        )
+        if should_hollow_first and self.hollower:
+            LOGGER.info(
+                f"Hollowing mesh BEFORE segmentation (wall_thickness={self.config.wall_thickness_mm}mm)..."
+            )
+            hollow_result = self.hollower.hollow(mesh)
+            if hollow_result.success and hollow_result.mesh is not None:
+                original_volume = mesh.volume_cm3
+                mesh = hollow_result.mesh
+                LOGGER.info(
+                    f"Hollowed: {hollow_result.material_savings_percent:.1f}% material savings "
+                    f"({original_volume:.1f} → {mesh.volume_cm3:.1f} cm³)"
+                )
+            else:
+                LOGGER.warning(f"Hollowing failed: {hollow_result.error}, proceeding with solid mesh")
+
+        # Check if segmentation needed (on potentially-hollowed mesh)
         if not self.needs_segmentation(mesh):
             LOGGER.info("Mesh fits build volume, no segmentation needed")
             return self._create_single_part_result(mesh, output_dir)
@@ -113,8 +139,13 @@ class PlanarSegmentationEngine(SegmentationEngine):
                 f"{state.count_exceeding(self.build_volume)} exceeding"
             )
 
-        # Apply hollowing if enabled
-        if self.hollower:
+        # HOLLOW AFTER if strategy is SEGMENT_THEN_HOLLOW
+        should_hollow_after = (
+            strategy == HollowingStrategy.SEGMENT_THEN_HOLLOW
+            or strategy == "segment_then_hollow"
+        )
+        if should_hollow_after and self.hollower:
+            LOGGER.info("Hollowing parts AFTER segmentation...")
             state.parts = self._apply_hollowing(state.parts)
 
         # Create result and optionally export
