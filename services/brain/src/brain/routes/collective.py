@@ -206,7 +206,7 @@ async def run_collective(req: RunReq):
                 proposals.append(Proposal(role=role, text=str(p)))
 
         # Calculate diversity metrics
-        diversity_metrics = pairwise_diversity(props)
+        diversity_metrics = pairwise_diversity(raw_props)
 
         # Record metrics before returning
         latency = time.time() - start_time

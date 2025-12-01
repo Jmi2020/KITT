@@ -37,13 +37,13 @@ class MockChat:
         self.call_count = 0
         self.calls: List[Dict[str, Any]] = []
 
-    def __call__(self, messages: List[Dict[str, str]], which: str = "Q4", tools: Any = None) -> str:
+    def __call__(self, messages: List[Dict[str, str]], which: str = "Q4", tools: Any = None, temperature: float = 0.7, max_tokens: int = 500) -> str:
         """Mock chat interface."""
         self.call_count += 1
-        self.calls.append({"messages": messages, "which": which, "tools": tools})
+        self.calls.append({"messages": messages, "which": which, "tools": tools, "temperature": temperature, "max_tokens": max_tokens})
 
         # Return response based on which model and content
-        if which == "F16":
+        if which == "DEEP":
             return self.responses.get("judge", "Mock judge verdict")
         elif "specialist" in str(messages):
             return self.responses.get(f"specialist_{self.call_count}", f"Specialist {self.call_count} proposal")
@@ -159,8 +159,8 @@ def test_n_judge(mock_chat):
         assert "verdict" in result
         assert "JUDGE VERDICT:" in result["verdict"]
         assert mock_chat.call_count == 1
-        # Judge should use F16
-        assert mock_chat.calls[0]["which"] == "F16"
+        # Judge should use DEEP
+        assert mock_chat.calls[0]["which"] == "DEEP"
 
 
 def test_build_collective_graph():
@@ -200,8 +200,8 @@ def test_graph_execution_council(mock_chat):
         assert "verdict" in result
         assert len(result["verdict"]) > 0
 
-        # Verify Q4 used for proposals, F16 for judge
-        # 1 plan + 3 proposals = 4 Q4 calls, 1 F16 call = 5 total
+        # Verify Q4 used for proposals, DEEP for judge
+        # 1 plan + 3 proposals = 4 Q4 calls, 1 DEEP call = 5 total
         assert mock_chat.call_count == 5
 
 

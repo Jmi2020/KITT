@@ -248,7 +248,7 @@ def n_judge(s: CollectiveState) -> CollectiveState:
     verdict = chat([
         {"role": "system", "content": f"{HINT_JUDGE} You may consider all available context including process and meta information."},
         {"role": "user", "content": user_prompt}
-    ], which="F16")
+    ], which="DEEP")
 
     return {**s, "verdict": verdict}
 

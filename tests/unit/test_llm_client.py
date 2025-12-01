@@ -63,22 +63,22 @@ class TestChatAsync:
             assert result == "Q4 response"
 
     @pytest.mark.asyncio
-    async def test_f16_routing(self):
-        """Test that which='F16' routes to kitty-f16 model."""
-        messages = [{"role": "user", "content": "Test F16"}]
+    async def test_deep_routing(self):
+        """Test that which='DEEP' routes to kitty-f16 model (deep reasoner alias)."""
+        messages = [{"role": "user", "content": "Test DEEP"}]
 
         with patch('brain.llm_client._get_client') as mock_get_client:
             mock_client = AsyncMock()
-            mock_client.generate = AsyncMock(return_value={"response": "F16 response"})
+            mock_client.generate = AsyncMock(return_value={"response": "DEEP response"})
             mock_get_client.return_value = mock_client
 
-            result = await chat_async(messages, which="F16")
+            result = await chat_async(messages, which="DEEP")
 
-            # Verify generate was called with F16 model
+            # Verify generate was called with DEEP model (kitty-f16 alias)
             mock_client.generate.assert_called_once()
             call_args = mock_client.generate.call_args
             assert call_args[1]["model"] == "kitty-f16"
-            assert result == "F16 response"
+            assert result == "DEEP response"
 
     @pytest.mark.asyncio
     async def test_coder_routing(self):

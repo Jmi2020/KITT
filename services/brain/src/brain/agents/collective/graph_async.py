@@ -406,12 +406,12 @@ async def n_judge(s: CollectiveState) -> CollectiveState:
     verdict, metadata = await chat_async([
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt}
-    ], which="F16", tools=tools_list, max_tokens=6000)
+    ], which="DEEP", tools=tools_list, max_tokens=6000)
 
     # If tool calls were made, execute them and get final verdict
     tool_calls = metadata.get("tool_calls", [])
     if tool_calls:
-        logger.info(f"Judge (F16/GPT-OSS) executing {len(tool_calls)} tool calls")
+        logger.info(f"Judge (DEEP/GPT-OSS) executing {len(tool_calls)} tool calls")
         tool_results = await _execute_tool_calls(tool_calls)
 
         # Format results for model
@@ -427,7 +427,7 @@ async def n_judge(s: CollectiveState) -> CollectiveState:
             {"role": "user", "content": user_prompt},
             {"role": "assistant", "content": "I need to verify some claims first."},
             {"role": "user", "content": f"Verification results:\n{results_text}\n\nNow provide your final verdict considering all evidence."}
-        ], which="F16", max_tokens=6000)
+        ], which="DEEP", max_tokens=6000)
 
     return {**s, "verdict": verdict}
 
