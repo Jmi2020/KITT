@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from .models import (
     AppSettings,
+    CustomVoiceMode,
     FabricationSettings,
     NotificationSettings,
     PrivacySettings,
@@ -188,6 +189,28 @@ async def update_notification_settings(
     record = storage.save_settings(user_id, existing.settings, existing.version)
     await _broadcast_update(user_id, record)
     return record.settings.notifications
+
+
+@router.get("/voice-modes", response_model=list[CustomVoiceMode])
+async def get_voice_modes(user_id: str = "default") -> list[CustomVoiceMode]:
+    """Get custom voice modes."""
+    storage = get_storage()
+    record = storage.get_or_create_default(user_id)
+    return record.settings.custom_voice_modes
+
+
+@router.put("/voice-modes", response_model=list[CustomVoiceMode])
+async def update_voice_modes(
+    modes: list[CustomVoiceMode],
+    user_id: str = "default",
+) -> list[CustomVoiceMode]:
+    """Update custom voice modes."""
+    storage = get_storage()
+    existing = storage.get_or_create_default(user_id)
+    existing.settings.custom_voice_modes = modes
+    record = storage.save_settings(user_id, existing.settings, existing.version)
+    await _broadcast_update(user_id, record)
+    return record.settings.custom_voice_modes
 
 
 @router.websocket("/sync")

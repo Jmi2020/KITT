@@ -330,7 +330,7 @@ else
 fi
 
 # Check critical services
-CRITICAL_SERVICES=("brain" "gateway" "postgres" "redis" "rabbitmq")
+CRITICAL_SERVICES=("brain" "gateway" "postgres" "redis" "rabbitmq" "settings")
 for service in "${CRITICAL_SERVICES[@]}"; do
     if compose_cmd ps | grep -q "$service.*Up"; then
         success "$service service healthy"
@@ -426,7 +426,8 @@ echo "  llama.cpp F16: http://localhost:8082"
 echo "  Brain API:     http://localhost:8000"
 echo "  Gateway (LB):  http://localhost:8080  (3 replicas + HAProxy)"
 echo "  HAProxy Stats: http://localhost:8404/stats  (admin/changeme)"
-echo "  Voice Service: http://localhost:8400"
+echo "  Voice Service: http://localhost:8550"
+echo "  Settings:      http://localhost:8450"
 echo "  UI:            http://localhost:4173"
 echo "  Research UI:   http://localhost:8080/research  (P1 #2)"
 echo "  I/O Control:   http://localhost:8080/io-control  (P1 #3)"

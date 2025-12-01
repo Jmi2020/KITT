@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ToolExecution, ToolStatus } from '../components/VoiceAssistant/ToolExecutionCard';
-import { getModeById } from '../types/voiceModes';
+import { getModeById, findModeById, VoiceMode } from '../types/voiceModes';
 
 type VoiceStatus = 'disconnected' | 'connecting' | 'connected' | 'listening' | 'responding' | 'error';
 
@@ -83,6 +83,8 @@ interface UseVoiceStreamOptions {
   reconnectBaseDelay?: number;
   /** Maximum delay in ms for reconnect backoff (default: 30000) */
   reconnectMaxDelay?: number;
+  /** Custom voice modes (for lookup when setMode is called) */
+  customModes?: VoiceMode[];
 }
 
 interface UseVoiceStreamReturn extends VoiceStreamState {
@@ -109,6 +111,7 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
     maxReconnectAttempts = 5,
     reconnectBaseDelay = 1000,
     reconnectMaxDelay = 30000,
+    customModes = [],
   } = options;
 
   const wsEndpoint = endpoint || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/voice/stream`;
@@ -518,7 +521,8 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
   }, []);
 
   const setMode = useCallback((modeId: string) => {
-    const modeConfig = getModeById(modeId);
+    // Search both system and custom modes
+    const modeConfig = findModeById(modeId, customModes);
     if (!modeConfig) return;
 
     setState((prev) => ({
@@ -540,7 +544,7 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
         },
       }));
     }
-  }, []);
+  }, [customModes]);
 
   // Cleanup on unmount
   useEffect(() => {

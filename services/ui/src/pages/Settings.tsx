@@ -1,22 +1,35 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { BambuLogin } from '../components/BambuLogin';
+import { VoiceModeEditor } from '../components/VoiceModeEditor';
 import { useSettings } from '../hooks/useSettings';
+import type { VoiceMode } from '../types/voiceModes';
 
-type SettingsTab = 'connections' | 'voice' | 'fabrication' | 'ui';
+type SettingsTab = 'connections' | 'voice' | 'voice_modes' | 'fabrication' | 'ui';
 
 /**
  * Settings page with service connections and preferences.
  */
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('connections');
-  const { settings, updateSection, isLoading } = useSettings();
+  const { settings, updateSection, updateSettings, isLoading } = useSettings();
 
   const tabs: { id: SettingsTab; label: string; icon: string }[] = [
     { id: 'connections', label: 'Connections', icon: '🔌' },
     { id: 'voice', label: 'Voice', icon: '🎙️' },
+    { id: 'voice_modes', label: 'Voice Modes', icon: '🎭' },
     { id: 'fabrication', label: 'Fabrication', icon: '🖨️' },
     { id: 'ui', label: 'Interface', icon: '🎨' },
   ];
+
+  const handleSaveVoiceModes = useCallback(
+    async (modes: VoiceMode[]) => {
+      // Update the custom_voice_modes in settings using updateSettings for array handling
+      if (settings) {
+        await updateSettings({ custom_voice_modes: modes });
+      }
+    },
+    [settings, updateSettings]
+  );
 
   return (
     <div className="min-h-screen bg-gray-900 p-6">
@@ -135,6 +148,19 @@ export default function Settings() {
                   </select>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Voice Modes Tab */}
+        {activeTab === 'voice_modes' && settings && (
+          <div className="space-y-6">
+            <div className="bg-gray-800 rounded-xl border border-gray-700 p-6">
+              <h2 className="text-lg font-semibold text-white mb-4">Voice Modes</h2>
+              <VoiceModeEditor
+                customModes={settings.custom_voice_modes || []}
+                onSave={handleSaveVoiceModes}
+              />
             </div>
           </div>
         )}

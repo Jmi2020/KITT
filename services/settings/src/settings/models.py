@@ -56,6 +56,20 @@ class NotificationSettings(BaseModel):
     sound_enabled: bool = Field(default=True, description="Enable notification sounds")
 
 
+class CustomVoiceMode(BaseModel):
+    """Custom voice mode configuration."""
+
+    id: str = Field(description="Unique mode identifier")
+    name: str = Field(description="Display name")
+    icon: str = Field(default="⚡", description="Emoji icon")
+    description: str = Field(default="", description="User-facing description")
+    allowPaid: bool = Field(default=False, description="Enable paid API calls")
+    preferLocal: bool = Field(default=True, description="Prefer local models")
+    enabledTools: list[str] = Field(default_factory=list, description="Enabled tool names")
+    color: str = Field(default="cyan", description="Theme color name")
+    isCustom: bool = Field(default=True, description="Distinguishes custom from system modes")
+
+
 class AppSettings(BaseModel):
     """Complete application settings."""
 
@@ -64,6 +78,9 @@ class AppSettings(BaseModel):
     ui: UISettings = Field(default_factory=UISettings)
     privacy: PrivacySettings = Field(default_factory=PrivacySettings)
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
+    custom_voice_modes: list[CustomVoiceMode] = Field(
+        default_factory=list, description="User-created custom voice modes"
+    )
 
 
 class UserSettingsRecord(BaseModel):

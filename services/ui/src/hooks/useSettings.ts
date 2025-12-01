@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { VoiceMode } from '../types/voiceModes';
 
 interface VoiceSettings {
   voice: string;
@@ -44,6 +45,7 @@ interface AppSettings {
   ui: UISettings;
   privacy: PrivacySettings;
   notifications: NotificationSettings;
+  custom_voice_modes: VoiceMode[];
 }
 
 interface UseSettingsReturn {
@@ -90,6 +92,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     low_inventory: true,
     sound_enabled: true,
   },
+  custom_voice_modes: [],
 };
 
 /**

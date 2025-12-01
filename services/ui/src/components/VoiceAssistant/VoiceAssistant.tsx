@@ -13,7 +13,8 @@ import { StatusBar } from './StatusBadge';
 import { ToolExecutionList } from './ToolExecutionCard';
 import { HUDFrame } from './HUDFrame';
 import { SettingsDrawer, SettingsButton } from './SettingsDrawer';
-import { getModeById } from '../../types/voiceModes';
+import { getModeById, findModeById } from '../../types/voiceModes';
+import { useSettings } from '../../hooks/useSettings';
 import type { VoiceStatus } from './StatusBadge';
 
 interface VoiceAssistantProps {
@@ -48,8 +49,13 @@ export function VoiceAssistant({
   );
   const currentMessageIdRef = useRef<string | null>(null);
 
-  // Voice stream hook
-  const voiceStream = useVoiceStream();
+  // Get settings for custom modes (must be called before useVoiceStream)
+  const { settings: appSettings } = useSettings();
+
+  // Voice stream hook with custom modes for mode lookup
+  const voiceStream = useVoiceStream({
+    customModes: appSettings?.custom_voice_modes || [],
+  });
   const {
     status,
     transcript,
@@ -74,8 +80,8 @@ export function VoiceAssistant({
     setMode,
   } = voiceStream;
 
-  // Get current mode configuration for colors
-  const currentModeConfig = getModeById(mode);
+  // Get current mode configuration for colors (search both system and custom modes)
+  const currentModeConfig = findModeById(mode, appSettings?.custom_voice_modes || []) || getModeById(mode);
 
   // Audio capture hook
   const audioCapture = useAudioCapture({

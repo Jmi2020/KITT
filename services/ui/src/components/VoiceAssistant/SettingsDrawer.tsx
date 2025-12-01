@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { VOICE_MODES, VoiceMode } from '../../types/voiceModes';
+import { VOICE_MODES, VoiceMode, getAllModes } from '../../types/voiceModes';
+import { useSettings } from '../../hooks/useSettings';
 
 interface SettingsDrawerProps {
   isOpen: boolean;
@@ -22,6 +23,9 @@ export function SettingsDrawer({
   onModeChange,
   isConnected,
 }: SettingsDrawerProps) {
+  const { settings } = useSettings();
+  const allModes = getAllModes(settings?.custom_voice_modes || []);
+
   const handleModeSelect = useCallback((mode: VoiceMode) => {
     onModeChange(mode.id);
     // Close drawer after selection
@@ -146,6 +150,7 @@ export function SettingsDrawer({
 
           {/* Mode List - Scrollable */}
           <div className="flex-1 overflow-y-auto p-5 space-y-3">
+            {/* System Modes */}
             {VOICE_MODES.map((mode) => {
               const isSelected = mode.id === currentMode;
               return (
@@ -158,6 +163,29 @@ export function SettingsDrawer({
                 />
               );
             })}
+
+            {/* Custom Modes Section */}
+            {(settings?.custom_voice_modes || []).length > 0 && (
+              <>
+                <div className="border-t border-white/10 my-4 pt-4">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    Custom Modes
+                  </span>
+                </div>
+                {(settings?.custom_voice_modes || []).map((mode) => {
+                  const isSelected = mode.id === currentMode;
+                  return (
+                    <ModeCard
+                      key={mode.id}
+                      mode={mode}
+                      isSelected={isSelected}
+                      onClick={() => handleModeSelect(mode)}
+                      disabled={!isConnected}
+                    />
+                  );
+                })}
+              </>
+            )}
           </div>
 
           {/* Footer */}
@@ -205,6 +233,9 @@ function ModeCard({ mode, isSelected, onClick, disabled }: ModeCardProps) {
     purple: { bg: 'rgba(168, 85, 247, 0.15)', border: 'rgba(168, 85, 247, 0.5)', accent: '#a855f7', glow: '0 0 20px rgba(168, 85, 247, 0.3)' },
     green: { bg: 'rgba(34, 197, 94, 0.15)', border: 'rgba(34, 197, 94, 0.5)', accent: '#22c55e', glow: '0 0 20px rgba(34, 197, 94, 0.3)' },
     pink: { bg: 'rgba(236, 72, 153, 0.15)', border: 'rgba(236, 72, 153, 0.5)', accent: '#ec4899', glow: '0 0 20px rgba(236, 72, 153, 0.3)' },
+    blue: { bg: 'rgba(59, 130, 246, 0.15)', border: 'rgba(59, 130, 246, 0.5)', accent: '#3b82f6', glow: '0 0 20px rgba(59, 130, 246, 0.3)' },
+    red: { bg: 'rgba(239, 68, 68, 0.15)', border: 'rgba(239, 68, 68, 0.5)', accent: '#ef4444', glow: '0 0 20px rgba(239, 68, 68, 0.3)' },
+    yellow: { bg: 'rgba(234, 179, 8, 0.15)', border: 'rgba(234, 179, 8, 0.5)', accent: '#eab308', glow: '0 0 20px rgba(234, 179, 8, 0.3)' },
   };
 
   const colors = colorValues[mode.color] || colorValues.cyan;
@@ -390,7 +421,9 @@ interface SettingsButtonProps {
 }
 
 export function SettingsButton({ currentMode, onClick, compact }: SettingsButtonProps) {
-  const mode = VOICE_MODES.find((m) => m.id === currentMode) || VOICE_MODES[0];
+  const { settings } = useSettings();
+  const allModes = getAllModes(settings?.custom_voice_modes || []);
+  const mode = allModes.find((m) => m.id === currentMode) || VOICE_MODES[0];
 
   // Color classes per mode
   const colorClasses: Record<string, { bg: string; border: string; text: string }> = {
@@ -399,6 +432,9 @@ export function SettingsButton({ currentMode, onClick, compact }: SettingsButton
     purple: { bg: 'bg-purple-500/15', border: 'border-purple-500/40', text: 'text-purple-400' },
     green: { bg: 'bg-green-500/15', border: 'border-green-500/40', text: 'text-green-400' },
     pink: { bg: 'bg-pink-500/15', border: 'border-pink-500/40', text: 'text-pink-400' },
+    blue: { bg: 'bg-blue-500/15', border: 'border-blue-500/40', text: 'text-blue-400' },
+    red: { bg: 'bg-red-500/15', border: 'border-red-500/40', text: 'text-red-400' },
+    yellow: { bg: 'bg-yellow-500/15', border: 'border-yellow-500/40', text: 'text-yellow-400' },
   };
 
   const colors = colorClasses[mode.color] || colorClasses.cyan;

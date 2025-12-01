@@ -37,6 +37,11 @@ class SettingsStorage:
         self._database_url = database_url or os.getenv(
             "DATABASE_URL", "postgresql://kitty:changeme@localhost:5432/kitty"
         )
+        # Convert postgresql:// to postgresql+psycopg:// for psycopg v3 driver
+        if self._database_url.startswith("postgresql://"):
+            self._database_url = self._database_url.replace(
+                "postgresql://", "postgresql+psycopg://", 1
+            )
         self._engine = create_engine(self._database_url)
         self._session_factory = sessionmaker(bind=self._engine)
 

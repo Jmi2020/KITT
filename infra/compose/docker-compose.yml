@@ -378,6 +378,22 @@ services:
     networks:
       - kitty
 
+  settings:
+    build:
+      context: ../..
+      dockerfile: services/settings/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *service-env
+      SERVICE_NAME: settings
+      DATABASE_URL: postgresql://kitty:${POSTGRES_PASSWORD:-changeme}@postgres:5432/kitty
+    depends_on:
+      - postgres
+    ports:
+      - "8450:8450"
+    networks:
+      - kitty
+
   minio:
     image: quay.io/minio/minio:latest
     command: server /data --console-address ":9001"
