@@ -56,7 +56,7 @@ def _get_default_config() -> Dict[str, Any]:
             "bamboo_h2d": {
                 "name": "Bambu Lab H2D",
                 "model": "H2D",
-                "build_volume": [256, 256, 256],
+                "build_volume": [300, 320, 325],  # Official specs: 300x320x325mm
                 "materials": ["PLA", "PETG", "ABS", "TPU"],
             },
             "elegoo_giga": {

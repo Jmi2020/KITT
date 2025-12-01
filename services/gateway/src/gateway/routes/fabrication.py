@@ -159,3 +159,90 @@ async def get_printer_status() -> dict[str, Any]:
         raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
     except httpx.HTTPError as e:
         raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+# === Mesh Segmentation Endpoints ===
+
+
+@router.get("/segmentation/printers")
+async def list_printers() -> list[dict[str, Any]]:
+    """List available printers with build volumes for segmentation."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{FABRICATION_BASE}/api/segmentation/printers")
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.post("/segmentation/check")
+async def check_segmentation(request: Request) -> dict[str, Any]:
+    """
+    Check if a mesh needs segmentation based on printer build volume.
+
+    Request body:
+    {
+        "mesh_path": "/path/to/model.3mf",
+        "printer_id": "bamboo_h2d"
+    }
+    """
+    try:
+        data = await request.json()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{FABRICATION_BASE}/api/segmentation/check",
+                json=data
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.post("/segmentation/segment")
+async def segment_mesh(request: Request) -> dict[str, Any]:
+    """
+    Segment a mesh into printable parts.
+
+    Request body:
+    {
+        "mesh_path": "/path/to/model.3mf",
+        "printer_id": "bamboo_h2d",
+        "wall_thickness_mm": 2.0,
+        "enable_hollowing": true,
+        "joint_type": "dowel",
+        "max_parts": 50
+    }
+    """
+    try:
+        data = await request.json()
+        async with httpx.AsyncClient(timeout=300.0) as client:  # Long timeout for segmentation
+            response = await client.post(
+                f"{FABRICATION_BASE}/api/segmentation/segment",
+                json=data
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.get("/segmentation/jobs/{job_id}")
+async def get_segmentation_job(job_id: str) -> dict[str, Any]:
+    """Get status of an async segmentation job."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{FABRICATION_BASE}/api/segmentation/jobs/{job_id}")
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
