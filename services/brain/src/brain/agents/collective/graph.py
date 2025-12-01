@@ -56,8 +56,18 @@ def n_plan(s: CollectiveState) -> CollectiveState:
     return {**s, "logs": (s.get("logs","") + "\n[plan]\n" + plan)}
 
 def n_propose_pipeline(s: CollectiveState) -> CollectiveState:
-    # defer to coding graph externally; this node just marks the step.
-    return {**s, "proposals": s.get("proposals", []) + ["<pipeline result inserted by router>"]}
+    """Pipeline node - placeholder for external coding graph integration.
+
+    Returns a Proposal dict to maintain consistency with other propose nodes.
+    The actual pipeline result would be inserted by the router in production.
+    """
+    placeholder = Proposal(
+        label="Response A",
+        content="<pipeline result inserted by router>",
+        model="pipeline",
+        role="pipeline",
+    )
+    return {**s, "proposals": s.get("proposals", []) + [placeholder]}
 
 def n_propose_council(s: CollectiveState) -> CollectiveState:
     """Council node - generates K independent specialist proposals.
@@ -111,19 +121,34 @@ def n_propose_debate(s: CollectiveState) -> CollectiveState:
 
     Confidentiality: Both debaters receive filtered context (excludes meta/dev/collective)
     to maintain independence and prevent anchoring.
+
+    Returns Proposal dicts to maintain consistency with other propose nodes.
     """
     # Fetch filtered context for debaters (excludes meta/dev tags)
     context = fetch_domain_context(s["task"], limit=6, for_proposer=True)
 
-    pro = chat([
+    pro_content = chat([
         {"role": "system", "content": f"You are PRO. {HINT_PROPOSER} Argue FOR the proposal in 6 concise bullet points."},
         {"role": "user", "content": f"Task:\n{s['task']}\n\nRelevant context:\n{context}\n\nProvide PRO arguments."}
     ], which="Q4")
 
-    con = chat([
+    con_content = chat([
         {"role": "system", "content": f"You are CON. {HINT_PROPOSER} Argue AGAINST the proposal in 6 concise bullet points."},
         {"role": "user", "content": f"Task:\n{s['task']}\n\nRelevant context:\n{context}\n\nProvide CON arguments."}
     ], which="Q4")
+
+    pro = Proposal(
+        label="Response A",
+        content=f"PRO: {pro_content}",
+        model="Q4",
+        role="pro_debater",
+    )
+    con = Proposal(
+        label="Response B",
+        content=f"CON: {con_content}",
+        model="Q4",
+        role="con_debater",
+    )
 
     return {**s, "proposals": [pro, con]}
 

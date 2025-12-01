@@ -409,7 +409,7 @@ def chat(
     prompt = _messages_to_prompt(messages)
 
     # Get client and run async generation in sync context
-    client = _get_client()
+    client = _get_local_client()
 
     try:
         # Run async call in event loop

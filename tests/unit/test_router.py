@@ -1,5 +1,6 @@
 # ruff: noqa: E402
 import asyncio
+import hashlib
 import sys
 from pathlib import Path
 from typing import Any, Dict
@@ -40,7 +41,7 @@ class StubLocal:
         self._text = text
         self._confidence = confidence
 
-    async def generate(self, prompt: str, model: str) -> Dict[str, Any]:
+    async def generate(self, prompt: str, model: str, tools: Any = None) -> Dict[str, Any]:
         await asyncio.sleep(0)
         return {"response": f"{self._text}: {prompt}"}
 
@@ -74,9 +75,11 @@ async def test_router_returns_local_result(monkeypatch):
 async def test_router_uses_cache(monkeypatch):
     cache = FakeCache()
     audit = StubAudit()
+    # Use the correct hash for "hello" to match the router's cache key generation
+    cache_key = hashlib.sha256("hello".encode("utf-8")).hexdigest()
     cache.store(
         CacheRecord(
-            key="abc",
+            key=cache_key,
             prompt="hello",
             response="cached response",
             confidence=0.9,

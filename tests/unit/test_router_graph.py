@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(ROOT / "services/common/src"))
@@ -30,7 +31,13 @@ class MockMultiServerClient:
         self.last_model = None
 
     async def generate(
-        self, prompt: str, model: str | None = None, tools: List[Dict[str, Any]] | None = None
+        self,
+        prompt: str,
+        model: str | None = None,
+        tools: List[Dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         """Mock generate method."""
         await asyncio.sleep(0)  # Simulate async
@@ -111,7 +118,7 @@ def mock_mcp():
     })
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def router_graph(mock_llm, mock_memory, mock_mcp):
     """Create RouterGraph instance with mocks."""
     return RouterGraph(
@@ -317,7 +324,7 @@ class TestResponseGenerationNode:
         assert "response" in result
         assert len(result["response"]) > 0
         assert "tier_used" in result
-        assert result["tier_used"] == RoutingTier.LOCAL
+        assert result["tier_used"] == RoutingTier.local
         assert mock_llm.call_count >= 1
 
     @pytest.mark.asyncio
@@ -419,7 +426,7 @@ class TestEndToEndWorkflow:
 
         # Verify workflow completion
         assert "response" in result
-        assert result["tier_used"] in [RoutingTier.LOCAL, RoutingTier.MCP, RoutingTier.FRONTIER]
+        assert result["tier_used"] in [RoutingTier.local, RoutingTier.mcp, RoutingTier.frontier]
         assert "complexity_score" in result
 
     @pytest.mark.asyncio

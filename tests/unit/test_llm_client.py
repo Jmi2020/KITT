@@ -49,72 +49,76 @@ class TestChatAsync:
         """Test that which='Q4' routes to kitty-q4 model."""
         messages = [{"role": "user", "content": "Test Q4"}]
 
-        with patch('brain.llm_client._get_client') as mock_get_client:
+        with patch('brain.llm_client._get_local_client') as mock_get_client:
             mock_client = AsyncMock()
             mock_client.generate = AsyncMock(return_value={"response": "Q4 response"})
             mock_get_client.return_value = mock_client
 
-            result = await chat_async(messages, which="Q4")
+            result, metadata = await chat_async(messages, which="Q4")
 
             # Verify generate was called with Q4 model
             mock_client.generate.assert_called_once()
             call_args = mock_client.generate.call_args
             assert call_args[1]["model"] == "kitty-q4"
             assert result == "Q4 response"
+            assert metadata["model_used"] == "kitty-q4"
 
     @pytest.mark.asyncio
     async def test_deep_routing(self):
         """Test that which='DEEP' routes to kitty-f16 model (deep reasoner alias)."""
         messages = [{"role": "user", "content": "Test DEEP"}]
 
-        with patch('brain.llm_client._get_client') as mock_get_client:
+        with patch('brain.llm_client._get_local_client') as mock_get_client:
             mock_client = AsyncMock()
             mock_client.generate = AsyncMock(return_value={"response": "DEEP response"})
             mock_get_client.return_value = mock_client
 
-            result = await chat_async(messages, which="DEEP")
+            result, metadata = await chat_async(messages, which="DEEP")
 
             # Verify generate was called with DEEP model (kitty-f16 alias)
             mock_client.generate.assert_called_once()
             call_args = mock_client.generate.call_args
             assert call_args[1]["model"] == "kitty-f16"
             assert result == "DEEP response"
+            assert metadata["model_used"] == "kitty-f16"
 
     @pytest.mark.asyncio
     async def test_coder_routing(self):
         """Test that which='CODER' routes to kitty-coder model."""
         messages = [{"role": "user", "content": "Write a function to check if a number is prime"}]
 
-        with patch('brain.llm_client._get_client') as mock_get_client:
+        with patch('brain.llm_client._get_local_client') as mock_get_client:
             mock_client = AsyncMock()
             mock_client.generate = AsyncMock(return_value={"response": "def is_prime(n): ..."})
             mock_get_client.return_value = mock_client
 
-            result = await chat_async(messages, which="CODER")
+            result, metadata = await chat_async(messages, which="CODER")
 
             # Verify generate was called with CODER model
             mock_client.generate.assert_called_once()
             call_args = mock_client.generate.call_args
             assert call_args[1]["model"] == "kitty-coder"
             assert result == "def is_prime(n): ..."
+            assert metadata["model_used"] == "kitty-coder"
 
     @pytest.mark.asyncio
     async def test_default_routing(self):
         """Test that default routing goes to Q4."""
         messages = [{"role": "user", "content": "Test default"}]
 
-        with patch('brain.llm_client._get_client') as mock_get_client:
+        with patch('brain.llm_client._get_local_client') as mock_get_client:
             mock_client = AsyncMock()
             mock_client.generate = AsyncMock(return_value={"response": "Default response"})
             mock_get_client.return_value = mock_client
 
             # Call without specifying which (should default to Q4)
-            result = await chat_async(messages)
+            result, metadata = await chat_async(messages)
 
             # Verify generate was called with Q4 model (default)
             mock_client.generate.assert_called_once()
             call_args = mock_client.generate.call_args
             assert call_args[1]["model"] == "kitty-q4"
+            assert metadata["model_used"] == "kitty-q4"
 
     @pytest.mark.asyncio
     async def test_tools_passed_through(self):
@@ -122,24 +126,25 @@ class TestChatAsync:
         messages = [{"role": "user", "content": "Test with tools"}]
         tools = [{"type": "function", "function": {"name": "test_tool"}}]
 
-        with patch('brain.llm_client._get_client') as mock_get_client:
+        with patch('brain.llm_client._get_local_client') as mock_get_client:
             mock_client = AsyncMock()
             mock_client.generate = AsyncMock(return_value={"response": "Response with tools"})
             mock_get_client.return_value = mock_client
 
-            result = await chat_async(messages, which="Q4", tools=tools)
+            result, metadata = await chat_async(messages, which="Q4", tools=tools)
 
             # Verify tools were passed to generate
             mock_client.generate.assert_called_once()
             call_args = mock_client.generate.call_args
             assert call_args[1]["tools"] == tools
+            assert result == "Response with tools"
 
     @pytest.mark.asyncio
     async def test_tool_calls_logged(self):
         """Test that tool calls are logged when present."""
         messages = [{"role": "user", "content": "Test tool calls"}]
 
-        with patch('brain.llm_client._get_client') as mock_get_client:
+        with patch('brain.llm_client._get_local_client') as mock_get_client:
             mock_client = AsyncMock()
             # Simulate tool calls in response
             tool_call = MagicMock()
@@ -151,12 +156,11 @@ class TestChatAsync:
             mock_get_client.return_value = mock_client
 
             with patch('brain.llm_client.logger') as mock_logger:
-                result = await chat_async(messages, which="Q4")
+                result, metadata = await chat_async(messages, which="Q4")
 
-                # Verify tool calls were logged
-                mock_logger.info.assert_called_once()
-                log_message = mock_logger.info.call_args[0][0]
-                assert "test_function" in log_message
+                # Verify tool calls were logged and included in metadata
+                mock_logger.info.assert_called()
+                assert len(metadata["tool_calls"]) == 1
 
 
 class TestChatSync:
@@ -166,39 +170,47 @@ class TestChatSync:
         """Test that sync chat routes Q4 correctly."""
         messages = [{"role": "user", "content": "Test Q4 sync"}]
 
-        with patch('brain.llm_client._get_client') as mock_get_client:
+        # Mock at the lowest level - the generate method and asyncio behavior
+        with patch('brain.llm_client._get_local_client') as mock_get_client:
             mock_client = MagicMock()
+            # Mock generate to return an awaitable that resolves to response dict
+            mock_client.generate = MagicMock(return_value={"response": "Q4 sync response"})
+            mock_get_client.return_value = mock_client
 
-            # Mock asyncio.run to return synchronously
+            # Mock asyncio.run to execute and return the mock result
             with patch('brain.llm_client.asyncio.run') as mock_run:
                 mock_run.return_value = {"response": "Q4 sync response"}
 
-                mock_get_client.return_value = mock_client
+                # Also mock asyncio.get_event_loop to raise RuntimeError
+                # forcing code to use asyncio.run
+                with patch('brain.llm_client.asyncio.get_event_loop') as mock_loop:
+                    mock_loop.side_effect = RuntimeError("No event loop")
 
-                result = chat(messages, which="Q4")
+                    result = chat(messages, which="Q4")
 
-                # Verify asyncio.run was called
-                assert mock_run.called
-                assert result == "Q4 sync response"
+                    # Verify asyncio.run was called and result correct
+                    assert mock_run.called
+                    assert result == "Q4 sync response"
 
     def test_coder_routing_sync(self):
         """Test that sync chat routes CODER correctly."""
         messages = [{"role": "user", "content": "Write code"}]
 
-        with patch('brain.llm_client._get_client') as mock_get_client:
+        with patch('brain.llm_client._get_local_client') as mock_get_client:
             mock_client = MagicMock()
+            mock_client.generate = MagicMock(return_value={"response": "def foo(): pass"})
+            mock_get_client.return_value = mock_client
 
-            # Mock asyncio.run to return synchronously
             with patch('brain.llm_client.asyncio.run') as mock_run:
                 mock_run.return_value = {"response": "def foo(): pass"}
 
-                mock_get_client.return_value = mock_client
+                with patch('brain.llm_client.asyncio.get_event_loop') as mock_loop:
+                    mock_loop.side_effect = RuntimeError("No event loop")
 
-                result = chat(messages, which="CODER")
+                    result = chat(messages, which="CODER")
 
-                # Verify asyncio.run was called
-                assert mock_run.called
-                assert result == "def foo(): pass"
+                    assert mock_run.called
+                    assert result == "def foo(): pass"
 
 
 class TestCoderIntegration:
@@ -212,25 +224,26 @@ class TestCoderIntegration:
             {"role": "user", "content": "Write a function to calculate factorial"}
         ]
 
-        with patch('brain.llm_client._get_client') as mock_get_client:
+        with patch('brain.llm_client._get_local_client') as mock_get_client:
             mock_client = AsyncMock()
             mock_client.generate = AsyncMock(return_value={
                 "response": "def factorial(n):\n    if n <= 1:\n        return 1\n    return n * factorial(n-1)"
             })
             mock_get_client.return_value = mock_client
 
-            result = await chat_async(messages, which="CODER")
+            result, metadata = await chat_async(messages, which="CODER")
 
             # Verify the response contains code
             assert "def factorial" in result
             assert "return" in result
+            assert metadata["model_used"] == "kitty-coder"
 
     @pytest.mark.asyncio
     async def test_coder_vs_q4_different_models(self):
         """Test that CODER and Q4 use different model aliases."""
         messages = [{"role": "user", "content": "Test"}]
 
-        with patch('brain.llm_client._get_client') as mock_get_client:
+        with patch('brain.llm_client._get_local_client') as mock_get_client:
             mock_client = AsyncMock()
             mock_client.generate = AsyncMock(return_value={"response": "Response"})
             mock_get_client.return_value = mock_client
@@ -260,7 +273,7 @@ class TestErrorHandling:
         """Test handling of client initialization errors."""
         messages = [{"role": "user", "content": "Test"}]
 
-        with patch('brain.llm_client._get_client') as mock_get_client:
+        with patch('brain.llm_client._get_local_client') as mock_get_client:
             mock_get_client.side_effect = Exception("Client initialization failed")
 
             with pytest.raises(Exception) as exc_info:
@@ -273,7 +286,7 @@ class TestErrorHandling:
         """Test handling of generate() errors."""
         messages = [{"role": "user", "content": "Test"}]
 
-        with patch('brain.llm_client._get_client') as mock_get_client:
+        with patch('brain.llm_client._get_local_client') as mock_get_client:
             mock_client = AsyncMock()
             mock_client.generate = AsyncMock(side_effect=Exception("Generation failed"))
             mock_get_client.return_value = mock_client
@@ -288,16 +301,17 @@ class TestErrorHandling:
         """Test handling of empty response from generate()."""
         messages = [{"role": "user", "content": "Test"}]
 
-        with patch('brain.llm_client._get_client') as mock_get_client:
+        with patch('brain.llm_client._get_local_client') as mock_get_client:
             mock_client = AsyncMock()
             # Return empty response
             mock_client.generate = AsyncMock(return_value={"response": ""})
             mock_get_client.return_value = mock_client
 
-            result = await chat_async(messages, which="Q4")
+            result, metadata = await chat_async(messages, which="Q4")
 
             # Should return empty string, not crash
             assert result == ""
+            assert metadata["model_used"] == "kitty-q4"
 
 
 # Test summary

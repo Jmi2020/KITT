@@ -89,7 +89,8 @@ def test_n_plan(mock_chat):
 
 def test_n_propose_council(mock_chat):
     """Test council proposal node generates k proposals."""
-    with patch("brain.agents.collective.graph.chat", mock_chat):
+    with patch("brain.agents.collective.graph.chat", mock_chat), \
+         patch("brain.agents.collective.graph.fetch_domain_context", return_value="Mock context"):
         state: CollectiveState = {
             "task": "Compare materials",
             "pattern": "council",
@@ -101,13 +102,15 @@ def test_n_propose_council(mock_chat):
         assert "proposals" in result
         assert len(result["proposals"]) == 3
         assert mock_chat.call_count == 3
-        # All proposals should use Q4
-        assert all(call["which"] == "Q4" for call in mock_chat.calls)
+        # First proposal uses Q4B (diversity seat), rest use Q4
+        assert mock_chat.calls[0]["which"] == "Q4B"
+        assert all(call["which"] == "Q4" for call in mock_chat.calls[1:])
 
 
 def test_n_propose_council_with_different_k(mock_chat):
     """Test council with different k values."""
-    with patch("brain.agents.collective.graph.chat", mock_chat):
+    with patch("brain.agents.collective.graph.chat", mock_chat), \
+         patch("brain.agents.collective.graph.fetch_domain_context", return_value="Mock context"):
         # Test with k=2
         state: CollectiveState = {"task": "Test", "k": 2}
         result = n_propose_council(state)
@@ -125,7 +128,8 @@ def test_n_propose_council_with_different_k(mock_chat):
 
 def test_n_propose_debate(mock_chat):
     """Test debate proposal node generates PRO and CON arguments."""
-    with patch("brain.agents.collective.graph.chat", mock_chat):
+    with patch("brain.agents.collective.graph.chat", mock_chat), \
+         patch("brain.agents.collective.graph.fetch_domain_context", return_value="Mock context"):
         state: CollectiveState = {
             "task": "Should I use tree supports?",
             "pattern": "debate"
@@ -135,8 +139,11 @@ def test_n_propose_debate(mock_chat):
 
         assert "proposals" in result
         assert len(result["proposals"]) == 2
-        assert "PRO:" in result["proposals"][0]
-        assert "CON:" in result["proposals"][1]
+        # Debate now returns Proposal dicts with label/content/model
+        assert "PRO:" in result["proposals"][0]["content"]
+        assert "CON:" in result["proposals"][1]["content"]
+        assert result["proposals"][0]["label"] == "Response A"
+        assert result["proposals"][1]["label"] == "Response B"
         assert mock_chat.call_count == 2
         # Both should use Q4
         assert all(call["which"] == "Q4" for call in mock_chat.calls)
@@ -144,13 +151,14 @@ def test_n_propose_debate(mock_chat):
 
 def test_n_judge(mock_chat):
     """Test judge node synthesizes proposals into verdict."""
-    with patch("brain.agents.collective.graph.chat", mock_chat):
+    with patch("brain.agents.collective.graph.chat", mock_chat), \
+         patch("brain.agents.collective.graph.fetch_domain_context", return_value="Mock context"):
         state: CollectiveState = {
             "task": "Compare materials",
             "proposals": [
-                "Specialist 1: PETG is best",
-                "Specialist 2: ABS is better",
-                "Specialist 3: ASA is optimal"
+                {"label": "Response A", "content": "Specialist 1: PETG is best", "model": "Q4B"},
+                {"label": "Response B", "content": "Specialist 2: ABS is better", "model": "Q4"},
+                {"label": "Response C", "content": "Specialist 3: ASA is optimal", "model": "Q4"}
             ]
         }
 
@@ -178,7 +186,9 @@ def test_build_collective_graph():
 
 def test_graph_execution_council(mock_chat):
     """Test full graph execution with council pattern."""
-    with patch("brain.agents.collective.graph.chat", mock_chat):
+    with patch("brain.agents.collective.graph.chat", mock_chat), \
+         patch("brain.agents.collective.graph.fetch_domain_context", return_value="Mock context"), \
+         patch("brain.agents.collective.graph.PEER_REVIEW_ENABLED", False):
         graph = build_collective_graph()
         state: CollectiveState = {
             "task": "Compare PETG vs ABS for outdoor use",
@@ -200,14 +210,19 @@ def test_graph_execution_council(mock_chat):
         assert "verdict" in result
         assert len(result["verdict"]) > 0
 
-        # Verify Q4 used for proposals, DEEP for judge
-        # 1 plan + 3 proposals = 4 Q4 calls, 1 DEEP call = 5 total
+        # Verify Q4B+Q4 used for proposals, DEEP for judge (peer review disabled)
+        # 1 plan (Q4) + 1 proposal (Q4B) + 2 proposals (Q4) + 1 judge (DEEP) = 5 total
         assert mock_chat.call_count == 5
+        # Check model usage: plan=Q4, proposals=Q4B/Q4/Q4, judge=DEEP
+        model_sequence = [call["which"] for call in mock_chat.calls]
+        assert model_sequence == ["Q4", "Q4B", "Q4", "Q4", "DEEP"]
 
 
 def test_graph_execution_debate(mock_chat):
     """Test full graph execution with debate pattern."""
-    with patch("brain.agents.collective.graph.chat", mock_chat):
+    with patch("brain.agents.collective.graph.chat", mock_chat), \
+         patch("brain.agents.collective.graph.fetch_domain_context", return_value="Mock context"), \
+         patch("brain.agents.collective.graph.PEER_REVIEW_ENABLED", False):
         graph = build_collective_graph()
         state: CollectiveState = {
             "task": "Should I use tree supports?",
@@ -216,7 +231,7 @@ def test_graph_execution_debate(mock_chat):
 
         result = graph.invoke(state)
 
-        # Should have 2 proposals (PRO and CON)
+        # Should have 2 proposals (PRO and CON) - debate returns Proposal dicts
         assert "proposals" in result
         assert len(result["proposals"]) == 2
 
@@ -229,7 +244,9 @@ def test_graph_execution_debate(mock_chat):
 
 def test_graph_execution_pipeline(mock_chat):
     """Test full graph execution with pipeline pattern."""
-    with patch("brain.agents.collective.graph.chat", mock_chat):
+    with patch("brain.agents.collective.graph.chat", mock_chat), \
+         patch("brain.agents.collective.graph.fetch_domain_context", return_value="Mock context"), \
+         patch("brain.agents.collective.graph.PEER_REVIEW_ENABLED", False):
         graph = build_collective_graph()
         state: CollectiveState = {
             "task": "Generate a test",
@@ -238,10 +255,11 @@ def test_graph_execution_pipeline(mock_chat):
 
         result = graph.invoke(state)
 
-        # Pipeline should have placeholder proposal
+        # Pipeline should have placeholder proposal as Proposal dict
         assert "proposals" in result
         assert len(result["proposals"]) >= 1
-        assert "<pipeline result inserted by router>" in result["proposals"][0]
+        # Pipeline returns Proposal dict with content field
+        assert "<pipeline result inserted by router>" in result["proposals"][0]["content"]
 
         # Should still have verdict
         assert "verdict" in result
@@ -249,7 +267,9 @@ def test_graph_execution_pipeline(mock_chat):
 
 def test_graph_execution_invalid_pattern_defaults_to_pipeline(mock_chat):
     """Test invalid pattern defaults to pipeline."""
-    with patch("brain.agents.collective.graph.chat", mock_chat):
+    with patch("brain.agents.collective.graph.chat", mock_chat), \
+         patch("brain.agents.collective.graph.fetch_domain_context", return_value="Mock context"), \
+         patch("brain.agents.collective.graph.PEER_REVIEW_ENABLED", False):
         graph = build_collective_graph()
         state: CollectiveState = {
             "task": "Test",
@@ -258,9 +278,9 @@ def test_graph_execution_invalid_pattern_defaults_to_pipeline(mock_chat):
 
         result = graph.invoke(state)
 
-        # Should default to pipeline (placeholder)
+        # Should default to pipeline (placeholder) with Proposal dict
         assert "proposals" in result
-        assert "<pipeline result inserted by router>" in result["proposals"][0]
+        assert "<pipeline result inserted by router>" in result["proposals"][0]["content"]
 
 
 def test_state_accumulation():
@@ -271,7 +291,8 @@ def test_state_accumulation():
         "judge": "Final verdict"
     }
 
-    with patch("brain.agents.collective.graph.chat", MockChat(responses)):
+    with patch("brain.agents.collective.graph.chat", MockChat(responses)), \
+         patch("brain.agents.collective.graph.fetch_domain_context", return_value="Mock context"):
         graph = build_collective_graph()
         state: CollectiveState = {
             "task": "Test accumulation",
@@ -294,7 +315,8 @@ def test_state_accumulation():
 
 def test_empty_task_handling(mock_chat):
     """Test handling of empty task."""
-    with patch("brain.agents.collective.graph.chat", mock_chat):
+    with patch("brain.agents.collective.graph.chat", mock_chat), \
+         patch("brain.agents.collective.graph.fetch_domain_context", return_value="Mock context"):
         graph = build_collective_graph()
         state: CollectiveState = {
             "task": "",
@@ -309,7 +331,8 @@ def test_empty_task_handling(mock_chat):
 
 def test_k_boundary_values(mock_chat):
     """Test k at boundary values (2 and 7)."""
-    with patch("brain.agents.collective.graph.chat", mock_chat):
+    with patch("brain.agents.collective.graph.chat", mock_chat), \
+         patch("brain.agents.collective.graph.fetch_domain_context", return_value="Mock context"):
         # Test k=2 (minimum)
         state: CollectiveState = {"task": "Test", "k": 2}
         result = n_propose_council(state)
@@ -333,7 +356,8 @@ async def test_concurrent_execution():
     responses["judge"] = "Verdict"
     responses["plan"] = "Plan"
 
-    with patch("brain.agents.collective.graph.chat", MockChat(responses)):
+    with patch("brain.agents.collective.graph.chat", MockChat(responses)), \
+         patch("brain.agents.collective.graph.fetch_domain_context", return_value="Mock context"):
         graph = build_collective_graph()
         state: CollectiveState = {
             "task": "Test",
