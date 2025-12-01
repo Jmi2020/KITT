@@ -211,21 +211,19 @@ class MeshWrapper:
 
             manifold = self.as_manifold
 
-            # Create halfspace for positive side
-            # Manifold3D uses (normal, offset) format
-            offset = plane.offset
+            # Calculate offset from origin along normal
+            # offset = normal · origin
+            offset = sum(n * o for n, o in zip(plane.normal, plane.origin))
+
+            # Convert normal to manifold3d format (positional args)
+            normal = plane.normal
 
             # Intersect with positive halfspace
-            positive_manifold = manifold.trim_by_plane(
-                normal=plane.normal,
-                offset=offset,
-            )
+            positive_manifold = manifold.trim_by_plane(normal, offset)
 
-            # Intersect with negative halfspace (flip normal)
-            negative_manifold = manifold.trim_by_plane(
-                normal=tuple(-n for n in plane.normal),
-                offset=-offset,
-            )
+            # Intersect with negative halfspace (flip normal and offset)
+            neg_normal = tuple(-n for n in plane.normal)
+            negative_manifold = manifold.trim_by_plane(neg_normal, -offset)
 
             positive = MeshWrapper._from_manifold(positive_manifold)
             negative = MeshWrapper._from_manifold(negative_manifold)
@@ -343,8 +341,41 @@ class MeshWrapper:
                 self._trimesh = loaded.dump(concatenate=True)
             else:
                 self._trimesh = loaded
+
+            # Handle 3MF unit conversion to millimeters
+            if path.suffix.lower() == ".3mf":
+                scale = self._get_3mf_scale_to_mm(path)
+                if scale != 1.0:
+                    LOGGER.info(f"Scaling 3MF mesh by {scale}x to convert to mm")
+                    self._trimesh.apply_scale(scale)
+
         except Exception as e:
             raise ValueError(f"Failed to load mesh from {path}: {e}")
+
+    def _get_3mf_scale_to_mm(self, path: Path) -> float:
+        """Get scale factor to convert 3MF units to millimeters."""
+        import zipfile
+        import xml.etree.ElementTree as ET
+
+        # Unit conversion factors to mm
+        unit_scales = {
+            "millimeter": 1.0,
+            "centimeter": 10.0,
+            "meter": 1000.0,
+            "inch": 25.4,
+            "foot": 304.8,
+            "micron": 0.001,
+        }
+
+        try:
+            with zipfile.ZipFile(str(path), 'r') as z:
+                content = z.read('3D/3dmodel.model')
+                root = ET.fromstring(content)
+                unit = root.attrib.get('unit', 'millimeter').lower()
+                return unit_scales.get(unit, 1.0)
+        except Exception as e:
+            LOGGER.warning(f"Could not determine 3MF units, assuming mm: {e}")
+            return 1.0
 
     def _convert_to_trimesh(self) -> trimesh.Trimesh:
         """Convert from other representations to trimesh."""

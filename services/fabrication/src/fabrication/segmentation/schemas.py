@@ -140,7 +140,7 @@ class SegmentMeshRequest(BaseModel):
         default=10,
         description="Maximum number of parts to generate",
         ge=2,
-        le=50,
+        le=100,
     )
     enable_hollowing: bool = Field(
         default=True,
