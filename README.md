@@ -116,7 +116,7 @@ pre-commit install
 cp .env.example .env
 # Edit .env with your settings (see Configuration section below)
 
-# Setup artifacts directory (for accessing STL files in Finder)
+# Setup artifacts directory (for accessing 3MF/GLB files in Finder)
 ./ops/scripts/setup-artifacts-dir.sh
 
 # Start everything

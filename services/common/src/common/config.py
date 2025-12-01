@@ -171,8 +171,7 @@ class Settings(BaseSettings):
     tripo_orientation: Optional[str] = None
     tripo_poll_interval: float = 3.0
     tripo_poll_timeout: float = 900.0
-    tripo_convert_enabled: bool = False
-    tripo_stl_format: str = "binary"
+    tripo_convert_enabled: bool = True
     tripo_face_limit: Optional[int] = None
     tripo_unit: str = "millimeters"
 

@@ -18,7 +18,7 @@ LOGGER = structlog.get_logger(__name__)
 STOPWORDS = {
     "a", "an", "the", "of", "for", "with", "and", "or", "in", "on", "to",
     "create", "make", "generate", "design", "build", "model", "render",
-    "3d", "stl", "glb", "file", "please", "can", "you", "i", "want",
+    "3d", "stl", "glb", "3mf", "file", "please", "can", "you", "i", "want",
     "need", "like", "would", "should", "could", "detailed", "simple",
     "realistic", "stylized", "low", "poly", "high", "resolution",
 }
@@ -71,7 +71,7 @@ class ArtifactRenameWorker:
     async def process_artifact(
         self,
         glb_location: Optional[str],
-        stl_location: Optional[str],
+        threemf_location: Optional[str],
         thumbnail_url: Optional[str],
         user_prompt: Optional[str],
         step_location: Optional[str] = None,
@@ -80,7 +80,7 @@ class ArtifactRenameWorker:
 
         Args:
             glb_location: Path to GLB file (or None)
-            stl_location: Path to STL file (or None)
+            threemf_location: Path to 3MF file (or None)
             thumbnail_url: URL to thumbnail image for vision analysis
             user_prompt: Original user request for context
             step_location: Path to STEP file (or None) - uses prompt-only rename
@@ -91,7 +91,7 @@ class ArtifactRenameWorker:
         result: Dict[str, Any] = {
             "success": False,
             "glb_new": None,
-            "stl_new": None,
+            "threemf_new": None,
             "step_new": None,
             "description": None,
         }
@@ -102,25 +102,25 @@ class ArtifactRenameWorker:
 
         # Check if at least one file exists
         glb_exists = glb_location and Path(glb_location).exists()
-        stl_exists = stl_location and Path(stl_location).exists()
+        threemf_exists = threemf_location and Path(threemf_location).exists()
         step_exists = step_location and Path(step_location).exists()
 
-        if not glb_exists and not stl_exists and not step_exists:
+        if not glb_exists and not threemf_exists and not step_exists:
             LOGGER.warning(
                 "No artifact files found for rename",
                 glb=glb_location,
-                stl=stl_location,
+                threemf=threemf_location,
                 step=step_location,
             )
             return result
 
         # For STEP-only files (no thumbnail available), require prompt
-        if step_exists and not glb_exists and not stl_exists and not user_prompt:
+        if step_exists and not glb_exists and not threemf_exists and not user_prompt:
             LOGGER.warning("STEP file rename requires a prompt (no thumbnail available)")
             return result
 
-        # For GLB/STL, require thumbnail or prompt
-        if (glb_exists or stl_exists) and not thumbnail_url and not user_prompt:
+        # For GLB/3MF, require thumbnail or prompt
+        if (glb_exists or threemf_exists) and not thumbnail_url and not user_prompt:
             LOGGER.warning("No thumbnail or prompt provided for rename")
             return result
 
@@ -160,12 +160,12 @@ class ArtifactRenameWorker:
             if actual_new:
                 result["glb_new"] = actual_new
 
-        # Rename STL file (use same description for consistency)
-        if stl_exists:
-            new_stl = self.renamer.generate_new_path(stl_location, description)
-            actual_new = self.renamer.rename_file(stl_location, new_stl)
+        # Rename 3MF file (use same description for consistency)
+        if threemf_exists:
+            new_threemf = self.renamer.generate_new_path(threemf_location, description)
+            actual_new = self.renamer.rename_file(threemf_location, new_threemf)
             if actual_new:
-                result["stl_new"] = actual_new
+                result["threemf_new"] = actual_new
 
         # Rename STEP file (use same description for consistency)
         if step_exists:
@@ -174,14 +174,14 @@ class ArtifactRenameWorker:
             if actual_new:
                 result["step_new"] = actual_new
 
-        result["success"] = bool(result["glb_new"] or result["stl_new"] or result["step_new"])
+        result["success"] = bool(result["glb_new"] or result["threemf_new"] or result["step_new"])
 
         if result["success"]:
             LOGGER.info(
                 "Artifact rename complete",
                 description=description,
                 glb_new=result["glb_new"],
-                stl_new=result["stl_new"],
+                threemf_new=result["threemf_new"],
                 step_new=result["step_new"],
             )
 
@@ -207,7 +207,7 @@ async def handle_artifact_saved(event_data: Dict[str, Any]) -> Dict[str, Any]:
     prompt-based or vision-based renaming.
 
     Args:
-        event_data: Dict containing glb_location, stl_location,
+        event_data: Dict containing glb_location, threemf_location,
                    step_location, thumbnail, and prompt
 
     Returns:
@@ -216,7 +216,7 @@ async def handle_artifact_saved(event_data: Dict[str, Any]) -> Dict[str, Any]:
     worker = get_rename_worker()
     return await worker.process_artifact(
         glb_location=event_data.get("glb_location"),
-        stl_location=event_data.get("stl_location"),
+        threemf_location=event_data.get("threemf_location"),
         thumbnail_url=event_data.get("thumbnail"),
         user_prompt=event_data.get("prompt"),
         step_location=event_data.get("step_location"),

@@ -83,6 +83,8 @@ async def get_artifact(subdir: str, filename: str):
             content_type = "application/octet-stream"
             if filename.endswith(".glb"):
                 content_type = "model/gltf-binary"
+            elif filename.endswith(".3mf"):
+                content_type = "application/vnd.ms-package.3dmanufacturing-3dmodel+xml"
             elif filename.endswith(".stl"):
                 content_type = "model/stl"
 
@@ -115,6 +117,8 @@ async def get_artifact_flat(filename: str):
             content_type = "application/octet-stream"
             if filename.endswith(".glb"):
                 content_type = "model/gltf-binary"
+            elif filename.endswith(".3mf"):
+                content_type = "application/vnd.ms-package.3dmanufacturing-3dmodel+xml"
             elif filename.endswith(".stl"):
                 content_type = "model/stl"
 

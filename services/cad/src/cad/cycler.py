@@ -22,7 +22,7 @@ from .providers.tripo_client import TripoClient
 from .providers.tripo_local import LocalMeshRunner
 from .providers.zoo_client import ZooClient
 from .storage.artifact_store import ArtifactStore
-from .utils.mesh_conversion import MeshConversionError, convert_mesh_to_stl
+from .utils.mesh_conversion import MeshConversionError, convert_mesh_to_3mf
 from .utils.image_normalization import (
     ImageNormalizationError,
     normalize_image_payload,
@@ -58,7 +58,6 @@ class CADCycler:
         gateway_internal_url: Optional[str] = None,
         mesh_converter: Optional[Callable[[bytes, Optional[str]], bytes]] = None,
         tripo_convert_enabled: bool = True,
-        tripo_stl_format: str = "binary",
         tripo_face_limit: Optional[int] = None,
         tripo_unit: Optional[str] = "millimeters",
     ) -> None:
@@ -84,9 +83,8 @@ class CADCycler:
             or os.getenv("GATEWAY_INTERNAL_URL")
             or "http://gateway:8080"
         ).rstrip("/")
-        self._mesh_converter = mesh_converter or convert_mesh_to_stl
+        self._mesh_converter = mesh_converter or convert_mesh_to_3mf
         self._tripo_convert_enabled = tripo_convert_enabled and self._tripo is not None
-        self._tripo_stl_format = (tripo_stl_format or "binary").lower()
         self._tripo_face_limit = tripo_face_limit
         self._tripo_unit = tripo_unit
 
@@ -152,7 +150,7 @@ class CADCycler:
                     asyncio.create_task(
                         self._emit_rename_event(
                             glb_location=glb_loc,
-                            stl_location=None,
+                            threemf_location=None,
                             thumbnail=None,  # Zoo doesn't provide thumbnails
                             prompt=prompt,
                             step_location=step_loc,
@@ -350,20 +348,20 @@ class CADCycler:
             )
             LOGGER.info("Saved GLB for preview", location=glb_location)
 
-            # Convert GLB to STL for slicer compatibility
-            stl_location = None
+            # Convert GLB to 3MF for slicer compatibility
+            threemf_location = None
             artifact_type = "glb"
             primary_location = glb_location
             try:
-                stl_data = convert_mesh_to_stl(glb_data, source_format="glb")
-                stl_location = await asyncio.to_thread(
-                    self._store.save_bytes, stl_data, ".stl", "stl"
+                threemf_data = convert_mesh_to_3mf(glb_data, source_format="glb")
+                threemf_location = await asyncio.to_thread(
+                    self._store.save_bytes, threemf_data, ".3mf", "3mf"
                 )
-                artifact_type = "stl"
-                primary_location = stl_location
-                LOGGER.info("Saved STL for slicer", location=stl_location)
+                artifact_type = "3mf"
+                primary_location = threemf_location
+                LOGGER.info("Saved 3MF for slicer", location=threemf_location)
             except MeshConversionError as conv_err:
-                LOGGER.warning("GLB to STL conversion failed", error=str(conv_err))
+                LOGGER.warning("GLB to 3MF conversion failed", error=str(conv_err))
 
             thumbnail = result.get("thumbnail", "")
             metadata = {
@@ -373,14 +371,14 @@ class CADCycler:
                 "prompt": prompt,
                 "glb_location": glb_location,
             }
-            if stl_location:
-                metadata["stl_location"] = stl_location
+            if threemf_location:
+                metadata["threemf_location"] = threemf_location
 
             # Emit event for background rename
             asyncio.create_task(
                 self._emit_rename_event(
                     glb_location=glb_location,
-                    stl_location=stl_location,
+                    threemf_location=threemf_location,
                     thumbnail=thumbnail,
                     prompt=prompt,
                 )
@@ -509,28 +507,28 @@ class CADCycler:
             glb_location = self._store.save_bytes(glb_bytes, ".glb", "glb")
             LOGGER.info("Saved GLB for preview", location=glb_location)
 
-        # Try server-side STL conversion first
-        convert_payload = await self._convert_tripo_task_to_stl(task_id)
+        # Try server-side 3MF conversion first
+        convert_payload = await self._convert_tripo_task_to_3mf(task_id)
         if convert_payload:
             content, convert_task_id = convert_payload
-            stl_location = self._store.save_bytes(content, ".stl", "stl")
-            LOGGER.info("Saved STL from server conversion", location=stl_location)
+            threemf_location = self._store.save_bytes(content, ".3mf", "3mf")
+            LOGGER.info("Saved 3MF from server conversion", location=threemf_location)
             metadata = {
                 "task_id": task_id or "",
                 "convert_task_id": convert_task_id or "",
                 "thumbnail": thumbnail,
                 "source_image": reference.source_url or reference.download_url or "",
-                "original_format": "stl",
+                "original_format": "3mf",
                 "friendly_name": reference.friendly_name or "",
                 "glb_location": glb_location or "",
-                "stl_location": stl_location,
+                "threemf_location": threemf_location,
             }
 
             # Emit event for background rename
             asyncio.create_task(
                 self._emit_rename_event(
                     glb_location=glb_location,
-                    stl_location=stl_location,
+                    threemf_location=threemf_location,
                     thumbnail=thumbnail,
                     prompt=reference.friendly_name or reference.title or "",
                 )
@@ -538,8 +536,8 @@ class CADCycler:
 
             return CADArtifact(
                 provider="tripo",
-                artifact_type="stl",
-                location=stl_location,
+                artifact_type="3mf",
+                location=threemf_location,
                 metadata={k: v for k, v in metadata.items() if v},
             )
 
@@ -548,7 +546,7 @@ class CADCycler:
             LOGGER.warning("Tripo job completed without mesh URL", task_id=task_id)
             return None
 
-        stl_location = None
+        threemf_location = None
         artifact_type = "glb"
         primary_location = glb_location
 
@@ -557,19 +555,19 @@ class CADCycler:
                 converted = await asyncio.to_thread(
                     self._mesh_converter, glb_bytes, mesh_format
                 )
-                stl_location = self._store.save_bytes(converted, ".stl", "stl")
-                artifact_type = "stl"
-                primary_location = stl_location
-                LOGGER.info("Saved STL from local conversion", location=stl_location)
+                threemf_location = self._store.save_bytes(converted, ".3mf", "3mf")
+                artifact_type = "3mf"
+                primary_location = threemf_location
+                LOGGER.info("Saved 3MF from local conversion", location=threemf_location)
             except MeshConversionError as exc:
                 LOGGER.warning(
-                    "STL conversion skipped, using GLB only",
+                    "3MF conversion skipped, using GLB only",
                     task_id=task_id,
                     error=str(exc),
                 )
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning(
-                    "Unexpected STL conversion failure",
+                    "Unexpected 3MF conversion failure",
                     task_id=task_id,
                     error=str(exc),
                 )
@@ -583,14 +581,14 @@ class CADCycler:
             "friendly_name": reference.friendly_name or "",
             "glb_location": glb_location or "",
         }
-        if stl_location:
-            metadata["stl_location"] = stl_location
+        if threemf_location:
+            metadata["threemf_location"] = threemf_location
 
         # Emit event for background rename
         asyncio.create_task(
             self._emit_rename_event(
                 glb_location=glb_location,
-                stl_location=stl_location,
+                threemf_location=threemf_location,
                 thumbnail=thumbnail,
                 prompt=reference.friendly_name or reference.title or "",
             )
@@ -603,7 +601,7 @@ class CADCycler:
             metadata={k: v for k, v in metadata.items() if v},
         )
 
-    async def _convert_tripo_task_to_stl(
+    async def _convert_tripo_task_to_3mf(
         self, task_id: Optional[str]
     ) -> Optional[tuple[bytes, Optional[str]]]:
         if not self._tripo_convert_enabled or not self._tripo or not task_id:
@@ -611,25 +609,24 @@ class CADCycler:
         try:
             convert_job = await self._tripo.start_convert_task(
                 original_task_id=task_id,
-                fmt="STL",
-                stl_format=self._tripo_stl_format.upper() if self._tripo_stl_format else None,
+                fmt="3MF",
                 face_limit=self._tripo_face_limit,
                 unit=self._tripo_unit,
             )
             convert_result = await self._await_tripo_completion(convert_job)
             payload = self._unwrap_tripo_payload(convert_result)
-            stl_url = self._extract_stl_url(payload)
-            if not stl_url:
+            threemf_url = self._extract_3mf_url(payload)
+            if not threemf_url:
                 LOGGER.warning(
-                    "Tripo convert completed without STL URL",
+                    "Tripo convert completed without 3MF URL",
                     task_id=convert_job.get("task_id"),
                 )
                 return None
-            data = await self._download_bytes(stl_url)
+            data = await self._download_bytes(threemf_url)
             return data, convert_job.get("task_id")
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning(
-                "Tripo STL convert failed",
+                "Tripo 3MF convert failed",
                 task_id=task_id,
                 error=str(exc),
             )
@@ -654,17 +651,24 @@ class CADCycler:
         return None, None
 
     @staticmethod
-    def _extract_stl_url(payload: Dict[str, Any]) -> Optional[str]:
+    def _extract_3mf_url(payload: Dict[str, Any]) -> Optional[str]:
         if not payload:
             return None
         candidates: List[Optional[str]] = []
-        direct = payload.get("stl_model")
-        if isinstance(direct, str):
-            candidates.append(direct)
+        # Check common 3MF field names from Tripo API
+        for key in ("3mf_model", "threemf_model", "model"):
+            direct = payload.get(key)
+            if isinstance(direct, str):
+                candidates.append(direct)
+            elif isinstance(direct, dict):
+                candidates.append(direct.get("url"))
+                candidates.append(direct.get("download_url"))
+        # Check direct url/download_url (after unwrapping)
+        candidates.append(payload.get("url"))
+        candidates.append(payload.get("download_url"))
         model_section = payload.get("model") or {}
         candidates.extend(
             [
-                model_section.get("stl_model"),
                 model_section.get("url"),
                 model_section.get("download_url"),
             ]
@@ -725,31 +729,31 @@ class CADCycler:
     async def _emit_rename_event(
         self,
         glb_location: Optional[str],
-        stl_location: Optional[str],
+        threemf_location: Optional[str],
         thumbnail: Optional[str],
         prompt: Optional[str],
         step_location: Optional[str] = None,
     ) -> None:
         """Emit event for background rename processing.
 
-        For GLB/STL: Uses prompt extraction first, falls back to vision if thumbnail available.
+        For GLB/3MF: Uses prompt extraction first, falls back to vision if thumbnail available.
         For STEP: Uses prompt extraction only (no vision, STEP files can't be previewed).
 
         This runs in the background and does not block artifact creation.
         If renaming fails, the original UUID-based filename is preserved.
         """
         # Skip if no files and no prompt to work with
-        if not (glb_location or stl_location or step_location):
+        if not (glb_location or threemf_location or step_location):
             LOGGER.debug("Skipping rename - no files to rename")
             return
 
         # For STEP-only, we need a prompt (no thumbnail fallback)
-        if step_location and not glb_location and not stl_location and not prompt:
+        if step_location and not glb_location and not threemf_location and not prompt:
             LOGGER.debug("Skipping STEP rename - no prompt available")
             return
 
-        # For GLB/STL, we need either thumbnail or prompt
-        if (glb_location or stl_location) and not thumbnail and not prompt:
+        # For GLB/3MF, we need either thumbnail or prompt
+        if (glb_location or threemf_location) and not thumbnail and not prompt:
             LOGGER.debug("Skipping rename - no thumbnail or prompt available")
             return
 
@@ -758,7 +762,7 @@ class CADCycler:
 
             result = await handle_artifact_saved({
                 "glb_location": glb_location,
-                "stl_location": stl_location,
+                "threemf_location": threemf_location,
                 "step_location": step_location,
                 "thumbnail": thumbnail,
                 "prompt": prompt,
@@ -767,7 +771,7 @@ class CADCycler:
                 LOGGER.info(
                     "Artifact rename completed",
                     glb_new=result.get("glb_new"),
-                    stl_new=result.get("stl_new"),
+                    threemf_new=result.get("threemf_new"),
                     step_new=result.get("step_new"),
                 )
         except Exception as e:

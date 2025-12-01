@@ -1,6 +1,6 @@
-## Tripo STL Workflow Smoke Test
+## Tripo 3MF Workflow Smoke Test
 
-Use this checklist whenever you need to verify that long-running Tripo jobs (5‑10 min) complete and return STL artifacts through the CAD service.
+Use this checklist whenever you need to verify that long-running Tripo jobs (5‑10 min) complete and return 3MF artifacts through the CAD service.
 
 ### 1. Configure timeouts
 
@@ -25,14 +25,14 @@ kitty-cli cad "High-detail reference-based mesh test"
 
 While it runs:
 
-- CAD logs (`docker compose logs -f cad`) will show upload URLs, `/task` polling, and STL conversion traces (local fallback or remote convert if explicitly enabled).
+- CAD logs (`docker compose logs -f cad`) will show upload URLs, `/task` polling, and 3MF conversion traces (server-side first, local trimesh fallback if needed).
 - The CLI spinner will continue until the HTTP response is sent or `KITTY_CLI_TIMEOUT` is hit.
 
 ### 4. Validate results
 
-- The CLI should report at least one `provider=tripo` artifact with `artifactType="stl"`.
+- The CLI should report at least one `provider=tripo` artifact with `artifactType="3mf"`.
 - Artifacts are stored under the usual MinIO/local path; you can download them via `kitty-cli list` + `kitty-cli queue` or directly from the location path.
-- Metadata will include `convert_task_id` when the server-side STL finished successfully.
+- Metadata will include `convert_task_id` when the server-side 3MF finished successfully.
 
 ### 5. Fallback sanity check (optional)
 
@@ -42,6 +42,6 @@ Temporarily disable convert to ensure the local `trimesh` fallback still works:
 TRIPO_CONVERT_ENABLED=false
 ```
 
-Restart CAD, rerun the job, and confirm the CLI still receives an STL along with a warning in the CAD logs noting that the local converter handled the export.
+Restart CAD, rerun the job, and confirm the CLI still receives a 3MF along with a warning in the CAD logs noting that the local converter handled the export.
 
-> Tip: leave `TRIPO_CONVERT_ENABLED=false` unless Tripo re-enables the `/convert` endpoint in your account. The CLI already performs local GLB→STL conversion, so the server-side convert task is optional.
+> Note: Server-side conversion is now enabled by default (`TRIPO_CONVERT_ENABLED=true`). The local trimesh fallback provides resilience if the Tripo convert API is unavailable.

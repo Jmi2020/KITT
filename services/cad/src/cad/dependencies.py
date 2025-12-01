@@ -62,7 +62,6 @@ def get_cad_cycler() -> CADCycler:
         storage_root=Path(os.getenv("KITTY_STORAGE_ROOT", "storage")),
         gateway_internal_url=os.getenv("GATEWAY_INTERNAL_URL"),
         tripo_convert_enabled=settings.tripo_convert_enabled,
-        tripo_stl_format=settings.tripo_stl_format,
         tripo_face_limit=settings.tripo_face_limit,
         tripo_unit=settings.tripo_unit,
     )

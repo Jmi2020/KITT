@@ -71,7 +71,7 @@ def mock_tripo_client():
                 "status": "completed",
                 "result": {
                     "model": {
-                        "stl_model": "https://tripo.ai/artifacts/model.stl",
+                        "url": "https://tripo.ai/artifacts/model.3mf",
                     }
                 },
             }
@@ -213,8 +213,8 @@ async def test_tripo_generation_with_image_url(cad_cycler, mock_tripo_client, tm
     # Find Tripo artifact
     tripo_artifacts = [a for a in artifacts if a.provider == "tripo"]
     assert len(tripo_artifacts) == 1
-    assert tripo_artifacts[0].artifact_type == "stl"
-    assert tripo_artifacts[0].location.endswith(".stl")
+    assert tripo_artifacts[0].artifact_type == "3mf"
+    assert tripo_artifacts[0].location.endswith(".3mf")
 
 
 @pytest.mark.asyncio

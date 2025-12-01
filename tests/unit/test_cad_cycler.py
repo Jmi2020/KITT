@@ -55,7 +55,7 @@ class DummyTripo:
                 "status": "completed",
                 "result": {
                     "model": {
-                        "stl_model": f"http://example.com/{task_id}.stl",
+                        "url": f"http://example.com/{task_id}.3mf",
                     }
                 },
             }
@@ -81,7 +81,7 @@ class DummyStore:
     async def save_from_url(self, url: str, suffix: str):  # noqa: D401
         return f"stored:{url}{suffix}"
 
-    def save_bytes(self, content: bytes, suffix: str):  # noqa: D401
+    def save_bytes(self, content: bytes, suffix: str, subdir: str = None):  # noqa: D401
         return f"stored-bytes:{len(content)}{suffix}"
 
 
@@ -108,7 +108,7 @@ async def test_cad_cycler_uses_image_refs_limit(tmp_path: Path):
         freecad_runner=None,
         max_tripo_images=2,
         storage_root=tmp_path,
-        mesh_converter=lambda _data, _fmt: b"stl-bytes",
+        mesh_converter=lambda _data, _fmt: b"3mf-bytes",
         tripo_convert_enabled=False,
     )
     cycler._download_bytes = AsyncMock(return_value=b"mesh")  # type: ignore[attr-defined]
@@ -124,7 +124,7 @@ async def test_cad_cycler_uses_image_refs_limit(tmp_path: Path):
     assert len(artifacts) == 2
     assert tripo.started == ["task-1", "task-2"]
     assert all(artifact.provider == "tripo" for artifact in artifacts)
-    assert all(artifact.artifact_type == "stl" for artifact in artifacts)
+    assert all(artifact.artifact_type == "3mf" for artifact in artifacts)
 
 
 @pytest.mark.asyncio
@@ -141,7 +141,7 @@ async def test_cad_cycler_prefers_tripo_convert(tmp_path: Path):
         mesh_converter=None,
         tripo_convert_enabled=True,
     )
-    cycler._download_bytes = AsyncMock(return_value=b"stl-data")  # type: ignore[attr-defined]
+    cycler._download_bytes = AsyncMock(return_value=b"3mf-data")  # type: ignore[attr-defined]
 
     path = tmp_path / "img.png"
     path.write_bytes(_make_image_bytes("PNG"))
@@ -150,7 +150,7 @@ async def test_cad_cycler_prefers_tripo_convert(tmp_path: Path):
     artifacts = await cycler.run("duck", references={}, image_refs=refs)
 
     assert len(artifacts) == 1
-    assert artifacts[0].artifact_type == "stl"
+    assert artifacts[0].artifact_type == "3mf"
     assert tripo.converts == [("task-1", "convert-1")]
 
 
@@ -184,7 +184,7 @@ async def test_cad_cycler_mode_organic_skips_zoo(tmp_path: Path):
         artifact_store=DummyStore(),
         storage_root=tmp_path,
     )
-    cycler._download_bytes = AsyncMock(return_value=b"stl-data")  # type: ignore[attr-defined]
+    cycler._download_bytes = AsyncMock(return_value=b"3mf-data")  # type: ignore[attr-defined]
 
     path = tmp_path / "img.png"
     path.write_bytes(_make_image_bytes("PNG"))

@@ -17,8 +17,8 @@ class DummyProject:
         self.artifacts = [
             {
                 "provider": "tripo",
-                "artifactType": "stl",
-                "location": "/api/cad/artifacts/stl/abc.stl",
+                "artifactType": "3mf",
+                "location": "/api/cad/artifacts/3mf/abc.3mf",
                 "metadata": {"glb_location": "/api/cad/artifacts/glb/abc.glb"},
             }
         ]
@@ -41,7 +41,7 @@ def test_list_projects(monkeypatch):
     assert resp.status_code == 200
     data = resp.json()[0]
     assert data["projectId"] == dummy.id
-    assert data["artifacts"][0]["artifactType"] == "stl"
+    assert data["artifacts"][0]["artifactType"] == "3mf"
     assert data["metadata"]["printer"] == "bambu"
 
 

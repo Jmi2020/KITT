@@ -196,8 +196,7 @@ class TripoClient:
         self,
         *,
         original_task_id: str,
-        fmt: str = "STL",
-        stl_format: Optional[str] = None,
+        fmt: str = "3MF",
         face_limit: Optional[int] = None,
         unit: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -205,10 +204,8 @@ class TripoClient:
 
         body: Dict[str, Any] = {
             "original_task_id": original_task_id,
-            "format": (fmt or "STL").upper(),
+            "format": (fmt or "3MF").upper(),
         }
-        if stl_format:
-            body["stl_format"] = stl_format
         if face_limit and face_limit > 0:
             body["face_limit"] = face_limit
         if unit:
