@@ -1112,11 +1112,11 @@ Requirements:
 
 Provide ONLY the synthesis (no meta-commentary about the task)."""
 
-        # Generate synthesis using F16 model for higher quality
+        # Generate synthesis using deep reasoner model for higher quality
         messages = [{"role": "user", "content": synthesis_prompt}]
         synthesis_text, metadata = await chat_async(
             messages=messages,
-            which="F16",  # Use F16 for quality synthesis
+            which="DEEP",  # Use deep reasoner for quality synthesis
             temperature=0.3,  # Lower temperature for factual synthesis
             max_tokens=2000
         )

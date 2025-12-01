@@ -42,12 +42,12 @@ class MultiServerLlamaCppClient:
 
     Supports:
     - Q4 (tool orchestrator) on llama.cpp
-    - F16 (reasoning engine) on llama.cpp OR Ollama (configurable)
+    - DEEP (reasoning engine) on llama.cpp OR Ollama (configurable)
     - Ollama GPT-OSS 120B with thinking mode
     """
 
     def __init__(self) -> None:
-        """Initialize clients for Q4, F16, and optionally Ollama models."""
+        """Initialize clients for Q4, DEEP reasoner, and optionally Ollama models."""
         self._clients: Dict[str, Any] = {}  # Can hold LlamaCppClient or OllamaReasonerClient
         self._ollama_client: Optional[OllamaReasonerClient] = None
 
@@ -77,26 +77,26 @@ class MultiServerLlamaCppClient:
                 timeout_s=int(ollama_cfg.timeout_seconds),
                 keep_alive=ollama_cfg.keep_alive,
             )
-            # Register Ollama as the F16 reasoner
-            f16_alias = os.getenv("LLAMACPP_F16_ALIAS", "kitty-f16")
-            self._clients[f16_alias] = "ollama"  # Marker for Ollama routing
+            # Register Ollama as the deep reasoner
+            deep_alias = os.getenv("LLAMACPP_F16_ALIAS", "kitty-f16")  # Legacy env var name
+            self._clients[deep_alias] = "ollama"  # Marker for Ollama routing
             logger.info(
-                f"Registered Ollama reasoner: {f16_alias} @ {ollama_cfg.host} "
+                f"Registered Ollama deep reasoner: {deep_alias} @ {ollama_cfg.host} "
                 f"(model={ollama_cfg.model}, think={ollama_cfg.think})"
             )
         else:
-            # F16 Model Configuration (Reasoning Engine - Port 8082)
-            f16_host = os.getenv("LLAMACPP_F16_HOST", "http://localhost:8082")
-            f16_alias = os.getenv("LLAMACPP_F16_ALIAS", "kitty-f16")
-            f16_timeout = _resolve_timeout("LLAMACPP_F16_TIMEOUT", "LLAMACPP_TIMEOUT")
-            f16_config = LlamaCppConfig(
-                host=f16_host,
-                model_alias=f16_alias,
+            # Deep Reasoner Model Configuration (llama.cpp fallback - Port 8082)
+            deep_host = os.getenv("LLAMACPP_F16_HOST", "http://localhost:8082")  # Legacy env var name
+            deep_alias = os.getenv("LLAMACPP_F16_ALIAS", "kitty-f16")  # Legacy env var name
+            deep_timeout = _resolve_timeout("LLAMACPP_F16_TIMEOUT", "LLAMACPP_TIMEOUT")
+            deep_config = LlamaCppConfig(
+                host=deep_host,
+                model_alias=deep_alias,
                 temperature=float(os.getenv("LLAMACPP_F16_TEMPERATURE", "0.2")),
-                timeout_seconds=f16_timeout,
+                timeout_seconds=deep_timeout,
             )
-            self._clients[f16_alias] = LlamaCppClient(config=f16_config)
-            logger.info(f"Registered F16 client: {f16_alias} @ {f16_host}")
+            self._clients[deep_alias] = LlamaCppClient(config=deep_config)
+            logger.info(f"Registered deep reasoner client (llama.cpp): {deep_alias} @ {deep_host}")
 
         # Set default orchestrator model
         self._default_model = q4_alias
@@ -108,7 +108,7 @@ class MultiServerLlamaCppClient:
 
         Args:
             prompt: The input prompt text
-            model: Model alias (e.g., "kitty-q4", "kitty-f16")
+            model: Model alias (e.g., "kitty-q4", "kitty-f16" for deep reasoner)
             tools: Optional tool definitions
 
         Returns:
@@ -197,7 +197,7 @@ class MultiServerLlamaCppClient:
 
         Args:
             prompt: The input prompt text
-            model: Model alias (e.g., "kitty-f16" for Ollama reasoner)
+            model: Model alias (e.g., "kitty-f16" for deep reasoner via Ollama)
             tools: Optional tool definitions (OpenAI format)
 
         Yields:

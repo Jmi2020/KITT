@@ -105,9 +105,9 @@ async def run_collective(req: RunReq):
     """Execute collective meta-agent pattern (council, debate, or pipeline).
 
     Patterns:
-    - council: K independent specialists propose solutions, F16 judges and synthesizes
+    - council: K independent specialists propose solutions, deep reasoner judges and synthesizes
       * With async: All K proposals generated concurrently (~K speedup)
-    - debate: PRO vs CON argue, F16 judges
+    - debate: PRO vs CON argue, deep reasoner judges
       * With async: PRO and CON generated concurrently (~2x speedup)
     - pipeline: Sequential workflow (requires coding graph - not yet implemented)
 
@@ -125,7 +125,7 @@ async def run_collective(req: RunReq):
 
     Returns:
         - proposals: List of agent proposals with roles
-        - verdict: Final synthesized decision from F16 judge
+        - verdict: Final synthesized decision from deep reasoner judge
         - logs: Execution logs
     """
     start_time = time.time()

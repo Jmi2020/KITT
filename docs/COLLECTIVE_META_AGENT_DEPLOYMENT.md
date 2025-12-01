@@ -2,7 +2,7 @@
 
 ## Overview
 
-Successfully integrated the Collective Meta-Agent drop-in module into KITTY Brain service, enabling multi-agent collaboration patterns (council, debate, pipeline) for complex decision-making using local llama.cpp Q4/F16 dual-model architecture.
+Successfully integrated the Collective Meta-Agent drop-in module into KITTY Brain service, enabling multi-agent collaboration patterns (council, debate, pipeline) for complex decision-making using local llama.cpp Q4/DEEP dual-model architecture.
 
 **Integration Date**: November 12, 2025
 **Status**: ✅ Complete - Ready for Testing
@@ -16,13 +16,13 @@ The Collective Meta-Agent provides three collaboration patterns for complex prob
 
 ### 1. **Council Pattern** (Default)
 - **How it works**: K independent specialists (Q4 models) each propose solutions to the same problem
-- **Judge**: F16 model synthesizes proposals and produces final verdict
+- **Judge**: DEEP (deep reasoner) model synthesizes proposals and produces final verdict
 - **Use cases**: Material selection, design trade-offs, comparing multiple approaches
 - **Example**: "Compare PETG vs ABS vs TPU for a 200mm tall vase with thin walls"
 
 ### 2. **Debate Pattern**
 - **How it works**: PRO agent argues FOR, CON agent argues AGAINST the proposal
-- **Judge**: F16 model evaluates arguments and makes balanced decision
+- **Judge**: DEEP (deep reasoner) model evaluates arguments and makes balanced decision
 - **Use cases**: Risk analysis, validating assumptions, finding counterarguments
 - **Example**: "Should I print support structures for this overhang?"
 
@@ -40,7 +40,7 @@ The Collective Meta-Agent provides three collaboration patterns for complex prob
 1. **`services/brain/src/brain/llm_client.py`** (117 lines)
    - Adapter that wraps KITTY's MultiServerLlamaCppClient
    - Provides simple `chat()` interface expected by collective module
-   - Maps "Q4"/"F16" → "kitty-q4"/"kitty-f16" model aliases
+   - Maps "Q4"/"DEEP" → "kitty-q4"/"kitty-f16" model aliases
    - Handles async/sync conversion for compatibility
 
 2. **`services/brain/src/brain/agents/collective/__init__.py`**
@@ -54,7 +54,7 @@ The Collective Meta-Agent provides three collaboration patterns for complex prob
 4. **`services/brain/src/brain/agents/collective/graph.py`** (83 lines)
    - LangGraph state machine implementing collective patterns
    - Nodes: plan, propose_pipeline, propose_council, propose_debate, judge
-   - Uses KITTY's llm_client adapter for Q4/F16 routing
+   - Uses KITTY's llm_client adapter for Q4/DEEP routing
 
 5. **`services/brain/src/brain/routes/collective.py`** (95 lines)
    - FastAPI router exposing `/api/collective/run` endpoint
@@ -100,12 +100,12 @@ The drop-in was designed for a generic "agent-runtime" service but KITTY uses "b
 - **Solution**: Created `brain.llm_client` adapter at root of brain service
 
 ### 3. LLM Client Interface
-- **Drop-in expected**: Simple `chat(messages, which="Q4"|"F16")` function
+- **Drop-in expected**: Simple `chat(messages, which="Q4"|"DEEP")` function
 - **KITTY actual**: Async `MultiServerLlamaCppClient.generate(prompt, model=...)`
 - **Solution**: Created adapter that:
   - Wraps async client with sync interface
   - Converts OpenAI messages to prompt string
-  - Maps "Q4"/"F16" to "kitty-q4"/"kitty-f16" aliases
+  - Maps "Q4"/"DEEP" to "kitty-q4"/"kitty-f16" aliases
   - Handles event loop edge cases (already running, no loop, etc.)
 
 ### 4. Coding Graph Integration

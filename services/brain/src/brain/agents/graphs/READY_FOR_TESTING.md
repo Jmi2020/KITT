@@ -12,10 +12,10 @@
 - Feature-flagged routing (`BRAIN_USE_LANGGRAPH`, `BRAIN_LANGGRAPH_ROLLOUT_PERCENT`)
 - A/B testing with hash-based consistent routing per conversation
 - Graceful fallback to traditional router on errors
-- Multi-server llama.cpp client (Q4 + F16)
+- Multi-server llama.cpp client (Q4 + DEEP)
 - **Files**: `integration.py`, `router_graph.py`, updated `orchestrator.py`
 
-### Phase 2: F16 Deep Reasoner & Escalation ✅
+### Phase 2: Deep Reasoner & Escalation ✅
 - 7-node deep reasoning workflow (context synthesis → problem decomposition → chain-of-thought → tool refinement → synthesis → self-evaluation → response)
 - 3 escalation triggers: confidence < 0.75, complexity > 0.7, explicit deep reasoning
 - 5-factor complexity analyzer (token count, technical density, multi-step, ambiguity, tool count)
@@ -73,7 +73,7 @@
 1. **Environment Setup** (30 minutes)
    - ✅ `.env` configuration ready (LangGraph flags added locally)
    - ⏳ Start llama.cpp Q4 server (port 8083)
-   - ⏳ Start llama.cpp F16 server (port 8082)
+   - ⏳ Start deep reasoner (Ollama or llama.cpp port 8082)
    - ⏳ Start Docker Compose services
    - ⏳ Verify Prometheus metrics endpoint
 
@@ -90,7 +90,7 @@
 4. **Initial Testing** (1 hour)
    - ⏳ Run unit tests: `pytest tests/unit/`
    - ⏳ Test simple queries (Q4 routing)
-   - ⏳ Test complex queries (F16 escalation)
+   - ⏳ Test complex queries (DEEP escalation)
    - ⏳ Test memory integration
    - ⏳ Validate metrics in Grafana
 
@@ -113,7 +113,7 @@ services/brain/src/brain/agents/
 ├── graphs/
 │   ├── states.py                      # TypedDict state definitions
 │   ├── router_graph.py                # Q4 routing workflow (684 lines)
-│   ├── deep_reasoner_graph.py         # F16 deep reasoning (671 lines)
+│   ├── deep_reasoner_graph.py         # DEEP reasoner workflow (671 lines)
 │   ├── memory_graph.py                # Adaptive memory retrieval (538 lines)
 │   └── integration.py                 # BrainOrchestrator bridge (196 lines)
 ├── orchestration/
@@ -190,22 +190,22 @@ cat services/brain/src/brain/agents/graphs/DEPLOYMENT_GUIDE.md
 
 ### Performance Targets
 - **Q4 Latency**: P95 < 2 seconds (simple queries)
-- **F16 Latency**: P95 < 10 seconds (complex queries with deep reasoning)
-- **Routing Distribution**: ~80% Q4, ~20% F16 (estimated)
-- **Escalation Success**: > 90% of F16 escalations succeed
+- **DEEP Latency**: P95 < 10 seconds (complex queries with deep reasoning)
+- **Routing Distribution**: ~80% Q4, ~20% DEEP (estimated)
+- **Escalation Success**: > 90% of DEEP escalations succeed
 - **Tool Success**: > 80% of tool executions complete
 - **Cost**: $0 per query (100% local inference)
 
 ### SLO Compliance
 All 10 SLOs defined in `SLO_DEFINITIONS.md` should be met:
 1. Q4 Routing Latency: P95 < 2s
-2. F16 Deep Reasoner Latency: P95 < 10s
+2. DEEP Reasoner Latency: P95 < 10s
 3. Escalation Success Rate: > 90%
 4. Tool Execution Success Rate: > 80%
 5. Response Confidence Quality: ≥ 70% with confidence ≥ 0.6
 6. Memory Retrieval Latency: P95 < 1s
 7. Graph Execution Success Rate: > 95%
-8. F16 Self-Evaluation Quality: P50 ≥ 0.7
+8. DEEP Self-Evaluation Quality: P50 ≥ 0.7
 9. Memory Sufficiency: P50 ≥ 0.6
 10. Critical Tool Availability: > 90% per tool
 
@@ -225,11 +225,11 @@ All 10 SLOs defined in `SLO_DEFINITIONS.md` should be met:
    ```
    - Expected: Q4 handles, no escalation, ~1-2s latency, confidence > 0.7
 
-2. **F16 Complex Query Test**:
+2. **DEEP Complex Query Test**:
    ```bash
    kitty-cli say "Explain detailed thermodynamic principles with comprehensive multi-step analysis"
    ```
-   - Expected: Q4 → F16 escalation, ~7-12s latency, confidence > 0.8
+   - Expected: Q4 → DEEP escalation, ~7-12s latency, confidence > 0.8
 
 3. **Check Grafana**:
    - Open: http://localhost:3000
@@ -244,10 +244,10 @@ All 10 SLOs defined in `SLO_DEFINITIONS.md` should be met:
 
 ### Common Issues & Solutions
 Refer to `ops/runbooks/langgraph-troubleshooting.md` for:
-- Q4/F16 server not responding → restart procedures
+- Q4/DEEP server not responding → restart procedures
 - High latency → GPU/CPU tuning
 - No metrics in Grafana → Prometheus scrape config
-- Escalation failures → F16 server health check
+- Escalation failures → DEEP server health check
 
 ---
 
@@ -280,7 +280,7 @@ docker compose restart brain
 
 ### Daily Checks (During Gradual Rollout)
 - [ ] Q4 P95 latency < 2s (Grafana: LangGraph Routing Overview)
-- [ ] F16 P95 latency < 10s (Grafana: LangGraph Routing Overview)
+- [ ] DEEP P95 latency < 10s (Grafana: LangGraph Routing Overview)
 - [ ] Escalation success rate > 90% (Grafana: LangGraph Routing Overview)
 - [ ] Tool success rate > 80% (Grafana: LangGraph Tool Performance)
 - [ ] No critical alerts firing (Prometheus: http://localhost:9090/alerts)
@@ -304,7 +304,7 @@ docker compose restart brain
 
 ### Key Concepts to Understand
 - **llama.cpp-First**: Always use local inference, never cloud in primary path
-- **Q4 vs F16**: Q4 = fast (80% queries), F16 = precise (20% complex queries)
+- **Q4 vs DEEP**: Q4 = fast (80% queries), DEEP = precise (20% complex queries)
 - **Escalation Triggers**: Confidence < 0.75 OR complexity > 0.7 OR explicit request
 - **A/B Testing**: Hash-based rollout ensures consistent experience per conversation
 - **Graceful Fallback**: System falls back to traditional router on any error
@@ -315,14 +315,14 @@ docker compose restart brain
 
 ### Before Starting
 - [ ] Mac Studio workstation accessible
-- [ ] llama.cpp models downloaded (Q4 and F16 variants)
+- [ ] llama.cpp models downloaded (Q4 and DEEP variants)
 - [ ] Docker Compose installed and working
 - [ ] Git branch `claude/kitty-001-access-011CUybyHrDBaPsk6JaCEBRL` pulled
 
 ### After Phase 4 Testing
 - [ ] All unit tests pass (300+ assertions)
 - [ ] Simple queries work (Q4 routing)
-- [ ] Complex queries work (F16 escalation)
+- [ ] Complex queries work (DEEP escalation)
 - [ ] Memory integration works
 - [ ] All 4 Grafana dashboards showing data
 - [ ] All 14 Prometheus alerts loaded

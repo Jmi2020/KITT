@@ -121,12 +121,12 @@ class BrainRouter:
         # Initialize safety checker for tool execution validation
         self._safety_checker = SafetyChecker()
 
-        # Agent uses F16 model for tool calling (more capable for agentic workflows)
+        # Agent uses deep reasoner model for tool calling (more capable for agentic workflows)
         self._agent = ReActAgent(
             llm_client=self._llama,
             mcp_client=self._tool_mcp,
             max_iterations=10,
-            model_alias="kitty-f16",
+            model_alias="kitty-f16",  # Deep reasoner alias (routes to GPTOSS 120B via Ollama)
         )
 
         # Cache for all available tools (registry + MCP)
@@ -319,9 +319,9 @@ class BrainRouter:
         full_content = ""
         full_thinking = ""
 
-        # Default to F16 (Ollama reasoner) for streaming with thinking traces
+        # Default to deep reasoner (Ollama) for streaming with thinking traces
         # Q4 (llama.cpp) doesn't support streaming yet
-        model_alias = request.model_hint or "kitty-f16"
+        model_alias = request.model_hint or "kitty-f16"  # Deep reasoner alias
         model_format = detect_model_format(model_alias)
 
         # Get tools based on prompt and mode (semantic or keyword-based)
@@ -410,7 +410,7 @@ class BrainRouter:
 
     async def _invoke_local(self, request: RoutingRequest) -> RoutingResult:
         start = time.perf_counter()
-        # Default to Q4 model for tool calling (F16 often not running)
+        # Default to Q4 model for tool calling (deep reasoner often not running)
         model_alias = request.model_hint or "kitty-q4"
         model_format = detect_model_format(model_alias)
 
@@ -834,8 +834,8 @@ class BrainRouter:
                             {"tool": "generate_cad_model", "error": "CAD MCP client not available"}
                         )
 
-                elif function_name == "reason_with_f16":
-                    # Delegate to F16 reasoning engine
+                elif function_name == "deep_reason":
+                    # Delegate to deep reasoning engine
                     query = arguments.get("query", "")
                     context = arguments.get("context", "")
 
@@ -844,26 +844,26 @@ class BrainRouter:
                     if context:
                         reasoning_prompt = f"Context:\n{context}\n\nQuestion: {query}"
 
-                    logger.info(f"Delegating to F16 reasoning engine: {query[:100]}...")
+                    logger.info(f"Delegating to deep reasoning engine: {query[:100]}...")
 
-                    # Call F16 model (no tools)
-                    f16_response = await self._llama.generate(
+                    # Call deep reasoner model (no tools)
+                    deep_response = await self._llama.generate(
                         reasoning_prompt,
-                        model="kitty-f16",
+                        model="kitty-f16",  # Deep reasoner alias
                         tools=None
                     )
-                    f16_output = (
-                        f16_response.get("response")
-                        or f16_response.get("output")
-                        or f16_response.get("completion")
-                        or "No response from F16 model"
+                    deep_output = (
+                        deep_response.get("response")
+                        or deep_response.get("output")
+                        or deep_response.get("completion")
+                        or "No response from deep reasoner"
                     )
 
                     tool_results.append(
                         {
-                            "tool": "reason_with_f16",
+                            "tool": "deep_reason",
                             "query": query,
-                            "result": f16_output,
+                            "result": deep_output,
                         }
                     )
 

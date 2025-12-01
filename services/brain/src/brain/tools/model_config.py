@@ -52,9 +52,10 @@ def detect_model_format(model_path_or_alias: str) -> ToolCallFormat:
     model_lower = model_path_or_alias.lower()
 
     # Check for known KITTY aliases first (based on .env configuration)
-    # kitty-f16 = GPTOSS 120B via Ollama (primary reasoning model)
-    # NOTE: 'kitty-f16' is a remapped alias for backward compatibility - it now
-    # refers to GPTOSS 120B (Ollama), not the original Llama 3.3 70B F16 model.
+    # kitty-f16 = DEEP reasoner (GPTOSS 120B via Ollama or llama.cpp fallback)
+    # NOTE: 'kitty-f16' is a legacy alias name retained for backward compatibility.
+    # In code, use which="DEEP" to access this model. The actual model is now
+    # GPTOSS 120B (Ollama), not the original Llama 3.3 70B F16 model.
     if "kitty-f16" in model_lower:
         return ToolCallFormat.GPTOSS_JSON
     # kitty-primary = Llama-3.3-70B (from LLAMACPP_PRIMARY_MODEL)

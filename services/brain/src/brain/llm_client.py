@@ -3,7 +3,7 @@
 
 This module provides a simple chat() interface that wraps KITTY's existing
 Multi-server llama.cpp client infrastructure, allowing the collective meta-agent
-to work with both local (Q4/F16/CODER) and cloud providers (OpenAI, Anthropic, etc.).
+to work with both local (Q4/DEEP/CODER) and cloud providers (OpenAI, Anthropic, etc.).
 
 Cloud providers are disabled by default and require feature flags to enable.
 When disabled, requests automatically fall back to local Q4.
@@ -80,7 +80,7 @@ class ProviderRegistry:
         Returns:
             Provider client instance if enabled, None otherwise
         """
-        if provider in ["Q4", "F16", "CODER", "Q4B"]:
+        if provider in ["Q4", "DEEP", "CODER", "Q4B"]:
             # Local providers always available, handled by MultiServerLlamaCppClient
             return None
 
@@ -184,7 +184,7 @@ def _messages_to_prompt(messages: List[Dict[str, str]]) -> str:
 
 async def chat_async(
     messages: List[Dict[str, str]],
-    which: Literal["Q4", "F16", "CODER", "Q4B"] = "Q4",
+    which: Literal["Q4", "DEEP", "CODER", "Q4B"] = "Q4",
     model: Optional[str] = None,
     provider: Optional[str] = None,
     tools: List[Dict[str, Any]] | None = None,
@@ -215,7 +215,7 @@ async def chat_async(
 
     Args:
         messages: OpenAI-style message list [{"role": "user", "content": "..."}]
-        which: Local model tier (Q4/F16/CODER/Q4B) - used for local or fallback
+        which: Local model tier (Q4/DEEP/CODER/Q4B) - used for local or fallback
         model: Cloud model name (e.g., "gpt-4o-mini", "claude-3-5-haiku-20241022")
         provider: Cloud provider name (e.g., "openai", "anthropic")
         tools: Optional tool definitions (JSON Schema format)
@@ -326,7 +326,7 @@ async def chat_async(
     # Use local llama.cpp (existing behavior)
     model_map = {
         "Q4": "kitty-q4",
-        "F16": "kitty-f16",
+        "DEEP": "kitty-f16",  # Deep reasoner (GPTOSS 120B via Ollama or llama.cpp fallback)
         "CODER": "kitty-coder",
         "Q4B": "kitty-q4b",
     }
@@ -362,7 +362,7 @@ async def chat_async(
 
 def chat(
     messages: List[Dict[str, str]],
-    which: Literal["Q4", "F16", "CODER", "Q4B"] = "Q4",
+    which: Literal["Q4", "DEEP", "CODER", "Q4B"] = "Q4",
     tools: List[Dict[str, Any]] | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None
@@ -379,7 +379,7 @@ def chat(
         messages: OpenAI-style message list [{"role": "user", "content": "..."}]
         which: Which model tier to use:
             - "Q4" for fast tool orchestrator (Qwen-based)
-            - "F16" for deep reasoner (Llama-based)
+            - "DEEP" for deep reasoner (GPTOSS 120B via Ollama)
             - "CODER" for code generation (Qwen-Coder)
             - "Q4B" for diversity seat (Mistral-based, falls back to Q4 if unavailable)
         tools: Optional tool definitions (JSON Schema format)
@@ -399,7 +399,7 @@ def chat(
     # Q4B (diversity seat) falls back to Q4 if not configured
     model_map = {
         "Q4": "kitty-q4",
-        "F16": "kitty-f16",
+        "DEEP": "kitty-f16",  # Deep reasoner (GPTOSS 120B via Ollama or llama.cpp fallback)
         "CODER": "kitty-coder",
         "Q4B": "kitty-q4b",  # Diversity seat (Mistral-7B or other model family)
     }

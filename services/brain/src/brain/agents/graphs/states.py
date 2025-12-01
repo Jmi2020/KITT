@@ -77,7 +77,7 @@ class RouterState(TypedDict, total=False):
     reasoning: str  # LLM's reasoning process
 
     # Escalation tracking
-    escalated_to_f16: bool
+    escalated_to_deep: bool
     escalation_reason: str
 
     # Metadata
@@ -89,7 +89,7 @@ class RouterState(TypedDict, total=False):
 
 class DeepReasonerState(TypedDict, total=False):
     """
-    State for F16 deep reasoner workflow.
+    State for deep reasoner workflow.
 
     Extends RouterState with additional fields for deep reasoning.
     """

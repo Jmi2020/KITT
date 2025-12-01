@@ -223,7 +223,7 @@ async def get_available_providers() -> Dict[str, Dict[str, ProviderInfo]]:
         "local": ProviderInfo(
             enabled=True,
             name="Local (llama.cpp)",
-            models=["Q4", "F16", "CODER", "Q4B"],
+            models=["Q4", "DEEP", "CODER", "Q4B"],
             cost_per_1m_tokens={"input": 0.0, "output": 0.0},
             icon="🏠",
         ),
