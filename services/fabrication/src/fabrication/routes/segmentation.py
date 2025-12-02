@@ -113,6 +113,8 @@ async def segment_mesh(request: SegmentMeshRequest) -> SegmentMeshResponse:
             joint_type=request.joint_type,
             joint_tolerance_mm=request.joint_tolerance_mm,
             max_parts=request.max_parts,
+            pin_diameter_mm=request.pin_diameter_mm,
+            pin_height_mm=request.pin_height_mm,
         )
 
         # Get output directory for exported parts
@@ -286,6 +288,8 @@ async def _run_segmentation_job(job_id: str, request: SegmentMeshRequest) -> Non
             joint_type=request.joint_type,
             joint_tolerance_mm=request.joint_tolerance_mm,
             max_parts=request.max_parts,
+            pin_diameter_mm=request.pin_diameter_mm,
+            pin_height_mm=request.pin_height_mm,
         )
 
         engine = PlanarSegmentationEngine(config)

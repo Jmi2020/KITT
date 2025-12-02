@@ -88,22 +88,29 @@ class IntegratedJointFactory(JointFactory):
 
         # Create joint pairs
         joints = []
+        # Get the cut plane normal for cylinder orientation
+        plane_normal = cut_plane.normal
+
         for i, pos_3d in enumerate(positions):
             # Pin side (part A) - protruding cylinder
             # Negative depth indicates protrusion rather than hole
+            # Pin extends in the direction of the plane normal (toward part B)
             pin_location = JointLocation(
                 position=pos_3d,
                 diameter_mm=self.pin_config.pin_diameter_mm,
                 depth_mm=-self.pin_config.pin_height_mm,  # Negative = protrusion
                 part_index=part_a_index,
+                normal=plane_normal,  # Orient along cut plane normal
             )
 
             # Socket side (part B) - hole with clearance
+            # Hole extends opposite to plane normal (into part B)
             socket_location = JointLocation(
                 position=pos_3d,
                 diameter_mm=self.pin_config.pin_diameter_mm + self.pin_config.hole_clearance_mm,
                 depth_mm=self.pin_config.hole_depth_mm,  # Positive = hole
                 part_index=part_b_index,
+                normal=tuple(-n for n in plane_normal),  # Opposite direction for hole
             )
 
             joints.append(
@@ -191,73 +198,92 @@ class IntegratedJointFactory(JointFactory):
         plane: CuttingPlane,
         num_joints: int,
     ) -> List[Tuple[float, float, float]]:
-        """Place joints using grid pattern with inset from edges."""
+        """
+        Place joints ON the mesh boundary (wall material), not in the interior.
+
+        For hollow shells, the seam cross-section is a ring shape (wall only).
+        Pins must be placed at positions that intersect solid material, which
+        means at the OUTER boundary of the mesh where walls exist.
+        """
         positions = []
 
-        if num_joints <= 0:
+        if num_joints <= 0 or len(contour) < 3:
             return positions
 
-        # Calculate bounding box of contour
-        min_pt = contour.min(axis=0)
-        max_pt = contour.max(axis=0)
-
-        # Inset margin (keep pins away from edges for strength)
-        margin = self.pin_config.pin_diameter_mm * 2
-
-        # Determine which axes to use based on plane normal
+        # Determine which axis is perpendicular to the plane
         normal = np.array(plane.normal)
         abs_normal = np.abs(normal)
-        plane_axis = np.argmax(abs_normal)  # Axis perpendicular to plane
+        plane_axis = np.argmax(abs_normal)
 
-        # Get the two axes we'll place joints along
+        # Get the two in-plane axes
         axes = [i for i in range(3) if i != plane_axis]
 
-        if num_joints == 1:
-            # Single joint at centroid
-            positions.append(tuple(centroid))
-        elif num_joints == 2:
-            # Two joints along longest axis
-            span = max_pt - min_pt
-            long_axis = axes[0] if span[axes[0]] > span[axes[1]] else axes[1]
+        # For hollow shells, we need to place pins at OUTER BOUNDARY positions
+        # The contour may contain both outer and inner perimeter points
+        # Filter to only include points at the mesh extremes (outer walls)
 
-            for offset in [-0.3, 0.3]:
-                pos = centroid.copy()
-                pos[long_axis] += offset * (span[long_axis] - 2 * margin)
-                positions.append(tuple(pos))
+        contour_2d = contour[:, axes]
+
+        # Find the bounding box of the contour
+        min_coords = contour_2d.min(axis=0)
+        max_coords = contour_2d.max(axis=0)
+
+        # Wall thickness tolerance (slightly larger to catch boundary points)
+        wall_tol = 5.0  # mm - generous tolerance to catch outer wall points
+
+        # Filter points that are on the OUTER boundary (near min/max coordinates)
+        # A point is on the outer boundary if either coordinate is near min or max
+        on_boundary = (
+            (contour_2d[:, 0] < min_coords[0] + wall_tol) |
+            (contour_2d[:, 0] > max_coords[0] - wall_tol) |
+            (contour_2d[:, 1] < min_coords[1] + wall_tol) |
+            (contour_2d[:, 1] > max_coords[1] - wall_tol)
+        )
+
+        boundary_points = contour[on_boundary]
+
+        if len(boundary_points) < num_joints:
+            LOGGER.warning(
+                f"Only {len(boundary_points)} boundary points found, "
+                f"using all contour points for joint placement"
+            )
+            boundary_points = contour
+
+        LOGGER.debug(
+            f"Filtered {len(contour)} contour points to {len(boundary_points)} boundary points"
+        )
+
+        # Now place joints evenly distributed among boundary points
+        # Sort boundary points by angle from centroid to get consistent ordering
+        centroid_2d = np.mean(boundary_points[:, axes], axis=0)
+        boundary_2d = boundary_points[:, axes]
+        angles = np.arctan2(
+            boundary_2d[:, 1] - centroid_2d[1],
+            boundary_2d[:, 0] - centroid_2d[0]
+        )
+        sorted_indices = np.argsort(angles)
+        sorted_boundary = boundary_points[sorted_indices]
+
+        # Select evenly spaced points
+        n_boundary = len(sorted_boundary)
+        if n_boundary <= num_joints:
+            # Use all boundary points
+            indices = list(range(n_boundary))
         else:
-            # Grid pattern for more joints
-            span = max_pt - min_pt
-            usable_span = span - 2 * margin
+            # Select evenly spaced indices
+            indices = [int(i * n_boundary / num_joints) for i in range(num_joints)]
 
-            # Calculate grid dimensions
-            aspect = usable_span[axes[0]] / max(usable_span[axes[1]], 1)
-            cols = max(1, int(np.sqrt(num_joints * aspect)))
-            rows = max(1, int(num_joints / cols))
+        for idx in indices[:num_joints]:
+            pos = sorted_boundary[idx]
+            positions.append(tuple(pos))
 
-            for row in range(rows):
-                for col in range(cols):
-                    if len(positions) >= num_joints:
-                        break
-
-                    pos = centroid.copy()
-
-                    # Distribute evenly with margin
-                    if cols > 1:
-                        t_col = col / (cols - 1) if cols > 1 else 0.5
-                        pos[axes[0]] = min_pt[axes[0]] + margin + t_col * usable_span[axes[0]]
-                    if rows > 1:
-                        t_row = row / (rows - 1) if rows > 1 else 0.5
-                        pos[axes[1]] = min_pt[axes[1]] + margin + t_row * usable_span[axes[1]]
-
-                    positions.append(tuple(pos))
-
-        return positions[:num_joints]
+        return positions
 
     def apply_joints_to_mesh(
         self,
         mesh: MeshWrapper,
         joints: List[JointLocation],
-        is_pin_side: bool,
+        is_pin_side: bool = False,  # Deprecated - now determined per-joint from depth_mm
     ) -> MeshWrapper:
         """
         Apply joint geometry to a mesh.
@@ -265,7 +291,7 @@ class IntegratedJointFactory(JointFactory):
         Args:
             mesh: The mesh to modify
             joints: Joint locations for this mesh
-            is_pin_side: True to add pins, False to add holes
+            is_pin_side: Deprecated - pin vs hole is now determined per-joint from depth_mm
 
         Returns:
             Modified mesh with joint geometry
@@ -274,34 +300,44 @@ class IntegratedJointFactory(JointFactory):
             import manifold3d as m3d
 
             manifold = mesh.as_manifold
+            pins_added = 0
+            holes_added = 0
 
             for joint in joints:
+                # Determine if this joint is a pin or hole from its depth
+                # Negative depth = pin (protrusion), Positive depth = hole (cavity)
+                is_pin = joint.depth_mm < 0
+
                 # Create cylinder for pin or hole
                 radius = joint.diameter_mm / 2
                 height = abs(joint.depth_mm)
 
-                # Create cylinder primitive
+                # Create cylinder primitive (created along Z axis by default)
                 cylinder = m3d.Manifold.cylinder(
                     height=height,
                     radius_low=radius,
-                    radius_high=radius * (0.95 if is_pin_side else 1.0),  # Slight taper on pins
+                    radius_high=radius * (0.95 if is_pin else 1.0),  # Slight taper on pins
                     circular_segments=32,
                 )
 
-                # Position the cylinder
+                # Orient cylinder along the joint normal (perpendicular to cut plane)
+                normal = np.array(joint.normal)
+                cylinder = self._orient_cylinder(cylinder, normal, height, is_pin=is_pin)
+
+                # Position the cylinder at the joint location
                 pos = joint.position
+                cylinder = cylinder.translate([pos[0], pos[1], pos[2]])
 
-                if is_pin_side and joint.depth_mm < 0:
-                    # Pin: union with mesh
-                    # Translate cylinder to position (extending from surface)
-                    cylinder = cylinder.translate([pos[0], pos[1], pos[2]])
+                if is_pin:
+                    # Pin: union with mesh (protrusion from surface)
                     manifold = manifold + cylinder
+                    pins_added += 1
                 else:
-                    # Hole: subtract from mesh
-                    # Translate cylinder to position (going into surface)
-                    cylinder = cylinder.translate([pos[0], pos[1], pos[2] - height])
+                    # Hole: subtract from mesh (cavity into surface)
                     manifold = manifold - cylinder
+                    holes_added += 1
 
+            LOGGER.info(f"Applied {pins_added} pins and {holes_added} holes to mesh")
             return MeshWrapper._from_manifold(manifold)
 
         except ImportError:
@@ -310,6 +346,73 @@ class IntegratedJointFactory(JointFactory):
         except Exception as e:
             LOGGER.error(f"Failed to apply joint geometry: {e}")
             return mesh
+
+    def _orient_cylinder(
+        self, cylinder, target_normal: np.ndarray, height: float, is_pin: bool = False
+    ):
+        """
+        Orient a cylinder to align with target normal.
+
+        For pins: cylinder extends FROM the joint position in the normal direction
+        For holes: cylinder extends INTO the mesh (opposite to normal)
+
+        Args:
+            cylinder: Manifold cylinder (created along Z axis with base at z=0)
+            target_normal: Direction the cylinder should point
+            height: Height of cylinder
+            is_pin: True if this is a pin (protrusion), False if hole (cavity)
+
+        Returns:
+            Positioned and rotated cylinder
+        """
+        # Normalize target
+        target_normal = target_normal / np.linalg.norm(target_normal)
+
+        # Default cylinder axis is Z (0, 0, 1)
+        z_axis = np.array([0.0, 0.0, 1.0])
+
+        # Position cylinder based on pin vs hole
+        # Manifold3D creates cylinder with base at z=0, top at z=height
+        # Small overlap ensures clean boolean operations
+        overlap = 0.5  # mm
+
+        if is_pin:
+            # Pin: base slightly inside mesh, extends outward in normal direction
+            # After translation to joint position, pin will protrude from surface
+            cylinder = cylinder.translate([0, 0, -overlap])
+        else:
+            # Hole: extends into mesh from surface
+            # Shift so cylinder goes into the mesh (negative Z before rotation)
+            cylinder = cylinder.translate([0, 0, overlap - height])
+
+        # Rotate to align Z axis with target normal
+        dot = np.dot(z_axis, target_normal)
+
+        if abs(dot) > 0.9999:
+            # Already aligned with Z (or opposite)
+            if dot < 0:
+                # Flip 180 degrees around X axis
+                cylinder = cylinder.rotate([180, 0, 0])
+            return cylinder
+
+        # General rotation for non-axis-aligned normals
+        rotation_axis = np.cross(z_axis, target_normal)
+        rotation_axis = rotation_axis / np.linalg.norm(rotation_axis)
+        angle_rad = np.arccos(np.clip(dot, -1.0, 1.0))
+        angle_deg = np.degrees(angle_rad)
+
+        # Apply rotation based on dominant rotation axis
+        if abs(rotation_axis[0]) > 0.9:
+            # Rotation around X
+            cylinder = cylinder.rotate([angle_deg * np.sign(rotation_axis[0]), 0, 0])
+        elif abs(rotation_axis[1]) > 0.9:
+            # Rotation around Y
+            cylinder = cylinder.rotate([0, angle_deg * np.sign(rotation_axis[1]), 0])
+        else:
+            # Rotation around Z
+            cylinder = cylinder.rotate([0, 0, angle_deg * np.sign(rotation_axis[2])])
+
+        return cylinder
 
 
 __all__ = ["IntegratedJointFactory", "IntegratedPinConfig"]

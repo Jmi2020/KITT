@@ -53,6 +53,9 @@ class JointLocation:
     diameter_mm: float = 4.0
     depth_mm: float = 10.0
     part_index: int = 0
+    # Normal direction for cylinder orientation (perpendicular to seam)
+    # Default is Z-up; set from cut plane normal when generating joints
+    normal: tuple[float, float, float] = (0.0, 0.0, 1.0)
 
 
 @dataclass
@@ -73,6 +76,9 @@ class SegmentationConfig:
     joint_tolerance_mm: float = 0.3  # Clearance for joint fit (0.3mm works for printed pins)
     dowel_diameter_mm: float = 4.0
     dowel_depth_mm: float = 10.0
+    # Integrated pin dimensions (for JointType.INTEGRATED)
+    pin_diameter_mm: float = 5.0
+    pin_height_mm: float = 8.0
 
     # Algorithm
     max_parts: int = 10
@@ -160,6 +166,18 @@ class SegmentMeshRequest(BaseModel):
         default=HollowingStrategy.HOLLOW_THEN_SEGMENT,
         description="When to hollow: 'hollow_then_segment' (default) creates shell first for wall panels, "
         "'segment_then_hollow' hollows each piece after cutting",
+    )
+    pin_diameter_mm: float = Field(
+        default=5.0,
+        description="Diameter of integrated pins (mm). Only used when joint_type='integrated'",
+        ge=2.0,
+        le=10.0,
+    )
+    pin_height_mm: float = Field(
+        default=8.0,
+        description="Height of integrated pin protrusion (mm). Only used when joint_type='integrated'",
+        ge=3.0,
+        le=15.0,
     )
 
 

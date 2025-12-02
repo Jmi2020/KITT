@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from common.logging import get_logger
@@ -11,10 +12,28 @@ from ..geometry.mesh_wrapper import MeshWrapper
 from ..geometry.plane import CuttingPlane
 from ..hollowing import SdfHollower
 from ..hollowing.sdf_hollower import HollowingConfig
-from ..schemas import HollowingStrategy, SegmentationConfig, SegmentedPart, SegmentationResult
+from ..joints.base import JointFactory, JointPair
+from ..joints.integrated import IntegratedJointFactory, IntegratedPinConfig
+from ..joints.dowel import DowelJointFactory, DowelConfig
+from ..schemas import (
+    HollowingStrategy,
+    JointType,
+    SegmentationConfig,
+    SegmentedPart,
+    SegmentationResult,
+)
 from .base import CutCandidate, SegmentationEngine, SegmentationState
 
 LOGGER = get_logger(__name__)
+
+
+@dataclass
+class SeamRelationship:
+    """Tracks which parts share a seam from a cut."""
+
+    part_a_idx: int  # Index of part on positive side of cut
+    part_b_idx: int  # Index of part on negative side of cut
+    cut_plane: CuttingPlane  # The plane where they meet
 
 
 class PlanarSegmentationEngine(SegmentationEngine):
@@ -38,6 +57,10 @@ class PlanarSegmentationEngine(SegmentationEngine):
                 min_wall_thickness_mm=config.min_wall_thickness_mm,
             )
             self.hollower = SdfHollower(hollow_config)
+
+        # Initialize joint factory based on config
+        self.joint_factory: Optional[JointFactory] = None
+        self._init_joint_factory()
 
     def segment(
         self, mesh: MeshWrapper, output_dir: Optional[str] = None
@@ -94,6 +117,10 @@ class PlanarSegmentationEngine(SegmentationEngine):
         state = SegmentationState(parts=[mesh])
         cut_planes: List[CuttingPlane] = []
 
+        # Track seam relationships: list of (part_a, part_b, plane) tuples
+        # We store mesh references initially, then resolve to indices after cutting
+        seam_pairs: List[Tuple[MeshWrapper, MeshWrapper, CuttingPlane]] = []
+
         # Iteratively cut until all parts fit or max parts reached
         while True:
             state.parts_exceeding_volume = state.count_exceeding(self.build_volume)
@@ -125,10 +152,15 @@ class PlanarSegmentationEngine(SegmentationEngine):
             # Replace target part with two new parts
             state.parts.pop(target_idx)
 
-            # Only add non-empty parts
-            if not positive.is_empty():
+            # Only add non-empty parts and track the seam relationship
+            if not positive.is_empty() and not negative.is_empty():
                 state.parts.append(positive)
-            if not negative.is_empty():
+                state.parts.append(negative)
+                # Track this seam - these two parts share the cut plane
+                seam_pairs.append((positive, negative, cut_candidate.plane))
+            elif not positive.is_empty():
+                state.parts.append(positive)
+            elif not negative.is_empty():
                 state.parts.append(negative)
 
             cut_planes.append(cut_candidate.plane)
@@ -147,6 +179,11 @@ class PlanarSegmentationEngine(SegmentationEngine):
         if should_hollow_after and self.hollower:
             LOGGER.info("Hollowing parts AFTER segmentation...")
             state.parts = self._apply_hollowing(state.parts)
+
+        # APPLY JOINTS to parts if joint generation is enabled
+        if self.joint_factory and seam_pairs:
+            LOGGER.info(f"Applying joints to {len(seam_pairs)} seams...")
+            state.parts = self._apply_joints(state.parts, seam_pairs)
 
         # Create result and optionally export
         return self._create_result(state.parts, cut_planes, output_dir)
@@ -312,6 +349,293 @@ class PlanarSegmentationEngine(SegmentationEngine):
                 hollowed_parts.append(part)
 
         return hollowed_parts
+
+    def _init_joint_factory(self) -> None:
+        """Initialize the appropriate joint factory based on configuration."""
+        joint_type = self.config.joint_type
+
+        # Handle both enum and string values
+        if joint_type == JointType.NONE or joint_type == "none":
+            self.joint_factory = None
+            return
+
+        if joint_type == JointType.INTEGRATED or joint_type == "integrated":
+            # Get pin dimensions from config (with defaults)
+            pin_diameter = getattr(self.config, "pin_diameter_mm", 5.0)
+            pin_height = getattr(self.config, "pin_height_mm", 8.0)
+
+            config = IntegratedPinConfig(
+                joint_type=JointType.INTEGRATED,
+                tolerance_mm=self.config.joint_tolerance_mm,
+                hole_clearance_mm=self.config.joint_tolerance_mm,
+                pin_diameter_mm=pin_diameter,
+                pin_height_mm=pin_height,
+            )
+            self.joint_factory = IntegratedJointFactory(config)
+
+            # Reduce build volume to account for pin protrusion
+            # Pins can be on any face, so reduce all axes by pin height
+            self.build_volume = tuple(
+                dim - pin_height for dim in self.build_volume
+            )
+            LOGGER.info(
+                f"Initialized integrated pin factory (pin: {pin_diameter}x{pin_height}mm), "
+                f"adjusted build volume to {self.build_volume}"
+            )
+
+        elif joint_type == JointType.DOWEL or joint_type == "dowel":
+            config = DowelConfig(
+                joint_type=JointType.DOWEL,
+                tolerance_mm=self.config.joint_tolerance_mm,
+                diameter_mm=self.config.dowel_diameter_mm,
+                depth_mm=self.config.dowel_depth_mm,
+                hole_clearance_mm=self.config.joint_tolerance_mm,
+            )
+            self.joint_factory = DowelJointFactory(config)
+            LOGGER.info("Initialized dowel joint factory")
+
+        else:
+            LOGGER.info(f"Joint type '{joint_type}' not implemented, no joints will be added")
+            self.joint_factory = None
+
+    def _apply_joints(
+        self,
+        parts: List[MeshWrapper],
+        seam_pairs: List[Tuple[MeshWrapper, MeshWrapper, CuttingPlane]],
+    ) -> List[MeshWrapper]:
+        """
+        Apply joint geometry to all parts based on seam relationships.
+
+        Instead of tracking mesh object identity (which breaks when parts are cut further),
+        we find parts that share each cut plane by checking if the plane intersects them.
+
+        Args:
+            parts: List of final mesh parts
+            seam_pairs: List of (part_a, part_b, plane) tuples from cutting (for plane info)
+
+        Returns:
+            Parts with joint geometry applied
+        """
+        if not self.joint_factory:
+            return parts
+
+        # Collect all joint locations per part
+        # Key: part index, Value: list of JointLocation objects + is_pin_side flag
+        part_joints: Dict[int, List[Tuple[any, bool]]] = {i: [] for i in range(len(parts))}
+
+        # Get unique cut planes from seam_pairs
+        processed_planes = set()
+
+        for _, _, plane in seam_pairs:
+            # Use plane position as key to avoid duplicates
+            plane_key = (round(plane.origin[0], 1), round(plane.origin[1], 1), round(plane.origin[2], 1))
+            if plane_key in processed_planes:
+                continue
+            processed_planes.add(plane_key)
+
+            # Find all adjacent part pairs at this cut plane
+            adjacent_pairs = self._find_parts_at_plane(parts, plane)
+
+            if not adjacent_pairs:
+                LOGGER.debug(f"No adjacent part pairs found at plane {plane_key}")
+                continue
+
+            # Generate joints for each pair of adjacent parts
+            for idx_a, idx_b in adjacent_pairs:
+                # Create a unique key for this part pair to avoid duplicates
+                pair_key = (min(idx_a, idx_b), max(idx_a, idx_b), plane_key)
+                if pair_key in processed_planes:
+                    continue
+                processed_planes.add(pair_key)
+
+                try:
+                    joint_pairs = self.joint_factory.generate_joints(
+                        parts[idx_a],
+                        parts[idx_b],
+                        plane,
+                        idx_a,
+                        idx_b,
+                    )
+
+                    for jp in joint_pairs:
+                        is_pin = jp.location_a.depth_mm < 0
+                        part_joints[idx_a].append((jp.location_a, is_pin))
+                        part_joints[idx_b].append((jp.location_b, False))
+
+                    LOGGER.info(f"Generated {len(joint_pairs)} joints for seam between parts {idx_a} and {idx_b}")
+
+                except Exception as e:
+                    LOGGER.warning(f"Joint generation failed for seam between {idx_a} and {idx_b}: {e}")
+                    continue
+
+        # Apply collected joints to each part
+        result_parts = []
+        for i, part in enumerate(parts):
+            if not part_joints[i]:
+                result_parts.append(part)
+                continue
+
+            try:
+                joint_locations = [jl for jl, _ in part_joints[i]]
+                is_pin_side = any(is_pin for _, is_pin in part_joints[i])
+
+                if isinstance(self.joint_factory, IntegratedJointFactory):
+                    modified = self.joint_factory.apply_joints_to_mesh(
+                        part, joint_locations, is_pin_side
+                    )
+                else:
+                    modified = self.joint_factory.apply_joints_to_mesh(part, joint_locations)
+
+                result_parts.append(modified)
+                LOGGER.info(f"Applied {len(joint_locations)} joints to part {i}")
+
+            except Exception as e:
+                LOGGER.warning(f"Failed to apply joints to part {i}: {e}")
+                result_parts.append(part)
+
+        return result_parts
+
+    def _find_parts_at_plane(
+        self, parts: List[MeshWrapper], plane: CuttingPlane
+    ) -> List[Tuple[int, int]]:
+        """
+        Find pairs of part indices that share a face at the cut plane.
+
+        Returns list of (idx_positive, idx_negative) tuples where:
+        - idx_positive: part on the positive side of the plane normal
+        - idx_negative: part on the negative side of the plane normal
+
+        Parts are paired if they are adjacent (share the cut plane face).
+        """
+        import numpy as np
+
+        tolerance = 10.0  # mm - generous tolerance for voxelization drift
+
+        # Determine which axis the plane is perpendicular to
+        normal = np.array(plane.normal)
+        axis = np.argmax(np.abs(normal))
+        plane_pos = plane.origin[axis]
+        normal_dir = 1 if normal[axis] > 0 else -1
+
+        # Categorize parts by which side of the plane they're on
+        # positive_side: parts whose MIN face touches the plane (they're on + side)
+        # negative_side: parts whose MAX face touches the plane (they're on - side)
+        positive_side = []  # Parts on positive side (min face at plane)
+        negative_side = []  # Parts on negative side (max face at plane)
+
+        for i, part in enumerate(parts):
+            bbox = part.bounding_box
+
+            # Get min/max along the cut axis
+            if axis == 0:
+                part_min, part_max = bbox.min_x, bbox.max_x
+            elif axis == 1:
+                part_min, part_max = bbox.min_y, bbox.max_y
+            else:
+                part_min, part_max = bbox.min_z, bbox.max_z
+
+            # Check if this part's min or max face is at the plane
+            if abs(part_min - plane_pos) < tolerance:
+                # Part's minimum face is at the plane -> part is on positive side
+                if normal_dir > 0:
+                    positive_side.append((i, part_min, part_max))
+                else:
+                    negative_side.append((i, part_min, part_max))
+
+            if abs(part_max - plane_pos) < tolerance:
+                # Part's maximum face is at the plane -> part is on negative side
+                if normal_dir > 0:
+                    negative_side.append((i, part_min, part_max))
+                else:
+                    positive_side.append((i, part_min, part_max))
+
+        # Now pair up parts that are truly adjacent (share a face, not just edge/corner)
+        # Two parts share a face if they overlap SIGNIFICANTLY in the other two dimensions
+        pairs = []
+        min_overlap_ratio = 0.5  # Require at least 50% overlap to be considered adjacent
+
+        for pos_idx, pos_min, pos_max in positive_side:
+            pos_bbox = parts[pos_idx].bounding_box
+
+            for neg_idx, neg_min, neg_max in negative_side:
+                if pos_idx == neg_idx:
+                    continue
+
+                neg_bbox = parts[neg_idx].bounding_box
+
+                # Check overlap in the other two axes
+                overlap_ratios = []
+                for check_axis in range(3):
+                    if check_axis == axis:
+                        continue
+
+                    # Get bounds for this axis
+                    if check_axis == 0:
+                        pos_lo, pos_hi = pos_bbox.min_x, pos_bbox.max_x
+                        neg_lo, neg_hi = neg_bbox.min_x, neg_bbox.max_x
+                    elif check_axis == 1:
+                        pos_lo, pos_hi = pos_bbox.min_y, pos_bbox.max_y
+                        neg_lo, neg_hi = neg_bbox.min_y, neg_bbox.max_y
+                    else:
+                        pos_lo, pos_hi = pos_bbox.min_z, pos_bbox.max_z
+                        neg_lo, neg_hi = neg_bbox.min_z, neg_bbox.max_z
+
+                    # Calculate overlap
+                    overlap_lo = max(pos_lo, neg_lo)
+                    overlap_hi = min(pos_hi, neg_hi)
+                    overlap_size = max(0, overlap_hi - overlap_lo)
+
+                    # Calculate overlap ratio relative to smaller extent
+                    pos_size = pos_hi - pos_lo
+                    neg_size = neg_hi - neg_lo
+                    min_size = min(pos_size, neg_size)
+
+                    if min_size > 0:
+                        overlap_ratios.append(overlap_size / min_size)
+                    else:
+                        overlap_ratios.append(0)
+
+                # Parts are adjacent if they have significant overlap in BOTH other axes
+                if all(ratio >= min_overlap_ratio for ratio in overlap_ratios):
+                    pairs.append((pos_idx, neg_idx))
+
+        return pairs
+
+    def _find_part_index(
+        self, original_part: MeshWrapper, current_parts: List[MeshWrapper]
+    ) -> Optional[int]:
+        """
+        Find the index of a part in the current list.
+
+        Uses object identity first, falls back to center matching.
+        This handles the case where hollowing creates slightly different mesh bounds.
+        """
+        # Try direct object match first (most reliable)
+        for i, part in enumerate(current_parts):
+            if part is original_part:
+                return i
+
+        # Fall back to center-based matching
+        # Parts from the same cut will have similar centers even after hollowing
+        target_center = original_part.bounding_box.center
+
+        best_match = None
+        best_distance = float("inf")
+
+        for i, part in enumerate(current_parts):
+            center = part.bounding_box.center
+            distance = sum((c1 - c2) ** 2 for c1, c2 in zip(center, target_center)) ** 0.5
+
+            if distance < best_distance:
+                best_distance = distance
+                best_match = i
+
+        # Use a more generous tolerance - 50mm should catch voxelization drift
+        # while still being much smaller than typical part sizes
+        if best_match is not None and best_distance < 50.0:
+            return best_match
+
+        return None
 
     def _create_single_part_result(
         self, mesh: MeshWrapper, output_dir: Optional[str] = None

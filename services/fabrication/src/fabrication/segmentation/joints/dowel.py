@@ -74,21 +74,28 @@ class DowelJointFactory(JointFactory):
 
         # Create joint pairs
         joints = []
+        # Get the cut plane normal for hole orientation
+        plane_normal = cut_plane.normal
+
         for i, pos_3d in enumerate(positions):
             # Pin side (part A) - tight fit
+            # Hole goes in the direction opposite to the plane normal (into part A)
             pin_location = JointLocation(
                 position=pos_3d,
                 diameter_mm=self.dowel_config.diameter_mm,
                 depth_mm=self.dowel_config.depth_mm,
                 part_index=part_a_index,
+                normal=tuple(-n for n in plane_normal),  # Into part A
             )
 
             # Socket side (part B) - with clearance
+            # Hole goes in the direction of plane normal (into part B)
             socket_location = JointLocation(
                 position=pos_3d,
                 diameter_mm=self.dowel_config.diameter_mm + self.dowel_config.hole_clearance_mm,
                 depth_mm=self.dowel_config.depth_mm,
                 part_index=part_b_index,
+                normal=plane_normal,  # Into part B
             )
 
             joints.append(
@@ -109,7 +116,8 @@ class DowelJointFactory(JointFactory):
         """
         Apply dowel holes to a mesh.
 
-        Creates cylindrical holes at each joint location.
+        Creates cylindrical holes at each joint location, oriented along the
+        joint's normal direction (perpendicular to cut plane).
         """
         if not joints:
             return mesh
@@ -120,16 +128,19 @@ class DowelJointFactory(JointFactory):
             result = mesh.as_trimesh.copy()
 
             for joint in joints:
-                # Create cylinder for hole
+                # Create cylinder for hole (along Z axis by default)
+                height = joint.depth_mm * 1.5  # Extra depth for clean cut
                 cylinder = trimesh.creation.cylinder(
                     radius=joint.diameter_mm / 2,
-                    height=joint.depth_mm * 1.5,  # Extra depth for clean cut
+                    height=height,
                     sections=24,  # Smooth cylinder
                 )
 
+                # Orient cylinder along the joint normal
+                normal = np.array(joint.normal)
+                cylinder = self._orient_cylinder_trimesh(cylinder, normal, height)
+
                 # Position cylinder at joint location
-                # Cylinder is created along Z axis, need to orient based on surface normal
-                # For now, assume holes are perpendicular to cut plane (Z-aligned for horizontal, etc.)
                 cylinder.apply_translation(joint.position)
 
                 # Boolean subtraction to create hole
@@ -144,6 +155,51 @@ class DowelJointFactory(JointFactory):
         except Exception as e:
             LOGGER.error(f"Failed to apply joints to mesh: {e}")
             return mesh
+
+    def _orient_cylinder_trimesh(
+        self, cylinder, target_normal: np.ndarray, height: float
+    ):
+        """
+        Orient a trimesh cylinder to align with target normal.
+
+        Args:
+            cylinder: Trimesh cylinder (created along Z axis)
+            target_normal: Direction the cylinder should point
+            height: Height of cylinder (for centering)
+
+        Returns:
+            Rotated and centered cylinder
+        """
+        import trimesh.transformations as tf
+
+        # Normalize target
+        target_normal = target_normal / np.linalg.norm(target_normal)
+
+        # Default cylinder axis is Z (0, 0, 1)
+        z_axis = np.array([0.0, 0.0, 1.0])
+
+        # Calculate rotation to align Z with target normal
+        dot = np.dot(z_axis, target_normal)
+
+        if abs(dot) > 0.9999:
+            # Nearly aligned - handle flip case
+            if dot < 0:
+                # Flip 180 degrees around X axis
+                rotation = tf.rotation_matrix(np.pi, [1, 0, 0])
+                cylinder.apply_transform(rotation)
+            # Center the cylinder (trimesh creates with centroid at origin)
+            return cylinder
+
+        # General case: calculate rotation axis and angle
+        rotation_axis = np.cross(z_axis, target_normal)
+        rotation_axis = rotation_axis / np.linalg.norm(rotation_axis)
+        angle = np.arccos(np.clip(dot, -1.0, 1.0))
+
+        # Create rotation matrix and apply
+        rotation = tf.rotation_matrix(angle, rotation_axis)
+        cylinder.apply_transform(rotation)
+
+        return cylinder
 
     def _calculate_num_joints(self, seam_area: float) -> int:
         """Calculate number of joints based on seam area."""
