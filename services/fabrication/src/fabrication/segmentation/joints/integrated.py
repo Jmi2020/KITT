@@ -25,8 +25,8 @@ class IntegratedPinConfig(JointConfig):
     """Configuration for integrated printed pins."""
 
     pin_diameter_mm: float = 8.0  # Pin diameter (must fit within wall thickness)
-    pin_height_mm: float = 10.0  # Height of protruding pin
-    hole_depth_mm: float = 12.0  # Hole is deeper than pin for clearance
+    pin_height_mm: float = 10.0  # Total pin height (2mm anchor + 8mm protrusion)
+    hole_depth_mm: float = 8.0  # Hole depth matches pin protrusion
     # Tolerance/clearance for printed pins - accounts for layer expansion
     # Default 0.3mm works well for FDM prints
     # This is added to hole diameter (hole = pin_diameter + clearance)
@@ -107,13 +107,13 @@ class IntegratedJointFactory(JointFactory):
                 normal=plane_normal,  # Points toward Part B
             )
 
-            # Socket side (part B) - ENLARGED by clearance (both radius AND depth)
+            # Socket side (part B) - ENLARGED by clearance
             # Socket will be subtracted from Part B
             # Clearance ensures the pin fits with room to spare
             socket_location = JointLocation(
                 position=pos_3d,
                 diameter_mm=self.pin_config.pin_diameter_mm + (self.pin_config.hole_clearance_mm * 2),  # Clearance on diameter (both sides)
-                depth_mm=self.pin_config.pin_height_mm + self.pin_config.hole_clearance_mm,  # Match pin height + clearance
+                depth_mm=self.pin_config.hole_depth_mm + self.pin_config.hole_clearance_mm,  # Hole depth + small clearance
                 part_index=part_b_index,
                 normal=tuple(-n for n in plane_normal),  # Points into Part B
             )
@@ -204,83 +204,113 @@ class IntegratedJointFactory(JointFactory):
         num_joints: int,
     ) -> List[Tuple[float, float, float]]:
         """
-        Place joints ON the mesh boundary (wall material), not in the interior.
+        Place joints WITHIN the wall material on the cut face.
 
         For hollow shells, the seam cross-section is a ring shape (wall only).
-        Pins must be placed at positions that intersect solid material, which
-        means at the OUTER boundary of the mesh where walls exist.
+        Pins must be placed at positions that:
+        1. Are ON the cut plane face (where parts mate)
+        2. Are WITHIN the wall material (not at edges)
+        3. Point PERPENDICULAR to the cut plane (toward mating part)
+
+        The contour from mesh.section() gives us the wall cross-section outline.
+        We place pins at the MIDPOINT of wall segments, not at the edges.
         """
         positions = []
 
         if num_joints <= 0 or len(contour) < 3:
             return positions
 
-        # Determine which axis is perpendicular to the plane
+        # Determine which axis is perpendicular to the plane (cut direction)
         normal = np.array(plane.normal)
         abs_normal = np.abs(normal)
         plane_axis = np.argmax(abs_normal)
 
-        # Get the two in-plane axes
+        # Get the two in-plane axes (the cut face)
         axes = [i for i in range(3) if i != plane_axis]
 
-        # For hollow shells, we need to place pins at OUTER BOUNDARY positions
-        # The contour may contain both outer and inner perimeter points
-        # Filter to only include points at the mesh extremes (outer walls)
-
+        # Project contour to 2D (the cut face plane)
         contour_2d = contour[:, axes]
 
-        # Find the bounding box of the contour
+        # Find bounding box to identify wall structure
         min_coords = contour_2d.min(axis=0)
         max_coords = contour_2d.max(axis=0)
+        bbox_center = (min_coords + max_coords) / 2
 
-        # Wall thickness tolerance (slightly larger to catch boundary points)
-        wall_tol = 5.0  # mm - generous tolerance to catch outer wall points
+        # For a hollow shell cut face, we want to place pins along the walls
+        # The walls form a frame around the hollow interior
+        # We'll place pins at strategic positions along each wall segment
 
-        # Filter points that are on the OUTER boundary (near min/max coordinates)
-        # A point is on the outer boundary if either coordinate is near min or max
-        on_boundary = (
-            (contour_2d[:, 0] < min_coords[0] + wall_tol) |
-            (contour_2d[:, 0] > max_coords[0] - wall_tol) |
-            (contour_2d[:, 1] < min_coords[1] + wall_tol) |
-            (contour_2d[:, 1] > max_coords[1] - wall_tol)
-        )
+        # Calculate positions along the 4 walls of the cut face
+        # Wall positions are at the MIDPOINT between outer and inner boundaries
+        wall_positions = []
 
-        boundary_points = contour[on_boundary]
+        # Wall tolerance for identifying wall regions
+        # Should be slightly larger than expected wall thickness to capture all wall points
+        # Default wall is 10mm, so use 15mm tolerance
+        wall_tol = 15.0  # mm - tolerance for identifying wall regions
 
-        if len(boundary_points) < num_joints:
-            LOGGER.warning(
-                f"Only {len(boundary_points)} boundary points found, "
-                f"using all contour points for joint placement"
-            )
-            boundary_points = contour
+        # Get the plane coordinate value (Z position for horizontal cuts, etc.)
+        plane_coord = plane.origin[plane_axis]
+
+        # Top wall (max Y region)
+        top_mask = contour_2d[:, 1] > max_coords[1] - wall_tol
+        if np.any(top_mask):
+            top_points = contour_2d[top_mask]
+            # Midpoint along X, at Y position within wall
+            mid_x = np.mean(top_points[:, 0])
+            mid_y = np.mean(top_points[:, 1])
+            pos_3d = [0.0, 0.0, 0.0]
+            pos_3d[axes[0]] = mid_x
+            pos_3d[axes[1]] = mid_y
+            pos_3d[plane_axis] = plane_coord
+            wall_positions.append(tuple(pos_3d))
+
+        # Bottom wall (min Y region)
+        bottom_mask = contour_2d[:, 1] < min_coords[1] + wall_tol
+        if np.any(bottom_mask):
+            bottom_points = contour_2d[bottom_mask]
+            mid_x = np.mean(bottom_points[:, 0])
+            mid_y = np.mean(bottom_points[:, 1])
+            pos_3d = [0.0, 0.0, 0.0]
+            pos_3d[axes[0]] = mid_x
+            pos_3d[axes[1]] = mid_y
+            pos_3d[plane_axis] = plane_coord
+            wall_positions.append(tuple(pos_3d))
+
+        # Left wall (min X region)
+        left_mask = contour_2d[:, 0] < min_coords[0] + wall_tol
+        if np.any(left_mask):
+            left_points = contour_2d[left_mask]
+            mid_x = np.mean(left_points[:, 0])
+            mid_y = np.mean(left_points[:, 1])
+            pos_3d = [0.0, 0.0, 0.0]
+            pos_3d[axes[0]] = mid_x
+            pos_3d[axes[1]] = mid_y
+            pos_3d[plane_axis] = plane_coord
+            wall_positions.append(tuple(pos_3d))
+
+        # Right wall (max X region)
+        right_mask = contour_2d[:, 0] > max_coords[0] - wall_tol
+        if np.any(right_mask):
+            right_points = contour_2d[right_mask]
+            mid_x = np.mean(right_points[:, 0])
+            mid_y = np.mean(right_points[:, 1])
+            pos_3d = [0.0, 0.0, 0.0]
+            pos_3d[axes[0]] = mid_x
+            pos_3d[axes[1]] = mid_y
+            pos_3d[plane_axis] = plane_coord
+            wall_positions.append(tuple(pos_3d))
+
+        # Select the requested number of positions
+        if len(wall_positions) >= num_joints:
+            positions = wall_positions[:num_joints]
+        else:
+            # Use all available wall positions
+            positions = wall_positions
 
         LOGGER.debug(
-            f"Filtered {len(contour)} contour points to {len(boundary_points)} boundary points"
+            f"Placed {len(positions)} joints at wall midpoints on cut face"
         )
-
-        # Now place joints evenly distributed among boundary points
-        # Sort boundary points by angle from centroid to get consistent ordering
-        centroid_2d = np.mean(boundary_points[:, axes], axis=0)
-        boundary_2d = boundary_points[:, axes]
-        angles = np.arctan2(
-            boundary_2d[:, 1] - centroid_2d[1],
-            boundary_2d[:, 0] - centroid_2d[0]
-        )
-        sorted_indices = np.argsort(angles)
-        sorted_boundary = boundary_points[sorted_indices]
-
-        # Select evenly spaced points
-        n_boundary = len(sorted_boundary)
-        if n_boundary <= num_joints:
-            # Use all boundary points
-            indices = list(range(n_boundary))
-        else:
-            # Select evenly spaced indices
-            indices = [int(i * n_boundary / num_joints) for i in range(num_joints)]
-
-        for idx in indices[:num_joints]:
-            pos = sorted_boundary[idx]
-            positions.append(tuple(pos))
 
         return positions
 
@@ -365,6 +395,10 @@ class IntegratedJointFactory(JointFactory):
         The joint position is ON the cut plane boundary. Both pin and hole
         start there and extend in opposite directions.
 
+        IMPORTANT: We must rotate FIRST, then translate. If we translate before
+        rotating, the rotation happens around the origin, which moves the
+        translated cylinder to the wrong position.
+
         Args:
             cylinder: Manifold cylinder (created along Z axis with base at z=0)
             target_normal: Direction the cylinder should point
@@ -372,7 +406,7 @@ class IntegratedJointFactory(JointFactory):
             is_pin: True if this is a pin (protrusion), False if hole (cavity)
 
         Returns:
-            Positioned and rotated cylinder
+            Positioned and rotated cylinder (centered at origin, ready for final translation)
         """
         # Normalize target
         target_normal = target_normal / np.linalg.norm(target_normal)
@@ -380,48 +414,52 @@ class IntegratedJointFactory(JointFactory):
         # Default cylinder axis is Z (0, 0, 1)
         z_axis = np.array([0.0, 0.0, 1.0])
 
-        # Position cylinder so it extends FROM the cut plane boundary
-        # Manifold3D creates cylinder with base at z=0, top at z=height
-        # Overlap ensures clean boolean operations (geometry penetrates mesh surface)
-        overlap = 1.0  # mm - overlap into the mesh for clean boolean
-
-        if is_pin:
-            # Pin: extends OUTWARD from cut plane (into where Part B was)
-            # Base starts slightly inside Part A (-overlap), extends to +height
-            # This creates a pin protruding from the cut surface
-            cylinder = cylinder.translate([0, 0, -overlap])
-        else:
-            # Hole: extends INWARD into Part B from cut plane
-            # We need the hole to start at the cut surface and go INTO the part
-            # Shift so cylinder goes into the mesh (negative Z before rotation)
-            cylinder = cylinder.translate([0, 0, -overlap])
-
-        # Rotate to align Z axis with target normal
+        # FIRST: Rotate cylinder to align with target normal (while still at origin)
         dot = np.dot(z_axis, target_normal)
 
-        if abs(dot) > 0.9999:
-            # Already aligned with Z (or opposite)
-            if dot < 0:
-                # Flip 180 degrees around X axis
-                cylinder = cylinder.rotate([180, 0, 0])
-            return cylinder
+        if abs(dot) < 0.9999:
+            # Need to rotate - general case for non-axis-aligned normals
+            rotation_axis = np.cross(z_axis, target_normal)
+            rotation_axis = rotation_axis / np.linalg.norm(rotation_axis)
+            angle_rad = np.arccos(np.clip(dot, -1.0, 1.0))
+            angle_deg = np.degrees(angle_rad)
 
-        # General rotation for non-axis-aligned normals
-        rotation_axis = np.cross(z_axis, target_normal)
-        rotation_axis = rotation_axis / np.linalg.norm(rotation_axis)
-        angle_rad = np.arccos(np.clip(dot, -1.0, 1.0))
-        angle_deg = np.degrees(angle_rad)
+            # Apply rotation based on dominant rotation axis
+            if abs(rotation_axis[0]) > 0.9:
+                cylinder = cylinder.rotate([angle_deg * np.sign(rotation_axis[0]), 0, 0])
+            elif abs(rotation_axis[1]) > 0.9:
+                cylinder = cylinder.rotate([0, angle_deg * np.sign(rotation_axis[1]), 0])
+            else:
+                cylinder = cylinder.rotate([0, 0, angle_deg * np.sign(rotation_axis[2])])
+        elif dot < 0:
+            # Opposite direction - flip 180 degrees around X axis
+            cylinder = cylinder.rotate([180, 0, 0])
 
-        # Apply rotation based on dominant rotation axis
-        if abs(rotation_axis[0]) > 0.9:
-            # Rotation around X
-            cylinder = cylinder.rotate([angle_deg * np.sign(rotation_axis[0]), 0, 0])
-        elif abs(rotation_axis[1]) > 0.9:
-            # Rotation around Y
-            cylinder = cylinder.rotate([0, angle_deg * np.sign(rotation_axis[1]), 0])
+        # SECOND: After rotation, translate along the (now aligned) target normal
+        # The cylinder is now oriented so its axis points along target_normal
+        # We need to position it so it protrudes/recedes from the cut plane
+
+        # Anchor depth: how much of the pin is embedded in the mesh for attachment
+        anchor_depth = 2.0  # mm - small anchor inside mesh for clean boolean union
+        overlap = 1.0  # mm - extra depth for clean boolean subtraction
+
+        if is_pin:
+            # Pin: PROTRUDES OUTWARD from cut surface along target_normal
+            # Most of the pin should be external (visible), with small anchor inside
+            # Translate so cylinder extends from -anchor_depth to +(height - anchor_depth) along normal
+            # Since cylinder was at z=0 to z=height, and we rotated it to align with normal,
+            # we translate backward along normal by anchor_depth
+            offset = -anchor_depth
         else:
-            # Rotation around Z
-            cylinder = cylinder.rotate([0, 0, angle_deg * np.sign(rotation_axis[2])])
+            # Hole: extends INWARD into mesh (opposite to target_normal)
+            # Hole should go INTO the part, starting slightly outside for clean boolean
+            # The hole's normal points INTO the part, so we translate forward slightly
+            # and the hole extends backward (into the mesh)
+            offset = overlap - height
+
+        # Apply offset along the target normal direction
+        offset_vec = target_normal * offset
+        cylinder = cylinder.translate([offset_vec[0], offset_vec[1], offset_vec[2]])
 
         return cylinder
 
