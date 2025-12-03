@@ -1716,9 +1716,37 @@ def _prompt_for_selection(count: int, picks: Optional[str]) -> List[int]:
     return chosen
 
 
-def _run_split_command(stl_path: str, printer_id: Optional[str] = None) -> None:
-    """Segment a mesh for multi-part 3D printing."""
+def _run_split_command(
+    stl_path: str,
+    printer_id: Optional[str] = None,
+    *,
+    quality: str = "high",
+    joint_type: str = "integrated",
+    wall_thickness: Optional[float] = None,
+    max_parts: Optional[int] = None,
+    enable_hollowing: Optional[bool] = None,
+    interactive: bool = True,
+) -> None:
+    """Segment a mesh for multi-part 3D printing.
+
+    Args:
+        stl_path: Path to 3MF or STL file
+        printer_id: Target printer for build volume constraints
+        quality: Hollowing quality preset (fast/medium/high)
+        joint_type: Joint type (integrated/dowel/none)
+        wall_thickness: Wall thickness in mm (default: 10.0)
+        max_parts: Max parts to generate (0 = auto)
+        enable_hollowing: Enable hollowing (default: True)
+        interactive: Prompt for confirmation and options
+    """
     from pathlib import Path
+
+    # Quality presets
+    quality_presets = {
+        "fast": {"resolution": 200, "desc": "~10s"},
+        "medium": {"resolution": 500, "desc": "~30s"},
+        "high": {"resolution": 1000, "desc": "~1-2min"},
+    }
 
     # Validate file exists
     path = Path(stl_path)
@@ -1771,35 +1799,127 @@ def _run_split_command(stl_path: str, printer_id: Optional[str] = None) -> None:
     console.print(f"\n[yellow]Model exceeds build volume by: {exceeds[0]:.1f} × {exceeds[1]:.1f} × {exceeds[2]:.1f} mm[/yellow]")
     console.print(f"[dim]Recommended cuts: {check_result.get('recommended_cuts', 1)}[/dim]")
 
-    # Prompt for segmentation
-    proceed = console.input("\n[cyan]Proceed with segmentation?[/] [dim](y/n)[/] [[dim]y[/dim]]: ").strip().lower()
-    if proceed not in ['', 'y', 'yes']:
-        console.print("[dim]Segmentation cancelled[/dim]")
-        return
+    # Apply defaults
+    final_wall_thickness = wall_thickness if wall_thickness is not None else 10.0
+    final_max_parts = max_parts if max_parts is not None else 0  # 0 = auto
+    final_enable_hollowing = enable_hollowing if enable_hollowing is not None else True
+    final_joint_type = joint_type
+    final_quality = quality
 
-    # Configure segmentation options
-    console.print("\n[bold cyan]Configure Segmentation[/bold cyan]")
-    console.print("[dim](Press Enter to use defaults)[/dim]\n")
+    # Track custom build volume if user enters one
+    custom_build_volume = None
+    selected_printer_id = printer_id
 
-    wall_input = console.input("[cyan]Wall thickness (mm)[/] [[dim]2.0[/dim]]: ").strip()
-    wall_thickness = float(wall_input) if wall_input else 2.0
+    if interactive:
+        # Prompt for segmentation
+        proceed = console.input("\n[cyan]Proceed with segmentation?[/] [dim](y/n)[/] [[dim]y[/dim]]: ").strip().lower()
+        if proceed not in ['', 'y', 'yes']:
+            console.print("[dim]Segmentation cancelled[/dim]")
+            return
 
-    hollow_input = console.input("[cyan]Enable hollowing?[/] [dim](y/n)[/] [[dim]y[/dim]]: ").strip().lower()
-    enable_hollowing = hollow_input not in ['n', 'no']
+        # Configure segmentation options
+        console.print("\n[bold cyan]Configure Segmentation[/bold cyan]")
+        console.print("[dim](Press Enter to use defaults)[/dim]\n")
 
-    max_parts_input = console.input("[cyan]Maximum parts[/] [[dim]10[/dim]]: ").strip()
-    max_parts = int(max_parts_input) if max_parts_input else 10
+        # Printer selection - fetch available printers
+        printers = []
+        try:
+            with _client() as client:
+                response = client.get(f"{FABRICATION_BASE}/api/segmentation/printers", timeout=10.0)
+                if response.status_code == 200:
+                    printers = response.json()
+        except Exception:
+            pass  # Will just show custom option if API fails
+
+        console.print("[cyan]Target printer (build volume):[/]")
+        printer_options = []
+        for i, p in enumerate(printers, start=1):
+            vol = p.get("build_volume_mm", (250, 250, 250))
+            name = p.get("name", p.get("printer_id", f"Printer {i}"))
+            console.print(f"  [dim]{i}.[/] {name} [dim]({vol[0]:.0f}×{vol[1]:.0f}×{vol[2]:.0f} mm)[/]")
+            printer_options.append(p)
+        custom_idx = len(printers) + 1
+        console.print(f"  [dim]{custom_idx}.[/] Custom dimensions [dim](enter your own)[/]")
+
+        default_choice = "1" if printers else str(custom_idx)
+        printer_input = console.input(f"[cyan]Printer[/] [[dim]{default_choice}[/dim]]: ").strip()
+
+        if not printer_input:
+            printer_input = default_choice
+
+        try:
+            choice = int(printer_input)
+            if 1 <= choice <= len(printers):
+                selected_printer_id = printer_options[choice - 1].get("printer_id")
+                vol = printer_options[choice - 1].get("build_volume_mm", (250, 250, 250))
+                console.print(f"[dim]Selected: {printer_options[choice - 1].get('name')} ({vol[0]:.0f}×{vol[1]:.0f}×{vol[2]:.0f} mm)[/dim]")
+            else:
+                # Custom dimensions
+                console.print("\n[cyan]Enter custom build volume (mm):[/]")
+                x_input = console.input("  [cyan]X (width)[/] [[dim]250[/dim]]: ").strip()
+                y_input = console.input("  [cyan]Y (depth)[/] [[dim]250[/dim]]: ").strip()
+                z_input = console.input("  [cyan]Z (height)[/] [[dim]250[/dim]]: ").strip()
+                custom_build_volume = (
+                    float(x_input) if x_input else 250.0,
+                    float(y_input) if y_input else 250.0,
+                    float(z_input) if z_input else 250.0,
+                )
+                console.print(f"[dim]Custom volume: {custom_build_volume[0]:.0f}×{custom_build_volume[1]:.0f}×{custom_build_volume[2]:.0f} mm[/dim]")
+                selected_printer_id = None  # Clear printer_id when using custom
+        except ValueError:
+            console.print("[yellow]Invalid selection, using default printer[/yellow]")
+
+        # Quality selector
+        console.print("[cyan]Quality presets:[/]")
+        console.print("  [dim]1.[/] Fast   [dim](200 voxels, ~10s)[/]")
+        console.print("  [dim]2.[/] Medium [dim](500 voxels, ~30s)[/]")
+        console.print("  [dim]3.[/] High   [dim](1000 voxels, ~1-2min)[/]")
+        quality_input = console.input("[cyan]Quality[/] [[dim]3 (high)[/dim]]: ").strip()
+        if quality_input == "1":
+            final_quality = "fast"
+        elif quality_input == "2":
+            final_quality = "medium"
+        else:
+            final_quality = "high"
+
+        # Joint type selector
+        console.print("\n[cyan]Joint types:[/]")
+        console.print("  [dim]1.[/] Integrated [dim](printed pins & holes - no hardware)[/]")
+        console.print("  [dim]2.[/] Dowel      [dim](holes for external pins)[/]")
+        console.print("  [dim]3.[/] None       [dim](manual alignment)[/]")
+        joint_input = console.input("[cyan]Joint type[/] [[dim]1 (integrated)[/dim]]: ").strip()
+        if joint_input == "2":
+            final_joint_type = "dowel"
+        elif joint_input == "3":
+            final_joint_type = "none"
+        else:
+            final_joint_type = "integrated"
+
+        wall_input = console.input("[cyan]Wall thickness (mm)[/] [[dim]10.0[/dim]]: ").strip()
+        final_wall_thickness = float(wall_input) if wall_input else 10.0
+
+        hollow_input = console.input("[cyan]Enable hollowing?[/] [dim](y/n)[/] [[dim]y[/dim]]: ").strip().lower()
+        final_enable_hollowing = hollow_input not in ['n', 'no']
+
+        max_parts_input = console.input("[cyan]Maximum parts[/] [[dim]0 (auto)[/dim]]: ").strip()
+        final_max_parts = int(max_parts_input) if max_parts_input else 0
+
+    # Get hollowing resolution from quality preset
+    hollowing_resolution = quality_presets.get(final_quality, quality_presets["high"])["resolution"]
 
     # Run segmentation
     segment_payload = {
         "stl_path": str(path.absolute()),
-        "wall_thickness_mm": wall_thickness,
-        "enable_hollowing": enable_hollowing,
-        "max_parts": max_parts,
-        "joint_type": "dowel",
+        "wall_thickness_mm": final_wall_thickness,
+        "enable_hollowing": final_enable_hollowing,
+        "max_parts": final_max_parts,
+        "joint_type": final_joint_type,
+        "hollowing_resolution": hollowing_resolution,
     }
-    if printer_id:
-        segment_payload["printer_id"] = printer_id
+    if selected_printer_id:
+        segment_payload["printer_id"] = selected_printer_id
+    if custom_build_volume:
+        segment_payload["custom_build_volume"] = list(custom_build_volume)
 
     console.print("\n[cyan]Segmenting mesh...[/cyan]")
 
@@ -2276,6 +2396,69 @@ def queue(
         raise typer.Exit(1) from exc
 
     console.print(f"[green]Queued print on {printer_id}: {data}")
+
+
+@app.command()
+def segment(
+    mesh_path: str = typer.Argument(..., help="Path to 3MF or STL file to segment"),
+    printer_id: Optional[str] = typer.Option(
+        None, "--printer", "-p", help="Target printer ID for build volume"
+    ),
+    quality: str = typer.Option(
+        "high",
+        "--quality",
+        "-q",
+        help="Quality preset: fast (200 voxels), medium (500), high (1000)",
+    ),
+    joint_type: str = typer.Option(
+        "integrated",
+        "--joint-type",
+        "-j",
+        help="Joint type: integrated (printed pins), dowel (external pins), none",
+    ),
+    wall_thickness: float = typer.Option(
+        10.0, "--wall-thickness", "-w", help="Wall thickness for hollowing (mm)"
+    ),
+    max_parts: int = typer.Option(
+        0, "--max-parts", "-m", help="Maximum parts to generate (0 = auto-calculate)"
+    ),
+    no_hollowing: bool = typer.Option(
+        False, "--no-hollowing", help="Disable mesh hollowing"
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Skip confirmation prompts"
+    ),
+) -> None:
+    """Segment large 3D models for multi-part printing.
+
+    Splits oversized meshes into parts that fit your printer's build volume,
+    with automatic hollowing and alignment joints.
+
+    Examples:
+        kitt segment model.3mf --printer bamboo_h2d
+        kitt segment duck.stl -q high -j integrated --yes
+        kitt segment large_model.3mf -m 0 -w 10.0 -y
+    """
+    # Validate quality preset
+    if quality not in ("fast", "medium", "high"):
+        console.print(f"[red]Invalid quality preset '{quality}'. Use: fast, medium, high")
+        raise typer.Exit(1)
+
+    # Validate joint type
+    if joint_type not in ("integrated", "dowel", "none"):
+        console.print(f"[red]Invalid joint type '{joint_type}'. Use: integrated, dowel, none")
+        raise typer.Exit(1)
+
+    _run_split_command(
+        mesh_path,
+        printer_id,
+        quality=quality,
+        joint_type=joint_type,
+        wall_thickness=wall_thickness,
+        max_parts=max_parts,
+        enable_hollowing=not no_hollowing,
+        interactive=not yes,
+    )
 
 
 def _images_post(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -3477,6 +3660,7 @@ def shell(
     console.print("  [cyan]/generate <prompt>[/cyan] - Generate image with Stable Diffusion")
     console.print("  [cyan]/list[/cyan]             - Show cached artifacts")
     console.print("  [cyan]/queue <idx> <id>[/cyan] - Queue artifact to printer")
+    console.print("  [cyan]/split <path> [printer][/cyan] - Segment large model for printing")
     console.print("  [cyan]/vision <query>[/cyan]   - Search & store reference images")
     console.print("  [cyan]/images[/cyan]           - List stored reference images")
 

@@ -147,7 +147,7 @@ class SegmentMeshRequest(BaseModel):
         le=10.0,
     )
     joint_type: JointType = Field(
-        default=JointType.DOWEL,
+        default=JointType.INTEGRATED,
         description="Joint type for assembly",
     )
     joint_tolerance_mm: float = Field(
@@ -157,10 +157,10 @@ class SegmentMeshRequest(BaseModel):
         le=1.0,
     )
     max_parts: int = Field(
-        default=10,
-        description="Maximum number of parts to generate",
-        ge=2,
-        le=100,
+        default=0,
+        description="Maximum number of parts to generate (0 = auto-calculate based on mesh/build volume)",
+        ge=0,
+        le=500,
     )
     enable_hollowing: bool = Field(
         default=True,
@@ -182,6 +182,17 @@ class SegmentMeshRequest(BaseModel):
         description="Height of integrated pin protrusion (mm). Only used when joint_type='integrated'",
         ge=3.0,
         le=15.0,
+    )
+    hollowing_resolution: int = Field(
+        default=1000,
+        description="Voxel resolution for hollowing (200=fast, 500=medium, 1000+=high quality)",
+        ge=50,
+        le=2000,
+    )
+    custom_build_volume: Optional[tuple[float, float, float]] = Field(
+        default=None,
+        description="Custom build volume (X, Y, Z in mm). Overrides printer_id if provided.",
+        examples=[(300.0, 300.0, 400.0)],
     )
 
 

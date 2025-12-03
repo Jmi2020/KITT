@@ -101,8 +101,12 @@ async def segment_mesh(request: SegmentMeshRequest) -> SegmentMeshResponse:
         mesh = MeshWrapper(mesh_path)
         logger.info(f"Loaded mesh: {mesh.dimensions} mm, {mesh.volume_cm3:.1f} cm³")
 
-        # Get build volume
-        build_volume = _get_build_volume(request.printer_id)
+        # Get build volume - custom overrides printer_id
+        if request.custom_build_volume:
+            build_volume = tuple(request.custom_build_volume)
+            logger.info(f"Using custom build volume: {build_volume}")
+        else:
+            build_volume = _get_build_volume(request.printer_id)
 
         # Configure segmentation
         config = SegmentationConfig(
@@ -110,6 +114,7 @@ async def segment_mesh(request: SegmentMeshRequest) -> SegmentMeshResponse:
             wall_thickness_mm=request.wall_thickness_mm,
             enable_hollowing=request.enable_hollowing,
             hollowing_strategy=request.hollowing_strategy,
+            hollowing_resolution=request.hollowing_resolution,
             joint_type=request.joint_type,
             joint_tolerance_mm=request.joint_tolerance_mm,
             max_parts=request.max_parts,
@@ -273,8 +278,11 @@ async def _run_segmentation_job(job_id: str, request: SegmentMeshRequest) -> Non
         mesh = MeshWrapper(mesh_path)
         _segmentation_jobs[job_id]["progress"] = 0.2
 
-        # Get build volume
-        build_volume = _get_build_volume(request.printer_id)
+        # Get build volume - custom overrides printer_id
+        if request.custom_build_volume:
+            build_volume = tuple(request.custom_build_volume)
+        else:
+            build_volume = _get_build_volume(request.printer_id)
 
         # Get output directory for exported parts
         output_dir = _get_output_directory(mesh_path)
@@ -285,6 +293,7 @@ async def _run_segmentation_job(job_id: str, request: SegmentMeshRequest) -> Non
             wall_thickness_mm=request.wall_thickness_mm,
             enable_hollowing=request.enable_hollowing,
             hollowing_strategy=request.hollowing_strategy,
+            hollowing_resolution=request.hollowing_resolution,
             joint_type=request.joint_type,
             joint_tolerance_mm=request.joint_tolerance_mm,
             max_parts=request.max_parts,

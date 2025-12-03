@@ -17,7 +17,7 @@ printers:
 
     # Printer capabilities (auto-detected but can override)
     capabilities:
-      build_volume: [256, 256, 256]  # X, Y, Z in mm
+      build_volume: [300, 320, 325]  # X, Y, Z in mm
       materials: ["PLA", "PETG", "ABS", "TPU", "PA", "PC"]
 
   # Elegoo OrangeStorm Giga - Moonraker/Klipper

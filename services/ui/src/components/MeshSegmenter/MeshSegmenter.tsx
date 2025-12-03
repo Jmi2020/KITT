@@ -63,10 +63,17 @@ interface MeshSegmenterProps {
 }
 
 const JOINT_TYPES = [
-  { value: 'dowel', label: 'Dowel Pins', description: 'Cylindrical alignment pins' },
-  { value: 'dovetail', label: 'Dovetail', description: 'Interlocking joints' },
-  { value: 'pyramid', label: 'Pyramid', description: 'Pyramid-shaped alignment keys' },
+  { value: 'integrated', label: 'Integrated Pins', description: 'Printed pins & holes (no hardware)' },
+  { value: 'dowel', label: 'Dowel Holes', description: 'Holes for external dowel pins' },
+  { value: 'dovetail', label: 'Dovetail', description: 'Interlocking joints (coming soon)' },
+  { value: 'pyramid', label: 'Pyramid', description: 'Self-centering cones (coming soon)' },
   { value: 'none', label: 'None', description: 'No joints - manual alignment' },
+];
+
+const QUALITY_PRESETS = [
+  { value: 'fast', label: 'Fast', resolution: 200, description: 'Quick preview (~10s)' },
+  { value: 'medium', label: 'Medium', resolution: 500, description: 'Balanced (~30s)' },
+  { value: 'high', label: 'High', resolution: 1000, description: 'Best quality (~1-2min)' },
 ];
 
 export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshSegmenterProps) {
@@ -81,9 +88,10 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
 
   // Config options
   const [enableHollowing, setEnableHollowing] = useState(true);
-  const [wallThickness, setWallThickness] = useState(2.0);
-  const [jointType, setJointType] = useState('dowel');
-  const [maxParts, setMaxParts] = useState(10);
+  const [wallThickness, setWallThickness] = useState(10.0);
+  const [jointType, setJointType] = useState('integrated');
+  const [maxParts, setMaxParts] = useState(0); // 0 = auto-calculate
+  const [quality, setQuality] = useState<'fast' | 'medium' | 'high'>('high');
 
   // Load available printers
   useEffect(() => {
@@ -158,6 +166,7 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
     setSegmentResult(null);
 
     try {
+      const hollowingResolution = QUALITY_PRESETS.find(q => q.value === quality)?.resolution || 1000;
       const response = await fetch('/api/fabrication/segmentation/segment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -168,6 +177,7 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
           wall_thickness_mm: wallThickness,
           joint_type: jointType,
           max_parts: maxParts,
+          hollowing_resolution: hollowingResolution,
         }),
       });
 
@@ -184,7 +194,7 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
     } finally {
       setLoading(false);
     }
-  }, [filePath, selectedPrinter, enableHollowing, wallThickness, jointType, maxParts, onSegmentComplete]);
+  }, [filePath, selectedPrinter, enableHollowing, wallThickness, jointType, maxParts, quality, onSegmentComplete]);
 
   const formatDimensions = (dims: { x: number; y: number; z: number }) => {
     return `${dims.x.toFixed(1)} x ${dims.y.toFixed(1)} x ${dims.z.toFixed(1)} mm`;
@@ -235,7 +245,7 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
           </label>
         </div>
 
-        <div className="form-row three-col">
+        <div className="form-row four-col">
           <label className="checkbox-label">
             <input
               type="checkbox"
@@ -250,12 +260,27 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
             <input
               type="number"
               value={wallThickness}
-              onChange={(e) => setWallThickness(parseFloat(e.target.value) || 2.0)}
-              min={0.5}
-              max={10}
+              onChange={(e) => setWallThickness(parseFloat(e.target.value) || 10.0)}
+              min={1.2}
+              max={15}
               step={0.5}
               disabled={!enableHollowing}
             />
+          </label>
+
+          <label>
+            Quality
+            <select
+              value={quality}
+              onChange={(e) => setQuality(e.target.value as 'fast' | 'medium' | 'high')}
+              disabled={!enableHollowing}
+            >
+              {QUALITY_PRESETS.map((q) => (
+                <option key={q.value} value={q.value}>
+                  {q.label} - {q.description}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label>
@@ -263,10 +288,12 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
             <input
               type="number"
               value={maxParts}
-              onChange={(e) => setMaxParts(parseInt(e.target.value, 10) || 10)}
-              min={2}
-              max={50}
+              onChange={(e) => setMaxParts(parseInt(e.target.value, 10) || 0)}
+              min={0}
+              max={500}
+              title="0 = auto-calculate based on model size"
             />
+            <span className="form-hint">0 = auto</span>
           </label>
         </div>
 
