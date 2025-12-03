@@ -361,8 +361,19 @@ class PlanarSegmentationEngine(SegmentationEngine):
 
         if joint_type == JointType.INTEGRATED or joint_type == "integrated":
             # Get pin dimensions from config (with defaults)
-            pin_diameter = getattr(self.config, "pin_diameter_mm", 5.0)
-            pin_height = getattr(self.config, "pin_height_mm", 8.0)
+            pin_diameter = getattr(self.config, "pin_diameter_mm", 8.0)
+            pin_height = getattr(self.config, "pin_height_mm", 10.0)
+            wall_thickness = self.config.wall_thickness_mm
+
+            # Validate wall thickness can accommodate pin diameter
+            # Wall must be thick enough to contain the pin without jutting through
+            if wall_thickness < pin_diameter:
+                adjusted_wall = pin_diameter + 2.0
+                LOGGER.warning(
+                    f"Wall thickness ({wall_thickness}mm) < pin diameter ({pin_diameter}mm). "
+                    f"Auto-adjusting wall thickness to {adjusted_wall}mm for integrated joints."
+                )
+                self.config.wall_thickness_mm = adjusted_wall
 
             config = IntegratedPinConfig(
                 joint_type=JointType.INTEGRATED,

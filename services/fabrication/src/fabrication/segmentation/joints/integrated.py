@@ -24,9 +24,9 @@ LOGGER = get_logger(__name__)
 class IntegratedPinConfig(JointConfig):
     """Configuration for integrated printed pins."""
 
-    pin_diameter_mm: float = 5.0  # Slightly larger than dowels for printability
-    pin_height_mm: float = 8.0  # Height of protruding pin
-    hole_depth_mm: float = 10.0  # Hole is deeper than pin for clearance
+    pin_diameter_mm: float = 8.0  # Pin diameter (must fit within wall thickness)
+    pin_height_mm: float = 10.0  # Height of protruding pin
+    hole_depth_mm: float = 12.0  # Hole is deeper than pin for clearance
     # Tolerance/clearance for printed pins - accounts for layer expansion
     # Default 0.3mm works well for FDM prints
     # This is added to hole diameter (hole = pin_diameter + clearance)
@@ -92,25 +92,30 @@ class IntegratedJointFactory(JointFactory):
         plane_normal = cut_plane.normal
 
         for i, pos_3d in enumerate(positions):
-            # Pin side (part A) - protruding cylinder
-            # Negative depth indicates protrusion rather than hole
-            # Pin extends in the direction of the plane normal (toward part B)
+            # PrusaSlicer approach: connector SPANS the cut plane
+            # Position is on the seam; we'll center the connector there
+            # Both pin and hole use the SAME position - the cut plane boundary
+            # The geometry application handles the spanning behavior
+
+            # Pin side (part A) - exact dimensions
+            # Pin will be unioned to Part A, spanning into where Part B was
             pin_location = JointLocation(
                 position=pos_3d,
                 diameter_mm=self.pin_config.pin_diameter_mm,
-                depth_mm=-self.pin_config.pin_height_mm,  # Negative = protrusion
+                depth_mm=-self.pin_config.pin_height_mm,  # Negative = protrusion (union)
                 part_index=part_a_index,
-                normal=plane_normal,  # Orient along cut plane normal
+                normal=plane_normal,  # Points toward Part B
             )
 
-            # Socket side (part B) - hole with clearance
-            # Hole extends opposite to plane normal (into part B)
+            # Socket side (part B) - ENLARGED by clearance (both radius AND depth)
+            # Socket will be subtracted from Part B
+            # Clearance ensures the pin fits with room to spare
             socket_location = JointLocation(
                 position=pos_3d,
-                diameter_mm=self.pin_config.pin_diameter_mm + self.pin_config.hole_clearance_mm,
-                depth_mm=self.pin_config.hole_depth_mm,  # Positive = hole
+                diameter_mm=self.pin_config.pin_diameter_mm + (self.pin_config.hole_clearance_mm * 2),  # Clearance on diameter (both sides)
+                depth_mm=self.pin_config.pin_height_mm + self.pin_config.hole_clearance_mm,  # Match pin height + clearance
                 part_index=part_b_index,
-                normal=tuple(-n for n in plane_normal),  # Opposite direction for hole
+                normal=tuple(-n for n in plane_normal),  # Points into Part B
             )
 
             joints.append(
@@ -353,8 +358,12 @@ class IntegratedJointFactory(JointFactory):
         """
         Orient a cylinder to align with target normal.
 
-        For pins: cylinder extends FROM the joint position in the normal direction
-        For holes: cylinder extends INTO the mesh (opposite to normal)
+        PrusaSlicer approach: connector geometry SPANS the cut plane.
+        - Pin: extends from joint position INTO where the other part was (outward)
+        - Hole: extends from joint position INTO this part (inward)
+
+        The joint position is ON the cut plane boundary. Both pin and hole
+        start there and extend in opposite directions.
 
         Args:
             cylinder: Manifold cylinder (created along Z axis with base at z=0)
@@ -371,19 +380,21 @@ class IntegratedJointFactory(JointFactory):
         # Default cylinder axis is Z (0, 0, 1)
         z_axis = np.array([0.0, 0.0, 1.0])
 
-        # Position cylinder based on pin vs hole
+        # Position cylinder so it extends FROM the cut plane boundary
         # Manifold3D creates cylinder with base at z=0, top at z=height
-        # Small overlap ensures clean boolean operations
-        overlap = 0.5  # mm
+        # Overlap ensures clean boolean operations (geometry penetrates mesh surface)
+        overlap = 1.0  # mm - overlap into the mesh for clean boolean
 
         if is_pin:
-            # Pin: base slightly inside mesh, extends outward in normal direction
-            # After translation to joint position, pin will protrude from surface
+            # Pin: extends OUTWARD from cut plane (into where Part B was)
+            # Base starts slightly inside Part A (-overlap), extends to +height
+            # This creates a pin protruding from the cut surface
             cylinder = cylinder.translate([0, 0, -overlap])
         else:
-            # Hole: extends into mesh from surface
+            # Hole: extends INWARD into Part B from cut plane
+            # We need the hole to start at the cut surface and go INTO the part
             # Shift so cylinder goes into the mesh (negative Z before rotation)
-            cylinder = cylinder.translate([0, 0, overlap - height])
+            cylinder = cylinder.translate([0, 0, -overlap])
 
         # Rotate to align Z axis with target normal
         dot = np.dot(z_axis, target_normal)

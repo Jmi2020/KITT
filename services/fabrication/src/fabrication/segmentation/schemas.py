@@ -62,11 +62,11 @@ class JointLocation:
 class SegmentationConfig:
     """Configuration for mesh segmentation."""
 
-    # Build volume constraint (mm)
-    build_volume: tuple[float, float, float] = (250.0, 250.0, 250.0)
+    # Build volume constraint (mm) - Default: Bambu H2D (300x320x325mm)
+    build_volume: tuple[float, float, float] = (300.0, 320.0, 325.0)
 
     # Hollowing
-    wall_thickness_mm: float = 2.0
+    wall_thickness_mm: float = 10.0  # Must be >= pin_diameter for integrated joints
     enable_hollowing: bool = True
     min_wall_thickness_mm: float = 1.2
     hollowing_strategy: HollowingStrategy = HollowingStrategy.HOLLOW_THEN_SEGMENT
@@ -77,8 +77,8 @@ class SegmentationConfig:
     dowel_diameter_mm: float = 4.0
     dowel_depth_mm: float = 10.0
     # Integrated pin dimensions (for JointType.INTEGRATED)
-    pin_diameter_mm: float = 5.0
-    pin_height_mm: float = 8.0
+    pin_diameter_mm: float = 8.0  # Pin diameter (must fit within wall thickness)
+    pin_height_mm: float = 10.0  # Pin height (protrusion from surface)
 
     # Algorithm
     max_parts: int = 10
