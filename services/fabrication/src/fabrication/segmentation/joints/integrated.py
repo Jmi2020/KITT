@@ -86,6 +86,42 @@ class IntegratedJointFactory(JointFactory):
             LOGGER.warning("No valid joint positions found for integrated pins")
             return []
 
+        # CRITICAL: Filter positions to only those within BOTH parts' boundaries
+        # Positions from part_a's contour may be outside part_b's bounding box
+        # if the parts only partially overlap (e.g., L-shaped pieces meeting at corner)
+        bbox_b = part_b.bounding_box
+        margin = self.pin_config.pin_diameter_mm / 2  # Half pin diameter margin
+
+        valid_positions = []
+        for pos in positions:
+            x, y, z = pos
+            # Check if position is within part_b's bounding box (with margin)
+            in_x = (bbox_b.min_x - margin) <= x <= (bbox_b.max_x + margin)
+            in_y = (bbox_b.min_y - margin) <= y <= (bbox_b.max_y + margin)
+            in_z = (bbox_b.min_z - margin) <= z <= (bbox_b.max_z + margin)
+
+            if in_x and in_y and in_z:
+                valid_positions.append(pos)
+            else:
+                LOGGER.debug(
+                    f"Filtering joint position {pos} - outside part_b bounds "
+                    f"X=[{bbox_b.min_x:.1f},{bbox_b.max_x:.1f}], "
+                    f"Y=[{bbox_b.min_y:.1f},{bbox_b.max_y:.1f}], "
+                    f"Z=[{bbox_b.min_z:.1f},{bbox_b.max_z:.1f}]"
+                )
+
+        if len(valid_positions) < len(positions):
+            LOGGER.info(
+                f"Filtered {len(positions) - len(valid_positions)} positions "
+                f"outside part_b bounds ({len(valid_positions)} remaining)"
+            )
+
+        positions = valid_positions
+
+        if not positions:
+            LOGGER.warning("No joint positions within both parts' boundaries")
+            return []
+
         # Create joint pairs
         joints = []
 
@@ -400,41 +436,57 @@ class IntegratedJointFactory(JointFactory):
             input_verts = np.array(input_mesh_data.vert_properties)[:, :3]
             LOGGER.debug(f"Input mesh Z range: {input_verts[:, 2].min():.1f} to {input_verts[:, 2].max():.1f}")
 
-            for joint in joints:
-                # Determine if this joint is a pin or hole from its depth
-                # Negative depth = pin (protrusion), Positive depth = hole (cavity)
-                is_pin = joint.depth_mm < 0
+            # CRITICAL: Process pins FIRST, then holes
+            # This prevents holes from boring through pins that were just added
+            # If we interleave, a hole subtraction can cut through a nearby pin
+            pin_joints = [j for j in joints if j.depth_mm < 0]
+            hole_joints = [j for j in joints if j.depth_mm >= 0]
 
-                LOGGER.info(f"Processing joint: pos={joint.position}, normal={joint.normal}, depth={joint.depth_mm}, is_pin={is_pin}")
+            # First pass: Add all pins (unions)
+            for joint in pin_joints:
+                LOGGER.info(f"Processing PIN: pos={joint.position}, normal={joint.normal}, depth={joint.depth_mm}")
 
-                # Create cylinder for pin or hole
                 radius = joint.diameter_mm / 2
                 height = abs(joint.depth_mm)
 
-                # Create cylinder primitive (created along Z axis by default)
                 cylinder = m3d.Manifold.cylinder(
                     height=height,
                     radius_low=radius,
-                    radius_high=radius * (0.95 if is_pin else 1.0),  # Slight taper on pins
+                    radius_high=radius * 0.95,  # Slight taper on pins
                     circular_segments=32,
                 )
 
-                # Orient cylinder along the joint normal (perpendicular to cut plane)
                 normal = np.array(joint.normal)
-                cylinder = self._orient_cylinder(cylinder, normal, height, is_pin=is_pin)
+                cylinder = self._orient_cylinder(cylinder, normal, height, is_pin=True)
 
-                # Position the cylinder at the joint location
                 pos = joint.position
                 cylinder = cylinder.translate([pos[0], pos[1], pos[2]])
 
-                if is_pin:
-                    # Pin: union with mesh (protrusion from surface)
-                    manifold = manifold + cylinder
-                    pins_added += 1
-                else:
-                    # Hole: subtract from mesh (cavity into surface)
-                    manifold = manifold - cylinder
-                    holes_added += 1
+                manifold = manifold + cylinder
+                pins_added += 1
+
+            # Second pass: Subtract all holes
+            for joint in hole_joints:
+                LOGGER.info(f"Processing HOLE: pos={joint.position}, normal={joint.normal}, depth={joint.depth_mm}")
+
+                radius = joint.diameter_mm / 2
+                height = abs(joint.depth_mm)
+
+                cylinder = m3d.Manifold.cylinder(
+                    height=height,
+                    radius_low=radius,
+                    radius_high=radius,  # No taper on holes
+                    circular_segments=32,
+                )
+
+                normal = np.array(joint.normal)
+                cylinder = self._orient_cylinder(cylinder, normal, height, is_pin=False)
+
+                pos = joint.position
+                cylinder = cylinder.translate([pos[0], pos[1], pos[2]])
+
+                manifold = manifold - cylinder
+                holes_added += 1
 
             LOGGER.info(f"Applied {pins_added} pins and {holes_added} holes to mesh")
 
