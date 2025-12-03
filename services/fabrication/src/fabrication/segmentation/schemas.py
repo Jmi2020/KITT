@@ -81,7 +81,8 @@ class SegmentationConfig:
     pin_height_mm: float = 10.0  # Pin height (protrusion from surface)
 
     # Algorithm
-    max_parts: int = 10
+    # max_parts: 0 = auto-calculate based on mesh/build volume, otherwise use specified limit
+    max_parts: int = 0
 
     # Output
     output_dir: Optional[str] = None

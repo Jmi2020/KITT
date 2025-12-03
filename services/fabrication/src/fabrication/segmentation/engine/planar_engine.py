@@ -109,6 +109,10 @@ class PlanarSegmentationEngine(SegmentationEngine):
             else:
                 LOGGER.warning(f"Hollowing failed: {hollow_result.error}, proceeding with solid mesh")
 
+        # Auto-calculate max_parts if set to 0
+        if self.config.max_parts == 0:
+            self._auto_calculate_max_parts(mesh)
+
         # Check if segmentation needed (on potentially-hollowed mesh)
         if not self.needs_segmentation(mesh):
             LOGGER.info("Mesh fits build volume, no segmentation needed")
@@ -435,6 +439,39 @@ class PlanarSegmentationEngine(SegmentationEngine):
         else:
             LOGGER.info(f"Joint type '{joint_type}' not implemented, no joints will be added")
             self.joint_factory = None
+
+    def _auto_calculate_max_parts(self, mesh: MeshWrapper) -> None:
+        """
+        Auto-calculate max_parts based on mesh dimensions and build volume.
+
+        Estimates the minimum number of cuts needed along each axis, then
+        calculates total parts with a safety margin for irregular shapes.
+        """
+        mesh_dims = np.array(mesh.dimensions)
+        build_dims = np.array(self.build_volume)
+
+        # Calculate parts needed per axis (ceiling division)
+        parts_per_axis = np.ceil(mesh_dims / build_dims).astype(int)
+
+        # Total parts if we did a grid cut
+        estimated_parts = int(np.prod(parts_per_axis))
+
+        # Add safety margin (2x) for:
+        # - Irregular shapes that may need more cuts
+        # - Parts that may need further subdivision
+        # - Account for hollowed mesh being larger in bounding box
+        safety_margin = 2.0
+        max_parts = max(int(estimated_parts * safety_margin), 10)  # At least 10
+
+        # Cap at reasonable maximum to prevent runaway
+        max_parts = min(max_parts, 500)
+
+        self.config.max_parts = max_parts
+        LOGGER.info(
+            f"Auto-calculated max_parts={max_parts} "
+            f"(mesh: {mesh_dims[0]:.0f}x{mesh_dims[1]:.0f}x{mesh_dims[2]:.0f}mm, "
+            f"est. grid: {parts_per_axis[0]}x{parts_per_axis[1]}x{parts_per_axis[2]} = {estimated_parts} parts)"
+        )
 
     def _deduplicate_joint_positions(
         self,
