@@ -375,12 +375,18 @@ class PlanarSegmentationEngine(SegmentationEngine):
                 )
                 self.config.wall_thickness_mm = adjusted_wall
 
+            # Calculate hole depth to match pin protrusion
+            # Pin has 2mm anchor inside, so protrusion = pin_height - 2mm
+            # Hole depth should match the protrusion
+            hole_depth = pin_height - 2.0  # 8mm for 10mm pin height
+
             config = IntegratedPinConfig(
                 joint_type=JointType.INTEGRATED,
                 tolerance_mm=self.config.joint_tolerance_mm,
                 hole_clearance_mm=self.config.joint_tolerance_mm,
                 pin_diameter_mm=pin_diameter,
                 pin_height_mm=pin_height,
+                hole_depth_mm=hole_depth,
             )
             self.joint_factory = IntegratedJointFactory(config)
 
@@ -490,6 +496,10 @@ class PlanarSegmentationEngine(SegmentationEngine):
                 joint_locations = [jl for jl, _ in part_joints[i]]
                 is_pin_side = any(is_pin for _, is_pin in part_joints[i])
 
+                # Get bounds before applying joints
+                z_min_before = part.as_trimesh.bounds[0][2]
+                z_max_before = part.as_trimesh.bounds[1][2]
+
                 if isinstance(self.joint_factory, IntegratedJointFactory):
                     modified = self.joint_factory.apply_joints_to_mesh(
                         part, joint_locations, is_pin_side
@@ -497,8 +507,16 @@ class PlanarSegmentationEngine(SegmentationEngine):
                 else:
                     modified = self.joint_factory.apply_joints_to_mesh(part, joint_locations)
 
+                # Verify bounds changed
+                z_min_after = modified.as_trimesh.bounds[0][2]
+                z_max_after = modified.as_trimesh.bounds[1][2]
+
+                LOGGER.info(
+                    f"Applied {len(joint_locations)} joints to part {i}: "
+                    f"Z [{z_min_before:.1f},{z_max_before:.1f}] -> [{z_min_after:.1f},{z_max_after:.1f}]"
+                )
+
                 result_parts.append(modified)
-                LOGGER.info(f"Applied {len(joint_locations)} joints to part {i}")
 
             except Exception as e:
                 LOGGER.warning(f"Failed to apply joints to part {i}: {e}")

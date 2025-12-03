@@ -88,8 +88,37 @@ class IntegratedJointFactory(JointFactory):
 
         # Create joint pairs
         joints = []
-        # Get the cut plane normal for cylinder orientation
-        plane_normal = cut_plane.normal
+
+        # CRITICAL: Determine pin normal direction based on part positions
+        # The pin must protrude FROM part_a TOWARD part_b
+        # We do this by checking which side of the plane each part's centroid is on
+        plane_origin = np.array(cut_plane.origin)
+        plane_normal = np.array(cut_plane.normal)
+
+        # Get centroids of both parts
+        centroid_a = np.array(part_a.as_trimesh.centroid)
+        centroid_b = np.array(part_b.as_trimesh.centroid)
+
+        # Calculate signed distance from plane for each centroid
+        # Positive = same side as normal, Negative = opposite side
+        dist_a = np.dot(centroid_a - plane_origin, plane_normal)
+        dist_b = np.dot(centroid_b - plane_origin, plane_normal)
+
+        # Pin normal should point FROM part_a TOWARD part_b
+        # If part_a is on positive side (dist_a > 0) and part_b on negative (dist_b < 0),
+        # then we need to INVERT the plane normal so pin points toward part_b
+        if dist_a > 0 and dist_b < 0:
+            # Part A is on positive side, part B on negative - invert normal
+            pin_normal = tuple(-n for n in plane_normal)
+        elif dist_a < 0 and dist_b > 0:
+            # Part A is on negative side, part B on positive - use normal as-is
+            pin_normal = tuple(plane_normal)
+        else:
+            # Fallback: use plane normal (shouldn't happen for valid cuts)
+            LOGGER.warning(f"Parts not on opposite sides of plane: dist_a={dist_a:.1f}, dist_b={dist_b:.1f}")
+            pin_normal = tuple(plane_normal)
+
+        LOGGER.info(f"Pin normal direction: {pin_normal} (part_a dist={dist_a:.1f}, part_b dist={dist_b:.1f})")
 
         for i, pos_3d in enumerate(positions):
             # PrusaSlicer approach: connector SPANS the cut plane
@@ -99,23 +128,26 @@ class IntegratedJointFactory(JointFactory):
 
             # Pin side (part A) - exact dimensions
             # Pin will be unioned to Part A, spanning into where Part B was
+            # pin_normal points FROM part_a TOWARD part_b (calculated above)
             pin_location = JointLocation(
                 position=pos_3d,
                 diameter_mm=self.pin_config.pin_diameter_mm,
                 depth_mm=-self.pin_config.pin_height_mm,  # Negative = protrusion (union)
                 part_index=part_a_index,
-                normal=plane_normal,  # Points toward Part B
+                normal=pin_normal,  # Points toward Part B (calculated from part positions)
             )
 
             # Socket side (part B) - ENLARGED by clearance
             # Socket will be subtracted from Part B
             # Clearance ensures the pin fits with room to spare
+            # Hole normal is OPPOSITE to pin normal (points INTO part B)
+            hole_normal = tuple(-n for n in pin_normal)
             socket_location = JointLocation(
                 position=pos_3d,
                 diameter_mm=self.pin_config.pin_diameter_mm + (self.pin_config.hole_clearance_mm * 2),  # Clearance on diameter (both sides)
                 depth_mm=self.pin_config.hole_depth_mm + self.pin_config.hole_clearance_mm,  # Hole depth + small clearance
                 part_index=part_b_index,
-                normal=tuple(-n for n in plane_normal),  # Points into Part B
+                normal=hole_normal,  # Points into Part B (opposite to pin)
             )
 
             joints.append(
@@ -338,10 +370,17 @@ class IntegratedJointFactory(JointFactory):
             pins_added = 0
             holes_added = 0
 
+            # Debug: log mesh bounds before processing
+            input_mesh_data = manifold.to_mesh()
+            input_verts = np.array(input_mesh_data.vert_properties)[:, :3]
+            LOGGER.debug(f"Input mesh Z range: {input_verts[:, 2].min():.1f} to {input_verts[:, 2].max():.1f}")
+
             for joint in joints:
                 # Determine if this joint is a pin or hole from its depth
                 # Negative depth = pin (protrusion), Positive depth = hole (cavity)
                 is_pin = joint.depth_mm < 0
+
+                LOGGER.info(f"Processing joint: pos={joint.position}, normal={joint.normal}, depth={joint.depth_mm}, is_pin={is_pin}")
 
                 # Create cylinder for pin or hole
                 radius = joint.diameter_mm / 2
@@ -373,6 +412,12 @@ class IntegratedJointFactory(JointFactory):
                     holes_added += 1
 
             LOGGER.info(f"Applied {pins_added} pins and {holes_added} holes to mesh")
+
+            # Debug: verify the mesh bounds changed
+            result_mesh = manifold.to_mesh()
+            result_verts = np.array(result_mesh.vert_properties)[:, :3]
+            LOGGER.debug(f"Result mesh Z range: {result_verts[:, 2].min():.1f} to {result_verts[:, 2].max():.1f}")
+
             return MeshWrapper._from_manifold(manifold)
 
         except ImportError:
