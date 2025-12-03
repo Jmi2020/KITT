@@ -23,6 +23,10 @@ class HollowingConfig:
     drain_holes: bool = True
     drain_hole_diameter_mm: float = 3.0
     drain_hole_count: int = 2
+    # Voxel resolution for fallback hollowing (trimesh voxelization)
+    # Higher values = more detail but slower. 200 is fast, 500+ is high quality
+    # Set to 0 to auto-calculate based on voxel_size_mm
+    voxels_per_dim: int = 200
 
 
 @dataclass
@@ -200,19 +204,29 @@ class SdfHollower:
 
             tm = mesh.as_trimesh
 
-            # Adaptive voxel size: limit to ~200 voxels per dimension for performance
-            # while ensuring we can achieve the wall thickness
+            # Adaptive voxel size based on config resolution or explicit voxel size
             max_dim = mesh.max_dimension
-            target_voxels_per_dim = 200
-            min_voxel_for_performance = max_dim / target_voxels_per_dim
+            target_voxels_per_dim = self.config.voxels_per_dim
 
-            # Need at least 2 voxels for wall thickness erosion
-            max_voxel_for_thickness = self.config.wall_thickness_mm / 2
+            if target_voxels_per_dim > 0:
+                # Use specified resolution
+                voxel_size = max_dim / target_voxels_per_dim
+            else:
+                # Use explicit voxel_size_mm from config
+                voxel_size = self.config.voxel_size_mm
 
-            voxel_size = max(min_voxel_for_performance, max_voxel_for_thickness)
+            # Ensure voxel size doesn't exceed wall thickness (need at least 1 erosion iteration)
+            # But allow smaller voxels for higher quality - more erosion iterations will be used
+            voxel_size = min(voxel_size, self.config.wall_thickness_mm)
+
+            # Minimum voxel size to prevent memory issues (0.5mm for very high quality)
+            voxel_size = max(voxel_size, 0.5)
+
+            actual_voxels = int(max_dim / voxel_size)
+            erosion_iters = max(1, int(self.config.wall_thickness_mm / voxel_size))
             LOGGER.info(
-                f"Voxel hollowing: {int(max_dim/voxel_size)} voxels/dim, "
-                f"voxel_size={voxel_size:.1f}mm"
+                f"Voxel hollowing: {actual_voxels} voxels/dim, "
+                f"voxel_size={voxel_size:.2f}mm, erosion_iterations={erosion_iters}"
             )
 
             # Voxelize the mesh

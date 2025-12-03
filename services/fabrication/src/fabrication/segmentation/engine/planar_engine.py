@@ -57,12 +57,18 @@ class PlanarSegmentationEngine(SegmentationEngine):
 
         self.hollower = None
         if config.enable_hollowing:
+            # Get hollowing resolution from config (default 200)
+            resolution = getattr(config, 'hollowing_resolution', 200)
             hollow_config = HollowingConfig(
                 wall_thickness_mm=config.wall_thickness_mm,
                 min_wall_thickness_mm=config.min_wall_thickness_mm,
+                voxels_per_dim=resolution,
             )
             self.hollower = SdfHollower(hollow_config)
-            LOGGER.info(f"Initialized hollower with wall_thickness={config.wall_thickness_mm}mm")
+            LOGGER.info(
+                f"Initialized hollower with wall_thickness={config.wall_thickness_mm}mm, "
+                f"resolution={resolution} voxels/dim"
+            )
 
         # Initialize joint factory based on config
         self.joint_factory: Optional[JointFactory] = None

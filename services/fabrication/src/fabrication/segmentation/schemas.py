@@ -70,6 +70,9 @@ class SegmentationConfig:
     enable_hollowing: bool = True
     min_wall_thickness_mm: float = 1.2
     hollowing_strategy: HollowingStrategy = HollowingStrategy.HOLLOW_THEN_SEGMENT
+    # Voxel resolution for hollowing: higher = more detail but slower
+    # 200 = fast/coarse (~5mm voxels for 1m model), 500 = medium (~2mm), 1000+ = high quality
+    hollowing_resolution: int = 200
 
     # Joints
     joint_type: JointType = JointType.DOWEL
