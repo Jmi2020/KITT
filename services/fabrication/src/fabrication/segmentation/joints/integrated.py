@@ -510,8 +510,10 @@ class IntegratedJointFactory(JointFactory):
         # We need to position it so it protrudes/recedes from the cut plane
 
         # Anchor depth: how much of the pin is embedded in the mesh for attachment
-        anchor_depth = 2.0  # mm - small anchor inside mesh for clean boolean union
-        overlap = 1.0  # mm - extra depth for clean boolean subtraction
+        # For hollowed meshes with 10mm walls, the pin position is at the wall midpoint (~5mm in)
+        # We need sufficient anchor to ensure the pin cylinder intersects the wall material
+        anchor_depth = 6.0  # mm - enough to penetrate through to wall material
+        overlap = 2.0  # mm - extra depth for clean boolean subtraction
 
         if is_pin:
             # Pin: PROTRUDES OUTWARD from cut surface along target_normal

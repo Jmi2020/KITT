@@ -218,10 +218,17 @@ class SdfHollower:
             # Voxelize the mesh
             voxelized = tm.voxelized(voxel_size)
 
-            # Hollow by eroding the voxel grid
+            # CRITICAL: voxelized.matrix only contains SURFACE voxels, not a solid fill.
+            # We need to fill the interior before eroding to create proper walls.
+            # Use binary_fill_holes to convert surface voxels to solid interior.
             from scipy import ndimage
 
-            filled = voxelized.matrix.copy()
+            # Fill the interior of the voxelized surface to get a solid volume
+            surface_voxels = voxelized.matrix.copy()
+            filled = ndimage.binary_fill_holes(surface_voxels)
+            LOGGER.debug(
+                f"Voxel fill: surface={surface_voxels.sum()} -> filled={filled.sum()} voxels"
+            )
 
             # Calculate erosion iterations - need enough to create wall thickness
             erosion_iterations = max(1, int(self.config.wall_thickness_mm / voxel_size))
