@@ -86,41 +86,15 @@ class IntegratedJointFactory(JointFactory):
             LOGGER.warning("No valid joint positions found for integrated pins")
             return []
 
-        # CRITICAL: Filter positions to only those within BOTH parts' boundaries
-        # Positions from part_a's contour may be outside part_b's bounding box
-        # if the parts only partially overlap (e.g., L-shaped pieces meeting at corner)
-        bbox_b = part_b.bounding_box
-        margin = self.pin_config.pin_diameter_mm / 2  # Half pin diameter margin
-
-        valid_positions = []
-        for pos in positions:
-            x, y, z = pos
-            # Check if position is within part_b's bounding box (with margin)
-            in_x = (bbox_b.min_x - margin) <= x <= (bbox_b.max_x + margin)
-            in_y = (bbox_b.min_y - margin) <= y <= (bbox_b.max_y + margin)
-            in_z = (bbox_b.min_z - margin) <= z <= (bbox_b.max_z + margin)
-
-            if in_x and in_y and in_z:
-                valid_positions.append(pos)
-            else:
-                LOGGER.debug(
-                    f"Filtering joint position {pos} - outside part_b bounds "
-                    f"X=[{bbox_b.min_x:.1f},{bbox_b.max_x:.1f}], "
-                    f"Y=[{bbox_b.min_y:.1f},{bbox_b.max_y:.1f}], "
-                    f"Z=[{bbox_b.min_z:.1f},{bbox_b.max_z:.1f}]"
-                )
-
-        if len(valid_positions) < len(positions):
-            LOGGER.info(
-                f"Filtered {len(positions) - len(valid_positions)} positions "
-                f"outside part_b bounds ({len(valid_positions)} remaining)"
-            )
-
-        positions = valid_positions
-
-        if not positions:
-            LOGGER.warning("No joint positions within both parts' boundaries")
-            return []
+        # CRITICAL: Filter positions to only those within BOTH parts' seam contours
+        # This is essential because:
+        # 1. Positions are calculated from part_a's seam contour at the cut plane
+        # 2. Part B may have been further subdivided, so its seam at this plane
+        #    may be smaller than part A's (e.g., part A is L-shaped, part B is a corner)
+        # 3. We need to check if the position falls within part B's ACTUAL seam geometry
+        positions = self._filter_positions_to_intersection(
+            positions, part_a, part_b, cut_plane
+        )
 
         # Create joint pairs
         joints = []
@@ -208,6 +182,84 @@ class IntegratedJointFactory(JointFactory):
             self.pin_config.min_joints_per_seam,
             min(target, self.pin_config.max_joints_per_seam),
         )
+
+    def _filter_positions_to_intersection(
+        self,
+        positions: List[Tuple[float, float, float]],
+        part_a: MeshWrapper,
+        part_b: MeshWrapper,
+        plane: CuttingPlane,
+    ) -> List[Tuple[float, float, float]]:
+        """
+        Filter joint positions to only those within BOTH parts' boundaries at the cut plane.
+
+        This handles the case where parts have been further subdivided after the
+        initial cut plane was created. A joint position from part_a's seam may
+        fall outside part_b's actual extent if part_b was split by another cut.
+
+        We use part_b's bounding box projected onto the cut plane since the cut
+        plane touches part_b's edge (not its interior), so we can't slice it.
+        """
+        if not positions:
+            return positions
+
+        # Determine which axis is perpendicular to the plane (cut axis)
+        normal = np.array(plane.normal)
+        plane_axis = np.argmax(np.abs(normal))
+        in_plane_axes = [i for i in range(3) if i != plane_axis]
+
+        # Use part_b's bounding box projected onto the cut plane
+        # This tells us the extent of part_b in the 2D plane perpendicular to the cut
+        bbox_b = part_b.bounding_box
+        bounds_b = [
+            [bbox_b.min_x, bbox_b.max_x],
+            [bbox_b.min_y, bbox_b.max_y],
+            [bbox_b.min_z, bbox_b.max_z],
+        ]
+
+        # Get the 2D bounds of part_b on the cut plane
+        min_b = np.array([bounds_b[in_plane_axes[0]][0], bounds_b[in_plane_axes[1]][0]])
+        max_b = np.array([bounds_b[in_plane_axes[0]][1], bounds_b[in_plane_axes[1]][1]])
+
+        margin = self.pin_config.pin_diameter_mm / 2
+
+        LOGGER.debug(
+            f"Part B bounds on cut plane (axes {in_plane_axes}): "
+            f"[{min_b[0]:.1f},{max_b[0]:.1f}] x [{min_b[1]:.1f},{max_b[1]:.1f}]"
+        )
+
+        valid_positions = []
+        filtered_count = 0
+
+        for pos in positions:
+            # Project position onto the 2D plane
+            pos_2d = np.array([pos[in_plane_axes[0]], pos[in_plane_axes[1]]])
+
+            # Check if position is within part B's bounding rect on the cut plane (with margin)
+            in_bounds = (
+                (min_b[0] - margin) <= pos_2d[0] <= (max_b[0] + margin) and
+                (min_b[1] - margin) <= pos_2d[1] <= (max_b[1] + margin)
+            )
+
+            if in_bounds:
+                valid_positions.append(pos)
+            else:
+                filtered_count += 1
+                LOGGER.debug(
+                    f"Filtering joint position {pos} (2D: {pos_2d}) - outside part_b bounds "
+                    f"[{min_b[0]:.1f},{max_b[0]:.1f}] x [{min_b[1]:.1f},{max_b[1]:.1f}]"
+                )
+
+        if filtered_count > 0:
+            LOGGER.info(
+                f"Filtered {filtered_count} positions outside part_b extent "
+                f"({len(valid_positions)} remaining)"
+            )
+
+        if not valid_positions:
+            LOGGER.warning("No joint positions within intersection of both parts")
+
+        return valid_positions
 
     def _find_joint_positions(
         self,
