@@ -415,6 +415,74 @@ class PlanarSegmentationEngine(SegmentationEngine):
             LOGGER.info(f"Joint type '{joint_type}' not implemented, no joints will be added")
             self.joint_factory = None
 
+    def _deduplicate_joint_positions(
+        self,
+        joints: List[Tuple],
+        min_spacing_mm: float = 15.0
+    ) -> List[Tuple]:
+        """
+        Remove overlapping joints. When pin/hole collide, remove BOTH.
+
+        Strategy (per user preference):
+        - When a pin and hole are at the same location: REMOVE BOTH
+        - When two pins or two holes overlap: Keep first, remove duplicate
+
+        Args:
+            joints: List of (JointLocation, is_pin) tuples
+            min_spacing_mm: Minimum distance between joints
+
+        Returns:
+            Deduplicated list of (JointLocation, is_pin) tuples
+        """
+        if len(joints) <= 1:
+            return joints
+
+        # First pass: identify positions to exclude (pin/hole conflicts)
+        positions_to_exclude = set()
+        for i, (joint_i, is_pin_i) in enumerate(joints):
+            pos_i = np.array(joint_i.position)
+            for j, (joint_j, is_pin_j) in enumerate(joints[i + 1:], start=i + 1):
+                pos_j = np.array(joint_j.position)
+                distance = np.linalg.norm(pos_i - pos_j)
+
+                if distance < min_spacing_mm:
+                    # Different types (pin vs hole) = conflict, remove both
+                    if is_pin_i != is_pin_j:
+                        LOGGER.debug(
+                            f"Pin/hole conflict at distance {distance:.1f}mm - removing both"
+                        )
+                        positions_to_exclude.add(i)
+                        positions_to_exclude.add(j)
+
+        # Second pass: build deduplicated list (skip conflicts, dedupe same-type)
+        deduplicated = []
+        for i, (joint, is_pin) in enumerate(joints):
+            if i in positions_to_exclude:
+                continue  # Skip pin/hole conflicts
+
+            pos = np.array(joint.position)
+            too_close = False
+            for existing_joint, _ in deduplicated:
+                existing_pos = np.array(existing_joint.position)
+                if np.linalg.norm(pos - existing_pos) < min_spacing_mm:
+                    too_close = True
+                    LOGGER.debug(
+                        f"Duplicate joint at distance {np.linalg.norm(pos - existing_pos):.1f}mm - keeping first"
+                    )
+                    break
+
+            if not too_close:
+                deduplicated.append((joint, is_pin))
+
+        removed_count = len(joints) - len(deduplicated)
+        if removed_count > 0:
+            LOGGER.info(
+                f"Deduplicated joints: {len(joints)} -> {len(deduplicated)} "
+                f"(removed {removed_count} conflicts/duplicates)"
+            )
+
+        return deduplicated
+
     def _apply_joints(
         self,
         parts: List[MeshWrapper],
@@ -493,8 +561,18 @@ class PlanarSegmentationEngine(SegmentationEngine):
                 continue
 
             try:
-                joint_locations = [jl for jl, _ in part_joints[i]]
-                is_pin_side = any(is_pin for _, is_pin in part_joints[i])
+                # Deduplicate joints for this part (removes pin/hole conflicts and duplicates)
+                deduplicated_joints = self._deduplicate_joint_positions(
+                    part_joints[i], min_spacing_mm=15.0
+                )
+
+                if not deduplicated_joints:
+                    # All joints were removed due to conflicts
+                    result_parts.append(part)
+                    continue
+
+                joint_locations = [jl for jl, _ in deduplicated_joints]
+                is_pin_side = any(is_pin for _, is_pin in deduplicated_joints)
 
                 # Get bounds before applying joints
                 z_min_before = part.as_trimesh.bounds[0][2]

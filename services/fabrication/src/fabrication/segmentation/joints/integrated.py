@@ -333,15 +333,40 @@ class IntegratedJointFactory(JointFactory):
             pos_3d[plane_axis] = plane_coord
             wall_positions.append(tuple(pos_3d))
 
+        # Filter out positions that are too close to corners
+        # Corners are where multiple cut planes intersect - joints there would conflict
+        corner_margin = self.pin_config.pin_diameter_mm * 2  # Stay away from corners
+
+        filtered_positions = []
+        for pos in wall_positions:
+            # Extract 2D coordinates on the cut face
+            pos_2d = [pos[axes[0]], pos[axes[1]]]
+
+            # Check if position is near multiple edges (corner)
+            near_top = pos_2d[1] > max_coords[1] - corner_margin
+            near_bottom = pos_2d[1] < min_coords[1] + corner_margin
+            near_left = pos_2d[0] < min_coords[0] + corner_margin
+            near_right = pos_2d[0] > max_coords[0] - corner_margin
+
+            # Count how many edges this position is near
+            edge_count = sum([near_top, near_bottom, near_left, near_right])
+
+            # If near 2+ edges, it's in a corner - skip to avoid conflicts
+            if edge_count < 2:
+                filtered_positions.append(pos)
+            else:
+                LOGGER.debug(f"Skipping corner position {pos} (near {edge_count} edges)")
+
         # Select the requested number of positions
-        if len(wall_positions) >= num_joints:
-            positions = wall_positions[:num_joints]
+        if len(filtered_positions) >= num_joints:
+            positions = filtered_positions[:num_joints]
         else:
-            # Use all available wall positions
-            positions = wall_positions
+            # Use all available non-corner positions
+            positions = filtered_positions
 
         LOGGER.debug(
-            f"Placed {len(positions)} joints at wall midpoints on cut face"
+            f"Placed {len(positions)} joints at wall midpoints on cut face "
+            f"(filtered {len(wall_positions) - len(filtered_positions)} corner positions)"
         )
 
         return positions
