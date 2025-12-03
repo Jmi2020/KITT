@@ -1,0 +1,206 @@
+# Manifold3D Boolean Union Not Persisting to 3MF Export
+
+## Summary
+
+The issue is that boolean union operations (using NVIDIA's Manifold3D library) appear to succeed in memory (the combined volume increases), but the added connector pins are not fused into the main mesh when exporting to 3MF. As a result, slicer software shows the pins as separate floating objects rather than integrated parts of the model.
+
+This document addresses each key question in detail:
+- How Manifold's output works
+- How Trimesh handles 3MF export of multiple shells
+- Potential causes of "union" behaving like a mere concatenation
+- How 3MF/slicers treat multi-component meshes
+
+---
+
+## 1. Manifold3D to Trimesh Conversion (Unified Mesh vs. Disconnected Components)
+
+### Does `manifold.to_mesh()` return a single unified mesh or can it have disconnected components?
+
+In the Manifold3D library, a `Manifold` object can indeed contain **multiple disconnected components** (multiple shells) within one manifold. The `to_mesh()` (or `getMesh()`) function will return a single mesh structure that includes all triangles from the result – even if those triangles form separate pieces.
+
+In other words, if your boolean union didn't actually connect the geometries, the returned mesh will still include both parts (pins and original mesh) but as separate shells in one mesh object.
+
+The library provides a method `decompose()` which splits a Manifold into an array of Manifolds for each topologically disconnected piece. If everything is truly connected, `decompose()` returns one manifold; if not, it returns multiple. So, `result_manifold.to_mesh()` could represent multiple disconnected components unless the union really fused them.
+
+### How to ensure the boolean result is a single manifold (one connected body)?
+
+You must ensure that the added pin geometry is actually **physically connected** to the main mesh geometry. In a proper boolean union, if the two solids overlap or even just touch, the algorithm should merge them into one continuous solid (internal faces where they meet are removed).
+
+In fact, the Manifold library is designed to handle even perfectly coincident touching surfaces by a slight perturbation to merge them – for example, "touching cubes are merged" by the union operation. This means if a pin is exactly flush against a surface of the main mesh (or intersecting it even slightly), the union should join them into one manifold piece.
+
+However, if there is any gap or no contact (even a tiny clearance), then the union has no overlapping region to fuse – the operation will essentially just combine the meshes without merging them, resulting in disjoint shells. In such a case, the boolean mathematically succeeds (the union of two disjoint solids is just both solids together), but topologically you get two separate components.
+
+**Key point:** A successful boolean union in terms of creating one connected body requires that the objects **intersect or at least touch**. If your pins were modeled with a clearance (e.g. slightly smaller than the hole, not touching the walls), they might float inside the cavity without actually intersecting the main mesh's surface – thus the union doesn't weld them.
+
+### To ensure one manifold:
+
+- **Position/Scale pins to intersect or exactly touch** the base model geometry. Even a flush surface contact should merge (Manifold perturbs coincident faces to avoid paper-thin gaps), but a slight gap will not. If needed, deliberately make the pin slightly larger or move it so it cuts into the surrounding mesh by a tiny amount.
+
+- **Verify connectivity** by using `result_manifold.decompose()`. This will tell you if the result is one component or multiple. In your debugging code, similarly, using `tm.split()` or checking `len(tm.split())` is a good approach – if it's greater than 1, you have disconnected parts.
+
+- **Ensure both the base mesh and pin are manifold** (which they are, presumably) and use the proper union call (`mesh.as_manifold + cylinder` or `mesh_as_manifold.add(cylinder)`). The Manifold library's `add` (operator `+`) is indeed the boolean Union operation. If the inputs are valid manifold meshes, the output will be a Manifold (possibly multi-shell if not connected).
+
+### Summary
+
+`manifold.getMesh()`/`to_mesh()` will return one mesh containing all triangles, but it does not guarantee those triangles form one connected piece. You must ensure the boolean operation physically connects the pieces (overlap or flush contact) so that the result is a single connected manifold. Use `decompose()` to confirm connectivity – a length greater than one indicates the union result still has separate shells.
+
+---
+
+## 2. Trimesh 3MF Export Behavior for Multiple Shells
+
+### Does Trimesh's 3MF export preserve separate shells as separate objects or merge them?
+
+Trimesh will **not automatically merge** disconnected components when exporting to 3MF. If you pass a single `trimesh.Trimesh` that has multiple disconnected components (shells), it will simply include all those triangles in the 3MF file.
+
+There is **no `merge=True` flag** in the export function to unify separate shells into one; the library assumes you provide the geometry in the desired state. In practice, this means that if your Trimesh object (constructed from `result_manifold.to_mesh()`) contains two shells (main piece + pin), the 3MF will contain them either as one mesh with two shells or possibly as two separate mesh objects depending on how Trimesh structures it internally.
+
+By default, if you create one Trimesh from vertices/faces arrays, that becomes one 3MF object containing all the geometry.
+
+### 3MF Format and Multiple Objects
+
+The 3MF format supports **multiple objects natively**. If Trimesh were given a `trimesh.Scene` with multiple geometries, it would export a 3MF with multiple objects (each object separate). In your case you likely made one Trimesh from the combined mesh data, so that is exported as a single 3MF model.
+
+Critically, even within one model, the slicer can detect multiple shells. Unlike STL (which always comes in as one object with multiple shells), a 3MF can explicitly hold separate objects. Trimesh's exporter will treat a single Trimesh as one object. It does not merge shells into one shell; it simply writes the geometry as-is.
+
+There isn't an automatic merging of disconnected parts on export – you would need to manually merge them via a boolean or by combining the meshes beforehand.
+
+### Vertex Merging
+
+Trimesh by default merges duplicate vertices when loading or creating meshes (to avoid unindexed triangle soup), but this merging of vertices won't merge separate objects unless they actually share identical vertices on touching surfaces.
+
+In your case, if the pin and main mesh had coincident surface vertices and you combined them in one Trimesh, those coincident points might merge at a vertex level (if within tolerance). However, if there was even a slight gap or separate coordinates, Trimesh can't merge them into one shell; they remain separate clusters of faces.
+
+### Conclusion
+
+When you do `tm = trimesh.Trimesh(vertices=..., faces=...)` from the Manifold output, you get a mesh that likely contains two separate shells. `tm.export('something.3mf')` will put both shells into the 3MF. There is no automatic "union" happening during export.
+
+**If you wanted the export to be a single fused piece, the input `tm` must represent a single fused piece to begin with.**
+
+> **Note:** Trimesh does have a `trimesh.util.concatenate()` to join multiple mesh objects into one Trimesh, which you effectively already did by creating `tm` from the Manifold result. But this is just concatenation of geometry data – it won't fuse overlapping shells on its own, it just puts them together in one mesh object.
+
+---
+
+## 3. Mesh Concatenation vs. True Boolean Union in Manifold3D
+
+### Can `mesh.as_manifold + cylinder` fall back to just concatenating the meshes instead of a real union?
+
+In practice, if the boolean union operation finds no intersection or contact between the two solids, the result is effectively just the two meshes combined – which is indistinguishable from a simple concatenation.
+
+The Manifold library doesn't explicitly "fall back" with a warning; it will still return a Manifold result, but that result may consist of two disjoint parts (the original shape and the pin) if no merging could occur. This is logically the correct outcome for a union of disjoint sets: you get a set containing both.
+
+So from the algorithm's perspective, it did perform a union – it just didn't have any internal faces to remove or volumes to connect, because the solids weren't touching.
+
+### Requirements for a successful (merged) boolean union in Manifold3D:
+
+1. Both input meshes must be **valid manifolds** (watertight solids)
+2. They need to **intersect or at least touch** for the union to produce one connected manifold
+
+Manifold3D's boolean is designed to handle even cases where objects just barely touch (e.g., two cubes sharing a face) by perturbing one slightly so that they merge rather than produce coincident faces. But if there is a gap between objects, no matter how small, that is not a union scenario – there's empty space separating them, so the algorithm will simply combine the two volumes without connecting them.
+
+**Important:** Manifold's documentation explicitly states the result of a Boolean operation is a solid representing the union/difference/etc of the inputs. It guarantees the output is manifold (no invalid edges), but it does not guarantee the output is one piece unless the inputs actually overlap. The library provides `Manifold.decompose()` to identify if an output has multiple components, which suggests that disjoint outputs are possible and expected if the geometry doesn't connect.
+
+### Troubleshooting checklist:
+
+If you find that `mesh + cylinder` isn't fusing, consider:
+
+- **Are the cylinder (pin) and mesh overlapping or at least sharing a face?**
+  - If the pin was meant to go into a hole but you did not subtract that hole from the mesh, the pin might actually be intersecting the solid's interior (which should fuse if overlapping)
+  - If you did subtract a hole (making space for the pin) and then union the pin, the pin might be entirely inside that cavity without touching the solid walls – in that case union adds it as a separate piece occupying the empty space
+  - To fuse it, the pin would need to touch the walls or be slightly larger than the hole
+
+- **Is the pin placed on a flat surface with any gap?**
+  - If the pin is placed on a flat surface of the mesh (like a registration peg sticking out), ensure it isn't just placed right above the surface with a tiny gap
+  - Any gap means no actual contact
+  - The solution is to embed it just enough that it intersects the surface (or exactly flush, relying on Manifold's handling of coincident faces)
+
+- **Verify connectivity with proper checks:**
+  - `result_manifold.is_empty()` (should be `False` if volume exists) and `result_manifold.num_vert()` – these just tell you some data but not connectivity
+  - The better check is `len(tm.split())` or `len(result_manifold.decompose())`
+  - If you get more than 1, you've got multiple shells
+
+### Summary
+
+Manifold will perform a true boolean union if the geometry allows it. There isn't a separate "concatenate" mode you invoked; it's the same `add` operation. But if that union finds no overlapping region, the outcome is effectively two separate sub-solids within one manifold.
+
+This is likely what happened with the pins: the boolean succeeded but as a union of disjoint pieces. The requirements for a fully merged single-body union are that the two meshes have some intersection or at least coplanar contact. Ensure the pin and model meet that criterion.
+
+If they do and it's still separate, it could indicate a precision/tolerance issue, but given the library's design that's less likely – it's usually geometric (no actual contact).
+
+> **Note:** The Manifold library uses a robust algorithm that even perturbs coincident faces to avoid non-merged surfaces for union. So "silently falling back to concatenation" is essentially just the union algorithm doing its job in a case where there is nothing to fuse.
+
+---
+
+## 4. 3MF Multi-Object Structure and Slicer Interpretation
+
+### Does the 3MF format store multiple objects separately even if they were unioned?
+
+Yes, the 3MF format can contain **multiple distinct objects** in one file – it's essentially a container (XML-based) that can hold several meshes, each as a separate part of a scene.
+
+If you truly unioned the pin with the model (one shell), you would typically export it as one object. But if your resulting mesh still has multiple shells, there are two possibilities for the 3MF output:
+
+1. A single 3MF object containing a mesh with multiple shells
+2. Multiple 3MF objects
+
+As mentioned, Trimesh will export a `Scene` with multiple geometries as multiple objects in 3MF, whereas a single Trimesh with multiple shells is likely written as one object. Either way, slicers are quite savvy about detecting multiple components.
+
+### How do slicers (e.g., Bambu Studio, PrusaSlicer) interpret multi-component meshes?
+
+Modern slicers will recognize if a loaded model has more than one disconnected shell. Depending on the slicer, it might automatically treat them as separate parts or at least alert the user.
+
+**PrusaSlicer:**
+- Will import an STL with multiple shells as one object by default (STL has no concept of multiple named objects)
+- Provides a function to "split" them into separate objects if desired
+- For 3MF format (which supports multiple named objects natively), will load separate objects as separate model instances on the build plate
+
+**Bambu Studio:**
+- Similar behavior – a 3MF with multiple objects can be split into parts or objects via right-click options
+- Has a "Split into Objects/Parts" feature, much like PrusaSlicer's
+- May show them in an "Assembly" view where each shell can be manipulated
+
+### Your specific situation:
+
+Since the pins appeared as "floating" in the slicer (Bambu Studio or PrusaSlicer), it indicates the slicer saw them as either separate objects or at least separate islands.
+
+If you exported as one object (one mesh with two shells), the slicer likely kept it as one model but internally knows there are two disconnected meshes. If shells are not connected, the slicer will treat them as separate printable islands. This can lead to the behavior you observed: the pins are not attached to the main piece in the toolpath, potentially printing in mid-air or as separate pieces.
+
+### How to verify:
+
+**In PrusaSlicer:**
+- Click the object and use "Split to parts" or "Split to objects"
+- It would likely separate the pin from the main model (confirming two shells were present)
+
+**In Bambu Studio:**
+- Look for "Assembly" concept for multi-part models
+- The fact that the pins "keep showing up as free floating pins" strongly implies they were separate shells in one file
+
+### Summary of slicer behavior:
+
+- 3MF can hold multiple objects, and slicers will import them accordingly (each object can then be arranged or dropped to the bed separately)
+- Even within one object, multiple shells can be identified and split if needed
+- If the union had succeeded, you would have only one shell and no issue
+- Since it didn't, the slicer sees multiple shells
+
+This is not a fault of 3MF – it's actually giving you an opportunity to have multiple parts in one file – but in this case you wanted them merged. Thus **the focus should be on fixing the union so that only one shell exists per piece**.
+
+---
+
+## Conclusion
+
+The boolean union from Manifold3D needs to produce a **single connected mesh** to get a fused result in the 3MF.
+
+Right now, `manifold + pin` likely resulted in a manifold containing two disconnected components (the volume increased as observed, but they weren't actually attached). The `to_mesh()` conversion isn't the problem – it faithfully gave you both parts. Trimesh then exported both, and the 3MF format/your slicer simply preserved that structure (multiple shells).
+
+### The remedy:
+
+1. **Adjust the boolean operation:** Ensure the pins physically intersect or touch the main mesh during union
+2. **Verify the result:** Use `decompose()` or your `tm.split()` check – it should be 1
+3. **Once the manifold result is truly one piece:** Exporting to 3MF will yield a single unified object (the pins will be part of the mesh)
+4. **The slicer will then see them as integrated,** not as separate floating objects
+
+---
+
+## References
+
+- **Manifold3D library docs** – `decompose()` returns multiple manifolds if parts are disconnected. This implies `getMesh()` can contain multiple shells in one output mesh.
+- **Manifold3D wiki** – Boolean union merges touching surfaces (no tolerance required), meaning overlap or contact is needed for a single fused result.
+- **Prusa Knowledge Base** – 3MF supports multiple objects, and slicers can split multiple shells into separate models. This highlights how slicers handle multi-part files.
