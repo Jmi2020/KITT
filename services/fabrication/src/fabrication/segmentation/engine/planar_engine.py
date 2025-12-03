@@ -50,6 +50,11 @@ class PlanarSegmentationEngine(SegmentationEngine):
     def __init__(self, config: SegmentationConfig):
         """Initialize planar engine."""
         super().__init__(config)
+
+        # IMPORTANT: Validate wall thickness for pin joints BEFORE creating hollower
+        # This ensures the hollower uses the correct (adjusted) wall thickness
+        self._validate_wall_thickness_for_joints()
+
         self.hollower = None
         if config.enable_hollowing:
             hollow_config = HollowingConfig(
@@ -57,6 +62,7 @@ class PlanarSegmentationEngine(SegmentationEngine):
                 min_wall_thickness_mm=config.min_wall_thickness_mm,
             )
             self.hollower = SdfHollower(hollow_config)
+            LOGGER.info(f"Initialized hollower with wall_thickness={config.wall_thickness_mm}mm")
 
         # Initialize joint factory based on config
         self.joint_factory: Optional[JointFactory] = None
@@ -350,6 +356,31 @@ class PlanarSegmentationEngine(SegmentationEngine):
 
         return hollowed_parts
 
+    def _validate_wall_thickness_for_joints(self) -> None:
+        """
+        Validate and adjust wall thickness to accommodate pin joints.
+
+        MUST be called BEFORE hollower is created so the hollower
+        uses the correct (adjusted) wall thickness.
+        """
+        joint_type = self.config.joint_type
+
+        # Only check for integrated joints which have pins embedded in walls
+        if joint_type == JointType.INTEGRATED or joint_type == "integrated":
+            pin_diameter = getattr(self.config, "pin_diameter_mm", 8.0)
+            wall_thickness = self.config.wall_thickness_mm
+
+            # Wall must be thick enough to contain the pin
+            # Need pin_diameter + margin for structural integrity
+            min_wall_for_pins = pin_diameter + 2.0
+
+            if wall_thickness < min_wall_for_pins:
+                LOGGER.warning(
+                    f"Wall thickness ({wall_thickness}mm) too thin for "
+                    f"{pin_diameter}mm pins. Adjusting to {min_wall_for_pins}mm"
+                )
+                self.config.wall_thickness_mm = min_wall_for_pins
+
     def _init_joint_factory(self) -> None:
         """Initialize the appropriate joint factory based on configuration."""
         joint_type = self.config.joint_type
@@ -361,19 +392,9 @@ class PlanarSegmentationEngine(SegmentationEngine):
 
         if joint_type == JointType.INTEGRATED or joint_type == "integrated":
             # Get pin dimensions from config (with defaults)
+            # Note: wall thickness validation already done in _validate_wall_thickness_for_joints()
             pin_diameter = getattr(self.config, "pin_diameter_mm", 8.0)
             pin_height = getattr(self.config, "pin_height_mm", 10.0)
-            wall_thickness = self.config.wall_thickness_mm
-
-            # Validate wall thickness can accommodate pin diameter
-            # Wall must be thick enough to contain the pin without jutting through
-            if wall_thickness < pin_diameter:
-                adjusted_wall = pin_diameter + 2.0
-                LOGGER.warning(
-                    f"Wall thickness ({wall_thickness}mm) < pin diameter ({pin_diameter}mm). "
-                    f"Auto-adjusting wall thickness to {adjusted_wall}mm for integrated joints."
-                )
-                self.config.wall_thickness_mm = adjusted_wall
 
             # Calculate hole depth to match pin protrusion
             # Pin has 2mm anchor inside, so protrusion = pin_height - 2mm
