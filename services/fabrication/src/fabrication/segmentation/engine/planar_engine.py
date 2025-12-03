@@ -564,9 +564,10 @@ class PlanarSegmentationEngine(SegmentationEngine):
                     )
 
                     for jp in joint_pairs:
-                        is_pin = jp.location_a.depth_mm < 0
-                        part_joints[idx_a].append((jp.location_a, is_pin))
-                        part_joints[idx_b].append((jp.location_b, False))
+                        is_pin_a = jp.location_a.depth_mm < 0
+                        is_pin_b = jp.location_b.depth_mm < 0
+                        part_joints[idx_a].append((jp.location_a, is_pin_a))
+                        part_joints[idx_b].append((jp.location_b, is_pin_b))
 
                     LOGGER.info(f"Generated {len(joint_pairs)} joints for seam between parts {idx_a} and {idx_b}")
 
@@ -596,8 +597,10 @@ class PlanarSegmentationEngine(SegmentationEngine):
                 is_pin_side = any(is_pin for _, is_pin in deduplicated_joints)
 
                 # Get bounds before applying joints
-                z_min_before = part.as_trimesh.bounds[0][2]
-                z_max_before = part.as_trimesh.bounds[1][2]
+                bounds_before = part.as_trimesh.bounds
+                z_min_before = bounds_before[0][2]
+                z_max_before = bounds_before[1][2]
+
 
                 if isinstance(self.joint_factory, IntegratedJointFactory):
                     modified = self.joint_factory.apply_joints_to_mesh(
@@ -610,8 +613,10 @@ class PlanarSegmentationEngine(SegmentationEngine):
                 z_min_after = modified.as_trimesh.bounds[0][2]
                 z_max_after = modified.as_trimesh.bounds[1][2]
 
+                bounds_after = modified.as_trimesh.bounds
                 LOGGER.info(
                     f"Applied {len(joint_locations)} joints to part {i}: "
+                    f"X [{bounds_before[0][0]:.1f},{bounds_before[1][0]:.1f}] -> [{bounds_after[0][0]:.1f},{bounds_after[1][0]:.1f}], "
                     f"Z [{z_min_before:.1f},{z_max_before:.1f}] -> [{z_min_after:.1f},{z_max_after:.1f}]"
                 )
 
