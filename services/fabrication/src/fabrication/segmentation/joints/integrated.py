@@ -79,22 +79,15 @@ class IntegratedJointFactory(JointFactory):
             f"(area: {seam_area:.1f}mm²)"
         )
 
-        # Find valid positions on the seam
-        positions = self._find_joint_positions(part_a, cut_plane, num_joints)
+        # Find valid positions on the seam using BOTH parts' contours
+        # This ensures joints are only placed where both parts have wall material
+        positions = self._find_joint_positions_intersection(
+            part_a, part_b, cut_plane, num_joints
+        )
 
         if not positions:
             LOGGER.warning("No valid joint positions found for integrated pins")
             return []
-
-        # CRITICAL: Filter positions to only those within BOTH parts' seam contours
-        # This is essential because:
-        # 1. Positions are calculated from part_a's seam contour at the cut plane
-        # 2. Part B may have been further subdivided, so its seam at this plane
-        #    may be smaller than part A's (e.g., part A is L-shaped, part B is a corner)
-        # 3. We need to check if the position falls within part B's ACTUAL seam geometry
-        positions = self._filter_positions_to_intersection(
-            positions, part_a, part_b, cut_plane
-        )
 
         # Create joint pairs
         joints = []
@@ -183,83 +176,142 @@ class IntegratedJointFactory(JointFactory):
             min(target, self.pin_config.max_joints_per_seam),
         )
 
-    def _filter_positions_to_intersection(
+    def _find_joint_positions_intersection(
         self,
-        positions: List[Tuple[float, float, float]],
         part_a: MeshWrapper,
         part_b: MeshWrapper,
         plane: CuttingPlane,
+        num_joints: int,
     ) -> List[Tuple[float, float, float]]:
         """
-        Filter joint positions to only those within BOTH parts' boundaries at the cut plane.
+        Find joint positions that are valid for BOTH parts.
 
-        This handles the case where parts have been further subdivided after the
-        initial cut plane was created. A joint position from part_a's seam may
-        fall outside part_b's actual extent if part_b was split by another cut.
+        This is critical for multi-cut scenarios where parts may have been
+        further subdivided. A joint position must be in wall material for
+        BOTH the pin side (part_a) AND the hole side (part_b).
 
-        We use part_b's bounding box projected onto the cut plane since the cut
-        plane touches part_b's edge (not its interior), so we can't slice it.
+        Strategy:
+        1. Get seam contour for both parts
+        2. Find the overlapping bounding box (where both parts have material)
+        3. Place joints only in this overlap region
         """
-        if not positions:
-            return positions
+        try:
+            # Get seam contours for both parts
+            contour_a = self._get_seam_contour(part_a, plane)
+            contour_b = self._get_seam_contour(part_b, plane)
 
-        # Determine which axis is perpendicular to the plane (cut axis)
-        normal = np.array(plane.normal)
-        plane_axis = np.argmax(np.abs(normal))
-        in_plane_axes = [i for i in range(3) if i != plane_axis]
+            if len(contour_a) < 3:
+                LOGGER.warning("Part A has insufficient seam contour")
+                return []
 
-        # Use part_b's bounding box projected onto the cut plane
-        # This tells us the extent of part_b in the 2D plane perpendicular to the cut
-        bbox_b = part_b.bounding_box
-        bounds_b = [
-            [bbox_b.min_x, bbox_b.max_x],
-            [bbox_b.min_y, bbox_b.max_y],
-            [bbox_b.min_z, bbox_b.max_z],
-        ]
+            if len(contour_b) < 3:
+                # Part B might not have interior intersection - use bounding box
+                LOGGER.debug("Part B has no seam contour, using bounding box")
 
-        # Get the 2D bounds of part_b on the cut plane
-        min_b = np.array([bounds_b[in_plane_axes[0]][0], bounds_b[in_plane_axes[1]][0]])
-        max_b = np.array([bounds_b[in_plane_axes[0]][1], bounds_b[in_plane_axes[1]][1]])
+            # Determine which axis is perpendicular to the plane
+            normal = np.array(plane.normal)
+            plane_axis = np.argmax(np.abs(normal))
+            in_plane_axes = [i for i in range(3) if i != plane_axis]
 
-        margin = self.pin_config.pin_diameter_mm / 2
+            # Get bounding boxes of both contours in the cut plane
+            contour_a_2d = contour_a[:, in_plane_axes]
+            min_a = contour_a_2d.min(axis=0)
+            max_a = contour_a_2d.max(axis=0)
 
-        LOGGER.debug(
-            f"Part B bounds on cut plane (axes {in_plane_axes}): "
-            f"[{min_b[0]:.1f},{max_b[0]:.1f}] x [{min_b[1]:.1f},{max_b[1]:.1f}]"
-        )
+            if len(contour_b) >= 3:
+                contour_b_2d = contour_b[:, in_plane_axes]
+                min_b = contour_b_2d.min(axis=0)
+                max_b = contour_b_2d.max(axis=0)
+            else:
+                # Fall back to Part B's mesh bounding box
+                bbox_b = part_b.bounding_box
+                bounds_b = [
+                    [bbox_b.min_x, bbox_b.max_x],
+                    [bbox_b.min_y, bbox_b.max_y],
+                    [bbox_b.min_z, bbox_b.max_z],
+                ]
+                min_b = np.array([bounds_b[in_plane_axes[0]][0], bounds_b[in_plane_axes[1]][0]])
+                max_b = np.array([bounds_b[in_plane_axes[0]][1], bounds_b[in_plane_axes[1]][1]])
 
-        valid_positions = []
-        filtered_count = 0
+            # Find the INTERSECTION of the two bounding boxes
+            # This is the region where both parts have material
+            overlap_min = np.maximum(min_a, min_b)
+            overlap_max = np.minimum(max_a, max_b)
 
-        for pos in positions:
-            # Project position onto the 2D plane
-            pos_2d = np.array([pos[in_plane_axes[0]], pos[in_plane_axes[1]]])
+            # Check if there's actually an overlap
+            if np.any(overlap_min >= overlap_max):
+                LOGGER.warning("No overlap between part A and part B seam regions")
+                return []
 
-            # Check if position is within part B's bounding rect on the cut plane (with margin)
-            in_bounds = (
-                (min_b[0] - margin) <= pos_2d[0] <= (max_b[0] + margin) and
-                (min_b[1] - margin) <= pos_2d[1] <= (max_b[1] + margin)
+            LOGGER.debug(
+                f"Seam overlap region: [{overlap_min[0]:.1f},{overlap_max[0]:.1f}] x "
+                f"[{overlap_min[1]:.1f},{overlap_max[1]:.1f}]"
             )
 
-            if in_bounds:
-                valid_positions.append(pos)
-            else:
-                filtered_count += 1
+            # Now place joints within the OVERLAP region only
+            # Create a synthetic "contour" that represents the overlap region
+            # by filtering contour_a to points within the overlap
+            margin = self.pin_config.pin_diameter_mm / 2
+
+            valid_contour_points = []
+            for pt in contour_a:
+                pt_2d = [pt[in_plane_axes[0]], pt[in_plane_axes[1]]]
+                if (overlap_min[0] - margin <= pt_2d[0] <= overlap_max[0] + margin and
+                    overlap_min[1] - margin <= pt_2d[1] <= overlap_max[1] + margin):
+                    valid_contour_points.append(pt)
+
+            if len(valid_contour_points) < 3:
+                LOGGER.warning("Insufficient contour points in overlap region")
+                return []
+
+            valid_contour = np.array(valid_contour_points)
+            centroid = np.mean(valid_contour, axis=0)
+
+            # Place joints using the filtered contour
+            positions = self._place_joints_grid(
+                valid_contour, centroid, plane, num_joints
+            )
+
+            # Additional filter: ensure positions are within the overlap region
+            # Use smaller margin - just enough to ensure the pin fits
+            edge_margin = self.pin_config.pin_diameter_mm / 2  # Half pin radius from edge
+
+            # Check if overlap region is large enough for any joints
+            overlap_size = overlap_max - overlap_min
+            min_required = edge_margin * 2 + self.pin_config.pin_diameter_mm
+            if np.any(overlap_size < min_required):
                 LOGGER.debug(
-                    f"Filtering joint position {pos} (2D: {pos_2d}) - outside part_b bounds "
-                    f"[{min_b[0]:.1f},{max_b[0]:.1f}] x [{min_b[1]:.1f},{max_b[1]:.1f}]"
+                    f"Overlap region too small for joints: size={overlap_size}, "
+                    f"min_required={min_required}"
+                )
+                # Still allow placement if the overlap is reasonable
+                edge_margin = max(0, min(edge_margin, (overlap_size.min() - self.pin_config.pin_diameter_mm) / 2))
+
+            final_positions = []
+            for pos in positions:
+                pos_2d = [pos[in_plane_axes[0]], pos[in_plane_axes[1]]]
+                # Check position is within overlap bounds (with reduced margin)
+                if (overlap_min[0] + edge_margin <= pos_2d[0] <= overlap_max[0] - edge_margin and
+                    overlap_min[1] + edge_margin <= pos_2d[1] <= overlap_max[1] - edge_margin):
+                    final_positions.append(pos)
+                else:
+                    LOGGER.debug(
+                        f"Filtering position {pos} - outside overlap [{overlap_min[0]+edge_margin:.1f},"
+                        f"{overlap_max[0]-edge_margin:.1f}] x [{overlap_min[1]+edge_margin:.1f},"
+                        f"{overlap_max[1]-edge_margin:.1f}]"
+                    )
+
+            if len(final_positions) < len(positions):
+                LOGGER.info(
+                    f"Filtered {len(positions) - len(final_positions)} positions "
+                    f"near overlap edges ({len(final_positions)} remaining)"
                 )
 
-        if filtered_count > 0:
-            LOGGER.info(
-                f"Filtered {filtered_count} positions outside part_b extent "
-                f"({len(valid_positions)} remaining)"
-            )
+            return final_positions
 
-        if not valid_positions:
-            LOGGER.warning("No joint positions within intersection of both parts")
-
-        return valid_positions
+        except Exception as e:
+            LOGGER.warning(f"Joint position intersection calculation failed: {e}")
+            return []
 
     def _find_joint_positions(
         self,
@@ -296,14 +348,42 @@ class IntegratedJointFactory(JointFactory):
     def _get_seam_contour(
         self, mesh: MeshWrapper, plane: CuttingPlane
     ) -> np.ndarray:
-        """Get the boundary contour of the seam area."""
+        """Get the boundary contour of the seam area.
+
+        If the plane is exactly at the mesh boundary, offset slightly
+        into the mesh to get a valid section.
+        """
         try:
             tm = mesh.as_trimesh
-            # Slice mesh at plane to get contour
+            plane_origin = np.array(plane.origin)
+            plane_normal = np.array(plane.normal)
+
+            # First try exact plane
             slice_result = tm.section(
-                plane_origin=plane.origin,
-                plane_normal=plane.normal,
+                plane_origin=plane_origin,
+                plane_normal=plane_normal,
             )
+
+            # If section at exact plane fails, the plane may be at the mesh boundary
+            # Try offsetting slightly into the mesh (both directions)
+            if slice_result is None:
+                offset = 0.01  # 0.01mm offset
+
+                # Try offsetting in the negative normal direction
+                origin_neg = plane_origin - offset * plane_normal
+                slice_result = tm.section(
+                    plane_origin=origin_neg,
+                    plane_normal=plane_normal,
+                )
+
+                if slice_result is None:
+                    # Try offsetting in the positive normal direction
+                    origin_pos = plane_origin + offset * plane_normal
+                    slice_result = tm.section(
+                        plane_origin=origin_pos,
+                        plane_normal=plane_normal,
+                    )
+
             if slice_result is None:
                 return np.array([])
 
