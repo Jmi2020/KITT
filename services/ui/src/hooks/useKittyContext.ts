@@ -19,7 +19,7 @@ interface KittyContext {
   conversations: Record<string, ConversationContextState>;
 }
 
-const useKittyContext = (mqttUrl: string = import.meta.env.VITE_MQTT_URL || 'ws://localhost:9001') => {
+const useKittyContext = (mqttUrl: string = import.meta.env.VITE_MQTT_URL || 'ws://localhost:9002') => {
   const [client, setClient] = useState<MqttClient | null>(null);
   const [context, setContext] = useState<KittyContext>({ devices: {}, conversations: {} });
 

@@ -2,14 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import './MeshSegmenter.css';
 
 interface Printer {
-  id: string;
+  printer_id: string;
   name: string;
-  build_volume: {
-    x: number;
-    y: number;
-    z: number;
-  };
-  technology: string;
+  build_volume_mm: [number, number, number];
+  model: string;
 }
 
 interface CheckResult {
@@ -102,7 +98,7 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
           const data = await response.json();
           setPrinters(data);
           if (data.length > 0 && !selectedPrinter) {
-            setSelectedPrinter(data[0].id);
+            setSelectedPrinter(data[0].printer_id);
           }
         }
       } catch (err) {
@@ -200,6 +196,10 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
     return `${dims.x.toFixed(1)} x ${dims.y.toFixed(1)} x ${dims.z.toFixed(1)} mm`;
   };
 
+  const formatTupleDimensions = (dims: [number, number, number]) => {
+    return `${dims[0].toFixed(0)} x ${dims[1].toFixed(0)} x ${dims[2].toFixed(0)} mm`;
+  };
+
   return (
     <div className="mesh-segmenter">
       <div className="segmenter-header">
@@ -226,8 +226,8 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
             <select value={selectedPrinter} onChange={(e) => setSelectedPrinter(e.target.value)}>
               <option value="">Auto-detect</option>
               {printers.map((printer) => (
-                <option key={printer.id} value={printer.id}>
-                  {printer.name} ({formatDimensions(printer.build_volume)})
+                <option key={printer.printer_id} value={printer.printer_id}>
+                  {printer.name} ({formatTupleDimensions(printer.build_volume_mm)})
                 </option>
               ))}
             </select>
