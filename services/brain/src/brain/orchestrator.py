@@ -22,6 +22,7 @@ from .state.mqtt_context_store import MQTTContextStore
 from .conversation.state import ConversationStateManager
 from .conversation.safety import SafetyChecker
 from .agents.graphs.integration import LangGraphRoutingIntegration
+from .agents.parallel.integration import ParallelAgentIntegration, get_parallel_integration
 
 
 logger = logging.getLogger("brain.orchestrator")
@@ -43,6 +44,7 @@ class BrainOrchestrator:
         safety_workflow: Any | None = None,
         memory_client: MemoryClient | None = None,
         langgraph_integration: Optional[LangGraphRoutingIntegration] = None,
+        parallel_integration: Optional[ParallelAgentIntegration] = None,
         state_manager: Any | None = None,
     ) -> None:
         self._context_store = context_store
@@ -52,6 +54,9 @@ class BrainOrchestrator:
         self._memory = memory_client or MemoryClient()
         self._langgraph = langgraph_integration
 
+        # Parallel agent orchestration - use provided or get global singleton
+        self._parallel = parallel_integration or get_parallel_integration()
+
         # Initialize conversation state manager for multi-turn workflows
         # Use provided manager (persistent) or fallback to in-memory
         self._state_manager = state_manager or ConversationStateManager()
@@ -59,7 +64,13 @@ class BrainOrchestrator:
         # Initialize safety checker for confirmation phrase verification
         self._safety_checker = SafetyChecker()
 
-        if self._langgraph and self._langgraph.enabled:
+        # Log initialization status
+        if self._parallel and self._parallel.enabled:
+            logger.info(
+                f"BrainOrchestrator initialized with parallel agent orchestration "
+                f"(rollout: {self._parallel.rollout_percent}%, threshold: {self._parallel.complexity_threshold})"
+            )
+        elif self._langgraph and self._langgraph.enabled:
             logger.info(
                 f"BrainOrchestrator initialized with LangGraph routing "
                 f"(rollout: {self._langgraph.rollout_percent}%)"
@@ -243,8 +254,42 @@ class BrainOrchestrator:
             vision_targets=vision_plan.targets if vision_plan.should_suggest else None,
         )
 
+        # Check if parallel agent orchestration should be used (complex multi-step goals)
+        if self._parallel and await self._parallel.should_use_parallel(
+            enriched_prompt, conversation_id
+        ):
+            logger.info("Using parallel agent orchestration for this request")
+            try:
+                parallel_result = await self._parallel.execute_parallel(
+                    goal=enriched_prompt,
+                    context={
+                        "conversation_id": conversation_id,
+                        "user_id": user_id,
+                        "request_id": request_id,
+                    },
+                    include_voice_summary=True,
+                )
+                # Convert parallel result to RoutingResult
+                result = RoutingResult(
+                    output=parallel_result.response,
+                    confidence=parallel_result.metrics.get("confidence", 0.9),
+                    tier=RoutingTier.local,  # Parallel uses local models
+                    request_id=request_id,
+                    conversation_id=conversation_id,
+                    cost_usd=parallel_result.metrics.get("total_cost_usd", 0.0),
+                    latency_ms=parallel_result.metrics.get("total_latency_ms", 0),
+                    voice_summary=parallel_result.voice_summary,
+                    metadata={
+                        "parallel_execution": True,
+                        "tasks_count": len(parallel_result.tasks),
+                        "parallel_metrics": parallel_result.metrics,
+                    },
+                )
+            except Exception as exc:
+                logger.error(f"Parallel execution failed, falling back to traditional: {exc}")
+                result = await self._router.route(routing_request)
         # Check if LangGraph routing should be used
-        if self._langgraph and await self._langgraph.should_use_langgraph(routing_request):
+        elif self._langgraph and await self._langgraph.should_use_langgraph(routing_request):
             logger.info("Using LangGraph routing for this request")
             try:
                 result = await self._langgraph.route_with_langgraph(routing_request)

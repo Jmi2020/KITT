@@ -40,11 +40,12 @@ success() {
 # ========================================
 
 # Q4 Server (Quality-First Tool Orchestrator - 128k context)
+# NOTE: Increased parallelism from 1 to 6 for parallel agent orchestration
 Q4_MODEL="${LLAMACPP_Q4_MODEL:-athene-v2-agent/Athene-V2-Agent-Q4_K_M.gguf}"
 Q4_PORT="${LLAMACPP_Q4_PORT:-8083}"
 Q4_ALIAS="${LLAMACPP_Q4_ALIAS:-kitty-q4}"
 Q4_CTX_SIZE="${LLAMACPP_Q4_CTX:-131072}"
-Q4_N_PARALLEL="${LLAMACPP_Q4_PARALLEL:-1}"
+Q4_N_PARALLEL="${LLAMACPP_Q4_PARALLEL:-6}"
 Q4_LOG="$LOG_DIR/llamacpp-q4.log"
 Q4_PID="$LOG_DIR/llamacpp-q4.pid"
 
@@ -75,6 +76,17 @@ VISION_PORT="${LLAMACPP_VISION_PORT:-8085}"
 VISION_ALIAS="${LLAMACPP_VISION_ALIAS:-kitty-vision}"
 VISION_LOG="$LOG_DIR/llamacpp-vision.log"
 VISION_PID="$LOG_DIR/llamacpp-vision.pid"
+
+# Coder Server (Code Generation - Qwen 32B)
+# Added for parallel agent orchestration
+CODER_ENABLED="${LLAMACPP_CODER_ENABLED:-true}"
+CODER_MODEL="${LLAMACPP_CODER_MODEL:-Qwen2.5-Coder-32B-Instruct-GGUF/qwen2.5-coder-32b-instruct-q8_0.gguf}"
+CODER_PORT="${LLAMACPP_CODER_PORT:-8087}"
+CODER_ALIAS="${LLAMACPP_CODER_ALIAS:-kitty-coder}"
+CODER_CTX_SIZE="${LLAMACPP_CODER_CTX:-32768}"
+CODER_N_PARALLEL="${LLAMACPP_CODER_PARALLEL:-4}"
+CODER_LOG="$LOG_DIR/llamacpp-coder.log"
+CODER_PID="$LOG_DIR/llamacpp-coder.pid"
 
 # Model base directory
 MODEL_BASE="${MODEL_BASE:-/Users/Shared/Coding/models}"
@@ -196,6 +208,35 @@ else
     echo $! > "$VISION_PID"
     success "Vision server starting (PID $(cat $VISION_PID))"
     log "  Logs: $VISION_LOG"
+fi
+
+# Coder Server (for parallel agent orchestration)
+if [ "$CODER_ENABLED" == "true" ]; then
+    if check_running $CODER_PORT; then
+        log "Coder server already running on port $CODER_PORT"
+    else
+        log "Starting Coder server (Qwen 32B) on port $CODER_PORT"
+
+        llama-server \
+            --model "$MODEL_BASE/$CODER_MODEL" \
+            --host 0.0.0.0 \
+            --port $CODER_PORT \
+            --n-gpu-layers 999 \
+            --ctx-size $CODER_CTX_SIZE \
+            -np $CODER_N_PARALLEL \
+            --batch-size 2048 \
+            --threads 8 \
+            --alias "$CODER_ALIAS" \
+            --jinja \
+            --flash-attn on \
+            > "$CODER_LOG" 2>&1 &
+
+        echo $! > "$CODER_PID"
+        success "Coder server starting (PID $(cat $CODER_PID))"
+        log "  Logs: $CODER_LOG"
+    fi
+else
+    log "Coder server disabled (LLAMACPP_CODER_ENABLED=false)"
 fi
 
 echo ""

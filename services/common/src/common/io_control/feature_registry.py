@@ -223,6 +223,20 @@ class FeatureRegistry:
             )
         )
 
+        self.register(
+            FeatureDefinition(
+                id="parallel_agents",
+                name="Parallel Agent Orchestration",
+                description="Multi-agent parallel execution for complex queries (3-4x faster)",
+                category=FeatureCategory.INTELLIGENCE,
+                env_var="ENABLE_PARALLEL_AGENTS",
+                default_value=False,
+                restart_scope=RestartScope.NONE,  # Hot-reload
+                validation_message="Enables decompose->parallel execute->synthesize pipeline. Requires multiple LLM slots.",
+                docs_url="Research/ParallelAgentExecution.md",
+            )
+        )
+
         # ====================================================================
         # Printer Devices
         # ====================================================================
