@@ -92,6 +92,14 @@ class SegmentationConfig:
     # 30° = strict (cleaner surfaces), 45° = standard FDM threshold
     overhang_threshold_deg: float = 30.0
 
+    # Oblique cutting planes (Phase 1C)
+    # When enabled, uses PCA to find mesh principal axes and generates
+    # oblique cuts perpendicular to those axes. Only used as fallback
+    # when axis-aligned cuts score poorly.
+    enable_oblique_cuts: bool = False
+    # Minimum score threshold - only try oblique cuts if best axis-aligned score is below this
+    oblique_fallback_threshold: float = 0.5
+
     # Output
     output_dir: Optional[str] = None
 

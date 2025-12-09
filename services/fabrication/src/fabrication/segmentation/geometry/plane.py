@@ -99,6 +99,94 @@ class CuttingPlane:
         """Create a horizontal plane perpendicular to Z axis."""
         return cls.from_axis(axis=2, position=z_position)
 
+    @classmethod
+    def from_normal(
+        cls,
+        normal: Tuple[float, float, float],
+        origin: Tuple[float, float, float],
+    ) -> "CuttingPlane":
+        """
+        Create an oblique cutting plane from arbitrary normal and origin.
+
+        Args:
+            normal: Normal vector (will be normalized)
+            origin: Point on the plane
+
+        Returns:
+            CuttingPlane with specified normal and origin
+        """
+        return cls(
+            origin=origin,
+            normal=normal,
+            plane_type="oblique",
+        )
+
+    @classmethod
+    def from_spherical(
+        cls,
+        theta: float,
+        phi: float,
+        origin: Tuple[float, float, float],
+    ) -> "CuttingPlane":
+        """
+        Create an oblique cutting plane from spherical coordinates.
+
+        This allows specifying plane orientation using angles:
+        - theta: Azimuthal angle in XY plane from +X axis (0 to 2π)
+        - phi: Polar angle from +Z axis (0 to π)
+
+        Args:
+            theta: Azimuthal angle in radians (rotation around Z)
+            phi: Polar angle in radians (tilt from Z axis)
+            origin: Point on the plane
+
+        Returns:
+            CuttingPlane with normal direction specified by angles
+        """
+        # Convert spherical to Cartesian for normal vector
+        # Standard physics convention: theta=azimuth, phi=polar
+        sin_phi = np.sin(phi)
+        normal = (
+            float(sin_phi * np.cos(theta)),
+            float(sin_phi * np.sin(theta)),
+            float(np.cos(phi)),
+        )
+        return cls(
+            origin=origin,
+            normal=normal,
+            plane_type="oblique",
+        )
+
+    @classmethod
+    def from_principal_axis(
+        cls,
+        axis_vector: np.ndarray,
+        origin: Tuple[float, float, float],
+    ) -> "CuttingPlane":
+        """
+        Create a cutting plane perpendicular to a principal axis.
+
+        Used for PCA-based oblique cuts where we cut perpendicular
+        to mesh principal directions.
+
+        Args:
+            axis_vector: Principal axis direction (will be normalized)
+            origin: Point on the plane
+
+        Returns:
+            CuttingPlane perpendicular to the axis
+        """
+        axis = np.array(axis_vector)
+        length = np.linalg.norm(axis)
+        if length > 0:
+            axis = axis / length
+        normal = tuple(float(x) for x in axis)
+        return cls(
+            origin=origin,
+            normal=normal,
+            plane_type="oblique",
+        )
+
     def point_side(self, point: Tuple[float, float, float]) -> int:
         """
         Determine which side of the plane a point is on.

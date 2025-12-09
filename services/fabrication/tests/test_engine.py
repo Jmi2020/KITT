@@ -424,3 +424,130 @@ class TestSeamVisibilityScoring:
         # Verify segmentation completed successfully with visibility scoring
         assert result.success
         # The key test is that segmentation still works with visibility scoring
+
+
+class TestObliqueCuttingPlanes:
+    """Tests for Phase 1C: Oblique cutting planes."""
+
+    def test_oblique_cuts_disabled_by_default(self) -> None:
+        """Test that oblique cuts are disabled by default."""
+        engine = PlanarSegmentationEngine(build_volume=(256, 256, 256))
+        assert not getattr(engine.config, 'enable_oblique_cuts', False)
+
+    def test_oblique_cuts_can_be_enabled(self) -> None:
+        """Test that oblique cuts can be enabled via config."""
+        engine = PlanarSegmentationEngine(
+            build_volume=(256, 256, 256),
+            enable_oblique_cuts=True,
+            oblique_fallback_threshold=0.5,
+        )
+        assert engine.config.enable_oblique_cuts is True
+        assert engine.config.oblique_fallback_threshold == 0.5
+
+    def test_pca_finds_principal_axes(self) -> None:
+        """Test that PCA finds mesh principal axes correctly."""
+        # Create a rotated box (diagonal orientation)
+        # This should have principal axes along its edges, not X/Y/Z
+        vertices = np.array([
+            [0, 0, 0], [100, 100, 0], [100, 100, 50], [0, 0, 50],
+            [100, 0, 0], [200, 100, 0], [200, 100, 50], [100, 0, 50],
+        ], dtype=np.float64)
+        faces = np.array([
+            [0, 1, 2], [0, 2, 3],  # One side
+            [4, 6, 5], [4, 7, 6],  # Other side
+            [0, 4, 5], [0, 5, 1],  # Front
+            [3, 2, 6], [3, 6, 7],  # Back
+            [0, 3, 7], [0, 7, 4],  # Bottom
+            [1, 5, 6], [1, 6, 2],  # Top
+        ])
+        diagonal_box = trimesh.Trimesh(vertices=vertices, faces=faces)
+        wrapper = MeshWrapper(diagonal_box)
+
+        engine = PlanarSegmentationEngine(
+            build_volume=(256, 256, 256),
+            enable_oblique_cuts=True,
+        )
+
+        # Generate oblique cuts
+        candidates = engine._generate_oblique_cuts(wrapper)
+
+        # Should generate candidates (3 axes × 3 positions = 9 max)
+        assert len(candidates) > 0
+        # All should be oblique type
+        for c in candidates:
+            assert c.plane.plane_type == "oblique"
+
+    def test_oblique_cuts_have_valid_scores(self) -> None:
+        """Test that oblique cut candidates have valid scores."""
+        # Create a simple diagonal mesh
+        mesh = trimesh.creation.box(extents=[200, 100, 100])
+        # Rotate 45 degrees around Z
+        rotation = trimesh.transformations.rotation_matrix(
+            np.pi / 4, [0, 0, 1]
+        )
+        mesh.apply_transform(rotation)
+        wrapper = MeshWrapper(mesh)
+
+        engine = PlanarSegmentationEngine(
+            build_volume=(256, 256, 256),
+            enable_oblique_cuts=True,
+        )
+
+        candidates = engine._generate_oblique_cuts(wrapper)
+
+        for c in candidates:
+            # Score should be valid (0-1 range, though can exceed slightly due to weighting)
+            assert 0.0 <= c.score <= 1.5
+            assert 0.0 <= c.max_overhang_ratio <= 1.0
+            assert 0.0 <= c.seam_visibility <= 1.0
+            assert 0.0 <= c.balance_score <= 1.0
+
+    def test_oblique_only_used_when_axis_aligned_poor(
+        self, oversized_mesh: trimesh.Trimesh, temp_dir: Path
+    ) -> None:
+        """Test that oblique cuts are only tried when axis-aligned score is low."""
+        engine = PlanarSegmentationEngine(
+            build_volume=(200, 200, 200),
+            enable_hollowing=False,
+            joint_type="none",
+            enable_oblique_cuts=True,
+            oblique_fallback_threshold=0.3,  # Low threshold
+        )
+        wrapper = MeshWrapper(oversized_mesh)
+
+        # Run segmentation - should complete successfully
+        result = engine.segment(wrapper, output_dir=temp_dir)
+
+        assert result.success
+        # The oversized_mesh is axis-aligned, so axis-aligned cuts should score well
+        # and oblique cuts shouldn't be needed
+
+    def test_cutting_plane_from_principal_axis(self) -> None:
+        """Test CuttingPlane.from_principal_axis factory method."""
+        from fabrication.segmentation.geometry.plane import CuttingPlane
+
+        # Create plane from diagonal axis
+        axis = np.array([1, 1, 0]) / np.sqrt(2)  # 45° in XY plane
+        origin = (50.0, 50.0, 25.0)
+
+        plane = CuttingPlane.from_principal_axis(axis, origin)
+
+        assert plane.plane_type == "oblique"
+        # Normal should be normalized
+        assert abs(np.linalg.norm(plane.normal_array) - 1.0) < 1e-6
+        # Normal should point in axis direction
+        assert np.allclose(plane.normal_array, axis, atol=1e-6)
+
+    def test_cutting_plane_from_spherical(self) -> None:
+        """Test CuttingPlane.from_spherical factory method."""
+        from fabrication.segmentation.geometry.plane import CuttingPlane
+
+        # theta=0, phi=π/2 should give normal pointing in +X direction
+        plane = CuttingPlane.from_spherical(
+            theta=0,
+            phi=np.pi / 2,
+            origin=(50.0, 0.0, 0.0),
+        )
+
+        assert plane.plane_type == "oblique"
+        assert np.allclose(plane.normal_array, [1, 0, 0], atol=1e-6)

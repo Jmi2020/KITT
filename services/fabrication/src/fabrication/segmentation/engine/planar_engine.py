@@ -236,11 +236,16 @@ class PlanarSegmentationEngine(SegmentationEngine):
         self, mesh: MeshWrapper, state: SegmentationState
     ) -> Optional[CutCandidate]:
         """
-        Find best axis-aligned cut for a mesh.
+        Find best cut for a mesh, trying axis-aligned first then oblique if enabled.
 
         Evaluates cuts along each axis and selects based on:
         - Balance: Even volume distribution between halves
         - Fit: Both halves should fit or be closer to fitting
+        - Overhang: Minimize overhangs in resulting parts
+        - Visibility: Prefer cuts on less visible surfaces
+
+        If enable_oblique_cuts is True and axis-aligned cuts score poorly,
+        also tries PCA-based oblique cuts as a fallback.
         """
         bbox = mesh.bounding_box
         dims = bbox.dimensions
@@ -265,8 +270,27 @@ class PlanarSegmentationEngine(SegmentationEngine):
         if not candidates:
             return None
 
-        # Score and select best candidate
+        # Find best axis-aligned candidate
         best = max(candidates, key=lambda c: c.score)
+
+        # Phase 1C: Try oblique cuts if enabled and axis-aligned score is poor
+        enable_oblique = getattr(self.config, 'enable_oblique_cuts', False)
+        oblique_threshold = getattr(self.config, 'oblique_fallback_threshold', 0.5)
+
+        if enable_oblique and best.score < oblique_threshold:
+            LOGGER.info(
+                f"Axis-aligned best score {best.score:.2f} < threshold {oblique_threshold}, "
+                "trying oblique cuts"
+            )
+            oblique_candidates = self._generate_oblique_cuts(mesh)
+            if oblique_candidates:
+                best_oblique = max(oblique_candidates, key=lambda c: c.score)
+                if best_oblique.score > best.score:
+                    LOGGER.info(
+                        f"Oblique cut scores better: {best_oblique.score:.2f} > {best.score:.2f}"
+                    )
+                    best = best_oblique
+
         return best
 
     def _generate_axis_cuts(
@@ -390,6 +414,133 @@ class PlanarSegmentationEngine(SegmentationEngine):
                     balance_score=balance,
                 )
             )
+
+        return candidates
+
+    def _generate_oblique_cuts(
+        self, mesh: MeshWrapper
+    ) -> List[CutCandidate]:
+        """
+        Generate oblique (non-axis-aligned) cutting plane candidates using PCA.
+
+        This method uses Principal Component Analysis to find the mesh's
+        natural orientation axes and generates cuts perpendicular to those axes.
+        Useful for diagonal or rotated meshes where axis-aligned cuts are suboptimal.
+
+        Returns:
+            List of CutCandidate with oblique planes
+        """
+        candidates = []
+
+        try:
+            # Get mesh vertices for PCA
+            vertices = mesh.vertices
+            if len(vertices) < 4:
+                return candidates
+
+            # Center vertices
+            centroid = np.mean(vertices, axis=0)
+            centered = vertices - centroid
+
+            # Compute covariance matrix and eigenvectors (PCA)
+            cov = np.cov(centered.T)
+            eigenvalues, eigenvectors = np.linalg.eigh(cov)
+
+            # Sort by eigenvalue (largest = most variance = longest axis)
+            order = np.argsort(eigenvalues)[::-1]
+            principal_axes = eigenvectors[:, order].T  # Each row is an axis
+
+            bbox = mesh.bounding_box
+
+            # Generate cuts perpendicular to each principal axis
+            for i, axis_vec in enumerate(principal_axes):
+                # Normalize axis
+                axis_vec = axis_vec / np.linalg.norm(axis_vec)
+
+                # Project mesh extent onto this axis to find range
+                projections = np.dot(centered, axis_vec)
+                min_proj = np.min(projections)
+                max_proj = np.max(projections)
+                axis_length = max_proj - min_proj
+
+                if axis_length < 1.0:  # Skip degenerate axes
+                    continue
+
+                # Generate cut positions along this axis (similar to axis-aligned)
+                # Use fewer positions for oblique cuts to limit computation
+                cut_offsets = [-0.3, 0.0, 0.3]  # Relative to center
+
+                for offset in cut_offsets:
+                    # Position along the principal axis
+                    pos_along_axis = offset * axis_length / 2
+                    cut_point = centroid + axis_vec * pos_along_axis
+
+                    # Create plane perpendicular to this axis
+                    plane = CuttingPlane.from_principal_axis(
+                        axis_vec, tuple(float(x) for x in cut_point)
+                    )
+
+                    # Estimate resulting part sizes (approximate)
+                    size_before = (0.5 + offset) * axis_length
+                    size_after = (0.5 - offset) * axis_length
+
+                    # Build volume check (use diagonal as conservative estimate)
+                    build_diagonal = np.sqrt(sum(d**2 for d in self.build_volume))
+                    build_limit = min(self.build_volume)  # Conservative
+
+                    # === FIT SCORE ===
+                    fits_before = 1.0 if size_before <= build_limit else build_limit / size_before
+                    fits_after = 1.0 if size_after <= build_limit else build_limit / size_after
+                    fit_score = (fits_before + fits_after) / 2
+
+                    # === UTILIZATION SCORE ===
+                    optimal_size = build_limit * 0.9
+                    util_before = max(0, 1.0 - abs(size_before - optimal_size) / build_limit)
+                    util_after = max(0, 1.0 - abs(size_after - optimal_size) / build_limit)
+                    utilization_score = (util_before + util_after) / 2
+
+                    # === BALANCE SCORE ===
+                    balance = 1.0 - abs(size_before - size_after) / axis_length if axis_length > 0 else 0.5
+
+                    # === OVERHANG SCORE ===
+                    overhang_threshold = getattr(self.config, 'overhang_threshold_deg', 30.0)
+                    overhang_positive = self.estimate_part_overhangs(
+                        mesh, plane, "positive", overhang_threshold
+                    )
+                    overhang_negative = self.estimate_part_overhangs(
+                        mesh, plane, "negative", overhang_threshold
+                    )
+                    max_overhang = max(overhang_positive, overhang_negative)
+                    overhang_score = 1.0 - max_overhang
+
+                    # === VISIBILITY SCORE ===
+                    visibility_score = self.calculate_seam_visibility(mesh, plane)
+
+                    # === COMBINED SCORE ===
+                    # Same weights as axis-aligned cuts
+                    score = (
+                        fit_score * 0.35
+                        + utilization_score * 0.20
+                        + balance * 0.10
+                        + overhang_score * 0.20
+                        + visibility_score * 0.15
+                    )
+
+                    candidates.append(
+                        CutCandidate(
+                            plane=plane,
+                            score=score,
+                            resulting_parts=2,
+                            max_overhang_ratio=max_overhang,
+                            seam_visibility=visibility_score,
+                            balance_score=balance,
+                        )
+                    )
+
+            LOGGER.debug(f"Generated {len(candidates)} oblique cut candidates")
+
+        except Exception as e:
+            LOGGER.warning(f"Oblique cut generation failed: {e}")
 
         return candidates
 
