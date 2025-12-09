@@ -330,6 +330,92 @@ class SegmentationEngine(ABC):
             LOGGER.debug(f"Overhang estimation failed: {e}")
             return 0.0
 
+    def calculate_seam_visibility(
+        self,
+        mesh: MeshWrapper,
+        plane: CuttingPlane,
+    ) -> float:
+        """
+        Calculate seam visibility score for a cutting plane.
+
+        Returns a score from 0.0 (most visible) to 1.0 (least visible/hidden).
+
+        Visibility heuristics:
+        - Bottom cuts (low Z): Most hidden (score ~0.9)
+        - Back cuts (low Y): Moderately hidden (score ~0.7)
+        - Side cuts (low/high X): Moderately visible (score ~0.5)
+        - Top cuts (high Z): Visible (score ~0.3)
+        - Front cuts (high Y): Most visible (score ~0.2)
+
+        The score considers:
+        1. Cut axis (Z cuts at bottom preferred, Y cuts at back preferred)
+        2. Cut position relative to model bounds (lower = more hidden)
+
+        Args:
+            mesh: Mesh being cut
+            plane: Proposed cutting plane
+
+        Returns:
+            Visibility score 0.0-1.0 (higher = less visible = better)
+        """
+        import numpy as np
+
+        try:
+            bbox = mesh.bounding_box
+            normal = np.array(plane.normal)
+            origin = np.array(plane.origin)
+
+            # Determine which axis this is (dominant normal component)
+            axis = int(np.argmax(np.abs(normal)))
+
+            # Get position as fraction of mesh extent along this axis
+            if axis == 0:  # X-axis cut
+                min_val, max_val = bbox.min_x, bbox.max_x
+                position = origin[0]
+            elif axis == 1:  # Y-axis cut
+                min_val, max_val = bbox.min_y, bbox.max_y
+                position = origin[1]
+            else:  # Z-axis cut (axis == 2)
+                min_val, max_val = bbox.min_z, bbox.max_z
+                position = origin[2]
+
+            extent = max_val - min_val
+            if extent <= 0:
+                return 0.5  # Default for degenerate case
+
+            # Normalized position: 0.0 = at min, 1.0 = at max
+            norm_position = (position - min_val) / extent
+            norm_position = max(0.0, min(1.0, norm_position))
+
+            # Visibility scoring by axis and position:
+            # - Z-axis: Lower Z is better (bottom = hidden)
+            # - Y-axis: Lower Y is better (back = hidden, assuming +Y = front)
+            # - X-axis: Either side is moderately visible
+
+            if axis == 2:  # Z-axis (horizontal cuts)
+                # Bottom cuts (low Z) are best hidden
+                # At min_z: visibility = 0.9 (very hidden)
+                # At max_z: visibility = 0.2 (very visible - top)
+                visibility = 0.9 - norm_position * 0.7
+            elif axis == 1:  # Y-axis (front/back cuts)
+                # Back cuts (low Y) are more hidden
+                # At min_y: visibility = 0.8 (back, hidden)
+                # At max_y: visibility = 0.2 (front, visible)
+                visibility = 0.8 - norm_position * 0.6
+            else:  # X-axis (side cuts)
+                # Side cuts are moderately visible
+                # Prefer cuts closer to edges (more hidden in profile view)
+                center_distance = abs(norm_position - 0.5)
+                # At edges (0.0 or 1.0): visibility = 0.6
+                # At center (0.5): visibility = 0.4
+                visibility = 0.4 + center_distance * 0.4
+
+            return float(visibility)
+
+        except Exception as e:
+            LOGGER.debug(f"Seam visibility calculation failed: {e}")
+            return 0.5  # Default middle score
+
     def validate_result(self, result: SegmentationResult) -> SegmentationResult:
         """Validate segmentation result and add warnings if needed."""
         warnings = []

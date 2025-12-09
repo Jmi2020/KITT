@@ -199,6 +199,14 @@ class SegmentMeshRequest(BaseModel):
         description="Custom build volume (X, Y, Z in mm). Overrides printer_id if provided.",
         examples=[(300.0, 300.0, 400.0)],
     )
+    overhang_threshold_deg: float = Field(
+        default=30.0,
+        description="Overhang angle threshold (degrees from vertical). "
+        "Faces steeper than this are considered overhangs. "
+        "30° = strict (cleaner surfaces), 45° = standard FDM threshold.",
+        ge=15.0,
+        le=60.0,
+    )
 
 
 # Backwards compatibility alias

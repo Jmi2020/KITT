@@ -273,13 +273,14 @@ class PlanarSegmentationEngine(SegmentationEngine):
         self, mesh: MeshWrapper, axis: int
     ) -> List[CutCandidate]:
         """
-        Generate candidate cuts along an axis with overhang-aware scoring.
+        Generate candidate cuts along an axis with overhang and visibility scoring.
 
-        Scoring formula (Phase 1A):
-        - fit_score * 0.40: Parts must fit in build volume
-        - utilization_score * 0.25: Efficient use of build volume
-        - balance * 0.15: Even volume distribution
+        Scoring formula (Phase 1B):
+        - fit_score * 0.35: Parts must fit in build volume
+        - utilization_score * 0.20: Efficient use of build volume
+        - balance * 0.10: Even volume distribution
         - overhang_score * 0.20: Minimize overhangs in resulting parts
+        - visibility_score * 0.15: Prefer cuts on less visible surfaces
         """
         candidates = []
         bbox = mesh.bounding_box
@@ -364,13 +365,19 @@ class PlanarSegmentationEngine(SegmentationEngine):
             # Convert ratio to score: 0.0 overhang = 1.0 score, 1.0 overhang = 0.0 score
             overhang_score = 1.0 - max_overhang
 
+            # === VISIBILITY SCORE (Phase 1B) ===
+            # Prefer cuts on less visible surfaces (bottom, back)
+            # Higher score = less visible = better
+            visibility_score = self.calculate_seam_visibility(mesh, plane)
+
             # === COMBINED SCORE ===
-            # Weights: fit=0.40, utilization=0.25, balance=0.15, overhang=0.20
+            # Weights: fit=0.35, utilization=0.20, balance=0.10, overhang=0.20, visibility=0.15
             score = (
-                fit_score * 0.40
-                + utilization_score * 0.25
-                + balance * 0.15
+                fit_score * 0.35
+                + utilization_score * 0.20
+                + balance * 0.10
                 + overhang_score * 0.20
+                + visibility_score * 0.15
             )
 
             candidates.append(
@@ -379,6 +386,7 @@ class PlanarSegmentationEngine(SegmentationEngine):
                     score=score,
                     resulting_parts=2,
                     max_overhang_ratio=max_overhang,
+                    seam_visibility=visibility_score,
                     balance_score=balance,
                 )
             )

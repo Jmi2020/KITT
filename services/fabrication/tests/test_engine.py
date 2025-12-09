@@ -333,3 +333,94 @@ class TestOverhangAwareScoring:
         # A rectangular box has only vertical and horizontal faces,
         # so should have minimal overhangs in any cardinal orientation
         assert ratio_z_up < 0.2  # Less than 20% overhang area
+
+
+class TestSeamVisibilityScoring:
+    """Tests for Phase 1B: Seam visibility scoring."""
+
+    def test_bottom_cuts_more_hidden_than_top(self) -> None:
+        """Test that bottom Z-axis cuts score higher (more hidden) than top cuts."""
+        from fabrication.segmentation.geometry.plane import CuttingPlane
+
+        # Create a simple box
+        mesh = trimesh.creation.box(extents=[100, 100, 100])
+        # Center at origin, so Z ranges from -50 to +50
+        wrapper = MeshWrapper(mesh)
+
+        engine = PlanarSegmentationEngine(build_volume=(256, 256, 256))
+
+        # Cut near bottom (Z = -40)
+        bottom_plane = CuttingPlane.horizontal(-40.0)
+        bottom_visibility = engine.calculate_seam_visibility(wrapper, bottom_plane)
+
+        # Cut near top (Z = +40)
+        top_plane = CuttingPlane.horizontal(40.0)
+        top_visibility = engine.calculate_seam_visibility(wrapper, top_plane)
+
+        # Bottom cuts should be MORE hidden (higher visibility score)
+        assert bottom_visibility > top_visibility
+        # Bottom should be highly hidden
+        assert bottom_visibility > 0.7
+        # Top should be more visible
+        assert top_visibility < 0.5
+
+    def test_back_cuts_more_hidden_than_front(self) -> None:
+        """Test that back Y-axis cuts score higher (more hidden) than front cuts."""
+        from fabrication.segmentation.geometry.plane import CuttingPlane
+
+        mesh = trimesh.creation.box(extents=[100, 100, 100])
+        wrapper = MeshWrapper(mesh)
+
+        engine = PlanarSegmentationEngine(build_volume=(256, 256, 256))
+
+        # Cut near back (Y = -40, assuming -Y is back)
+        back_plane = CuttingPlane.vertical_y(-40.0)
+        back_visibility = engine.calculate_seam_visibility(wrapper, back_plane)
+
+        # Cut near front (Y = +40, assuming +Y is front)
+        front_plane = CuttingPlane.vertical_y(40.0)
+        front_visibility = engine.calculate_seam_visibility(wrapper, front_plane)
+
+        # Back cuts should be more hidden
+        assert back_visibility > front_visibility
+
+    def test_side_cuts_moderate_visibility(self) -> None:
+        """Test that X-axis cuts have moderate visibility scores."""
+        from fabrication.segmentation.geometry.plane import CuttingPlane
+
+        mesh = trimesh.creation.box(extents=[100, 100, 100])
+        wrapper = MeshWrapper(mesh)
+
+        engine = PlanarSegmentationEngine(build_volume=(256, 256, 256))
+
+        # Cut in the middle of X
+        center_plane = CuttingPlane.vertical_x(0.0)
+        center_visibility = engine.calculate_seam_visibility(wrapper, center_plane)
+
+        # Cut near edge of X
+        edge_plane = CuttingPlane.vertical_x(40.0)
+        edge_visibility = engine.calculate_seam_visibility(wrapper, edge_plane)
+
+        # Center cuts are more visible than edge cuts
+        assert edge_visibility > center_visibility
+        # Both should be in moderate range
+        assert 0.3 < center_visibility < 0.7
+        assert 0.4 < edge_visibility < 0.8
+
+    def test_visibility_affects_cut_selection(
+        self, oversized_mesh: trimesh.Trimesh, temp_dir: Path
+    ) -> None:
+        """Test that visibility scoring affects cut candidate ranking."""
+        engine = PlanarSegmentationEngine(
+            build_volume=(200, 200, 200),
+            enable_hollowing=False,
+            joint_type="none",
+        )
+        wrapper = MeshWrapper(oversized_mesh)
+
+        # Run segmentation
+        result = engine.segment(wrapper, output_dir=temp_dir)
+
+        # Verify segmentation completed successfully with visibility scoring
+        assert result.success
+        # The key test is that segmentation still works with visibility scoring

@@ -120,6 +120,7 @@ async def segment_mesh(request: SegmentMeshRequest) -> SegmentMeshResponse:
             max_parts=request.max_parts,
             pin_diameter_mm=request.pin_diameter_mm,
             pin_height_mm=request.pin_height_mm,
+            overhang_threshold_deg=request.overhang_threshold_deg,
         )
 
         # Get output directory for exported parts

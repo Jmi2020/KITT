@@ -1725,6 +1725,7 @@ def _run_split_command(
     wall_thickness: Optional[float] = None,
     max_parts: Optional[int] = None,
     enable_hollowing: Optional[bool] = None,
+    overhang_threshold_deg: Optional[float] = None,
     interactive: bool = True,
 ) -> None:
     """Segment a mesh for multi-part 3D printing.
@@ -1737,6 +1738,7 @@ def _run_split_command(
         wall_thickness: Wall thickness in mm (default: 10.0)
         max_parts: Max parts to generate (0 = auto)
         enable_hollowing: Enable hollowing (default: True)
+        overhang_threshold_deg: Overhang angle threshold (default: 30.0)
         interactive: Prompt for confirmation and options
     """
     from pathlib import Path
@@ -1803,6 +1805,7 @@ def _run_split_command(
     final_wall_thickness = wall_thickness if wall_thickness is not None else 10.0
     final_max_parts = max_parts if max_parts is not None else 0  # 0 = auto
     final_enable_hollowing = enable_hollowing if enable_hollowing is not None else True
+    final_overhang_threshold = overhang_threshold_deg if overhang_threshold_deg is not None else 30.0
     final_joint_type = joint_type
     final_quality = quality
 
@@ -1915,6 +1918,7 @@ def _run_split_command(
         "max_parts": final_max_parts,
         "joint_type": final_joint_type,
         "hollowing_resolution": hollowing_resolution,
+        "overhang_threshold_deg": final_overhang_threshold,
     }
     if selected_printer_id:
         segment_payload["printer_id"] = selected_printer_id
@@ -2425,6 +2429,12 @@ def segment(
     no_hollowing: bool = typer.Option(
         False, "--no-hollowing", help="Disable mesh hollowing"
     ),
+    overhang_threshold: float = typer.Option(
+        30.0,
+        "--overhang-threshold",
+        "-o",
+        help="Overhang angle threshold in degrees (30=strict, 45=standard FDM)",
+    ),
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Skip confirmation prompts"
     ),
@@ -2457,6 +2467,7 @@ def segment(
         wall_thickness=wall_thickness,
         max_parts=max_parts,
         enable_hollowing=not no_hollowing,
+        overhang_threshold_deg=overhang_threshold,
         interactive=not yes,
     )
 
