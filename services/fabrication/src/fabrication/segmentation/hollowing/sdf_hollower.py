@@ -135,7 +135,8 @@ class SdfHollower:
         Creates an inner offset surface by moving vertices along normals,
         then uses boolean subtraction to create a shell.
 
-        This preserves all original surface detail/texture.
+        This preserves all original surface detail/texture on the outside,
+        while aggressively simplifying the inner surface (not visible).
         """
         try:
             import manifold3d as m3d
@@ -154,6 +155,22 @@ class SdfHollower:
 
             # Create inner surface by offsetting vertices inward
             inner_vertices = tm.vertices - vertex_normals * wall_thickness
+            inner_tm = trimesh.Trimesh(vertices=inner_vertices, faces=tm.faces.copy())
+
+            # Aggressively simplify inner mesh - no one sees the inside!
+            # Target 10% of original faces for inner surface
+            inner_target_faces = max(1000, len(tm.faces) // 10)
+            original_inner_faces = len(inner_tm.faces)
+
+            try:
+                inner_tm = inner_tm.simplify_quadric_decimation(face_count=inner_target_faces)
+                LOGGER.info(
+                    f"Simplified inner surface: {original_inner_faces:,} -> {len(inner_tm.faces):,} faces "
+                    f"({len(inner_tm.faces)/original_inner_faces*100:.1f}%)"
+                )
+            except Exception as e:
+                LOGGER.warning(f"Inner surface simplification failed: {e}, using full resolution")
+                inner_tm = trimesh.Trimesh(vertices=inner_vertices, faces=tm.faces.copy())
 
             # Convert both to manifold3d
             outer_mesh = m3d.Mesh(
@@ -163,8 +180,8 @@ class SdfHollower:
             outer_manifold = m3d.Manifold(outer_mesh)
 
             inner_mesh = m3d.Mesh(
-                vert_properties=inner_vertices.astype(np.float32),
-                tri_verts=tm.faces.astype(np.uint32),
+                vert_properties=inner_tm.vertices.astype(np.float32),
+                tri_verts=inner_tm.faces.astype(np.uint32),
             )
             inner_manifold = m3d.Manifold(inner_mesh)
 
