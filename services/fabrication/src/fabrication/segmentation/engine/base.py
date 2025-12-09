@@ -179,6 +179,22 @@ class SegmentationEngine(ABC):
         Returns:
             True if mesh has significant overhangs requiring supports
         """
+        overhang_ratio = self.calculate_overhang_ratio(mesh, threshold_angle)
+        return overhang_ratio > 0.10
+
+    def calculate_overhang_ratio(
+        self, mesh: MeshWrapper, threshold_angle: float = 45.0
+    ) -> float:
+        """
+        Calculate the ratio of surface area with overhangs exceeding threshold.
+
+        Args:
+            mesh: Mesh to analyze
+            threshold_angle: Angle from vertical considered overhang (degrees)
+
+        Returns:
+            Ratio of overhang area to total area (0.0 to 1.0)
+        """
         import numpy as np
 
         try:
@@ -192,21 +208,127 @@ class SegmentationEngine(ABC):
             # Find downward-facing triangles (negative Z component)
             downward_mask = cos_angles < 0
 
+            if not np.any(downward_mask):
+                return 0.0
+
             # Calculate overhang angle for downward faces
             overhang_angles = np.degrees(np.arccos(np.abs(cos_angles[downward_mask])))
 
             # Calculate area of faces exceeding threshold
-            overhang_area = np.sum(areas[downward_mask][overhang_angles > threshold_angle])
+            overhang_threshold_mask = overhang_angles > threshold_angle
+            overhang_area = np.sum(areas[downward_mask][overhang_threshold_mask])
             total_area = np.sum(areas)
 
-            # If more than 10% of surface area is overhang, mark as needing supports
-            overhang_ratio = overhang_area / total_area if total_area > 0 else 0
-
-            return overhang_ratio > 0.10
+            return float(overhang_area / total_area) if total_area > 0 else 0.0
 
         except Exception as e:
-            LOGGER.warning(f"Overhang analysis failed: {e}")
-            return False  # Assume no supports needed if analysis fails
+            LOGGER.warning(f"Overhang calculation failed: {e}")
+            return 0.0
+
+    def estimate_part_overhangs(
+        self,
+        mesh: MeshWrapper,
+        plane: CuttingPlane,
+        side: str = "positive",
+        threshold_angle: float = 45.0,
+    ) -> float:
+        """
+        Estimate MINIMUM overhang ratio for a potential cut result,
+        considering that the part can be reoriented for optimal printing.
+
+        This enables overhang-aware cut scoring by predicting which cuts will
+        produce parts with fewer overhangs after optimal orientation.
+
+        Strategy:
+        1. Identify faces that would end up on the specified side of the cut
+        2. Test multiple print orientations (6 cardinal directions)
+        3. Return the MINIMUM overhang ratio (best orientation)
+
+        Args:
+            mesh: Mesh to analyze
+            plane: Proposed cutting plane
+            side: "positive" or "negative" side of plane
+            threshold_angle: Angle threshold for overhangs (degrees)
+
+        Returns:
+            Estimated minimum overhang ratio (0.0 to 1.0) for the resulting part
+            in its optimal print orientation
+        """
+        import numpy as np
+
+        try:
+            # Get face data
+            normals = mesh.face_normals
+            areas = mesh.face_areas
+            tm = mesh.as_trimesh
+
+            # Get face centroids to determine which side of plane they're on
+            face_centroids = tm.triangles_center
+
+            # Calculate signed distance from plane for each face centroid
+            plane_origin = np.array(plane.origin)
+            plane_normal = np.array(plane.normal)
+            plane_normal = plane_normal / np.linalg.norm(plane_normal)
+
+            # Signed distance: positive = on normal side, negative = opposite side
+            signed_distances = np.dot(face_centroids - plane_origin, plane_normal)
+
+            # Select faces on the requested side
+            if side == "positive":
+                side_mask = signed_distances >= 0
+            else:
+                side_mask = signed_distances < 0
+
+            if not np.any(side_mask):
+                return 0.0
+
+            # Get faces on this side
+            side_normals = normals[side_mask]
+            side_areas = areas[side_mask]
+            side_total_area = np.sum(side_areas)
+
+            if side_total_area <= 0:
+                return 0.0
+
+            # Test 6 cardinal orientations (each axis as build plate normal)
+            # This simulates rotating the part to find the best print orientation
+            test_up_vectors = [
+                np.array([0, 0, 1]),   # Z up (original)
+                np.array([0, 0, -1]),  # Z down
+                np.array([0, 1, 0]),   # Y up
+                np.array([0, -1, 0]),  # Y down
+                np.array([1, 0, 0]),   # X up
+                np.array([-1, 0, 0]),  # X down
+            ]
+
+            min_overhang_ratio = 1.0
+
+            for up_vector in test_up_vectors:
+                # Calculate overhang for this orientation
+                cos_angles = np.dot(side_normals, up_vector)
+
+                # Find downward-facing triangles (opposite to up_vector)
+                downward_mask = cos_angles < 0
+
+                if not np.any(downward_mask):
+                    # No overhangs in this orientation - perfect!
+                    return 0.0
+
+                # Calculate overhang angles
+                overhang_angles = np.degrees(np.arccos(np.abs(cos_angles[downward_mask])))
+
+                # Calculate overhang area exceeding threshold
+                overhang_threshold_mask = overhang_angles > threshold_angle
+                overhang_area = np.sum(side_areas[downward_mask][overhang_threshold_mask])
+
+                overhang_ratio = overhang_area / side_total_area
+                min_overhang_ratio = min(min_overhang_ratio, overhang_ratio)
+
+            return float(min_overhang_ratio)
+
+        except Exception as e:
+            LOGGER.debug(f"Overhang estimation failed: {e}")
+            return 0.0
 
     def validate_result(self, result: SegmentationResult) -> SegmentationResult:
         """Validate segmentation result and add warnings if needed."""

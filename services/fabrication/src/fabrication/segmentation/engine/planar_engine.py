@@ -272,7 +272,15 @@ class PlanarSegmentationEngine(SegmentationEngine):
     def _generate_axis_cuts(
         self, mesh: MeshWrapper, axis: int
     ) -> List[CutCandidate]:
-        """Generate candidate cuts along an axis."""
+        """
+        Generate candidate cuts along an axis with overhang-aware scoring.
+
+        Scoring formula (Phase 1A):
+        - fit_score * 0.40: Parts must fit in build volume
+        - utilization_score * 0.25: Efficient use of build volume
+        - balance * 0.15: Even volume distribution
+        - overhang_score * 0.20: Minimize overhangs in resulting parts
+        """
         candidates = []
         bbox = mesh.bounding_box
 
@@ -323,12 +331,13 @@ class PlanarSegmentationEngine(SegmentationEngine):
             size_before = pos - min_val
             size_after = max_val - pos
 
-            # Score prioritizing fit over balance
+            # === FIT SCORE ===
             # A piece that fits perfectly scores 1.0
-            # A piece at exactly build_limit scores high (optimal use of space)
             fits_before = 1.0 if size_before <= build_limit else build_limit / size_before
             fits_after = 1.0 if size_after <= build_limit else build_limit / size_after
+            fit_score = (fits_before + fits_after) / 2
 
+            # === UTILIZATION SCORE ===
             # Bonus for pieces close to build_limit (better material utilization)
             # Optimal piece is ~90% of build_limit
             optimal_size = build_limit * 0.9
@@ -336,17 +345,40 @@ class PlanarSegmentationEngine(SegmentationEngine):
             utilization_after = 1.0 - abs(size_after - optimal_size) / build_limit if size_after <= build_limit else 0.0
             utilization_score = (utilization_before + utilization_after) / 2
 
-            fit_score = (fits_before + fits_after) / 2
+            # === BALANCE SCORE ===
             balance = 1.0 - abs(size_before - size_after) / axis_length
 
-            # Prioritize: fit (must fit) > utilization (use space well) > balance
-            score = fit_score * 0.5 + utilization_score * 0.35 + balance * 0.15
+            # === OVERHANG SCORE (Phase 1A) ===
+            # Estimate overhangs for both resulting parts (considering optimal orientation)
+            # Lower overhang ratio = higher score
+            # Use configured threshold (default 30° for cleaner surfaces)
+            overhang_threshold = getattr(self.config, 'overhang_threshold_deg', 30.0)
+            overhang_positive = self.estimate_part_overhangs(
+                mesh, plane, "positive", overhang_threshold
+            )
+            overhang_negative = self.estimate_part_overhangs(
+                mesh, plane, "negative", overhang_threshold
+            )
+            max_overhang = max(overhang_positive, overhang_negative)
+
+            # Convert ratio to score: 0.0 overhang = 1.0 score, 1.0 overhang = 0.0 score
+            overhang_score = 1.0 - max_overhang
+
+            # === COMBINED SCORE ===
+            # Weights: fit=0.40, utilization=0.25, balance=0.15, overhang=0.20
+            score = (
+                fit_score * 0.40
+                + utilization_score * 0.25
+                + balance * 0.15
+                + overhang_score * 0.20
+            )
 
             candidates.append(
                 CutCandidate(
                     plane=plane,
                     score=score,
                     resulting_parts=2,
+                    max_overhang_ratio=max_overhang,
                     balance_score=balance,
                 )
             )

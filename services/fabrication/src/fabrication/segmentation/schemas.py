@@ -87,6 +87,11 @@ class SegmentationConfig:
     # max_parts: 0 = auto-calculate based on mesh/build volume, otherwise use specified limit
     max_parts: int = 0
 
+    # Overhang optimization (Phase 1A)
+    # Threshold angle from vertical for overhang detection (degrees)
+    # 30° = strict (cleaner surfaces), 45° = standard FDM threshold
+    overhang_threshold_deg: float = 30.0
+
     # Output
     output_dir: Optional[str] = None
 
