@@ -23,6 +23,7 @@ class HollowingStrategy(str, Enum):
 
     HOLLOW_THEN_SEGMENT = "hollow_then_segment"  # Hollow first, then segment shell (default)
     SEGMENT_THEN_HOLLOW = "segment_then_hollow"  # Segment solid, then hollow each piece
+    SURFACE_SHELL = "surface_shell"  # Preserve original surface, offset inward (best quality)
     NONE = "none"  # No hollowing
 
 
@@ -74,6 +75,16 @@ class SegmentationConfig:
     # 200 = fast/coarse (~5mm voxels for 1m model), 500 = medium (~2mm), 1000+ = high quality
     hollowing_resolution: int = 200
 
+    # Post-hollowing mesh cleanup
+    # Simplification reduces excessive triangles from voxelization
+    enable_simplification: bool = True
+    simplification_ratio: float = 0.3  # Reduce to 30% of original faces
+    # Smoothing reduces jagged voxel surface artifacts
+    # WARNING: Smoothing can create "icicle" artifacts on thin geometry/overhangs
+    # Use sparingly (0-1 iterations) or disable for models with fine details
+    enable_smoothing: bool = False  # Disabled by default to avoid icicles
+    smooth_iterations: int = 0  # Number of Laplacian smoothing passes
+
     # Joints
     joint_type: JointType = JointType.DOWEL
     joint_tolerance_mm: float = 0.3  # Clearance for joint fit (0.3mm works for printed pins)
@@ -99,6 +110,14 @@ class SegmentationConfig:
     enable_oblique_cuts: bool = False
     # Minimum score threshold - only try oblique cuts if best axis-aligned score is below this
     oblique_fallback_threshold: float = 0.5
+
+    # Beam search (Phase 2)
+    # When enabled, uses beam search to explore multiple cut sequences
+    # instead of greedy single-best selection at each step.
+    enable_beam_search: bool = False
+    beam_width: int = 3  # Number of candidate paths to keep at each depth
+    beam_max_depth: int = 10  # Maximum search depth (cuts)
+    beam_timeout_seconds: float = 60.0  # Timeout for beam search
 
     # Output
     output_dir: Optional[str] = None
@@ -201,6 +220,26 @@ class SegmentMeshRequest(BaseModel):
         description="Voxel resolution for hollowing (200=fast, 500=medium, 1000+=high quality)",
         ge=50,
         le=2000,
+    )
+    enable_simplification: bool = Field(
+        default=True,
+        description="Enable mesh simplification after hollowing to reduce triangle count",
+    )
+    simplification_ratio: float = Field(
+        default=0.3,
+        description="Target ratio for mesh simplification (0.3 = reduce to 30% of faces)",
+        ge=0.05,
+        le=1.0,
+    )
+    enable_smoothing: bool = Field(
+        default=True,
+        description="Enable Laplacian smoothing after hollowing to reduce voxel artifacts",
+    )
+    smooth_iterations: int = Field(
+        default=2,
+        description="Number of smoothing iterations (more = smoother but may lose detail)",
+        ge=0,
+        le=10,
     )
     custom_build_volume: Optional[tuple[float, float, float]] = Field(
         default=None,

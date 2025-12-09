@@ -28,6 +28,16 @@ class HollowingConfig:
     # Set to 0 to auto-calculate based on voxel_size_mm
     voxels_per_dim: int = 200
 
+    # Post-hollowing mesh cleanup options
+    # Simplification reduces triangle count while preserving shape
+    enable_simplification: bool = True
+    simplification_ratio: float = 0.3  # Reduce to 30% of original faces
+    target_faces: Optional[int] = None  # Override ratio with specific count
+
+    # Smoothing reduces jagged voxel artifacts
+    enable_smoothing: bool = True
+    smooth_iterations: int = 2  # Number of Laplacian smoothing passes
+
 
 @dataclass
 class HollowingResult:
@@ -65,12 +75,13 @@ class SdfHollower:
             LOGGER.warning("mrmeshpy not available, hollowing will be limited")
             return False
 
-    def hollow(self, mesh: MeshWrapper) -> HollowingResult:
+    def hollow(self, mesh: MeshWrapper, strategy: str = "voxel") -> HollowingResult:
         """
         Hollow a mesh to create a shell with specified wall thickness.
 
         Args:
             mesh: Input mesh to hollow
+            strategy: "voxel" (default) or "surface_shell" (preserves original surface)
 
         Returns:
             HollowingResult with hollowed mesh and statistics
@@ -105,9 +116,98 @@ class SdfHollower:
                 error=None,
             )
 
+        # Use surface shell method if requested (preserves original surface)
+        if strategy == "surface_shell":
+            return self._hollow_surface_shell(mesh, original_volume)
+
+        # Otherwise use voxel-based methods
         if self._meshlib_available:
             return self._hollow_meshlib(mesh, original_volume)
         else:
+            return self._hollow_fallback(mesh, original_volume)
+
+    def _hollow_surface_shell(
+        self, mesh: MeshWrapper, original_volume: float
+    ) -> HollowingResult:
+        """
+        Surface-preserving hollowing that keeps the original outer surface.
+
+        Creates an inner offset surface by moving vertices along normals,
+        then uses boolean subtraction to create a shell.
+
+        This preserves all original surface detail/texture.
+        """
+        try:
+            import manifold3d as m3d
+            import trimesh
+
+            tm = mesh.as_trimesh.copy()
+            wall_thickness = self.config.wall_thickness_mm
+
+            LOGGER.info(
+                f"Surface shell hollowing: wall_thickness={wall_thickness}mm, "
+                f"preserving original {len(tm.faces):,} faces"
+            )
+
+            # Get smooth vertex normals
+            vertex_normals = tm.vertex_normals
+
+            # Create inner surface by offsetting vertices inward
+            inner_vertices = tm.vertices - vertex_normals * wall_thickness
+
+            # Convert both to manifold3d
+            outer_mesh = m3d.Mesh(
+                vert_properties=tm.vertices.astype(np.float32),
+                tri_verts=tm.faces.astype(np.uint32),
+            )
+            outer_manifold = m3d.Manifold(outer_mesh)
+
+            inner_mesh = m3d.Mesh(
+                vert_properties=inner_vertices.astype(np.float32),
+                tri_verts=tm.faces.astype(np.uint32),
+            )
+            inner_manifold = m3d.Manifold(inner_mesh)
+
+            # Boolean subtract inner from outer to create shell
+            shell_manifold = outer_manifold - inner_manifold
+
+            if shell_manifold.status() != m3d.Error.NoError:
+                LOGGER.warning(f"Surface shell boolean failed: {shell_manifold.status()}")
+                # Fall back to voxel method
+                return self._hollow_fallback(mesh, original_volume)
+
+            # Convert back to MeshWrapper
+            shell_mesh_data = shell_manifold.to_mesh()
+            shell_verts = np.array(shell_mesh_data.vert_properties)[:, :3]
+            shell_faces = np.array(shell_mesh_data.tri_verts)
+            shell_tm = trimesh.Trimesh(vertices=shell_verts, faces=shell_faces)
+
+            result_mesh = MeshWrapper(shell_tm)
+            hollowed_volume = result_mesh.volume_cm3
+
+            savings = (
+                (original_volume - hollowed_volume) / original_volume * 100
+                if original_volume > 0
+                else 0
+            )
+
+            LOGGER.info(
+                f"Surface shell complete: {original_volume:.1f}cm³ → {hollowed_volume:.1f}cm³ "
+                f"({savings:.1f}% savings), {result_mesh.face_count:,} faces"
+            )
+
+            return HollowingResult(
+                success=True,
+                mesh=result_mesh,
+                original_volume_cm3=original_volume,
+                hollowed_volume_cm3=hollowed_volume,
+                material_savings_percent=savings,
+                wall_thickness_achieved_mm=wall_thickness,
+            )
+
+        except Exception as e:
+            LOGGER.error(f"Surface shell hollowing failed: {e}")
+            # Fall back to voxel method
             return self._hollow_fallback(mesh, original_volume)
 
     def _hollow_meshlib(
@@ -155,6 +255,10 @@ class SdfHollower:
 
             # Convert back to MeshWrapper
             result_mesh = MeshWrapper._from_meshlib(hollowed)
+
+            # Apply post-hollowing cleanup (simplification + smoothing)
+            result_mesh = self._apply_cleanup(result_mesh)
+
             hollowed_volume = result_mesh.volume_cm3
 
             # Calculate material savings
@@ -277,6 +381,10 @@ class SdfHollower:
                 )
 
             result_mesh = MeshWrapper(hollowed_mesh)
+
+            # Apply post-hollowing cleanup (simplification + smoothing)
+            result_mesh = self._apply_cleanup(result_mesh)
+
             hollowed_volume = result_mesh.volume_cm3
             savings = (
                 (original_volume - hollowed_volume) / original_volume * 100
@@ -304,6 +412,44 @@ class SdfHollower:
                 wall_thickness_achieved_mm=0.0,
                 error=str(e),
             )
+
+    def _apply_cleanup(self, mesh: MeshWrapper) -> MeshWrapper:
+        """
+        Apply post-hollowing mesh cleanup (simplification + smoothing + repair).
+
+        Reduces triangle count from voxelization, smooths jagged surfaces,
+        and removes degenerate triangles that can cause "icicle" artifacts.
+        """
+        original_faces = mesh.face_count
+
+        # Apply simplification first (reduces triangle count)
+        if self.config.enable_simplification:
+            if self.config.target_faces is not None:
+                mesh = mesh.simplify(target_faces=self.config.target_faces)
+            else:
+                mesh = mesh.simplify(ratio=self.config.simplification_ratio)
+
+        # Apply smoothing after (reduces voxel artifacts)
+        if self.config.enable_smoothing and self.config.smooth_iterations > 0:
+            mesh = mesh.smooth(iterations=self.config.smooth_iterations)
+
+        # Repair mesh to remove degenerate triangles
+        # NOTE: We only remove zero-area degenerate faces, not elongated ones,
+        # because removing elongated faces creates holes that break manifold cutting.
+        # The "icicle" artifacts from smoothing are less harmful than broken meshes.
+        mesh = mesh.repair(
+            remove_degenerate=True,
+            remove_elongated=False,  # Disabled - creates holes that break manifold3d
+        )
+
+        final_faces = mesh.face_count
+        if final_faces != original_faces:
+            LOGGER.info(
+                f"Mesh cleanup: {original_faces} -> {final_faces} faces "
+                f"({final_faces/original_faces*100:.1f}% of original)"
+            )
+
+        return mesh
 
     def add_drain_holes(
         self,

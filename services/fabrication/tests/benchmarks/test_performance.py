@@ -152,11 +152,11 @@ class TestHollowingPerformance:
 
         print(f"\n[PERF] Hollowing resolution {resolution}: {elapsed_ms:.2f}ms")
 
-        # Resolution-dependent timeout
+        # Resolution-dependent timeout (includes simplification + smoothing overhead)
         max_time_ms = {
-            100: 5000,
-            200: 15000,
-            500: 60000,
+            100: 10000,
+            200: 35000,  # Increased to account for simplification/smoothing
+            500: 90000,
         }
 
         assert elapsed_ms < max_time_ms.get(resolution, 60000), (

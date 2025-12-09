@@ -23,6 +23,7 @@ from ..schemas import (
     SegmentationResult,
 )
 from .base import CutCandidate, SegmentationEngine, SegmentationState
+from .beam_search import BeamSearchSegmenter, SegmentationPath, create_beam_search_segmenter
 
 LOGGER = get_logger(__name__)
 
@@ -81,15 +82,27 @@ class PlanarSegmentationEngine(SegmentationEngine):
         if config.enable_hollowing:
             # Get hollowing resolution from config (default 200)
             resolution = getattr(config, 'hollowing_resolution', 200)
+            # Get simplification/smoothing settings
+            enable_simplification = getattr(config, 'enable_simplification', True)
+            simplification_ratio = getattr(config, 'simplification_ratio', 0.3)
+            enable_smoothing = getattr(config, 'enable_smoothing', True)
+            smooth_iterations = getattr(config, 'smooth_iterations', 2)
+
             hollow_config = HollowingConfig(
                 wall_thickness_mm=config.wall_thickness_mm,
                 min_wall_thickness_mm=config.min_wall_thickness_mm,
                 voxels_per_dim=resolution,
+                enable_simplification=enable_simplification,
+                simplification_ratio=simplification_ratio,
+                enable_smoothing=enable_smoothing,
+                smooth_iterations=smooth_iterations,
             )
             self.hollower = SdfHollower(hollow_config)
             LOGGER.info(
                 f"Initialized hollower with wall_thickness={config.wall_thickness_mm}mm, "
-                f"resolution={resolution} voxels/dim"
+                f"resolution={resolution} voxels/dim, "
+                f"simplify={enable_simplification} ({simplification_ratio:.0%}), "
+                f"smooth={enable_smoothing} ({smooth_iterations} iters)"
             )
 
         # Initialize joint factory based on config
@@ -122,17 +135,25 @@ class PlanarSegmentationEngine(SegmentationEngine):
         # Engine config is set at initialization time
         strategy = self.config.hollowing_strategy
 
-        # HOLLOW FIRST if strategy is HOLLOW_THEN_SEGMENT
+        # HOLLOW FIRST if strategy is HOLLOW_THEN_SEGMENT or SURFACE_SHELL
         # Handle both enum and string values
         should_hollow_first = (
             strategy == HollowingStrategy.HOLLOW_THEN_SEGMENT
             or strategy == "hollow_then_segment"
+            or strategy == HollowingStrategy.SURFACE_SHELL
+            or strategy == "surface_shell"
         )
         if should_hollow_first and self.hollower:
+            # Determine hollowing method: surface_shell preserves original surface
+            hollow_strategy = "surface_shell" if (
+                strategy == HollowingStrategy.SURFACE_SHELL or strategy == "surface_shell"
+            ) else "voxel"
+
             LOGGER.info(
-                f"Hollowing mesh BEFORE segmentation (wall_thickness={self.config.wall_thickness_mm}mm)..."
+                f"Hollowing mesh BEFORE segmentation using {hollow_strategy} method "
+                f"(wall_thickness={self.config.wall_thickness_mm}mm)..."
             )
-            hollow_result = self.hollower.hollow(mesh)
+            hollow_result = self.hollower.hollow(mesh, strategy=hollow_strategy)
             if hollow_result.success and hollow_result.mesh is not None:
                 original_volume = mesh.volume_cm3
                 mesh = hollow_result.mesh
@@ -157,63 +178,15 @@ class PlanarSegmentationEngine(SegmentationEngine):
             f"build volume {self.build_volume}"
         )
 
-        # Initialize state
-        state = SegmentationState(parts=[mesh])
-        cut_planes: List[CuttingPlane] = []
+        # Choose segmentation algorithm based on config
+        enable_beam_search = getattr(self.config, 'enable_beam_search', False)
 
-        # Track seam relationships: list of (part_a, part_b, plane) tuples
-        # We store mesh references initially, then resolve to indices after cutting
-        seam_pairs: List[Tuple[MeshWrapper, MeshWrapper, CuttingPlane]] = []
-
-        # Iteratively cut until all parts fit or max parts reached
-        while True:
-            state.parts_exceeding_volume = state.count_exceeding(self.build_volume)
-
-            if state.parts_exceeding_volume == 0:
-                LOGGER.info(f"All {len(state.parts)} parts fit build volume")
-                break
-
-            if len(state.parts) >= self.config.max_parts:
-                LOGGER.warning(f"Reached max parts limit ({self.config.max_parts})")
-                break
-
-            # Find part that exceeds volume most
-            target_part, target_idx = self._find_largest_exceeding_part(state.parts)
-
-            if target_part is None:
-                break
-
-            # Find best cut for this part
-            cut_candidate = self.find_best_cut(target_part, state)
-
-            if cut_candidate is None:
-                LOGGER.warning(f"No valid cut found for part {target_idx}")
-                break
-
-            # Execute cut
-            positive, negative = self.execute_cut(target_part, cut_candidate.plane)
-
-            # Replace target part with two new parts
-            state.parts.pop(target_idx)
-
-            # Only add non-empty parts and track the seam relationship
-            if not positive.is_empty() and not negative.is_empty():
-                state.parts.append(positive)
-                state.parts.append(negative)
-                # Track this seam - these two parts share the cut plane
-                seam_pairs.append((positive, negative, cut_candidate.plane))
-            elif not positive.is_empty():
-                state.parts.append(positive)
-            elif not negative.is_empty():
-                state.parts.append(negative)
-
-            cut_planes.append(cut_candidate.plane)
-            state.iteration += 1
-
-            LOGGER.info(
-                f"Cut {state.iteration}: {len(state.parts)} parts, "
-                f"{state.count_exceeding(self.build_volume)} exceeding"
-            )
+        if enable_beam_search:
+            # Use beam search for optimal cut sequence
+            parts, cut_planes, seam_pairs = self._segment_with_beam_search(mesh)
+        else:
+            # Use greedy iterative approach (original algorithm)
+            parts, cut_planes, seam_pairs = self._segment_greedy(mesh)
 
         # HOLLOW AFTER if strategy is SEGMENT_THEN_HOLLOW
         should_hollow_after = (
@@ -222,15 +195,15 @@ class PlanarSegmentationEngine(SegmentationEngine):
         )
         if should_hollow_after and self.hollower:
             LOGGER.info("Hollowing parts AFTER segmentation...")
-            state.parts = self._apply_hollowing(state.parts)
+            parts = self._apply_hollowing(parts)
 
         # APPLY JOINTS to parts if joint generation is enabled
         if self.joint_factory and seam_pairs:
             LOGGER.info(f"Applying joints to {len(seam_pairs)} seams...")
-            state.parts = self._apply_joints(state.parts, seam_pairs)
+            parts = self._apply_joints(parts, seam_pairs)
 
         # Create result and optionally export
-        return self._create_result(state.parts, cut_planes, output_dir)
+        return self._create_result(parts, cut_planes, output_dir)
 
     def find_best_cut(
         self, mesh: MeshWrapper, state: SegmentationState
@@ -292,6 +265,134 @@ class PlanarSegmentationEngine(SegmentationEngine):
                     best = best_oblique
 
         return best
+
+    def _segment_greedy(
+        self, mesh: MeshWrapper
+    ) -> Tuple[List[MeshWrapper], List[CuttingPlane], List[Tuple[MeshWrapper, MeshWrapper, CuttingPlane]]]:
+        """
+        Greedy iterative segmentation algorithm.
+
+        Repeatedly finds and applies the single best cut until all parts
+        fit the build volume or max_parts is reached.
+
+        Returns:
+            Tuple of (parts, cut_planes, seam_pairs)
+        """
+        # Initialize state
+        state = SegmentationState(parts=[mesh])
+        cut_planes: List[CuttingPlane] = []
+
+        # Track seam relationships: list of (part_a, part_b, plane) tuples
+        seam_pairs: List[Tuple[MeshWrapper, MeshWrapper, CuttingPlane]] = []
+
+        # Iteratively cut until all parts fit or max parts reached
+        while True:
+            state.parts_exceeding_volume = state.count_exceeding(self.build_volume)
+
+            if state.parts_exceeding_volume == 0:
+                LOGGER.info(f"All {len(state.parts)} parts fit build volume")
+                break
+
+            if len(state.parts) >= self.config.max_parts:
+                LOGGER.warning(f"Reached max parts limit ({self.config.max_parts})")
+                break
+
+            # Find part that exceeds volume most
+            target_part, target_idx = self._find_largest_exceeding_part(state.parts)
+
+            if target_part is None:
+                break
+
+            # Find best cut for this part
+            cut_candidate = self.find_best_cut(target_part, state)
+
+            if cut_candidate is None:
+                LOGGER.warning(f"No valid cut found for part {target_idx}")
+                break
+
+            # Execute cut
+            positive, negative = self.execute_cut(target_part, cut_candidate.plane)
+
+            # Replace target part with two new parts
+            state.parts.pop(target_idx)
+
+            # Only add non-empty parts and track the seam relationship
+            if not positive.is_empty() and not negative.is_empty():
+                state.parts.append(positive)
+                state.parts.append(negative)
+                # Track this seam - these two parts share the cut plane
+                seam_pairs.append((positive, negative, cut_candidate.plane))
+            elif not positive.is_empty():
+                state.parts.append(positive)
+            elif not negative.is_empty():
+                state.parts.append(negative)
+
+            cut_planes.append(cut_candidate.plane)
+            state.iteration += 1
+
+            LOGGER.info(
+                f"Cut {state.iteration}: {len(state.parts)} parts, "
+                f"{state.count_exceeding(self.build_volume)} exceeding"
+            )
+
+        return state.parts, cut_planes, seam_pairs
+
+    def _segment_with_beam_search(
+        self, mesh: MeshWrapper
+    ) -> Tuple[List[MeshWrapper], List[CuttingPlane], List[Tuple[MeshWrapper, MeshWrapper, CuttingPlane]]]:
+        """
+        Beam search segmentation algorithm.
+
+        Explores multiple cut sequences in parallel and selects the best
+        overall solution. Can find better results than greedy when a
+        locally suboptimal cut leads to better overall results.
+
+        Returns:
+            Tuple of (parts, cut_planes, seam_pairs)
+        """
+        beam_width = getattr(self.config, 'beam_width', 3)
+        beam_timeout = getattr(self.config, 'beam_timeout_seconds', 60.0)
+
+        LOGGER.info(
+            f"Starting beam search segmentation (width={beam_width}, "
+            f"timeout={beam_timeout}s)"
+        )
+
+        # Create beam search segmenter
+        segmenter = create_beam_search_segmenter(self.config, self)
+
+        # Run beam search
+        result = segmenter.search(mesh)
+
+        LOGGER.info(
+            f"Beam search complete: {result.terminated_reason}, "
+            f"explored {result.all_paths_explored} paths in {result.search_time_seconds:.1f}s"
+        )
+
+        if result.best_path is None:
+            LOGGER.warning("Beam search found no valid path, falling back to greedy")
+            return self._segment_greedy(mesh)
+
+        path = result.best_path
+
+        # Reconstruct seam_pairs from cut history
+        # Each cut creates a seam between two parts
+        seam_pairs: List[Tuple[MeshWrapper, MeshWrapper, CuttingPlane]] = []
+
+        # We need to reconstruct which parts share each cut plane
+        # The beam search path has the final parts and the cut sequence
+        for plane in path.cuts:
+            # Find pairs of parts that share this cut plane
+            adjacent_pairs = self._find_parts_at_plane(path.parts, plane)
+            for idx_a, idx_b in adjacent_pairs:
+                seam_pairs.append((path.parts[idx_a], path.parts[idx_b], plane))
+
+        LOGGER.info(
+            f"Beam search result: {len(path.parts)} parts, "
+            f"{len(path.cuts)} cuts, score={path.score:.3f}"
+        )
+
+        return path.parts, path.cuts, seam_pairs
 
     def _generate_axis_cuts(
         self, mesh: MeshWrapper, axis: int

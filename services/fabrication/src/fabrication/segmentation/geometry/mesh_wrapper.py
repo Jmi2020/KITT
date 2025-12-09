@@ -462,3 +462,219 @@ class MeshWrapper:
     def copy(self) -> "MeshWrapper":
         """Create a deep copy of this mesh."""
         return MeshWrapper(self.as_trimesh.copy())
+
+    @property
+    def face_count(self) -> int:
+        """Get number of faces/triangles."""
+        return len(self.as_trimesh.faces)
+
+    @property
+    def vertex_count(self) -> int:
+        """Get number of vertices."""
+        return len(self.as_trimesh.vertices)
+
+    def simplify(
+        self,
+        target_faces: Optional[int] = None,
+        ratio: float = 0.5,
+        preserve_topology: bool = True,
+    ) -> "MeshWrapper":
+        """
+        Reduce triangle count while preserving mesh shape.
+
+        Uses quadric decimation for high-quality simplification.
+
+        Args:
+            target_faces: Target number of faces (overrides ratio if set)
+            ratio: Reduction ratio (0.5 = reduce to 50% of faces)
+            preserve_topology: Try to preserve mesh topology (slower but safer)
+
+        Returns:
+            Simplified MeshWrapper
+        """
+        tm = self.as_trimesh.copy()
+        current_faces = len(tm.faces)
+
+        if target_faces is None:
+            target_faces = int(current_faces * ratio)
+
+        # Ensure we don't try to reduce below minimum viable mesh
+        target_faces = max(target_faces, 100)
+
+        if target_faces >= current_faces:
+            LOGGER.debug(f"Mesh already has {current_faces} faces, no simplification needed")
+            return MeshWrapper(tm)
+
+        LOGGER.info(f"Simplifying mesh: {current_faces} -> {target_faces} faces ({target_faces/current_faces*100:.1f}%)")
+
+        try:
+            # Use trimesh's simplify_quadric_decimation with face_count parameter
+            simplified = tm.simplify_quadric_decimation(face_count=target_faces)
+
+            if simplified is None or len(simplified.faces) == 0:
+                LOGGER.warning("Simplification failed, returning original mesh")
+                return MeshWrapper(tm)
+
+            LOGGER.info(f"Simplification complete: {len(simplified.faces)} faces")
+            return MeshWrapper(simplified)
+
+        except Exception as e:
+            LOGGER.warning(f"Quadric decimation failed: {e}, trying fast_simplification directly")
+            try:
+                # Fallback: use fast_simplification directly
+                import fast_simplification
+                points, faces_out = fast_simplification.simplify(
+                    tm.vertices.astype(np.float32),
+                    tm.faces.astype(np.int32),
+                    target_reduction=1.0 - ratio  # e.g., 0.7 reduction = keep 30%
+                )
+                simplified = trimesh.Trimesh(vertices=points, faces=faces_out)
+
+                if len(simplified.faces) > 0:
+                    LOGGER.info(f"fast_simplification complete: {len(simplified.faces)} faces")
+                    return MeshWrapper(simplified)
+            except Exception as e2:
+                LOGGER.warning(f"fast_simplification also failed: {e2}")
+
+            return MeshWrapper(tm)
+
+    def smooth(self, iterations: int = 3, lamb: float = 0.5) -> "MeshWrapper":
+        """
+        Apply Laplacian smoothing to reduce jagged voxel artifacts.
+
+        Args:
+            iterations: Number of smoothing iterations (more = smoother but more distortion)
+            lamb: Smoothing factor (0-1, higher = more smoothing per iteration)
+
+        Returns:
+            Smoothed MeshWrapper
+        """
+        tm = self.as_trimesh.copy()
+
+        LOGGER.info(f"Smoothing mesh: {iterations} iterations, lambda={lamb}")
+
+        try:
+            # Laplacian smoothing
+            smoothed = trimesh.smoothing.filter_laplacian(
+                tm,
+                lamb=lamb,
+                iterations=iterations,
+                implicit_time_integration=False,
+                volume_constraint=True,  # Try to preserve volume
+            )
+
+            if smoothed is not None:
+                LOGGER.info(f"Smoothing complete")
+                return MeshWrapper(smoothed)
+
+        except Exception as e:
+            LOGGER.warning(f"Laplacian smoothing failed: {e}")
+
+        return MeshWrapper(tm)
+
+    def repair(
+        self,
+        remove_degenerate: bool = True,
+        remove_elongated: bool = True,
+        max_aspect_ratio: float = 20.0,
+        fill_holes: bool = False,
+    ) -> "MeshWrapper":
+        """
+        Repair mesh issues like degenerate triangles and non-manifold edges.
+
+        Args:
+            remove_degenerate: Remove degenerate (zero-area) triangles
+            remove_elongated: Remove extremely elongated triangles ("icicles")
+            max_aspect_ratio: Maximum allowed aspect ratio (longest/shortest edge)
+            fill_holes: Attempt to fill holes in the mesh
+
+        Returns:
+            Repaired MeshWrapper
+        """
+        tm = self.as_trimesh.copy()
+        original_faces = len(tm.faces)
+
+        LOGGER.info(f"Repairing mesh: {original_faces} faces")
+
+        try:
+            if remove_degenerate:
+                # Remove degenerate faces (zero area, collinear vertices)
+                tm.remove_degenerate_faces()
+
+                # Also remove faces with very small area (near-degenerate)
+                face_areas = tm.area_faces
+                min_area = 0.01  # mm² - faces smaller than this are degenerate
+                valid_small = face_areas > min_area
+                small_area_count = (~valid_small).sum()
+                if small_area_count > 0:
+                    tm.update_faces(valid_small)
+                    tm.remove_unreferenced_vertices()
+                    LOGGER.info(f"Removed {small_area_count} near-degenerate faces (area < {min_area}mm²)")
+
+            if remove_elongated:
+                # Remove extremely elongated triangles ("icicle" artifacts)
+                # These are triangles where one edge is much longer than others
+                vertices = tm.vertices
+                faces = tm.faces
+                valid_elongated = np.ones(len(faces), dtype=bool)
+
+                # Calculate aspect ratio for each face
+                for i, face in enumerate(faces):
+                    v0, v1, v2 = vertices[face]
+                    e0 = np.linalg.norm(v1 - v0)
+                    e1 = np.linalg.norm(v2 - v1)
+                    e2 = np.linalg.norm(v0 - v2)
+                    edges = sorted([e0, e1, e2])
+                    if edges[0] > 0.001:
+                        aspect = edges[2] / edges[0]
+                        if aspect > max_aspect_ratio:
+                            valid_elongated[i] = False
+
+                elongated_count = (~valid_elongated).sum()
+                if elongated_count > 0:
+                    tm.update_faces(valid_elongated)
+                    tm.remove_unreferenced_vertices()
+                    LOGGER.info(f"Removed {elongated_count} elongated faces (aspect ratio > {max_aspect_ratio})")
+
+            # Remove unreferenced vertices after face removal
+            tm.remove_unreferenced_vertices()
+
+            if fill_holes:
+                tm.fill_holes()
+
+            final_faces = len(tm.faces)
+            if final_faces != original_faces:
+                LOGGER.info(f"Repair complete: {original_faces} -> {final_faces} faces")
+            else:
+                LOGGER.info(f"Repair complete: no changes needed")
+
+            return MeshWrapper(tm)
+
+        except Exception as e:
+            LOGGER.warning(f"Mesh repair failed: {e}")
+            return MeshWrapper(tm)
+
+    def simplify_and_smooth(
+        self,
+        target_faces: Optional[int] = None,
+        ratio: float = 0.5,
+        smooth_iterations: int = 2,
+    ) -> "MeshWrapper":
+        """
+        Combined simplification and smoothing for post-hollowing cleanup.
+
+        Applies simplification first (to reduce triangle count),
+        then smoothing (to reduce voxel artifacts).
+
+        Args:
+            target_faces: Target face count (overrides ratio)
+            ratio: Reduction ratio if target_faces not set
+            smooth_iterations: Number of smoothing iterations
+
+        Returns:
+            Simplified and smoothed MeshWrapper
+        """
+        result = self.simplify(target_faces=target_faces, ratio=ratio)
+        if smooth_iterations > 0:
+            result = result.smooth(iterations=smooth_iterations)
+        return result
