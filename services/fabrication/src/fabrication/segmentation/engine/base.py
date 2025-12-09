@@ -67,12 +67,19 @@ class SegmentationEngine(ABC):
         self.build_volume = config.build_volume
 
     @abstractmethod
-    def segment(self, mesh: MeshWrapper) -> SegmentationResult:
+    def segment(
+        self,
+        mesh: MeshWrapper,
+        request: Optional["SegmentMeshRequest"] = None,
+        output_dir: Optional[str] = None,
+    ) -> SegmentationResult:
         """
         Segment mesh into parts that fit the build volume.
 
         Args:
             mesh: Input mesh to segment
+            request: Optional request object (backwards compatibility)
+            output_dir: Optional directory for output files
 
         Returns:
             SegmentationResult with parts and metadata

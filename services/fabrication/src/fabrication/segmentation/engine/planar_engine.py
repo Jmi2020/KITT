@@ -47,8 +47,30 @@ class PlanarSegmentationEngine(SegmentationEngine):
     4. Apply hollowing to reduce material
     """
 
-    def __init__(self, config: SegmentationConfig):
-        """Initialize planar engine."""
+    def __init__(
+        self,
+        config: Optional[SegmentationConfig] = None,
+        *,
+        build_volume: Optional[Tuple[float, float, float]] = None,
+        **kwargs,
+    ):
+        """
+        Initialize planar engine.
+
+        Can be initialized with a full config or with convenience parameters:
+            engine = PlanarSegmentationEngine(config)
+            engine = PlanarSegmentationEngine(build_volume=(256, 256, 256))
+        """
+        if config is None:
+            if build_volume is None:
+                build_volume = (256.0, 256.0, 256.0)
+            # Convert string joint_type to enum if necessary
+            if "joint_type" in kwargs and isinstance(kwargs["joint_type"], str):
+                kwargs["joint_type"] = JointType(kwargs["joint_type"])
+            # Convert string hollowing_strategy to enum if necessary
+            if "hollowing_strategy" in kwargs and isinstance(kwargs["hollowing_strategy"], str):
+                kwargs["hollowing_strategy"] = HollowingStrategy(kwargs["hollowing_strategy"])
+            config = SegmentationConfig(build_volume=build_volume, **kwargs)
         super().__init__(config)
 
         # IMPORTANT: Validate wall thickness for pin joints BEFORE creating hollower
@@ -75,7 +97,10 @@ class PlanarSegmentationEngine(SegmentationEngine):
         self._init_joint_factory()
 
     def segment(
-        self, mesh: MeshWrapper, output_dir: Optional[str] = None
+        self,
+        mesh: MeshWrapper,
+        request: Optional["SegmentMeshRequest"] = None,
+        output_dir: Optional[str] = None,
     ) -> SegmentationResult:
         """
         Segment mesh into parts fitting build volume.
@@ -87,11 +112,14 @@ class PlanarSegmentationEngine(SegmentationEngine):
 
         Args:
             mesh: The mesh to segment
+            request: Optional request object (for backwards compatibility, config from __init__ is used)
             output_dir: Optional directory to export parts to (creates 3MF files)
 
         Returns:
             SegmentationResult with part info and optional file paths
         """
+        # Note: request parameter is for backwards compatibility but not used
+        # Engine config is set at initialization time
         strategy = self.config.hollowing_strategy
 
         # HOLLOW FIRST if strategy is HOLLOW_THEN_SEGMENT

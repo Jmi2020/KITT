@@ -50,9 +50,9 @@ class TestSegmentationCheckEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert "needs_segmentation" in data
-        assert "model_dimensions" in data
-        assert "build_volume" in data
-        assert "exceeds" in data
+        assert "model_dimensions_mm" in data
+        assert "build_volume_mm" in data
+        assert "exceeds_by_mm" in data
 
     def test_check_with_printer_id(
         self, client: TestClient, small_stl_file: Path
@@ -152,9 +152,9 @@ class TestPrintersEndpoint:
         assert isinstance(data, list)
         # Should have at least default printers
         for printer in data:
-            assert "id" in printer
+            assert "printer_id" in printer
             assert "name" in printer
-            assert "build_volume" in printer
+            assert "build_volume_mm" in printer
 
 
 class TestAsyncSegmentEndpoint:

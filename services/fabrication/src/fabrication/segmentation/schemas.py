@@ -196,6 +196,10 @@ class SegmentMeshRequest(BaseModel):
     )
 
 
+# Backwards compatibility alias
+SegmentationRequest = SegmentMeshRequest
+
+
 class SegmentedPartResponse(BaseModel):
     """Response model for a segmented part."""
 
@@ -243,3 +247,7 @@ class CheckSegmentationResponse(BaseModel):
     build_volume_mm: tuple[float, float, float]
     exceeds_by_mm: tuple[float, float, float]
     recommended_cuts: int
+
+
+# Backwards compatibility alias
+CheckSegmentationResult = CheckSegmentationResponse
