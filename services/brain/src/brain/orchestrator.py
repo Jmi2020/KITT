@@ -274,15 +274,15 @@ class BrainOrchestrator:
                     output=parallel_result.response,
                     confidence=parallel_result.metrics.get("confidence", 0.9),
                     tier=RoutingTier.local,  # Parallel uses local models
-                    request_id=request_id,
-                    conversation_id=conversation_id,
-                    cost_usd=parallel_result.metrics.get("total_cost_usd", 0.0),
-                    latency_ms=parallel_result.metrics.get("total_latency_ms", 0),
-                    voice_summary=parallel_result.voice_summary,
+                    latency_ms=int(parallel_result.metrics.get("total_latency_ms", 0)),
                     metadata={
                         "parallel_execution": True,
                         "tasks_count": len(parallel_result.tasks),
                         "parallel_metrics": parallel_result.metrics,
+                        "request_id": request_id,
+                        "conversation_id": conversation_id,
+                        "cost_usd": parallel_result.metrics.get("total_cost_usd", 0.0),
+                        "voice_summary": parallel_result.voice_summary,
                     },
                 )
             except Exception as exc:
