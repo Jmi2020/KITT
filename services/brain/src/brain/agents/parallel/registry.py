@@ -36,6 +36,8 @@ class ModelEndpoint:
         supports_tools: Whether endpoint supports tool calling
         supports_vision: Whether endpoint handles images
         thinking_mode: Ollama thinking effort (low/medium/high)
+        idle_shutdown_seconds: Seconds of inactivity before shutdown (0=never)
+        port: Server port (extracted from base_url for process management)
     """
     name: str
     base_url: str
@@ -45,10 +47,13 @@ class ModelEndpoint:
     supports_tools: bool = False
     supports_vision: bool = False
     thinking_mode: Optional[str] = None
+    idle_shutdown_seconds: int = 0  # 0 = never auto-shutdown
+    port: int = 0  # Extracted from base_url
 
     # Runtime state (not serialized)
     _active_slots: int = field(default=0, repr=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    _is_running: bool = field(default=True, repr=False)  # Assume running on init
 
     @property
     def active_slots(self) -> int:
@@ -145,50 +150,80 @@ class KittyAgent:
         return prompt
 
 
+def _extract_port(url: str, default: int = 0) -> int:
+    """Extract port number from URL."""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        return parsed.port or default
+    except Exception:
+        return default
+
+
 def _load_endpoints_from_env() -> Dict[ModelTier, ModelEndpoint]:
     """
     Load endpoint configuration from environment variables.
 
-    Matches the configuration in ops/scripts/llama/start.sh and .env
+    Matches the configuration in ops/scripts/llama/start.sh and .env.
+
+    Idle shutdown settings:
+    - 0 = never auto-shutdown (default for Ollama which has its own keep_alive)
+    - >0 = shutdown after N seconds of inactivity
     """
+    q4_url = os.getenv("LLAMACPP_Q4_HOST", "http://localhost:8083")
+    vision_url = os.getenv("LLAMACPP_VISION_HOST", "http://localhost:8086")
+    coder_url = os.getenv("LLAMACPP_CODER_HOST", "http://localhost:8087")
+    summary_url = os.getenv("LLAMACPP_SUMMARY_HOST", "http://localhost:8084")
+    ollama_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+
     return {
         ModelTier.Q4_TOOLS: ModelEndpoint(
             name="Athene V2 Q4 (Tool Orchestrator)",
-            base_url=os.getenv("LLAMACPP_Q4_HOST", "http://localhost:8083"),
+            base_url=q4_url,
             max_slots=int(os.getenv("LLAMACPP_Q4_PARALLEL", "6")),
             context_length=int(os.getenv("LLAMACPP_Q4_CTX", "131072")),
             model_id=os.getenv("LLAMACPP_Q4_ALIAS", "kitty-q4"),
             supports_tools=True,
+            idle_shutdown_seconds=int(os.getenv("LLAMACPP_Q4_IDLE_SHUTDOWN_SECONDS", "900")),
+            port=_extract_port(q4_url, 8083),
         ),
         ModelTier.GPTOSS_REASON: ModelEndpoint(
             name="GPT-OSS 120B (Deep Reasoner)",
-            base_url=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+            base_url=ollama_url,
             max_slots=int(os.getenv("OLLAMA_NUM_PARALLEL", "2")),
             context_length=65536,
             model_id=os.getenv("OLLAMA_MODEL", "gpt-oss-120b-judge"),
             thinking_mode=os.getenv("OLLAMA_THINK", "medium"),
+            idle_shutdown_seconds=0,  # Ollama manages its own keep_alive
+            port=_extract_port(ollama_url, 11434),
         ),
         ModelTier.VISION: ModelEndpoint(
-            name="Llama 3.2 Vision (Multimodal)",
-            base_url=os.getenv("LLAMACPP_VISION_HOST", "http://localhost:8085"),
-            max_slots=int(os.getenv("LLAMACPP_VISION_PARALLEL", "4")),
-            context_length=4096,
+            name="Gemma 3 27B Vision (Multimodal)",
+            base_url=vision_url,
+            max_slots=int(os.getenv("LLAMACPP_VISION_PARALLEL", "2")),
+            context_length=int(os.getenv("LLAMACPP_VISION_CTX", "8192")),
             model_id=os.getenv("LLAMACPP_VISION_ALIAS", "kitty-vision"),
             supports_vision=True,
+            idle_shutdown_seconds=int(os.getenv("LLAMACPP_VISION_IDLE_SHUTDOWN_SECONDS", "1800")),
+            port=_extract_port(vision_url, 8086),
         ),
         ModelTier.CODER: ModelEndpoint(
             name="Qwen 32B Coder",
-            base_url=os.getenv("LLAMACPP_CODER_HOST", "http://localhost:8087"),
+            base_url=coder_url,
             max_slots=int(os.getenv("LLAMACPP_CODER_PARALLEL", "4")),
             context_length=int(os.getenv("LLAMACPP_CODER_CTX", "32768")),
             model_id=os.getenv("LLAMACPP_CODER_ALIAS", "kitty-coder"),
+            idle_shutdown_seconds=int(os.getenv("LLAMACPP_CODER_IDLE_SHUTDOWN_SECONDS", "900")),
+            port=_extract_port(coder_url, 8087),
         ),
         ModelTier.SUMMARY: ModelEndpoint(
             name="Hermes 8B (Summarizer)",
-            base_url=os.getenv("LLAMACPP_SUMMARY_HOST", "http://localhost:8084"),
+            base_url=summary_url,
             max_slots=int(os.getenv("LLAMACPP_SUMMARY_PARALLEL", "4")),
             context_length=4096,
             model_id=os.getenv("LLAMACPP_SUMMARY_ALIAS", "kitty-summary"),
+            idle_shutdown_seconds=int(os.getenv("LLAMACPP_SUMMARY_IDLE_SHUTDOWN_SECONDS", "1800")),
+            port=_extract_port(summary_url, 8084),
         ),
     }
 
