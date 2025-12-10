@@ -1,6 +1,6 @@
 # KITTY: Technical AI Habitat for Fabrication
 
-> **K**nowledgeable **I**ntelligent **T**ool-using **T**abletop **Y**ardMaster
+> **K**nowledgeable **I**ntelligent **T**ool-using **T**abletop **Y**oda
 >
 > An offline-first, voice-enabled fabrication lab orchestrator running on Mac Studio M3 Ultra. Think "JARVIS for your workshop" - but it actually works, runs locally, and won't spy on you.
 
