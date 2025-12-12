@@ -1,0 +1,123 @@
+/* Media Hub Styles */
+
+.media-hub {
+  padding: 1.5rem;
+  max-width: 1600px;
+  margin: 0 auto;
+  color: #f4f6fb;
+}
+
+.media-hub-header {
+  margin-bottom: 1.5rem;
+}
+
+.header-content h1 {
+  font-size: 2rem;
+  margin: 0 0 0.5rem 0;
+  color: #f4f6fb;
+}
+
+.header-content .subtitle {
+  color: #a9b1c7;
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+/* Tab Navigation */
+.media-hub-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  padding: 0.5rem;
+  background: rgba(15, 17, 26, 0.8);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tab-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: #a9b1c7;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab-button:hover {
+  background: rgba(124, 92, 255, 0.1);
+  color: #c9d4ff;
+}
+
+.tab-button.active {
+  background: rgba(124, 92, 255, 0.2);
+  color: #7c5cff;
+  border: 1px solid rgba(124, 92, 255, 0.3);
+}
+
+.tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: rgba(124, 92, 255, 0.2);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.tab-button.active .tab-icon {
+  background: rgba(124, 92, 255, 0.4);
+}
+
+/* Content Area */
+.media-hub-content {
+  background: rgba(6, 8, 12, 0.7);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 1.5rem;
+  box-shadow: 0 20px 60px rgba(5, 6, 10, 0.8);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .media-hub {
+    padding: 1rem;
+  }
+
+  .header-content h1 {
+    font-size: 1.5rem;
+  }
+
+  .media-hub-tabs {
+    flex-wrap: wrap;
+  }
+
+  .tab-button {
+    flex: 1;
+    min-width: 120px;
+    justify-content: center;
+  }
+
+  .tab-label {
+    display: none;
+  }
+
+  .tab-button .tab-icon {
+    width: 32px;
+    height: 32px;
+    font-size: 1rem;
+  }
+}
+
+@media (min-width: 769px) {
+  .tab-label {
+    display: inline;
+  }
+}

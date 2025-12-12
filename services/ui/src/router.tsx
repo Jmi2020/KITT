@@ -14,8 +14,8 @@ const FabricationConsole = lazy(() => import('./pages/FabricationConsole'));
 const Projects = lazy(() => import('./pages/Projects'));
 const Shell = lazy(() => import('./pages/Shell'));
 const WallTerminal = lazy(() => import('./pages/WallTerminal'));
-const VisionGallery = lazy(() => import('./pages/VisionGallery'));
-const ImageGenerator = lazy(() => import('./pages/ImageGenerator'));
+// VisionGallery and ImageGenerator are now part of MediaHub
+const MediaHub = lazy(() => import('./pages/MediaHub'));
 const ResearchHub = lazy(() => import('./pages/ResearchHub'));
 // IOControl is now part of Settings as System tab
 const MaterialInventory = lazy(() => import('./pages/MaterialInventory'));
@@ -61,15 +61,16 @@ function LegacyViewRedirect() {
     console: '/console',
     shell: '/shell',
     wall: '/wall',
-    vision: '/vision',
-    images: '/images',
+    media: '/media',
+    vision: '/media?tab=gallery',
+    images: '/media?tab=generate',
     research: '/research',
-    results: '/results',
-    iocontrol: '/iocontrol',
+    results: '/research?tab=results',
+    iocontrol: '/settings?tab=system',
     inventory: '/inventory',
     intelligence: '/intelligence',
     cameras: '/cameras',
-    calendar: '/calendar',
+    calendar: '/research?tab=schedule',
     voice: '/voice',
     settings: '/settings',
   };
@@ -103,15 +104,16 @@ function MenuWrapper() {
       console: '/console',
       shell: '/shell',
       wall: '/wall',
-      vision: '/vision',
-      images: '/images',
+      media: '/media',
+      vision: '/media?tab=gallery',
+      images: '/media?tab=generate',
       research: '/research',
-      results: '/results',
-      iocontrol: '/iocontrol',
+      results: '/research?tab=results',
+      iocontrol: '/settings?tab=system',
       inventory: '/inventory',
       intelligence: '/intelligence',
       cameras: '/cameras',
-      calendar: '/calendar',
+      calendar: '/research?tab=schedule',
       voice: '/voice',
       settings: '/settings',
     };
@@ -183,22 +185,23 @@ export const router = createBrowserRouter([
         ),
       },
 
-      // Media
+      // Media Hub (consolidated: VisionGallery + ImageGenerator)
       {
-        path: 'vision',
+        path: 'media',
         element: (
           <Suspense fallback={<PageLoader />}>
-            <VisionGallery />
+            <MediaHub />
           </Suspense>
         ),
       },
+      // Legacy redirects for backwards compatibility
+      {
+        path: 'vision',
+        element: <Navigate to="/media?tab=gallery" replace />,
+      },
       {
         path: 'images',
-        element: (
-          <Suspense fallback={<PageLoader />}>
-            <ImageGenerator />
-          </Suspense>
-        ),
+        element: <Navigate to="/media?tab=generate" replace />,
       },
 
       // Research Hub (consolidated: Research + Results + Calendar)

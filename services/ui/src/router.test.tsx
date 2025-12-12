@@ -32,12 +32,9 @@ vi.mock('./pages/Projects', () => ({
   default: () => <div data-testid="projects-page">Projects</div>,
 }));
 
-vi.mock('./pages/VisionGallery', () => ({
-  default: () => <div data-testid="vision-page">Vision Gallery</div>,
-}));
-
-vi.mock('./pages/ImageGenerator', () => ({
-  default: () => <div data-testid="images-page">Image Generator</div>,
+// MediaHub is the consolidated page for VisionGallery and ImageGenerator
+vi.mock('./pages/MediaHub', () => ({
+  default: () => <div data-testid="media-hub-page">Media Hub</div>,
 }));
 
 // ResearchHub is the consolidated page for Research, Results, and Calendar
@@ -133,17 +130,25 @@ describe('Router Configuration', () => {
     });
   });
 
-  it('renders vision gallery at /vision', async () => {
-    renderWithRouter('/vision');
+  it('renders media hub at /media', async () => {
+    renderWithRouter('/media');
     await waitFor(() => {
-      expect(screen.getByTestId('vision-page')).toBeInTheDocument();
+      expect(screen.getByTestId('media-hub-page')).toBeInTheDocument();
     });
   });
 
-  it('renders image generator at /images', async () => {
+  // /vision and /images now redirect to /media - skip due to AbortSignal incompatibility
+  it.skip('redirects /vision to media hub', async () => {
+    renderWithRouter('/vision');
+    await waitFor(() => {
+      expect(screen.getByTestId('media-hub-page')).toBeInTheDocument();
+    });
+  });
+
+  it.skip('redirects /images to media hub', async () => {
     renderWithRouter('/images');
     await waitFor(() => {
-      expect(screen.getByTestId('images-page')).toBeInTheDocument();
+      expect(screen.getByTestId('media-hub-page')).toBeInTheDocument();
     });
   });
 
@@ -225,7 +230,7 @@ describe('Router Configuration', () => {
 });
 
 describe('Router - All Routes (Consolidation in Progress)', () => {
-  // Note: /results, /calendar, and /iocontrol are now redirects
+  // Note: /results, /calendar, /iocontrol, /vision, /images are now redirects
   // Redirect tests are skipped due to jsdom AbortSignal incompatibility
   const routes = [
     { path: '/', testId: 'menu-page', name: 'Menu' },
@@ -234,8 +239,8 @@ describe('Router - All Routes (Consolidation in Progress)', () => {
     { path: '/console', testId: 'console-page', name: 'Console' },
     { path: '/dashboard', testId: 'dashboard-page', name: 'Dashboard' },
     { path: '/projects', testId: 'projects-page', name: 'Projects' },
-    { path: '/vision', testId: 'vision-page', name: 'Vision Gallery' },
-    { path: '/images', testId: 'images-page', name: 'Image Generator' },
+    // /vision and /images are now redirects to /media
+    { path: '/media', testId: 'media-hub-page', name: 'Media Hub' },
     { path: '/research', testId: 'research-hub-page', name: 'Research Hub' },
     { path: '/cameras', testId: 'cameras-page', name: 'Cameras' },
     { path: '/inventory', testId: 'inventory-page', name: 'Inventory' },
