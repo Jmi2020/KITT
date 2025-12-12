@@ -16,8 +16,7 @@ const Shell = lazy(() => import('./pages/Shell'));
 const WallTerminal = lazy(() => import('./pages/WallTerminal'));
 const VisionGallery = lazy(() => import('./pages/VisionGallery'));
 const ImageGenerator = lazy(() => import('./pages/ImageGenerator'));
-const Research = lazy(() => import('./pages/Research'));
-const Results = lazy(() => import('./pages/Results'));
+const ResearchHub = lazy(() => import('./pages/ResearchHub'));
 const IOControl = lazy(() => import('./pages/IOControl'));
 const MaterialInventory = lazy(() => import('./pages/MaterialInventory'));
 const PrintIntelligence = lazy(() => import('./pages/PrintIntelligence'));
@@ -202,30 +201,23 @@ export const router = createBrowserRouter([
         ),
       },
 
-      // Research
+      // Research Hub (consolidated: Research + Results + Calendar)
       {
         path: 'research',
         element: (
           <Suspense fallback={<PageLoader />}>
-            <Research />
+            <ResearchHub />
           </Suspense>
         ),
       },
+      // Legacy redirects for backwards compatibility
       {
         path: 'results',
-        element: (
-          <Suspense fallback={<PageLoader />}>
-            <Results />
-          </Suspense>
-        ),
+        element: <Navigate to="/research?tab=results" replace />,
       },
       {
         path: 'calendar',
-        element: (
-          <Suspense fallback={<PageLoader />}>
-            <AutonomyCalendar />
-          </Suspense>
-        ),
+        element: <Navigate to="/research?tab=schedule" replace />,
       },
 
       // Monitoring
