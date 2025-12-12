@@ -343,10 +343,54 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Autonomous mode disabled (AUTONOMOUS_ENABLED=false)")
 
+    # Start IdleReaper for automatic llama.cpp server memory management
+    # Only runs when ENABLE_PARALLEL_AGENTS=true (already using local LLM infrastructure)
+    parallel_enabled = os.getenv("ENABLE_PARALLEL_AGENTS", "true").lower() == "true"
+    if parallel_enabled:
+        try:
+            from brain.agents.parallel import (
+                IdleReaper,
+                get_slot_manager,
+                get_process_manager,
+            )
+
+            slot_manager = get_slot_manager()
+            process_manager = get_process_manager()
+
+            # Create reaper with ProcessManager.stop_server as callback
+            app.state.idle_reaper = IdleReaper(
+                slot_manager=slot_manager,
+                shutdown_callback=process_manager.stop_server,
+            )
+
+            # Start background task (checks every 60 seconds)
+            reaper_interval = int(os.getenv("IDLE_REAPER_INTERVAL_SECONDS", "60"))
+            await app.state.idle_reaper.start(interval=reaper_interval)
+
+            logger.info(
+                f"IdleReaper started: checking every {reaper_interval}s, "
+                f"monitoring {app.state.idle_reaper.get_status()['endpoints_monitored']} endpoints"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to start IdleReaper: {e}")
+            app.state.idle_reaper = None
+    else:
+        logger.info("IdleReaper disabled (ENABLE_PARALLEL_AGENTS=false)")
+        app.state.idle_reaper = None
+
     yield
 
     # Shutdown
     logger.info("Brain service shutting down")
+
+    # Stop IdleReaper background task
+    if hasattr(app.state, 'idle_reaper') and app.state.idle_reaper is not None:
+        logger.info("Stopping IdleReaper")
+        try:
+            await app.state.idle_reaper.stop()
+            logger.info("IdleReaper stopped")
+        except Exception as e:
+            logger.error(f"Error stopping IdleReaper: {e}")
 
     # Graceful shutdown for research session manager (wait for pending writes)
     if hasattr(app.state, 'session_manager') and app.state.session_manager is not None:

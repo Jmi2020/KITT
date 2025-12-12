@@ -2,6 +2,15 @@
 
 Technical documentation for the mesh segmentation system.
 
+## Overview
+
+The segmentation system automatically divides oversized 3D models into printable parts that fit within a target printer's build volume. It features:
+
+- **Smart Cut Placement**: Multi-factor scoring for optimal cuts (fit, overhang, visibility)
+- **Surface-Preserving Hollowing**: Reduce material while keeping original surface detail
+- **Integrated Joints**: Printed pins/holes for easy assembly alignment
+- **Multiple Search Algorithms**: Greedy (fast) or beam search (optimal)
+
 ## Architecture
 
 ```
@@ -9,12 +18,14 @@ segmentation/
 ├── __init__.py              # Public exports
 ├── schemas.py               # Pydantic/dataclass models
 ├── engine/
-│   ├── base.py              # Abstract SegmentationEngine
-│   └── planar_engine.py     # Axis-aligned planar cutting
+│   ├── base.py              # Abstract SegmentationEngine + scoring methods
+│   ├── planar_engine.py     # Main segmentation algorithm
+│   └── beam_search.py       # Beam search for optimal cut sequences
 ├── geometry/
-│   └── mesh_wrapper.py      # MeshWrapper: unified mesh interface
+│   ├── mesh_wrapper.py      # MeshWrapper: unified mesh interface
+│   └── plane.py             # CuttingPlane representation
 ├── hollowing/
-│   └── sdf_hollower.py      # SDF-based mesh hollowing
+│   └── sdf_hollower.py      # Voxel + surface shell hollowing
 ├── joints/
 │   ├── base.py              # JointFactory interface
 │   ├── dowel.py             # Dowel hole joints
@@ -23,125 +34,203 @@ segmentation/
     └── threemf_writer.py    # 3MF export with metadata
 ```
 
-## Core Components
-
-### MeshWrapper (`geometry/mesh_wrapper.py`)
-
-Unified interface for mesh operations supporting multiple backends:
-- **trimesh**: Primary backend for mesh operations
-- **MeshLib (mrmeshpy)**: Optional, used for SDF hollowing when available
-
-Key features:
-- Automatic unit detection from 3MF files
-- Lazy conversion between backends
-- Boolean operations (difference for joint holes)
-- Bounding box, volume, dimension calculations
+## Quick Start
 
 ```python
-mesh = MeshWrapper("/path/to/model.3mf")
-print(f"Dimensions: {mesh.dimensions} mm")
-print(f"Volume: {mesh.volume_cm3} cm³")
+from fabrication.segmentation.engine.planar_engine import PlanarSegmentationEngine
+from fabrication.segmentation.geometry.mesh_wrapper import MeshWrapper
+from fabrication.segmentation.schemas import HollowingStrategy, JointType
 
-# Boolean subtraction
-mesh_with_holes = mesh.boolean_difference(cylinder_mesh)
-```
+# Load mesh
+mesh = MeshWrapper(trimesh.load("model.3mf"))
 
-### PlanarSegmentationEngine (`engine/planar_engine.py`)
-
-Main segmentation algorithm using iterative axis-aligned cuts:
-
-1. **Hollowing** (if enabled): Create shell using SdfHollower
-2. **Auto max_parts**: Calculate based on mesh/build volume ratio
-3. **Iterative cutting**: Cut largest oversized part until all fit
-4. **Joint application**: Add pins/holes to cut seams
-5. **Export**: Write parts as 3MF files
-
-```python
-config = SegmentationConfig(
+# Configure and run segmentation
+engine = PlanarSegmentationEngine(
     build_volume=(300.0, 320.0, 325.0),  # Bambu H2D
-    wall_thickness_mm=10.0,
-    hollowing_resolution=1000,
+    wall_thickness_mm=5.0,
+    hollowing_strategy=HollowingStrategy.SURFACE_SHELL,
     joint_type=JointType.INTEGRATED,
 )
 
-engine = PlanarSegmentationEngine(config)
 result = engine.segment(mesh, output_dir="/output/path")
+print(f"Created {result.num_parts} parts")
 ```
 
-### SdfHollower (`hollowing/sdf_hollower.py`)
+## Cut Scoring System
 
-Voxel-based mesh hollowing:
-
-1. **Voxelize** mesh at specified resolution
-2. **Fill interior** using `scipy.ndimage.binary_fill_holes`
-3. **Erode** to create wall thickness
-4. **Extract shell** as `filled & ~eroded`
-5. **Convert back** to mesh via marching cubes
-
-Key config:
-- `voxels_per_dim`: Resolution (200=fast, 1000=high quality)
-- `wall_thickness_mm`: Target shell thickness
-
-### Joint Factories (`joints/`)
-
-**IntegratedJointFactory**: Creates printed pins on one part, holes on mating part
-- Places joints in overlap region of seam contours
-- Filters positions too close to edges
-- Determines pin/hole assignment based on distance to cut plane
-
-**DowelJointFactory**: Creates matching holes on both parts for external pins
-
-## Data Flow
+The engine scores each potential cut using a weighted formula:
 
 ```
-Input 3MF/STL
-    ↓
-MeshWrapper (load + unit conversion)
-    ↓
-SdfHollower (optional hollowing)
-    ↓
-PlanarSegmentationEngine (iterative cutting)
-    ↓
-JointFactory (add pins/holes)
-    ↓
-ThreeMFWriter (export parts)
-    ↓
-Output 3MF files
+score = fit×0.35 + utilization×0.20 + balance×0.10 + overhang×0.20 + visibility×0.15
 ```
 
-## Configuration
+| Factor | Weight | Description |
+|--------|--------|-------------|
+| **Fit** | 35% | Do resulting parts fit in build volume? |
+| **Utilization** | 20% | How efficiently do parts use build volume? |
+| **Balance** | 10% | Are parts roughly equal in size? |
+| **Overhang** | 20% | Can parts print with minimal supports? (Phase 1A) |
+| **Visibility** | 15% | Is the seam hidden from view? (Phase 1B) |
+
+### Phase 1A: Overhang-Aware Scoring
+
+Each cut candidate is evaluated for printability:
+- Tests 6 print orientations (Z-up/down, Y-up/down, X-up/down)
+- Returns minimum overhang ratio across orientations
+- Configurable threshold (default 30° from vertical)
+
+```python
+engine = PlanarSegmentationEngine(
+    overhang_threshold_deg=30.0,  # Strict (cleaner surfaces)
+    # overhang_threshold_deg=45.0,  # Standard FDM threshold
+)
+```
+
+### Phase 1B: Seam Visibility Scoring
+
+Prefers cuts on less visible surfaces:
+- **Bottom cuts (low Z)**: visibility score = 0.9 (hidden)
+- **Back cuts (min Y)**: visibility score = 0.7
+- **Front/top cuts**: visibility score = 0.3 (visible)
+
+### Phase 1C: Oblique Cutting Planes
+
+When axis-aligned cuts score poorly, the engine can try oblique cuts:
+
+```python
+engine = PlanarSegmentationEngine(
+    enable_oblique_cuts=True,           # Enable PCA-based oblique cuts
+    oblique_fallback_threshold=0.5,     # Use when axis-aligned < 0.5
+)
+```
+
+Uses Principal Component Analysis (PCA) to find mesh orientation axes.
+
+## Search Algorithms
+
+### Greedy (Default)
+
+Fast iterative approach - finds and applies the single best cut at each step.
+
+### Beam Search (Phase 2)
+
+Explores multiple cut sequences in parallel for potentially better results:
+
+```python
+engine = PlanarSegmentationEngine(
+    enable_beam_search=True,
+    beam_width=3,              # Parallel paths to explore
+    beam_timeout_seconds=60.0, # Max search time
+)
+```
+
+## Hollowing Strategies
+
+### HOLLOW_THEN_SEGMENT (Default)
+
+Hollow the entire mesh first, then segment. Creates wall panels.
+
+### SEGMENT_THEN_HOLLOW
+
+Segment the solid mesh first, then hollow each piece. Creates hollow boxes.
+
+### SURFACE_SHELL (Best Quality)
+
+Preserves original surface detail while hollowing:
+
+```python
+engine = PlanarSegmentationEngine(
+    hollowing_strategy=HollowingStrategy.SURFACE_SHELL,
+    wall_thickness_mm=5.0,
+)
+```
+
+**How it works:**
+1. Keep original outer surface at full resolution
+2. Create inner surface by offsetting vertices along normals
+3. Aggressively simplify inner surface (10% of faces - not visible)
+4. Boolean subtract inner from outer
+
+**Results (King.3mf example):**
+- Original: 578K faces, 84,000 cm³
+- Surface shell: 651K faces (578K outer + 58K inner), 13,700 cm³
+- Material savings: 83.7%
+- Surface detail: 100% preserved
+
+### NONE
+
+No hollowing - segment solid mesh.
+
+## Joint Types
+
+### INTEGRATED (Recommended)
+
+Printed pins on one part, holes on the mating part:
+- No external hardware needed
+- Self-aligning during assembly
+- Configurable pin size
+
+```python
+engine = PlanarSegmentationEngine(
+    joint_type=JointType.INTEGRATED,
+    pin_diameter_mm=5.0,
+    pin_height_mm=8.0,
+    joint_tolerance_mm=0.25,  # Clearance for fit
+)
+```
+
+**Note:** Wall thickness must be ≥ pin_diameter + 2mm for structural integrity.
+
+### DOWEL
+
+Creates matching holes on both parts for external dowel pins:
+- Requires purchasing dowel pins
+- Stronger connection
+
+### NONE
+
+No joints - use adhesive only.
+
+## Configuration Reference
 
 ### SegmentationConfig
 
 ```python
 @dataclass
 class SegmentationConfig:
+    # Build volume
     build_volume: tuple[float, float, float] = (300.0, 320.0, 325.0)
-    wall_thickness_mm: float = 10.0
+
+    # Hollowing
     enable_hollowing: bool = True
     hollowing_strategy: HollowingStrategy = HollowingStrategy.HOLLOW_THEN_SEGMENT
-    hollowing_resolution: int = 1000  # voxels per dimension
+    wall_thickness_mm: float = 10.0
+    hollowing_resolution: int = 200  # voxels (for voxel method)
+    enable_simplification: bool = True
+    simplification_ratio: float = 0.3
+    enable_smoothing: bool = False  # Disabled - can cause artifacts
+
+    # Joints
     joint_type: JointType = JointType.INTEGRATED
     joint_tolerance_mm: float = 0.3
     pin_diameter_mm: float = 8.0
     pin_height_mm: float = 10.0
+
+    # Cut optimization (Phase 1)
+    overhang_threshold_deg: float = 30.0
+    enable_oblique_cuts: bool = False
+    oblique_fallback_threshold: float = 0.5
+
+    # Beam search (Phase 2)
+    enable_beam_search: bool = False
+    beam_width: int = 3
+    beam_timeout_seconds: float = 60.0
+
+    # Limits
     max_parts: int = 0  # 0 = auto-calculate
 ```
 
-### HollowingConfig
-
-```python
-@dataclass
-class HollowingConfig:
-    wall_thickness_mm: float = 2.0
-    min_wall_thickness_mm: float = 1.2
-    voxel_size_mm: float = 0.5
-    voxels_per_dim: int = 200  # overrides voxel_size_mm if > 0
-```
-
-## API Integration
-
-Routes are defined in `routes/segmentation.py`:
+## API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -149,47 +238,48 @@ Routes are defined in `routes/segmentation.py`:
 | `/api/segmentation/segment` | POST | Synchronous segmentation |
 | `/api/segmentation/segment/async` | POST | Async job for large models |
 | `/api/segmentation/jobs/{id}` | GET | Get async job status |
-| `/api/segmentation/printers` | GET | List printer configs |
+| `/api/segmentation/printers` | GET | List printer configurations |
 
-## Performance Considerations
+## Performance
 
-### Memory Usage
+### Hollowing Resolution vs Quality
 
-| Resolution | Voxels | Memory (1m model) |
-|------------|--------|-------------------|
-| 200 | 8M | ~100MB |
-| 500 | 125M | ~500MB |
-| 1000 | 1B | ~1-2GB |
+| Resolution | Time | Quality | Memory |
+|------------|------|---------|--------|
+| 200 | ~5s | Fast/coarse | ~100MB |
+| 500 | ~20s | Medium | ~500MB |
+| 1000 | ~60-90s | High | ~1-2GB |
 
-### Processing Time
+### Surface Shell vs Voxel Hollowing
 
-| Resolution | Hollowing | Cutting (36 parts) |
-|------------|-----------|-------------------|
-| 200 | ~5s | ~20s |
-| 500 | ~20s | ~30s |
-| 1000 | ~60-90s | ~40s |
-
-## Dependencies
-
-Required:
-- `trimesh`: Mesh loading, boolean operations, marching cubes
-- `scipy`: Binary morphology for hollowing
-- `numpy`: Array operations
-
-Optional:
-- `mrmeshpy` (MeshLib): Faster SDF hollowing via native implementation
+| Method | Face Count | Surface Detail | Time |
+|--------|------------|----------------|------|
+| Voxel (res=200) | ~70K | Lost | ~5s |
+| Surface Shell | ~650K | Preserved | ~2s |
 
 ## Testing
 
 ```bash
-PYTHONPATH=services/fabrication/src:services/common/src python3 -m pytest \
-  services/fabrication/tests/test_segmentation.py -v
+# Run all segmentation tests
+PYTHONPATH=services/fabrication/src:services/common/src \
+  python3 -m pytest services/fabrication/tests/ -v
+
+# Run specific phase tests
+PYTHONPATH=services/fabrication/src:services/common/src \
+  python3 -m pytest services/fabrication/tests/test_engine.py::TestOverhangAwareScoring -v
+
+PYTHONPATH=services/fabrication/src:services/common/src \
+  python3 -m pytest services/fabrication/tests/test_engine.py::TestBeamSearchSegmentation -v
 ```
 
-## Future Work
+## Dependencies
 
-- [ ] Dovetail joint implementation
-- [ ] Pyramid joint implementation
-- [ ] Oblique cutting planes (not just axis-aligned)
-- [ ] Material-aware hollowing (variable wall thickness)
-- [ ] GPU-accelerated voxelization
+**Required:**
+- `trimesh`: Mesh loading, boolean operations, marching cubes
+- `scipy`: Binary morphology for hollowing
+- `numpy`: Array operations
+- `manifold3d`: Boolean operations for surface shell + joints
+
+**Optional:**
+- `mrmeshpy` (MeshLib): Faster SDF hollowing
+- `fast-simplification`: Mesh decimation
