@@ -9,6 +9,7 @@ import Layout from './components/Layout';
 
 // Lazy load pages for better performance
 const Menu = lazy(() => import('./pages/Menu'));
+// Dashboard is now consolidated with cameras and materials
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const FabricationConsole = lazy(() => import('./pages/FabricationConsole'));
 const Projects = lazy(() => import('./pages/Projects'));
@@ -18,10 +19,9 @@ const WallTerminal = lazy(() => import('./pages/WallTerminal'));
 const MediaHub = lazy(() => import('./pages/MediaHub'));
 const ResearchHub = lazy(() => import('./pages/ResearchHub'));
 // IOControl is now part of Settings as System tab
-const MaterialInventory = lazy(() => import('./pages/MaterialInventory'));
+// MaterialInventory is now part of Dashboard as Materials tab
+// VisionService/cameras is now part of Dashboard as Cameras tab
 const PrintIntelligence = lazy(() => import('./pages/PrintIntelligence'));
-const VisionService = lazy(() => import('./pages/VisionService'));
-const AutonomyCalendar = lazy(() => import('./pages/AutonomyCalendar'));
 const Voice = lazy(() => import('./pages/Voice'));
 const Settings = lazy(() => import('./pages/Settings/index'));
 
@@ -67,9 +67,9 @@ function LegacyViewRedirect() {
     research: '/research',
     results: '/research?tab=results',
     iocontrol: '/settings?tab=system',
-    inventory: '/inventory',
+    inventory: '/dashboard?tab=materials',
     intelligence: '/intelligence',
-    cameras: '/cameras',
+    cameras: '/dashboard?tab=cameras',
     calendar: '/research?tab=schedule',
     voice: '/voice',
     settings: '/settings',
@@ -110,9 +110,9 @@ function MenuWrapper() {
       research: '/research',
       results: '/research?tab=results',
       iocontrol: '/settings?tab=system',
-      inventory: '/inventory',
+      inventory: '/dashboard?tab=materials',
       intelligence: '/intelligence',
-      cameras: '/cameras',
+      cameras: '/dashboard?tab=cameras',
       calendar: '/research?tab=schedule',
       voice: '/voice',
       settings: '/settings',
@@ -223,22 +223,14 @@ export const router = createBrowserRouter([
         element: <Navigate to="/research?tab=schedule" replace />,
       },
 
-      // Monitoring
+      // Monitoring - cameras and inventory are now redirects to Dashboard tabs
       {
         path: 'cameras',
-        element: (
-          <Suspense fallback={<PageLoader />}>
-            <VisionService />
-          </Suspense>
-        ),
+        element: <Navigate to="/dashboard?tab=cameras" replace />,
       },
       {
         path: 'inventory',
-        element: (
-          <Suspense fallback={<PageLoader />}>
-            <MaterialInventory />
-          </Suspense>
-        ),
+        element: <Navigate to="/dashboard?tab=materials" replace />,
       },
       {
         path: 'intelligence',

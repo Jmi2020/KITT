@@ -12,6 +12,7 @@ vi.mock('./pages/Menu', () => ({
   ),
 }));
 
+// Dashboard is now consolidated with cameras and materials tabs
 vi.mock('./pages/Dashboard', () => ({
   default: () => <div data-testid="dashboard-page">Dashboard</div>,
 }));
@@ -42,13 +43,8 @@ vi.mock('./pages/ResearchHub', () => ({
   default: () => <div data-testid="research-hub-page">Research Hub</div>,
 }));
 
-vi.mock('./pages/VisionService', () => ({
-  default: () => <div data-testid="cameras-page">Cameras</div>,
-}));
-
-vi.mock('./pages/MaterialInventory', () => ({
-  default: () => <div data-testid="inventory-page">Inventory</div>,
-}));
+// VisionService and MaterialInventory are now part of Dashboard tabs
+// No separate mocks needed since they redirect to Dashboard
 
 vi.mock('./pages/PrintIntelligence', () => ({
   default: () => <div data-testid="intelligence-page">Intelligence</div>,
@@ -175,17 +171,18 @@ describe('Router Configuration', () => {
     });
   });
 
-  it('renders cameras page at /cameras', async () => {
+  // /cameras and /inventory now redirect to /dashboard tabs - skip due to AbortSignal incompatibility
+  it.skip('redirects /cameras to dashboard', async () => {
     renderWithRouter('/cameras');
     await waitFor(() => {
-      expect(screen.getByTestId('cameras-page')).toBeInTheDocument();
+      expect(screen.getByTestId('dashboard-page')).toBeInTheDocument();
     });
   });
 
-  it('renders inventory page at /inventory', async () => {
+  it.skip('redirects /inventory to dashboard', async () => {
     renderWithRouter('/inventory');
     await waitFor(() => {
-      expect(screen.getByTestId('inventory-page')).toBeInTheDocument();
+      expect(screen.getByTestId('dashboard-page')).toBeInTheDocument();
     });
   });
 
@@ -230,7 +227,7 @@ describe('Router Configuration', () => {
 });
 
 describe('Router - All Routes (Consolidation in Progress)', () => {
-  // Note: /results, /calendar, /iocontrol, /vision, /images are now redirects
+  // Note: /results, /calendar, /iocontrol, /vision, /images, /cameras, /inventory are now redirects
   // Redirect tests are skipped due to jsdom AbortSignal incompatibility
   const routes = [
     { path: '/', testId: 'menu-page', name: 'Menu' },
@@ -242,8 +239,7 @@ describe('Router - All Routes (Consolidation in Progress)', () => {
     // /vision and /images are now redirects to /media
     { path: '/media', testId: 'media-hub-page', name: 'Media Hub' },
     { path: '/research', testId: 'research-hub-page', name: 'Research Hub' },
-    { path: '/cameras', testId: 'cameras-page', name: 'Cameras' },
-    { path: '/inventory', testId: 'inventory-page', name: 'Inventory' },
+    // /cameras and /inventory are now redirects to /dashboard tabs
     { path: '/intelligence', testId: 'intelligence-page', name: 'Intelligence' },
     // /iocontrol is now a redirect to /settings?tab=system
     { path: '/settings', testId: 'settings-page', name: 'Settings' },
