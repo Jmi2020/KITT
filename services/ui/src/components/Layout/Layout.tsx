@@ -1,5 +1,6 @@
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useTheme } from '../../contexts/ThemeContext';
+import { KittyBadge } from '../KittyBadge';
 import './Layout.css';
 
 interface NavItem {
@@ -21,6 +22,7 @@ export function Layout() {
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
   const isHome = location.pathname === '/';
+  const isVoicePage = location.pathname === '/voice';
 
   return (
     <div className="kitty-app">
@@ -54,6 +56,11 @@ export function Layout() {
       <main>
         <Outlet />
       </main>
+
+      {/* Floating KITTY badge - appears on all pages except Voice (which has its own with pause behavior) */}
+      {!isVoicePage && (
+        <KittyBadge size={80} wandering={true} wanderInterval={30000} />
+      )}
     </div>
   );
 }

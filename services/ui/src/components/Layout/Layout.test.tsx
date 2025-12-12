@@ -28,7 +28,11 @@ function TestLayout({ initialPath = '/' }: { initialPath?: string }) {
 describe('Layout', () => {
   it('renders the KITTY header', () => {
     render(<TestLayout />);
-    expect(screen.getByText('KITTY')).toBeInTheDocument();
+    // KITTY appears in both the header h1 and the floating badge, so use getAllByText
+    const kittyElements = screen.getAllByText('KITTY');
+    expect(kittyElements.length).toBeGreaterThanOrEqual(1);
+    // Verify the header h1 specifically
+    expect(screen.getByRole('heading', { name: 'KITTY' })).toBeInTheDocument();
   });
 
   it('renders theme toggle button', () => {
@@ -68,5 +72,16 @@ describe('Layout', () => {
     render(<TestLayout initialPath="/voice" />);
     const voiceLink = screen.getByRole('link', { name: /Voice/ });
     expect(voiceLink).toHaveClass('active');
+  });
+
+  it('renders KittyBadge on non-voice pages', () => {
+    render(<TestLayout initialPath="/" />);
+    expect(screen.getByTitle('Click to move KITTY')).toBeInTheDocument();
+  });
+
+  it('does not render KittyBadge on voice page (voice has its own)', () => {
+    render(<TestLayout initialPath="/voice" />);
+    // Voice page has its own KittyBadge with special pause behavior, so Layout hides it
+    expect(screen.queryByTitle('Click to move KITTY')).not.toBeInTheDocument();
   });
 });
