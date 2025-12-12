@@ -133,3 +133,29 @@ vi.stubGlobal('IntersectionObserver', class {
   unobserve() {}
   disconnect() {}
 });
+
+// Suppress React Router's AbortSignal error in jsdom
+// This is a known compatibility issue with jsdom and @remix-run/router
+const originalConsoleError = console.error;
+console.error = (...args: unknown[]) => {
+  if (
+    typeof args[0] === 'string' &&
+    args[0].includes('AbortSignal')
+  ) {
+    return;
+  }
+  originalConsoleError.apply(console, args);
+};
+
+// Add global error handler to suppress the unhandled rejection
+// from React Router's internal navigation (jsdom AbortSignal issue)
+if (typeof window !== 'undefined') {
+  window.addEventListener('unhandledrejection', (event) => {
+    if (
+      event.reason instanceof TypeError &&
+      event.reason.message.includes('AbortSignal')
+    ) {
+      event.preventDefault();
+    }
+  });
+}
