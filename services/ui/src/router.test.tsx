@@ -57,11 +57,9 @@ vi.mock('./pages/PrintIntelligence', () => ({
   default: () => <div data-testid="intelligence-page">Intelligence</div>,
 }));
 
-vi.mock('./pages/IOControl', () => ({
-  default: () => <div data-testid="iocontrol-page">IO Control</div>,
-}));
+// IOControl is now part of Settings - no separate mock needed
 
-vi.mock('./pages/Settings', () => ({
+vi.mock('./pages/Settings/index', () => ({
   default: () => <div data-testid="settings-page">Settings</div>,
 }));
 
@@ -193,10 +191,11 @@ describe('Router Configuration', () => {
     });
   });
 
-  it('renders iocontrol page at /iocontrol', async () => {
+  // IOControl now redirects to Settings?tab=system - skip due to AbortSignal incompatibility
+  it.skip('redirects /iocontrol to settings', async () => {
     renderWithRouter('/iocontrol');
     await waitFor(() => {
-      expect(screen.getByTestId('iocontrol-page')).toBeInTheDocument();
+      expect(screen.getByTestId('settings-page')).toBeInTheDocument();
     });
   });
 
@@ -226,8 +225,8 @@ describe('Router Configuration', () => {
 });
 
 describe('Router - All Routes (Consolidation in Progress)', () => {
-  // Note: /results and /calendar are now redirects to /research (Research Hub)
-  // Those redirect tests are skipped due to jsdom AbortSignal incompatibility
+  // Note: /results, /calendar, and /iocontrol are now redirects
+  // Redirect tests are skipped due to jsdom AbortSignal incompatibility
   const routes = [
     { path: '/', testId: 'menu-page', name: 'Menu' },
     { path: '/voice', testId: 'voice-page', name: 'Voice' },
@@ -241,7 +240,7 @@ describe('Router - All Routes (Consolidation in Progress)', () => {
     { path: '/cameras', testId: 'cameras-page', name: 'Cameras' },
     { path: '/inventory', testId: 'inventory-page', name: 'Inventory' },
     { path: '/intelligence', testId: 'intelligence-page', name: 'Intelligence' },
-    { path: '/iocontrol', testId: 'iocontrol-page', name: 'IO Control' },
+    // /iocontrol is now a redirect to /settings?tab=system
     { path: '/settings', testId: 'settings-page', name: 'Settings' },
     { path: '/wall', testId: 'wall-page', name: 'Wall Terminal' },
   ];

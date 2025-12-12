@@ -17,13 +17,13 @@ const WallTerminal = lazy(() => import('./pages/WallTerminal'));
 const VisionGallery = lazy(() => import('./pages/VisionGallery'));
 const ImageGenerator = lazy(() => import('./pages/ImageGenerator'));
 const ResearchHub = lazy(() => import('./pages/ResearchHub'));
-const IOControl = lazy(() => import('./pages/IOControl'));
+// IOControl is now part of Settings as System tab
 const MaterialInventory = lazy(() => import('./pages/MaterialInventory'));
 const PrintIntelligence = lazy(() => import('./pages/PrintIntelligence'));
 const VisionService = lazy(() => import('./pages/VisionService'));
 const AutonomyCalendar = lazy(() => import('./pages/AutonomyCalendar'));
 const Voice = lazy(() => import('./pages/Voice'));
-const Settings = lazy(() => import('./pages/Settings'));
+const Settings = lazy(() => import('./pages/Settings/index'));
 
 // Loading component for suspense
 function PageLoader() {
@@ -248,20 +248,17 @@ export const router = createBrowserRouter([
 
       // System
       {
-        path: 'iocontrol',
-        element: (
-          <Suspense fallback={<PageLoader />}>
-            <IOControl />
-          </Suspense>
-        ),
-      },
-      {
         path: 'settings',
         element: (
           <Suspense fallback={<PageLoader />}>
             <Settings />
           </Suspense>
         ),
+      },
+      // Legacy redirect for IOControl -> Settings System tab
+      {
+        path: 'iocontrol',
+        element: <Navigate to="/settings?tab=system" replace />,
       },
 
       // Special
