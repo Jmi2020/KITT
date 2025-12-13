@@ -1,4 +1,11 @@
-"""Voice service dependencies."""
+"""Voice service dependencies.
+
+Provides lazy-initialized components for the voice service:
+- STT (Whisper local + OpenAI fallback)
+- TTS (Kokoro/Piper local + OpenAI fallback)
+- Wake word detection (Porcupine)
+- WebSocket handler for real-time streaming
+"""
 
 from __future__ import annotations
 
@@ -20,6 +27,7 @@ if TYPE_CHECKING:
     from .stt import HybridSTT
     from .tts import StreamingTTS
     from .websocket import VoiceWebSocketHandler
+    from .wake_word import WakeWordManager
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +93,7 @@ def get_stt() -> HybridSTT | None:
 
 @lru_cache(maxsize=1)
 def get_tts() -> StreamingTTS | None:
-    """Initialize hybrid TTS with local Piper and OpenAI fallback."""
+    """Initialize hybrid TTS with Kokoro/Piper local and OpenAI fallback."""
     try:
         from .tts import StreamingTTS
 
@@ -93,12 +101,14 @@ def get_tts() -> StreamingTTS | None:
         openai_key = os.getenv("OPENAI_API_KEY")
         openai_model = os.getenv("OPENAI_TTS_MODEL", "tts-1")
         prefer_local = os.getenv("VOICE_PREFER_LOCAL", "true").lower() == "true"
+        local_provider = os.getenv("LOCAL_TTS_PROVIDER", "kokoro")
 
         tts = StreamingTTS(
             piper_model_dir=piper_dir,
             openai_api_key=openai_key,
             openai_model=openai_model,
             prefer_local=prefer_local,
+            local_provider=local_provider,
         )
 
         logger.info("TTS initialized: %s", tts.get_status())
@@ -106,6 +116,26 @@ def get_tts() -> StreamingTTS | None:
 
     except Exception as e:
         logger.warning("Failed to initialize TTS: %s", e)
+        return None
+
+
+@lru_cache(maxsize=1)
+def get_wake_word_manager() -> WakeWordManager | None:
+    """Initialize wake word manager for hands-free activation."""
+    try:
+        from .wake_word import WakeWordManager
+
+        manager = WakeWordManager()
+
+        if manager.enabled:
+            logger.info("Wake word manager initialized (enabled)")
+        else:
+            logger.info("Wake word manager initialized (disabled by config)")
+
+        return manager
+
+    except Exception as e:
+        logger.warning("Failed to initialize wake word manager: %s", e)
         return None
 
 
@@ -124,6 +154,7 @@ def get_websocket_handler() -> VoiceWebSocketHandler | None:
     """Initialize WebSocket handler for real-time voice streaming.
 
     Will work with just STT/TTS even if router/orchestrator unavailable.
+    Includes wake word manager for hands-free activation if configured.
     """
     try:
         from .websocket import VoiceWebSocketHandler
@@ -132,6 +163,7 @@ def get_websocket_handler() -> VoiceWebSocketHandler | None:
         router = get_router_optional()
         stt = get_stt()
         tts = get_tts()
+        wake_word_manager = get_wake_word_manager()
 
         # At minimum, we need STT or TTS to be useful
         if stt is None and tts is None:
@@ -141,13 +173,15 @@ def get_websocket_handler() -> VoiceWebSocketHandler | None:
             router=router,
             stt=stt,
             tts=tts,
+            wake_word_manager=wake_word_manager,
         )
 
         logger.info(
-            "Voice WebSocket handler initialized (STT: %s, TTS: %s, Router: %s)",
+            "Voice WebSocket handler initialized (STT: %s, TTS: %s, Router: %s, WakeWord: %s)",
             stt is not None,
             tts is not None,
             router is not None,
+            wake_word_manager is not None and wake_word_manager.enabled,
         )
         return handler
 

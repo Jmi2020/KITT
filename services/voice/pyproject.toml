@@ -28,6 +28,12 @@ dependencies = [
 [project.optional-dependencies]
 local = [
   "whispercpp>=0.0.17",  # Local Whisper STT
+  "kokoro-onnx>=0.4.0",  # Local TTS with Apple Silicon optimization
+  "pvporcupine>=3.0.0",  # Porcupine wake word detection
+  "pyaudio>=0.2.14",     # Audio capture for wake word
+]
+apple-silicon = [
+  "onnxruntime-silicon>=1.19.0",  # Apple Silicon optimized ONNX runtime
 ]
 
 [tool.setuptools.package-dir]

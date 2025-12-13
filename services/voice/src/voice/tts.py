@@ -1,7 +1,12 @@
-"""Streaming Text-to-Speech with local Piper and OpenAI fallback.
+"""Streaming Text-to-Speech with local Kokoro/Piper and OpenAI fallback.
 
 Supports real-time audio generation as text arrives,
 with sentence-level buffering for natural speech flow.
+
+Provider priority (configurable via LOCAL_TTS_PROVIDER env):
+1. Kokoro ONNX - Apple Silicon optimized (default)
+2. Piper - CPU-based fallback
+3. OpenAI - Cloud fallback
 """
 
 from __future__ import annotations
@@ -16,6 +21,8 @@ import tempfile
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import AsyncIterator, Optional
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +240,141 @@ class PiperTTSClient(TTSProvider):
         return list(self.VOICE_MAP.keys())
 
 
+class KokoroTTSClient(TTSProvider):
+    """Kokoro ONNX TTS client optimized for Apple Silicon.
+
+    Provides high-quality neural TTS with adaptive chunking
+    for smooth playback on longer texts.
+    """
+
+    # Map OpenAI voice names to Kokoro voices
+    VOICE_MAP = {
+        "default": "am_michael",
+        "alloy": "am_michael",
+        "echo": "am_michael",
+        "fable": "af",  # Female voice
+        "onyx": "am_michael",
+        "nova": "af",
+        "shimmer": "af",
+    }
+
+    def __init__(
+        self,
+        default_voice: str | None = None,
+        speed: float = 1.0,
+    ) -> None:
+        self._default_voice = default_voice or os.getenv("KOKORO_DEFAULT_VOICE", "am_michael")
+        self._speed = speed
+        self._available = False
+        self._tts = None
+        self._check_availability()
+
+    def _check_availability(self) -> None:
+        """Check if Kokoro dependencies are available."""
+        try:
+            from .kokoro_manager import KokoroManager
+
+            if KokoroManager.is_available():
+                # Check model files exist
+                model_path = os.path.expanduser(
+                    os.getenv("KOKORO_MODEL_PATH", "~/.local/share/kitty/models/kokoro-v1.0.onnx")
+                )
+                if os.path.exists(model_path):
+                    self._available = True
+                    logger.info("Kokoro TTS available with model: %s", model_path)
+                else:
+                    logger.warning("Kokoro model not found: %s", model_path)
+                    self._available = False
+            else:
+                logger.info("Kokoro dependencies not available")
+                self._available = False
+        except ImportError as e:
+            logger.info("Kokoro not available: %s", e)
+            self._available = False
+        except Exception as e:
+            logger.warning("Error checking Kokoro availability: %s", e)
+            self._available = False
+
+    def _ensure_tts(self) -> None:
+        """Lazy initialization of Kokoro TTS."""
+        if self._tts is not None:
+            return
+
+        from .kokoro_tts import KokoroTTS
+
+        self._tts = KokoroTTS(
+            voice=self._default_voice,
+            speed=self._speed,
+        )
+
+    def _get_voice(self, voice: str) -> str:
+        """Map voice name to Kokoro voice."""
+        return self.VOICE_MAP.get(voice, self._default_voice)
+
+    async def synthesize(
+        self,
+        text: str,
+        voice: str = "default",
+    ) -> bytes:
+        """Synthesize text to audio bytes."""
+        if not self._available:
+            raise RuntimeError("Kokoro TTS not available")
+
+        self._ensure_tts()
+
+        if self._tts is None:
+            raise RuntimeError("Kokoro TTS initialization failed")
+
+        # Set voice temporarily
+        original_voice = self._tts.voice
+        self._tts.voice = self._get_voice(voice)
+
+        try:
+            samples, sample_rate = self._tts.synthesize(text)
+
+            # Convert float32 samples to int16 PCM bytes
+            pcm_samples = (samples * 32767).astype(np.int16)
+            return pcm_samples.tobytes()
+
+        finally:
+            self._tts.voice = original_voice
+
+    async def synthesize_stream(
+        self,
+        text: str,
+        voice: str = "default",
+    ) -> AsyncIterator[bytes]:
+        """Stream audio chunks using adaptive chunking."""
+        if not self._available:
+            raise RuntimeError("Kokoro TTS not available")
+
+        self._ensure_tts()
+
+        if self._tts is None:
+            raise RuntimeError("Kokoro TTS initialization failed")
+
+        # Set voice temporarily
+        original_voice = self._tts.voice
+        self._tts.voice = self._get_voice(voice)
+
+        try:
+            async for chunk in self._tts.synthesize_streaming(text):
+                # Convert float32 samples to int16 PCM bytes
+                pcm_samples = (chunk.samples * 32767).astype(np.int16)
+                yield pcm_samples.tobytes()
+
+        finally:
+            self._tts.voice = original_voice
+
+    def is_available(self) -> bool:
+        """Check if Kokoro is available."""
+        return self._available
+
+    def get_voices(self) -> list[str]:
+        """Get available voice names."""
+        return list(self.VOICE_MAP.keys())
+
+
 class OpenAITTSClient(TTSProvider):
     """OpenAI TTS API client for cloud-based speech synthesis."""
 
@@ -325,9 +467,12 @@ class OpenAITTSClient(TTSProvider):
 
 
 class StreamingTTS:
-    """Hybrid streaming TTS that tries local Piper first, falls back to OpenAI.
+    """Hybrid streaming TTS with Kokoro/Piper local and OpenAI cloud fallback.
 
-    Provides real-time audio generation with automatic provider selection.
+    Provider selection order (configurable via LOCAL_TTS_PROVIDER env):
+    - kokoro: Kokoro ONNX (Apple Silicon optimized) -> Piper -> OpenAI
+    - piper: Piper -> Kokoro -> OpenAI
+    - openai: OpenAI only (cloud)
     """
 
     def __init__(
@@ -336,12 +481,29 @@ class StreamingTTS:
         openai_api_key: str | None = None,
         openai_model: str = "tts-1",
         prefer_local: bool = True,
+        local_provider: str | None = None,
     ) -> None:
-        self._local = PiperTTSClient(model_dir=piper_model_dir)
+        # Determine local provider preference
+        self._local_provider = local_provider or os.getenv("LOCAL_TTS_PROVIDER", "kokoro")
+
+        # Initialize all providers
+        self._kokoro = KokoroTTSClient()
+        self._piper = PiperTTSClient(model_dir=piper_model_dir)
         self._cloud = OpenAITTSClient(api_key=openai_api_key, model=openai_model)
+
         self._prefer_local = prefer_local
-        self._local_failures = 0
+        self._kokoro_failures = 0
+        self._piper_failures = 0
         self._max_local_failures = 3
+
+        # Log provider status
+        logger.info(
+            "TTS initialized: kokoro=%s, piper=%s, cloud=%s, preferred=%s",
+            self._kokoro.is_available(),
+            self._piper.is_available(),
+            self._cloud.is_available(),
+            self._local_provider,
+        )
 
     def _strip_markdown(self, text: str) -> str:
         """Remove markdown formatting for clean TTS output.
@@ -406,10 +568,7 @@ class StreamingTTS:
         for provider in providers:
             try:
                 result = await provider.synthesize(text, voice)
-
-                if provider is self._local:
-                    self._local_failures = 0
-
+                self._reset_failures(provider)
                 return result
 
             except Exception as e:
@@ -419,9 +578,7 @@ class StreamingTTS:
                     e,
                 )
                 last_error = e
-
-                if provider is self._local:
-                    self._local_failures += 1
+                self._track_failure(provider)
 
         raise RuntimeError(
             f"All TTS providers failed. Last error: {last_error}"
@@ -443,9 +600,7 @@ class StreamingTTS:
                 async for chunk in provider.synthesize_stream(text, voice):
                     yield chunk
 
-                if provider is self._local:
-                    self._local_failures = 0
-
+                self._reset_failures(provider)
                 return  # Success, don't try other providers
 
             except Exception as e:
@@ -454,10 +609,7 @@ class StreamingTTS:
                     provider.__class__.__name__,
                     e,
                 )
-
-                if provider is self._local:
-                    self._local_failures += 1
-
+                self._track_failure(provider)
                 continue  # Try next provider
 
         # All providers failed - raise error
@@ -503,44 +655,78 @@ class StreamingTTS:
         """Determine provider order based on preferences and health."""
         providers: list[TTSProvider] = []
 
-        use_local = (
-            self._prefer_local
-            and self._local.is_available()
-            and self._local_failures < self._max_local_failures
-        )
+        if not self._prefer_local:
+            # Cloud-only mode
+            if self._cloud.is_available():
+                providers.append(self._cloud)
+            return providers
 
-        if use_local:
-            providers.append(self._local)
-
+        # Build local provider chain based on preference
+        if self._local_provider == "kokoro":
+            # Kokoro -> Piper -> Cloud
+            if self._kokoro.is_available() and self._kokoro_failures < self._max_local_failures:
+                providers.append(self._kokoro)
+            if self._piper.is_available() and self._piper_failures < self._max_local_failures:
+                providers.append(self._piper)
+        elif self._local_provider == "piper":
+            # Piper -> Kokoro -> Cloud
+            if self._piper.is_available() and self._piper_failures < self._max_local_failures:
+                providers.append(self._piper)
+            if self._kokoro.is_available() and self._kokoro_failures < self._max_local_failures:
+                providers.append(self._kokoro)
+        # openai mode or fallback
         if self._cloud.is_available():
             providers.append(self._cloud)
 
-        if not providers and not use_local:
-            providers.append(self._local)
-
         return providers
+
+    def _track_failure(self, provider: TTSProvider) -> None:
+        """Track provider failures."""
+        if provider is self._kokoro:
+            self._kokoro_failures += 1
+        elif provider is self._piper:
+            self._piper_failures += 1
+
+    def _reset_failures(self, provider: TTSProvider) -> None:
+        """Reset failure count on success."""
+        if provider is self._kokoro:
+            self._kokoro_failures = 0
+        elif provider is self._piper:
+            self._piper_failures = 0
 
     def get_voices(self) -> list[str]:
         """Get available voices from active provider."""
-        if self._prefer_local and self._local.is_available():
-            return self._local.get_voices()
-        elif self._cloud.is_available():
-            return self._cloud.get_voices()
+        # Try providers in order of preference
+        for provider in self._get_provider_order():
+            if provider.is_available():
+                return provider.get_voices()
         return ["alloy"]
+
+    def get_active_provider(self) -> str:
+        """Get the name of the currently active provider."""
+        providers = self._get_provider_order()
+        if not providers:
+            return "none"
+
+        provider = providers[0]
+        if provider is self._kokoro:
+            return "kokoro"
+        elif provider is self._piper:
+            return "piper"
+        elif provider is self._cloud:
+            return "openai"
+        return "unknown"
 
     def get_status(self) -> dict:
         """Get current TTS provider status."""
         return {
-            "local_available": self._local.is_available(),
+            "kokoro_available": self._kokoro.is_available(),
+            "piper_available": self._piper.is_available(),
             "cloud_available": self._cloud.is_available(),
-            "local_failures": self._local_failures,
+            "kokoro_failures": self._kokoro_failures,
+            "piper_failures": self._piper_failures,
             "prefer_local": self._prefer_local,
-            "active_provider": (
-                "local"
-                if self._prefer_local
-                and self._local.is_available()
-                and self._local_failures < self._max_local_failures
-                else "cloud" if self._cloud.is_available() else "none"
-            ),
+            "local_provider": self._local_provider,
+            "active_provider": self.get_active_provider(),
             "voices": self.get_voices(),
         }

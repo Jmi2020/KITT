@@ -2,7 +2,11 @@
 
 Handles bidirectional audio streaming:
 - Client → Server: Audio chunks for STT (Whisper)
-- Server → Client: Response audio from TTS (Piper/OpenAI)
+- Server → Client: Response audio from TTS (Kokoro/Piper/OpenAI)
+
+Features:
+- Wake word detection (Porcupine) for hands-free activation
+- Adaptive TTS with Kokoro ONNX optimized for Apple Silicon
 """
 
 from __future__ import annotations
@@ -13,7 +17,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -21,6 +25,7 @@ if TYPE_CHECKING:
     from .router import VoiceRouter
     from .stt import HybridSTT
     from .tts import StreamingTTS
+    from .wake_word import WakeWordManager
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +38,7 @@ class MessageType(str, Enum):
     AUDIO_END = "audio.end"  # Client finished speaking
     CONFIG = "config"  # Session configuration
     CANCEL = "cancel"  # Cancel current response
+    WAKE_WORD_TOGGLE = "wake_word.toggle"  # Enable/disable wake word
 
     # Server → Client
     TRANSCRIPT = "transcript"  # STT result (partial or final)
@@ -44,6 +50,8 @@ class MessageType(str, Enum):
     FUNCTION_RESULT = "function.result"  # Tool result
     ERROR = "error"  # Error message
     STATUS = "status"  # Connection status updates
+    WAKE_WORD_DETECTED = "wake_word.detected"  # Wake word triggered
+    WAKE_WORD_STATUS = "wake_word.status"  # Wake word enabled/disabled
 
 
 @dataclass
@@ -70,6 +78,10 @@ class VoiceSession:
     allow_paid: bool = False  # Allow paid API calls (CAD, deep research)
     enabled_tools: list = field(default_factory=list)  # Enabled tool names
 
+    # Wake word settings
+    wake_word_enabled: bool = False  # Whether wake word detection is active
+    activation_mode: str = "ptt"  # ptt (push-to-talk) or always_listening
+
 
 class VoiceWebSocketHandler:
     """Handles WebSocket connections for real-time voice interaction."""
@@ -79,11 +91,14 @@ class VoiceWebSocketHandler:
         router: VoiceRouter | None = None,
         stt: HybridSTT | None = None,
         tts: StreamingTTS | None = None,
+        wake_word_manager: Optional["WakeWordManager"] = None,
     ) -> None:
         self._router = router
         self._stt = stt
         self._tts = tts
+        self._wake_word_manager = wake_word_manager
         self._sessions: dict[str, VoiceSession] = {}
+        self._wake_word_websockets: dict[str, WebSocket] = {}  # Track WS for wake word callbacks
 
     async def handle_connection(self, websocket: WebSocket) -> None:
         """Main WebSocket connection handler."""
@@ -92,6 +107,15 @@ class VoiceWebSocketHandler:
         self._sessions[session.session_id] = session
 
         try:
+            # Track websocket for wake word callbacks
+            self._wake_word_websockets[session.session_id] = websocket
+
+            # Check wake word availability
+            wake_word_available = (
+                self._wake_word_manager is not None
+                and self._wake_word_manager.enabled
+            )
+
             # Send initial status
             await self._send(
                 websocket,
@@ -103,7 +127,9 @@ class VoiceWebSocketHandler:
                         "stt": self._stt is not None,
                         "tts": self._tts is not None,
                         "streaming": True,
+                        "wake_word": wake_word_available,
                     },
+                    "tts_provider": self._tts.get_active_provider() if self._tts else None,
                 },
             )
 
@@ -134,6 +160,7 @@ class VoiceWebSocketHandler:
             )
         finally:
             self._sessions.pop(session.session_id, None)
+            self._wake_word_websockets.pop(session.session_id, None)
 
     async def _handle_text_message(
         self, websocket: WebSocket, session: VoiceSession, raw: str
@@ -212,6 +239,10 @@ class VoiceWebSocketHandler:
             await self._send(
                 websocket, MessageType.STATUS, {"status": "cancelled"}
             )
+
+        elif msg_type == MessageType.WAKE_WORD_TOGGLE:
+            # Toggle wake word detection
+            await self._handle_wake_word_toggle(websocket, session, data)
 
         elif msg_type == "text":
             # Direct text input (bypass STT)
@@ -424,6 +455,73 @@ class VoiceWebSocketHandler:
                 MessageType.ERROR,
                 {"message": f"TTS failed: {e}", "code": "tts_error"},
             )
+
+    async def _handle_wake_word_toggle(
+        self, websocket: WebSocket, session: VoiceSession, data: dict[str, Any]
+    ) -> None:
+        """Handle wake word enable/disable requests."""
+        enable = data.get("enable", not session.wake_word_enabled)
+
+        if not self._wake_word_manager:
+            await self._send(
+                websocket,
+                MessageType.ERROR,
+                {"message": "Wake word not available", "code": "wake_word_unavailable"},
+            )
+            return
+
+        if not self._wake_word_manager.enabled:
+            await self._send(
+                websocket,
+                MessageType.ERROR,
+                {"message": "Wake word disabled in configuration", "code": "wake_word_disabled"},
+            )
+            return
+
+        if enable:
+            # Create callback that will notify this session
+            def on_wake_word_detected():
+                # Schedule coroutine on event loop
+                asyncio.create_task(
+                    self._notify_wake_word_detected(session.session_id)
+                )
+
+            success = self._wake_word_manager.start(on_wake_word_detected)
+            session.wake_word_enabled = success
+            session.activation_mode = "always_listening" if success else "ptt"
+        else:
+            self._wake_word_manager.stop()
+            session.wake_word_enabled = False
+            session.activation_mode = "ptt"
+
+        await self._send(
+            websocket,
+            MessageType.WAKE_WORD_STATUS,
+            {
+                "enabled": session.wake_word_enabled,
+                "activation_mode": session.activation_mode,
+            },
+        )
+
+    async def _notify_wake_word_detected(self, session_id: str) -> None:
+        """Notify a session that wake word was detected."""
+        websocket = self._wake_word_websockets.get(session_id)
+        session = self._sessions.get(session_id)
+
+        if not websocket or not session:
+            return
+
+        try:
+            await self._send(
+                websocket,
+                MessageType.WAKE_WORD_DETECTED,
+                {"session_id": session_id},
+            )
+            # Optionally start listening immediately
+            session.is_listening = True
+            logger.info(f"Wake word detected for session {session_id}")
+        except Exception as e:
+            logger.error(f"Error notifying wake word detection: {e}")
 
     async def _send(
         self, websocket: WebSocket, msg_type: MessageType, data: dict[str, Any]
