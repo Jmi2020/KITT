@@ -42,6 +42,7 @@ interface VoiceStreamState {
     stt: boolean;
     tts: boolean;
     streaming: boolean;
+    wakeWord: boolean;
   };
   /** Whether auto-reconnect is active */
   isReconnecting: boolean;
@@ -55,6 +56,12 @@ interface VoiceStreamState {
   mode: string;
   /** Whether paid API calls are allowed */
   allowPaid: boolean;
+  /** Whether wake word detection is enabled */
+  wakeWordEnabled: boolean;
+  /** Activation mode: 'ptt' or 'always_listening' */
+  activationMode: 'ptt' | 'always_listening';
+  /** TTS provider being used (kokoro, piper, openai) */
+  ttsProvider: string | null;
 }
 
 interface VoiceStreamConfig {
@@ -97,6 +104,8 @@ interface UseVoiceStreamReturn extends VoiceStreamState {
   setPreferLocal: (prefer: boolean) => void;
   /** Set voice mode (basic, maker, research, home, creative) */
   setMode: (modeId: string) => void;
+  /** Toggle wake word detection on/off */
+  toggleWakeWord: (enable?: boolean) => void;
 }
 
 /**
@@ -124,13 +133,16 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
     sessionId: null,
     error: null,
     preferLocal: true,
-    capabilities: { stt: false, tts: false, streaming: false },
+    capabilities: { stt: false, tts: false, streaming: false, wakeWord: false },
     isReconnecting: false,
     reconnectAttempts: 0,
     toolExecutions: [],
     toolsUsed: 0,
     mode: 'basic',
     allowPaid: false,
+    wakeWordEnabled: false,
+    activationMode: 'ptt',
+    ttsProvider: null,
   });
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -204,8 +216,14 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
             ...prev,
             sessionId: msg.session_id || prev.sessionId,
             status: msg.status === 'connected' ? 'connected' : prev.status,
-            capabilities: msg.capabilities || prev.capabilities,
+            capabilities: msg.capabilities ? {
+              stt: msg.capabilities.stt ?? prev.capabilities.stt,
+              tts: msg.capabilities.tts ?? prev.capabilities.tts,
+              streaming: msg.capabilities.streaming ?? prev.capabilities.streaming,
+              wakeWord: msg.capabilities.wake_word ?? prev.capabilities.wakeWord,
+            } : prev.capabilities,
             preferLocal: msg.prefer_local ?? prev.preferLocal,
+            ttsProvider: msg.tts_provider ?? prev.ttsProvider,
           }));
           break;
 
@@ -285,6 +303,24 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
           setState((prev) => ({
             ...prev,
             status: 'connected',
+          }));
+          break;
+
+        case 'wake_word.detected':
+          // Wake word was detected - transition to listening mode
+          console.log('[VoiceStream] Wake word detected');
+          setState((prev) => ({
+            ...prev,
+            status: 'listening',
+          }));
+          break;
+
+        case 'wake_word.status':
+          // Wake word toggle response
+          setState((prev) => ({
+            ...prev,
+            wakeWordEnabled: msg.enabled ?? prev.wakeWordEnabled,
+            activationMode: msg.activation_mode === 'always_listening' ? 'always_listening' : 'ptt',
           }));
           break;
 
@@ -456,13 +492,16 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
       sessionId: null,
       error: null,
       preferLocal: true,
-      capabilities: { stt: false, tts: false, streaming: false },
+      capabilities: { stt: false, tts: false, streaming: false, wakeWord: false },
       isReconnecting: false,
       reconnectAttempts: 0,
       toolExecutions: [],
       toolsUsed: 0,
       mode: 'basic',
       allowPaid: false,
+      wakeWordEnabled: false,
+      activationMode: 'ptt',
+      ttsProvider: null,
     });
   }, []);
 
@@ -546,6 +585,17 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
     }
   }, [customModes]);
 
+  const toggleWakeWord = useCallback((enable?: boolean) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      // If enable is undefined, toggle the current state
+      const newState = enable !== undefined ? enable : !stateRef.current.wakeWordEnabled;
+      wsRef.current.send(JSON.stringify({
+        type: 'wake_word.toggle',
+        enable: newState,
+      }));
+    }
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -563,5 +613,6 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
     cancel,
     setPreferLocal,
     setMode,
+    toggleWakeWord,
   };
 }

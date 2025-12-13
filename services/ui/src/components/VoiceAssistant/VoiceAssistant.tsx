@@ -70,6 +70,9 @@ export function VoiceAssistant({
     toolsUsed,
     mode,
     allowPaid,
+    wakeWordEnabled,
+    activationMode,
+    ttsProvider,
     connect,
     disconnect,
     sendAudio,
@@ -78,6 +81,7 @@ export function VoiceAssistant({
     cancel,
     setPreferLocal,
     setMode,
+    toggleWakeWord,
   } = voiceStream;
 
   // Get current mode configuration for colors (search both system and custom modes)
@@ -560,13 +564,29 @@ export function VoiceAssistant({
                   </span>
                   <span className={`flex items-center gap-1 ${capabilities.tts ? 'text-green-400/80' : 'opacity-50'}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${capabilities.tts ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
-                    TTS
+                    TTS{ttsProvider && <span className="text-gray-600 ml-0.5">({ttsProvider})</span>}
                   </span>
                   {!isMobile && (
                     <span className={`flex items-center gap-1 ${capabilities.streaming ? 'text-green-400/80' : 'opacity-50'}`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${capabilities.streaming ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
                       Stream
                     </span>
+                  )}
+                  {capabilities.wakeWord && (
+                    <button
+                      onClick={() => toggleWakeWord()}
+                      className={`flex items-center gap-1 transition-colors ${
+                        wakeWordEnabled
+                          ? 'text-yellow-400/80 hover:text-yellow-300'
+                          : 'text-gray-500 hover:text-gray-400'
+                      }`}
+                      title={wakeWordEnabled ? 'Wake word active - click to disable' : 'Click to enable wake word ("Hey Howdy")'}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${
+                        wakeWordEnabled ? 'bg-yellow-400 animate-pulse' : 'bg-gray-600'
+                      }`} />
+                      {wakeWordEnabled ? 'Listening' : 'Wake'}
+                    </button>
                   )}
                 </div>
               )}
