@@ -149,7 +149,7 @@ KITTY includes a **hybrid voice system** with local-first processing, wake word 
 │                                                                               │
 │  ┌─────────────────────────────────────────────────────────────────────────┐ │
 │  │                      Wake Word Detection (Optional)                      │ │
-│  │               Porcupine ("Hey Howdy") → Activates Listening              │ │
+│  │               Porcupine ("Hey Kitty") → Activates Listening              │ │
 │  └──────────────────────────────────┬──────────────────────────────────────┘ │
 │                                     │                                         │
 │                                     ▼                                         │
@@ -180,9 +180,9 @@ KITTY includes a **hybrid voice system** with local-first processing, wake word 
 ### Local Voice Models
 
 **Wake Word Detection (Porcupine)**
-- Engine: Picovoice Porcupine v3.0
-- Wake word: "Hey Howdy" (custom model, can create "Hey Kitty" via Picovoice Console)
-- Location: `~/.local/share/kitty/models/Hey-Howdy_en_mac_v3_0_0.ppn`
+- Engine: Picovoice Porcupine v4.0
+- Wake word: "Hey Kitty" (custom trained model)
+- Location: `~/.local/share/kitty/models/Hey-Kitty_en_mac_v4_0_0.ppn`
 - Features: Low CPU usage, configurable sensitivity
 
 **Speech-to-Text (Whisper.cpp)**
@@ -222,7 +222,7 @@ WHISPER_MODEL_PATH=                  # Optional custom path
 # Wake Word Detection (Porcupine)
 PORCUPINE_ACCESS_KEY=your-key        # Get from console.picovoice.ai
 WAKE_WORD_ENABLED=true               # Enable wake word detection
-WAKE_WORD_MODEL_PATH=~/.local/share/kitty/models/Hey-Howdy_en_mac_v3_0_0.ppn
+WAKE_WORD_MODEL_PATH=~/.local/share/kitty/models/Hey-Kitty_en_mac_v4_0_0.ppn
 WAKE_WORD_SENSITIVITY=0.5            # Detection sensitivity (0.0-1.0)
 
 # Local TTS Provider Selection
@@ -737,7 +737,7 @@ WHISPER_MODEL_PATH=
 # Wake Word Detection (Porcupine)
 PORCUPINE_ACCESS_KEY=your-key        # Get free key from console.picovoice.ai
 WAKE_WORD_ENABLED=true
-WAKE_WORD_MODEL_PATH=~/.local/share/kitty/models/Hey-Howdy_en_mac_v3_0_0.ppn
+WAKE_WORD_MODEL_PATH=~/.local/share/kitty/models/Hey-Kitty_en_mac_v4_0_0.ppn
 WAKE_WORD_SENSITIVITY=0.5
 
 # Local TTS Provider
@@ -824,7 +824,7 @@ ls /Users/Shared/Coding/models/Piper/*.onnx
 **Wake word not working:**
 ```bash
 # Check Porcupine model exists
-ls ~/.local/share/kitty/models/Hey-Howdy_en_mac_v3_0_0.ppn
+ls ~/.local/share/kitty/models/Hey-Kitty_en_mac_v4_0_0.ppn
 
 # Verify PORCUPINE_ACCESS_KEY is set in .env
 grep PORCUPINE_ACCESS_KEY .env
