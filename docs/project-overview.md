@@ -22,7 +22,7 @@ KITTY transforms a Mac Studio M3 Ultra into an offline-first control plane for f
 | Messaging | MQTT (Mosquitto), Redis Streams (semantic cache) |
 | Data | PostgreSQL (audit, lineage), MinIO (artifact storage) |
 | Observability | Prometheus, Grafana, Loki, Tempo |
-| Local AI | llama.cpp (GGUF models), Whisper.cpp/Piper for speech |
+| Local AI | llama.cpp (GGUF models), Whisper.cpp for STT, Kokoro ONNX/Piper for TTS, Porcupine wake word |
 | Cloud connectors | Perplexity MCP, OpenAI (frontier), Anthropic, Google Gemini, Zoo CAD, Tripo API |
 
 ### Infrastructure
@@ -41,7 +41,7 @@ KITTY transforms a Mac Studio M3 Ultra into an offline-first control plane for f
 | `fabrication` | OctoPrint/Klipper orchestration, MQTT command handling, printer state updates. | `kitty/devices/<printer>/cmd/state` topics |
 | `cad` | Multi-provider CAD generation (Zoo/Tripo) with MinIO storage. | `/api/cad/generate`, artifact metadata |
 | `safety` | Policy engine for hazardous actions, UniFi Access checks, signature validation, audit logging. | Shared safety workflow invoked by `brain` |
-| `voice` | Speech transcript ingestion, parser/router integration, note logging. | `/api/voice/transcript`, MQTT notifications |
+| `voice` | STT/TTS pipeline (Whisper, Kokoro ONNX, Piper), wake word detection, parser/router. | `/api/voice/ws`, `/api/voice/status`, MQTT notifications |
 | `ui` | Web dashboard, Fabrication Console, wall terminal view. | HTTP front-end, MQTT subscriptions |
 | `cli` | SSH-friendly text interface for conversation, CAD preview, printer queuing. | `kitty-cli` commands calling REST APIs |
 | `common` | Shared config, ORM models, logging, semantic cache, HTTP utilities. | Imported by all Python services |

@@ -138,48 +138,73 @@ After startup, open your browser to:
 
 ## Voice Service
 
-KITTY includes a **hybrid voice system** with local-first processing and cloud fallback:
+KITTY includes a **hybrid voice system** with local-first processing, wake word detection, and cloud fallback:
 
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Voice Service (:8400)                     │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────────┐       ┌─────────────────────┐          │
-│  │    STT (Speech)     │       │    TTS (Synthesis)  │          │
-│  │  ┌───────────────┐  │       │  ┌───────────────┐  │          │
-│  │  │ Local Whisper │◄─┼─Toggle─┼─►│  Local Piper  │  │          │
-│  │  │   (base.en)   │  │       │  │ (amy/ryan)    │  │          │
-│  │  └───────┬───────┘  │       │  └───────┬───────┘  │          │
-│  │          │ Fallback │       │          │ Fallback │          │
-│  │  ┌───────▼───────┐  │       │  ┌───────▼───────┐  │          │
-│  │  │  OpenAI API   │  │       │  │  OpenAI TTS   │  │          │
-│  │  │   Whisper     │  │       │  │   tts-1       │  │          │
-│  │  └───────────────┘  │       │  └───────────────┘  │          │
-│  └─────────────────────┘       └─────────────────────┘          │
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │                   WebSocket Handler                          ││
-│  │  Real-time audio streaming with sentence-level buffering    ││
-│  └─────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          Voice Service (:8400)                                │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  ┌─────────────────────────────────────────────────────────────────────────┐ │
+│  │                      Wake Word Detection (Optional)                      │ │
+│  │               Porcupine ("Hey Howdy") → Activates Listening              │ │
+│  └──────────────────────────────────┬──────────────────────────────────────┘ │
+│                                     │                                         │
+│                                     ▼                                         │
+│  ┌───────────────────────┐         ┌───────────────────────────────────────┐ │
+│  │    STT (Speech)       │         │         TTS (Synthesis)               │ │
+│  │  ┌─────────────────┐  │         │  ┌─────────────────────────────────┐  │ │
+│  │  │  Local Whisper  │  │         │  │  Kokoro ONNX (Apple Silicon)   │  │ │
+│  │  │    (base.en)    │  │         │  │  am_michael (male), af (female) │  │ │
+│  │  └───────┬─────────┘  │         │  └───────────────┬─────────────────┘  │ │
+│  │          │ Fallback   │         │                  │ Fallback           │ │
+│  │  ┌───────▼─────────┐  │         │  ┌───────────────▼─────────────────┐  │ │
+│  │  │  OpenAI API     │  │         │  │      Piper TTS (Legacy)         │  │ │
+│  │  │    Whisper      │  │         │  │    amy/ryan (22050 Hz)          │  │ │
+│  │  └─────────────────┘  │         │  └───────────────┬─────────────────┘  │ │
+│  └───────────────────────┘         │                  │ Fallback           │
+│                                    │  ┌───────────────▼─────────────────┐  │ │
+│                                    │  │       OpenAI TTS (tts-1)        │  │ │
+│                                    │  └─────────────────────────────────┘  │ │
+│                                    └───────────────────────────────────────┘ │
+│                                                                               │
+│  ┌─────────────────────────────────────────────────────────────────────────┐ │
+│  │                        WebSocket Handler                                 │ │
+│  │   Real-time streaming • PTT or Always-Listening • Adaptive chunking     │ │
+│  └─────────────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Local Voice Models
+
+**Wake Word Detection (Porcupine)**
+- Engine: Picovoice Porcupine v3.0
+- Wake word: "Hey Howdy" (custom model, can create "Hey Kitty" via Picovoice Console)
+- Location: `~/.local/share/kitty/models/Hey-Howdy_en_mac_v3_0_0.ppn`
+- Features: Low CPU usage, configurable sensitivity
 
 **Speech-to-Text (Whisper.cpp)**
 - Model: `base.en` (English-optimized, ~150MB)
 - Location: `~/.cache/whisper/ggml-base.en.bin`
 - Features: VAD, real-time transcription
 
-**Text-to-Speech (Piper)**
+**Text-to-Speech (Kokoro ONNX)** - Primary
+- Model: Kokoro v1.0 ONNX (~82MB, optimized for Apple Silicon)
+- Location: `~/.local/share/kitty/models/kokoro-v1.0.onnx`
+- Voices: `am_michael` (male cowboy), `af` (female)
+- Sample rate: 24000 Hz
+- Features: Adaptive text chunking, CoreML acceleration, streaming
+
+**Text-to-Speech (Piper)** - Fallback
 - Models: `en_US-amy-medium` (female), `en_US-ryan-medium` (male)
 - Location: `/Users/Shared/Coding/models/Piper/`
 - Sample rate: 22050 Hz
-- Voice mapping:
-  - alloy, nova, shimmer → amy (female)
-  - echo, fable, onyx → ryan (male)
+
+**Voice Mapping (TTS):**
+- alloy, nova, shimmer → af/amy (female)
+- echo, fable, onyx → am_michael/ryan (male)
 
 ### Voice Configuration
 
@@ -194,9 +219,26 @@ VOICE_SAMPLE_RATE=16000              # Audio sample rate
 WHISPER_MODEL=base.en                # Model size (tiny, base, small, medium, large)
 WHISPER_MODEL_PATH=                  # Optional custom path
 
-# Local Piper TTS
+# Wake Word Detection (Porcupine)
+PORCUPINE_ACCESS_KEY=your-key        # Get from console.picovoice.ai
+WAKE_WORD_ENABLED=true               # Enable wake word detection
+WAKE_WORD_MODEL_PATH=~/.local/share/kitty/models/Hey-Howdy_en_mac_v3_0_0.ppn
+WAKE_WORD_SENSITIVITY=0.5            # Detection sensitivity (0.0-1.0)
+
+# Local TTS Provider Selection
+LOCAL_TTS_PROVIDER=kokoro            # Primary: kokoro, fallback: piper
+
+# Kokoro TTS (Primary)
+KOKORO_ENABLED=true
+KOKORO_MODEL_PATH=~/.local/share/kitty/models/kokoro-v1.0.onnx
+KOKORO_VOICES_PATH=~/.local/share/kitty/models/voices-v1.0.bin
+KOKORO_VOICE=am_michael              # am_michael (male), af (female)
+
+# Piper TTS (Fallback)
 PIPER_MODEL_DIR=/Users/Shared/Coding/models/Piper
-OPENAI_TTS_MODEL=tts-1               # Cloud fallback model
+
+# Cloud TTS (Final Fallback)
+OPENAI_TTS_MODEL=tts-1
 ```
 
 ### Starting Voice Service
@@ -221,6 +263,21 @@ curl http://localhost:8080/api/voice/status | jq .
 | `/api/voice/synthesize` | POST | Convert text to speech |
 | `/api/voice/ws` | WebSocket | Real-time bidirectional streaming |
 | `/api/voice/chat` | POST | Full voice chat (STT → LLM → TTS) |
+
+### WebSocket Events
+
+| Event | Direction | Description |
+|-------|-----------|-------------|
+| `config` | Client → Server | Set session config (mode, voice, prefer_local) |
+| `audio.chunk` | Client → Server | Base64 encoded audio chunk |
+| `audio.end` | Client → Server | Signal end of speech |
+| `wake_word.toggle` | Client → Server | Enable/disable wake word detection |
+| `wake_word.detected` | Server → Client | Wake word triggered |
+| `transcript` | Server → Client | STT result (partial or final) |
+| `response.text` | Server → Client | Streaming text response |
+| `response.audio` | Server → Client | TTS audio chunk (base64) |
+| `function.call` | Server → Client | Tool invocation started |
+| `function.result` | Server → Client | Tool execution result |
 
 ---
 
@@ -677,8 +734,24 @@ VOICE_SAMPLE_RATE=16000
 WHISPER_MODEL=base.en
 WHISPER_MODEL_PATH=
 
-# Local TTS (Piper)
+# Wake Word Detection (Porcupine)
+PORCUPINE_ACCESS_KEY=your-key        # Get free key from console.picovoice.ai
+WAKE_WORD_ENABLED=true
+WAKE_WORD_MODEL_PATH=~/.local/share/kitty/models/Hey-Howdy_en_mac_v3_0_0.ppn
+WAKE_WORD_SENSITIVITY=0.5
+
+# Local TTS Provider
+LOCAL_TTS_PROVIDER=kokoro            # kokoro (primary) or piper (fallback)
+
+# Kokoro TTS (Primary)
+KOKORO_ENABLED=true
+KOKORO_MODEL_PATH=~/.local/share/kitty/models/kokoro-v1.0.onnx
+KOKORO_VOICES_PATH=~/.local/share/kitty/models/voices-v1.0.bin
+
+# Piper TTS (Fallback)
 PIPER_MODEL_DIR=/Users/Shared/Coding/models/Piper
+
+# Cloud TTS (Final Fallback)
 OPENAI_TTS_MODEL=tts-1
 ```
 
@@ -722,7 +795,24 @@ pip install whispercpp
 # Model downloads automatically on first use
 ```
 
-**Local TTS not available:**
+**Kokoro TTS not available:**
+```bash
+# Check Kokoro model files exist
+ls ~/.local/share/kitty/models/kokoro-v1.0.onnx
+ls ~/.local/share/kitty/models/voices-v1.0.bin
+ls ~/.local/share/kitty/models/voices/am_michael.bin
+
+# Copy from HowdyTTS if missing
+cp /Users/Shared/Coding/HowdyTTS/models/kokoro-v1.0.onnx ~/.local/share/kitty/models/
+cp /Users/Shared/Coding/HowdyTTS/models/voices-v1.0.bin ~/.local/share/kitty/models/
+mkdir -p ~/.local/share/kitty/models/voices
+cp /Users/Shared/Coding/HowdyTTS/models/voices/*.bin ~/.local/share/kitty/models/voices/
+
+# Install dependencies
+cd services/voice && pip install -e ".[local]"
+```
+
+**Piper TTS not available (fallback):**
 ```bash
 # Check Piper models exist
 ls /Users/Shared/Coding/models/Piper/*.onnx
@@ -731,10 +821,27 @@ ls /Users/Shared/Coding/models/Piper/*.onnx
 # Copy en_US-amy-medium.onnx and en_US-ryan-medium.onnx
 ```
 
+**Wake word not working:**
+```bash
+# Check Porcupine model exists
+ls ~/.local/share/kitty/models/Hey-Howdy_en_mac_v3_0_0.ppn
+
+# Verify PORCUPINE_ACCESS_KEY is set in .env
+grep PORCUPINE_ACCESS_KEY .env
+
+# Get free access key from: https://console.picovoice.ai
+# Ensure pyaudio is installed
+pip install pyaudio
+```
+
 **Check voice status:**
 ```bash
 curl http://localhost:8080/api/voice/status | jq .
-# Should show local_available: true for both stt and tts
+# Should show:
+#   stt.local_available: true
+#   tts.local_available: true
+#   tts.active_provider: "kokoro" (or "piper" fallback)
+#   capabilities.wake_word: true (if configured)
 ```
 
 ### Services Not Starting
@@ -780,7 +887,9 @@ curl http://localhost:8080/api/voice/status
 
 ### Recent Additions (Phase 4.5)
 
-- **Voice Service**: Local Whisper STT + Piper TTS with cloud fallback
+- **Voice Service**: Local Whisper STT + Kokoro/Piper TTS with cloud fallback
+- **Wake Word Detection**: Hands-free activation with Porcupine ("Hey Howdy")
+- **Kokoro TTS**: High-quality Apple Silicon-optimized local speech synthesis
 - **Menu Landing Page**: Card-based navigation to all sections
 - **Bambu Labs Integration**: Login/status via Settings page
 - **Gateway Voice Proxy**: Full voice API proxying through gateway
@@ -795,7 +904,7 @@ curl http://localhost:8080/api/voice/status
 | **Services** | 12 FastAPI microservices |
 | **Docker Containers** | 20+ (including infrastructure) |
 | **Local AI Models** | 6 (GPT-OSS 120B, Q4, F16, Vision, Summary, Coder) |
-| **Voice Models** | 3 (Whisper base.en, Piper amy, Piper ryan) |
+| **Voice Models** | 5 (Whisper, Kokoro ONNX, Piper amy/ryan, Porcupine wake word) |
 | **Cloud Providers** | 4 (OpenAI, Anthropic, Perplexity, Brave) |
 | **UI Pages** | 16 (Menu, Voice, Shell, Projects, etc.) |
 | **Supported Printers** | Bamboo Labs, Elegoo (Klipper), Snapmaker, OctoPrint |
@@ -835,7 +944,9 @@ KITTY stands on the shoulders of giants:
 
 - **[llama.cpp](https://github.com/ggerganov/llama.cpp)**: Local LLM inference
 - **[Whisper.cpp](https://github.com/ggerganov/whisper.cpp)**: Local speech recognition
-- **[Piper](https://github.com/rhasspy/piper)**: Local text-to-speech
+- **[Kokoro](https://github.com/thewh1teagle/kokoro-onnx)**: High-quality local TTS (ONNX)
+- **[Piper](https://github.com/rhasspy/piper)**: Fast local text-to-speech
+- **[Picovoice Porcupine](https://picovoice.ai/platform/porcupine/)**: Wake word detection
 - **[FastAPI](https://fastapi.tiangolo.com/)**: Python web framework
 - **[Home Assistant](https://www.home-assistant.io/)**: Smart home integration
 - **[Zoo](https://zoo.dev/)**: Parametric CAD API
