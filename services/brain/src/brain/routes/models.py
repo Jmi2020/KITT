@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Any, Dict
 
 from fastapi import APIRouter
 
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/routing", tags=["routing"])
 
 
 @router.get("/models")
-def get_models() -> Dict[str, List[str]]:
+def get_models() -> Dict[str, Any]:
     """Expose available local and remote model identifiers."""
 
     cfg = get_routing_config()

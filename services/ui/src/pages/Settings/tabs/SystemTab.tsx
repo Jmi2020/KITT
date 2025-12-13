@@ -18,11 +18,15 @@ export default function SystemTab({ api }: SystemTabProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showPreview, setShowPreview] = useState(false);
 
+  // Load data once on mount - api functions are stable (useCallback)
+  // but the api object itself changes every render, so we use individual functions
+  const { loadFeatures, loadPresets, loadState } = api;
+
   useEffect(() => {
-    api.loadFeatures();
-    api.loadPresets();
-    api.loadState();
-  }, [api]);
+    loadFeatures();
+    loadPresets();
+    loadState();
+  }, [loadFeatures, loadPresets, loadState]);
 
   // Get unique categories
   const categories = ['all', ...Array.from(new Set(api.features.map((f) => f.category)))];

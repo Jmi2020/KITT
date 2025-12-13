@@ -38,57 +38,21 @@ const menuItems: MenuItem[] = [
   },
   {
     id: 'dashboard',
-    title: '3D Printers',
-    description: 'Monitor and control Bambu Lab printers',
+    title: 'Dashboard',
+    description: 'Printers, cameras, and material inventory',
     icon: '🖨️',
   },
   {
-    id: 'vision',
-    title: 'Vision Gallery',
-    description: 'Generated 3D models and assets',
-    icon: '🗂️',
-  },
-  {
-    id: 'images',
-    title: 'Image Generator',
-    description: 'Generate images from prompts',
+    id: 'media',
+    title: 'Media Hub',
+    description: 'Vision gallery and image generation',
     icon: '🖼️',
   },
   {
-    id: 'cameras',
-    title: 'Cameras',
-    description: 'Live dashboard for connected cameras',
-    icon: '📹',
-  },
-  {
     id: 'research',
-    title: 'Research',
-    description: 'Deep research and analysis tools',
+    title: 'Research Hub',
+    description: 'Research, results, and scheduling',
     icon: '🔬',
-  },
-  {
-    id: 'results',
-    title: 'Results',
-    description: 'Research results and reports',
-    icon: '📊',
-  },
-  {
-    id: 'calendar',
-    title: 'Calendar',
-    description: 'Schedule and event management',
-    icon: '📅',
-  },
-  {
-    id: 'iocontrol',
-    title: 'I/O Control',
-    description: 'Device and automation control',
-    icon: '⚙️',
-  },
-  {
-    id: 'inventory',
-    title: 'Inventory',
-    description: 'Asset and material tracking',
-    icon: '📦',
   },
   {
     id: 'intelligence',
@@ -105,7 +69,7 @@ const menuItems: MenuItem[] = [
   {
     id: 'settings',
     title: 'Settings',
-    description: 'KITTY configuration and preferences',
+    description: 'Connections, preferences, and system features',
     icon: '⚙️',
   },
 ];
