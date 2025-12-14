@@ -56,29 +56,24 @@ const STATUS_CONFIG = {
 };
 
 const TOOL_ICONS: Record<string, string> = {
-  // Home automation
   'lights': '💡',
   'thermostat': '🌡️',
   'lock': '🔒',
   'camera': '📷',
   'speaker': '🔊',
   'tv': '📺',
-  // 3D printing
   'print': '🖨️',
   'printer': '🖨️',
   'filament': '🧵',
   'bed': '🛏️',
-  // CAD
   'model': '📐',
   'design': '✏️',
   'export': '📤',
-  // System
   'weather': '🌤️',
   'search': '🔍',
   'timer': '⏱️',
   'reminder': '🔔',
   'calendar': '📅',
-  // Default
   'default': '⚙️',
 };
 
@@ -101,8 +96,68 @@ function formatDuration(start: Date, end?: Date): string {
 }
 
 /**
+ * Timeline visualization of tool executions.
+ */
+const ToolTimeline = memo(function ToolTimeline({ tools }: { tools: ToolExecution[] }) {
+  if (tools.length === 0) return null;
+
+  // Find min start and max end to normalize timeline
+  const startTimes = tools.map(t => t.startedAt?.getTime() || Date.now());
+  const endTimes = tools.map(t => t.completedAt?.getTime() || Date.now());
+  const minTime = Math.min(...startTimes);
+  const maxTime = Math.max(...endTimes);
+  const totalDuration = Math.max(maxTime - minTime, 1000); // Min 1s to avoid divide by zero
+
+  return (
+    <div className="space-y-2 mt-2">
+      {tools.map((tool) => {
+        const start = tool.startedAt?.getTime() || minTime;
+        const end = tool.completedAt?.getTime() || Date.now();
+        const duration = end - start;
+        
+        const leftPercent = ((start - minTime) / totalDuration) * 100;
+        const widthPercent = Math.max(((duration / totalDuration) * 100), 1); // Min 1% width
+        
+        const statusColor = tool.status === 'error' ? 'bg-red-500' : 
+                           tool.status === 'running' ? 'bg-yellow-400' : 'bg-green-500';
+
+        return (
+          <div key={tool.id} className="relative h-6 flex items-center group">
+            <div className="w-24 text-[10px] text-gray-400 truncate pr-2 text-right">
+              {tool.displayName || tool.name}
+            </div>
+            <div className="flex-1 h-full relative bg-gray-800/30 rounded overflow-hidden">
+              {/* Timeline bar */}
+              <div 
+                className={`absolute top-1.5 bottom-1.5 rounded-sm ${statusColor} opacity-60 group-hover:opacity-100 transition-opacity`}
+                style={{ 
+                  left: `${leftPercent}%`, 
+                  width: `${widthPercent}%`,
+                  minWidth: '4px'
+                }}
+              />
+              {/* Tooltip on hover */}
+              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center pointer-events-none">
+                <span className="text-[9px] bg-black/80 px-1 rounded text-white whitespace-nowrap">
+                  {formatDuration(new Date(start), new Date(end))}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      
+      {/* Time axis */}
+      <div className="flex justify-between text-[9px] text-gray-600 pl-24 pt-1 border-t border-white/5">
+        <span>0s</span>
+        <span>{(totalDuration / 1000).toFixed(1)}s</span>
+      </div>
+    </div>
+  );
+});
+
+/**
  * Card component for displaying tool execution status.
- * Shows tool name, status, arguments, and results.
  */
 export const ToolExecutionCard = memo(function ToolExecutionCard({
   tool,
@@ -214,7 +269,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
 });
 
 /**
- * List of tool executions with status summary.
+ * List of tool executions with status summary and view toggle.
  */
 interface ToolExecutionListProps {
   tools: ToolExecution[];
@@ -228,6 +283,7 @@ export const ToolExecutionList = memo(function ToolExecutionList({
   maxVisible = 5,
 }: ToolExecutionListProps) {
   const [showAll, setShowAll] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'timeline'>('list');
 
   if (tools.length === 0) return null;
 
@@ -245,43 +301,55 @@ export const ToolExecutionList = memo(function ToolExecutionList({
 
   return (
     <div className="space-y-2">
-      {/* Status summary */}
+      {/* Header with view toggle */}
       {tools.length > 1 && (
-        <div className="flex items-center gap-3 text-xs text-gray-400">
-          <span>Tools: {tools.length}</span>
-          {statusCounts.running > 0 && (
-            <span className="text-yellow-400">
-              {statusCounts.running} running
-            </span>
-          )}
-          {statusCounts.completed > 0 && (
-            <span className="text-green-400">
-              {statusCounts.completed} done
-            </span>
-          )}
-          {statusCounts.error > 0 && (
-            <span className="text-red-400">
-              {statusCounts.error} failed
-            </span>
+        <div className="flex items-center justify-between text-xs text-gray-400">
+          <div className="flex items-center gap-2">
+            <span>Tools: {tools.length}</span>
+            {statusCounts.running > 0 && (
+              <span className="text-yellow-400">{statusCounts.running} active</span>
+            )}
+          </div>
+          
+          {!compact && (
+            <div className="flex bg-gray-800/50 rounded p-0.5">
+              <button 
+                onClick={() => setViewMode('list')}
+                className={`px-2 py-0.5 rounded text-[10px] ${viewMode === 'list' ? 'bg-gray-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+              >
+                List
+              </button>
+              <button 
+                onClick={() => setViewMode('timeline')}
+                className={`px-2 py-0.5 rounded text-[10px] ${viewMode === 'timeline' ? 'bg-gray-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+              >
+                Timeline
+              </button>
+            </div>
           )}
         </div>
       )}
 
-      {/* Tool cards */}
-      <div className={compact ? 'space-y-1' : 'space-y-2'}>
-        {visibleTools.map((tool) => (
-          <ToolExecutionCard key={tool.id} tool={tool} compact={compact} />
-        ))}
-      </div>
+      {/* View Content */}
+      {viewMode === 'timeline' ? (
+        <ToolTimeline tools={tools} />
+      ) : (
+        <>
+          <div className={compact ? 'space-y-1' : 'space-y-2'}>
+            {visibleTools.map((tool) => (
+              <ToolExecutionCard key={tool.id} tool={tool} compact={compact} />
+            ))}
+          </div>
 
-      {/* Show more/less */}
-      {hiddenCount > 0 && (
-        <button
-          onClick={() => setShowAll(!showAll)}
-          className="w-full py-1 text-xs text-gray-400 hover:text-cyan-400 transition-colors"
-        >
-          {showAll ? 'Show less' : `Show ${hiddenCount} more`}
-        </button>
+          {hiddenCount > 0 && (
+            <button
+              onClick={() => setShowAll(!showAll)}
+              className="w-full py-1 text-xs text-gray-400 hover:text-cyan-400 transition-colors"
+            >
+              {showAll ? 'Show less' : `Show ${hiddenCount} more`}
+            </button>
+          )}
+        </>
       )}
     </div>
   );

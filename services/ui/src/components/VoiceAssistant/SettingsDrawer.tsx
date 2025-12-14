@@ -1,6 +1,6 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { VOICE_MODES, VoiceMode, getAllModes } from '../../types/voiceModes';
+import { VOICE_MODES, VoiceMode, getAllModes, MODE_COLOR_PRESETS, ModeColorName, createEmptyMode } from '../../types/voiceModes';
 import { useSettings } from '../../hooks/useSettings';
 
 interface SettingsDrawerProps {
@@ -12,7 +12,7 @@ interface SettingsDrawerProps {
 }
 
 /**
- * Sci-Fi styled settings drawer for voice mode selection.
+ * Sci-Fi styled settings drawer for voice mode selection and creation.
  * Uses React Portal for proper fixed positioning.
  * Features glassmorphism, animated borders, and mode-specific colors.
  */
@@ -23,7 +23,10 @@ export function SettingsDrawer({
   onModeChange,
   isConnected,
 }: SettingsDrawerProps) {
-  const { settings } = useSettings();
+  const { settings, updateSettings } = useSettings();
+  const [isCreating, setIsCreating] = useState(false);
+  const [newMode, setNewMode] = useState<VoiceMode>(createEmptyMode());
+
   const allModes = getAllModes(settings?.custom_voice_modes || []);
 
   const handleModeSelect = useCallback((mode: VoiceMode) => {
@@ -32,16 +35,35 @@ export function SettingsDrawer({
     setTimeout(onClose, 200);
   }, [onModeChange, onClose]);
 
+  const handleSaveMode = async () => {
+    if (!newMode.name.trim()) return;
+    
+    const updatedCustomModes = [...(settings?.custom_voice_modes || []), { ...newMode, id: `custom_${Date.now()}` }];
+    await updateSettings({ custom_voice_modes: updatedCustomModes });
+    
+    setIsCreating(false);
+    setNewMode(createEmptyMode());
+  };
+
+  const handleCancelCreate = () => {
+    setIsCreating(false);
+    setNewMode(createEmptyMode());
+  };
+
   // Handle escape key to close
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) {
-        onClose();
+        if (isCreating) {
+          setIsCreating(false);
+        } else {
+          onClose();
+        }
       }
     };
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, isCreating]);
 
   // Prevent body scroll when drawer is open
   useEffect(() => {
@@ -130,10 +152,10 @@ export function SettingsDrawer({
                   <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center text-sm">
                     ⚙
                   </span>
-                  Voice Mode
+                  {isCreating ? 'Create Mode' : 'Voice Mode'}
                 </h2>
                 <p className="text-gray-400 text-sm mt-1">
-                  Select KITTY's operational mode
+                  {isCreating ? 'Define custom behavior' : "Select KITTY's operational mode"}
                 </p>
               </div>
               <button
@@ -148,31 +170,94 @@ export function SettingsDrawer({
             </div>
           </div>
 
-          {/* Mode List - Scrollable */}
+          {/* Body */}
           <div className="flex-1 overflow-y-auto p-5 space-y-3">
-            {/* System Modes */}
-            {VOICE_MODES.map((mode) => {
-              const isSelected = mode.id === currentMode;
-              return (
-                <ModeCard
-                  key={mode.id}
-                  mode={mode}
-                  isSelected={isSelected}
-                  onClick={() => handleModeSelect(mode)}
-                  disabled={!isConnected}
-                />
-              );
-            })}
-
-            {/* Custom Modes Section */}
-            {(settings?.custom_voice_modes || []).length > 0 && (
-              <>
-                <div className="border-t border-white/10 my-4 pt-4">
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Custom Modes
-                  </span>
+            {isCreating ? (
+              <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
+                {/* Name Input */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Mode Name</label>
+                  <input
+                    type="text"
+                    value={newMode.name}
+                    onChange={(e) => setNewMode({ ...newMode, name: e.target.value })}
+                    className="w-full bg-black/30 border border-gray-700 rounded-lg p-2 text-white focus:border-cyan-500 focus:outline-none transition-colors"
+                    placeholder="e.g. Code Expert"
+                  />
                 </div>
-                {(settings?.custom_voice_modes || []).map((mode) => {
+
+                {/* Icon Input */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Icon (Emoji)</label>
+                  <input
+                    type="text"
+                    value={newMode.icon}
+                    onChange={(e) => setNewMode({ ...newMode, icon: e.target.value })}
+                    className="w-full bg-black/30 border border-gray-700 rounded-lg p-2 text-white focus:border-cyan-500 focus:outline-none transition-colors"
+                    placeholder="e.g. 💻"
+                    maxLength={2}
+                  />
+                </div>
+
+                {/* Description Input */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Description</label>
+                  <textarea
+                    value={newMode.description}
+                    onChange={(e) => setNewMode({ ...newMode, description: e.target.value })}
+                    className="w-full bg-black/30 border border-gray-700 rounded-lg p-2 text-white focus:border-cyan-500 focus:outline-none transition-colors h-20 resize-none"
+                    placeholder="Describe what this mode does..."
+                  />
+                </div>
+
+                {/* Color Selection */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Theme Color</label>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.keys(MODE_COLOR_PRESETS).map((color) => (
+                      <button
+                        key={color}
+                        onClick={() => setNewMode({ ...newMode, color, ...MODE_COLOR_PRESETS[color as ModeColorName] })}
+                        className={`w-8 h-8 rounded-full border-2 transition-all ${
+                          newMode.color === color ? 'border-white scale-110' : 'border-transparent opacity-70 hover:opacity-100'
+                        }`}
+                        style={{ backgroundColor: color === 'cyan' ? '#22d3ee' : color }}
+                        title={color}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-2 pt-4">
+                  <button
+                    onClick={handleCancelCreate}
+                    className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-medium transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveMode}
+                    className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={!newMode.name.trim()}
+                  >
+                    Save Mode
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Create New Button */}
+                <button
+                  onClick={() => setIsCreating(true)}
+                  className="w-full py-3 mb-4 rounded-xl border border-dashed border-gray-600 hover:border-cyan-500 hover:bg-cyan-500/10 text-gray-400 hover:text-cyan-400 transition-all flex items-center justify-center gap-2 group"
+                >
+                  <span className="text-lg group-hover:scale-110 transition-transform">+</span>
+                  <span className="font-medium">Create Custom Mode</span>
+                </button>
+
+                {/* System Modes */}
+                {VOICE_MODES.map((mode) => {
                   const isSelected = mode.id === currentMode;
                   return (
                     <ModeCard
@@ -184,6 +269,29 @@ export function SettingsDrawer({
                     />
                   );
                 })}
+
+                {/* Custom Modes Section */}
+                {(settings?.custom_voice_modes || []).length > 0 && (
+                  <>
+                    <div className="border-t border-white/10 my-4 pt-4">
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Custom Modes
+                      </span>
+                    </div>
+                    {(settings?.custom_voice_modes || []).map((mode) => {
+                      const isSelected = mode.id === currentMode;
+                      return (
+                        <ModeCard
+                          key={mode.id}
+                          mode={mode}
+                          isSelected={isSelected}
+                          onClick={() => handleModeSelect(mode)}
+                          disabled={!isConnected}
+                        />
+                      );
+                    })}
+                  </>
+                )}
               </>
             )}
           </div>
@@ -445,7 +553,7 @@ export function SettingsButton({ currentMode, onClick, compact }: SettingsButton
       className={`flex items-center gap-2 px-3 py-2 rounded-xl ${colors.bg} border ${colors.border} hover:scale-105 active:scale-95 transition-all duration-200 group`}
       title="Voice Mode Settings"
     >
-      <span className="text-lg">{mode.icon}</span>
+      <span className="text-lg leading-none">{mode.icon}</span>
       {!compact && (
         <span className={`text-sm font-medium ${colors.text}`}>{mode.name}</span>
       )}

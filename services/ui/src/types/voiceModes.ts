@@ -153,6 +153,9 @@ export const VOICE_MODES: VoiceMode[] = [
   },
 ];
 
+// Alias for VoiceAssistant usage
+export const SYSTEM_MODES = VOICE_MODES;
+
 export function getModeById(id: string): VoiceMode | undefined {
   return VOICE_MODES.find((m) => m.id === id);
 }

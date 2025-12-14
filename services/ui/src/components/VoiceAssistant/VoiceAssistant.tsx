@@ -1,210 +1,76 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useVoiceStream } from '../../hooks/useVoiceStream';
 import { useAudioCapture } from '../../hooks/useAudioCapture';
 import { useAudioAnalyzer } from '../../hooks/useAudioAnalyzer';
-import { useVoiceStream } from '../../hooks/useVoiceStream';
-import { useConversations } from '../../hooks/useConversations';
-import { useConversationApi } from '../../hooks/useConversationApi';
+import { useSettings } from '../../hooks/useSettings';
+import { useWindowSize } from '../../hooks/useWindowSize';
+import { useVoiceStore } from './store/voiceStore';
+
+// Atomic Components
+import { MainLayout } from './templates/MainLayout';
 import { AudioVisualizer } from './AudioVisualizer';
-import { InputLevelMeter } from './InputLevelMeter';
+import { SettingsDrawer } from './SettingsDrawer';
+import { Button } from '../../design-system/Button';
+import { Input } from '../../design-system/Input';
+import { StatusBadge } from './StatusBadge';
+import { ToolExecutionList } from './ToolExecutionCard';
 import { ConversationPanel } from './ConversationPanel';
 import { ConversationSelector } from './ConversationSelector';
-import { StreamingIndicator } from './StreamingIndicator';
-import { StatusBar } from './StatusBadge';
-import { ToolExecutionList } from './ToolExecutionCard';
-import { HUDFrame } from './HUDFrame';
-import { SettingsDrawer, SettingsButton } from './SettingsDrawer';
-import { getModeById, findModeById } from '../../types/voiceModes';
-import { useSettings } from '../../hooks/useSettings';
-import type { VoiceStatus } from './StatusBadge';
+import { HUDFrame, HUDLabel, HUDDivider } from './HUDFrame';
+import { InputLevelMeter } from './InputLevelMeter';
+import { useConversations } from '../../hooks/useConversations';
+import { useConversationApi } from '../../hooks/useConversationApi';
+import { getModeById, SYSTEM_MODES } from '../../types/voiceModes';
 
-interface VoiceAssistantProps {
-  initialConversationId?: string;
-  userId?: string;
-  onClose?: () => void;
-  fullscreen?: boolean;
-  /** Callback when voice status changes */
-  onStatusChange?: (status: string) => void;
-  /** Show conversation history panel */
-  showHistory?: boolean;
-}
-
-/**
- * Voice assistant component with real-time audio streaming.
- * Provides voice interaction with KITTY via WebSocket.
- */
 export function VoiceAssistant({
   initialConversationId,
   userId = 'anonymous',
   onClose,
   fullscreen = false,
-  onStatusChange,
-  showHistory = true,
-}: VoiceAssistantProps) {
-  const [isPushToTalk, setIsPushToTalk] = useState(false);
-  const [textInput, setTextInput] = useState('');
-  const [showHistoryPanel, setShowHistoryPanel] = useState(showHistory);
-  const [showSettingsDrawer, setShowSettingsDrawer] = useState(false);
+}: any) {
+  // Global State
+  const { isSettingsOpen, setSettingsOpen, isHistoryOpen, setHistoryOpen } = useVoiceStore();
+  const { isMobile, isDesktop } = useWindowSize();
+  const { settings } = useSettings();
+
+  // Local State
   const [conversationId, setConversationId] = useState<string>(
     initialConversationId || crypto.randomUUID()
   );
-  const currentMessageIdRef = useRef<string | null>(null);
+  const [inputType, setInputType] = useState<'voice' | 'text'>('voice');
+  const [showDebug, setShowDebug] = useState(false);
 
-  // Get settings for custom modes (must be called before useVoiceStream)
-  const { settings: appSettings } = useSettings();
-
-  // Voice stream hook with custom modes for mode lookup
-  const voiceStream = useVoiceStream({
-    customModes: appSettings?.custom_voice_modes || [],
-  });
-  const {
-    status,
-    transcript,
-    response,
-    tier,
-    capabilities,
-    error,
-    preferLocal,
-    isReconnecting,
-    reconnectAttempts,
-    toolExecutions,
-    toolsUsed,
-    mode,
-    allowPaid,
-    wakeWordEnabled,
-    activationMode,
-    ttsProvider,
-    connect,
-    disconnect,
-    sendAudio,
-    sendText,
-    endAudio,
-    cancel,
-    setPreferLocal,
-    setMode,
-    toggleWakeWord,
+  // Voice Logic
+  const voiceStream = useVoiceStream({ customModes: settings?.custom_voice_modes || [] });
+  const { 
+    status, transcript, response, connect, disconnect, 
+    sendAudio, sendText, endAudio, toolExecutions, 
+    mode, setMode, capabilities, preferLocal, setPreferLocal,
+    wakeWordEnabled, toggleWakeWord, tier
   } = voiceStream;
-
-  // Get current mode configuration for colors (search both system and custom modes)
-  const currentModeConfig = findModeById(mode, appSettings?.custom_voice_modes || []) || getModeById(mode);
-
-  // Audio capture hook
-  const audioCapture = useAudioCapture({
-    sampleRate: 16000,
-    onAudioChunk: sendAudio,
-  });
-  const { isCapturing, stream, startCapture, stopCapture, error: captureError, inputLevel } = audioCapture;
-
-  // Audio analyzer for visualization
+  
+  // Audio Logic
+  const audioCapture = useAudioCapture({ sampleRate: 16000, onAudioChunk: sendAudio });
+  const { isCapturing, startCapture, stopCapture, stream, inputLevel } = audioCapture;
   const { fftData, audioLevel } = useAudioAnalyzer(stream);
 
-  // Conversation management (local state)
-  const conversations = useConversations();
-  const { messages, addUserMessage, addAssistantMessage, updateMessage, appendToMessage, clearMessages, createConversation } = conversations;
-
-  // Conversation API (remote state)
-  const conversationApi = useConversationApi();
-  const {
-    conversations: savedConversations,
+  // Conversation Logic
+  const { messages, clearMessages, createConversation } = useConversations();
+  const { 
+    conversations: savedConversations, 
     isLoading: isLoadingConversations,
-    fetchConversations,
+    fetchConversations, 
     fetchMessages,
     renameConversation,
-    deleteConversation,
-  } = conversationApi;
+    deleteConversation 
+  } = useConversationApi();
 
-  // Fetch conversations on mount
   useEffect(() => {
     fetchConversations();
-  }, [fetchConversations]);
-
-  // Load conversation history when conversation changes
-  useEffect(() => {
-    if (conversationId) {
-      fetchMessages(conversationId).then((loadedMessages) => {
-        if (loadedMessages.length > 0) {
-          // Update local conversation state with loaded messages
-          createConversation(`Loaded: ${conversationId.slice(0, 8)}`);
-          loadedMessages.forEach((msg) => {
-            if (msg.role === 'user') {
-              addUserMessage(msg.content);
-            } else if (msg.role === 'assistant') {
-              addAssistantMessage(msg.content, msg.tier);
-            }
-          });
-        } else {
-          // New conversation
-          createConversation(`Voice Session ${new Date().toLocaleTimeString()}`);
-        }
-      });
-    }
-  }, [conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Track when we start responding and add assistant message
-  useEffect(() => {
-    if (status === 'responding' && transcript && !currentMessageIdRef.current) {
-      // Add user message first
-      addUserMessage(transcript);
-      // Create placeholder for assistant response
-      const msg = addAssistantMessage('', tier || undefined);
-      currentMessageIdRef.current = msg.id;
-    }
-  }, [status, transcript, tier, addUserMessage, addAssistantMessage]);
-
-  // Track response changes
-  useEffect(() => {
-    if (response && currentMessageIdRef.current) {
-      updateMessage(currentMessageIdRef.current, { content: response, isStreaming: status === 'responding' });
-    }
-  }, [response, status, updateMessage]);
-
-  // Clear current message ref when response ends
-  useEffect(() => {
-    if (status === 'connected' && currentMessageIdRef.current) {
-      updateMessage(currentMessageIdRef.current, { isStreaming: false });
-      currentMessageIdRef.current = null;
-    }
-  }, [status, updateMessage]);
-
-  // Connect on mount with initial mode
-  useEffect(() => {
-    const initialMode = getModeById('basic');
-    connect({
-      conversationId,
-      userId,
-      mode: 'basic',
-      allowPaid: initialMode?.allowPaid ?? false,
-      preferLocal: initialMode?.preferLocal ?? true,
-      enabledTools: initialMode?.enabledTools ?? [],
-    });
+    connect({ conversationId, userId });
     return () => disconnect();
-  }, [connect, disconnect, conversationId, userId]);
-
-  // Notify parent of status changes
-  useEffect(() => {
-    onStatusChange?.(status);
-  }, [status, onStatusChange]);
-
-  // Handle push-to-talk
-  const handlePushToTalkStart = useCallback(async () => {
-    if (status !== 'connected' && status !== 'listening') return;
-    setIsPushToTalk(true);
-    await startCapture();
-  }, [status, startCapture]);
-
-  const handlePushToTalkEnd = useCallback(() => {
-    if (!isPushToTalk) return;
-    setIsPushToTalk(false);
-    stopCapture();
-    endAudio();
-  }, [isPushToTalk, stopCapture, endAudio]);
-
-  // Handle text input
-  const handleTextSubmit = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    if (!textInput.trim()) return;
-    sendText(textInput.trim());
-    setTextInput('');
-  }, [textInput, sendText]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle new conversation
   const handleNewConversation = useCallback(() => {
@@ -212,7 +78,6 @@ export function VoiceAssistant({
     setConversationId(newId);
     clearMessages();
     createConversation(`Voice Session ${new Date().toLocaleTimeString()}`);
-    // Reconnect with new conversation ID
     disconnect();
     setTimeout(() => connect({ conversationId: newId, userId }), 100);
   }, [clearMessages, createConversation, connect, disconnect, userId]);
@@ -222,398 +87,360 @@ export function VoiceAssistant({
     if (id === conversationId) return;
     setConversationId(id);
     clearMessages();
-    // Reconnect with new conversation ID
     disconnect();
-    setTimeout(() => connect({ conversationId: id, userId }), 100);
-  }, [conversationId, clearMessages, connect, disconnect, userId]);
+    fetchMessages(id).then(() => {
+        connect({ conversationId: id, userId });
+    });
+  }, [conversationId, clearMessages, connect, disconnect, userId, fetchMessages]);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !e.repeat && e.target === document.body) {
-        e.preventDefault();
-        handlePushToTalkStart();
-      }
-      if (e.code === 'Escape') {
-        cancel();
-      }
-    };
+  const handleTextSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const input = (e.target as HTMLFormElement).querySelector('input') as HTMLInputElement;
+    if (input.value.trim()) {
+        sendText(input.value.trim());
+        input.value = '';
+    }
+  };
 
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        e.preventDefault();
-        handlePushToTalkEnd();
-      }
-    };
+  const currentModeConfig = getModeById(mode);
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
+  // --- Layout Components ---
 
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [handlePushToTalkStart, handlePushToTalkEnd, cancel]);
+  const Header = (
+    <div className="flex items-center justify-between w-full px-8 py-4">
+      <div className="flex items-center gap-8">
+        {/* Minimal Logo */}
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-teal-500/10 rounded-lg flex items-center justify-center border border-teal-500/20">
+            <span className="text-sm">◉</span>
+          </div>
+          <h1 className="text-sm font-semibold tracking-wide text-zinc-300">KITTY</h1>
+        </div>
 
-  const visualizerStatus =
-    status === 'listening' ? 'listening' :
-    status === 'responding' ? 'responding' :
-    status === 'error' ? 'error' : 'idle';
+        {/* Conversation Context (Desktop) */}
+        {!isMobile && (
+          <div className="w-64 opacity-50 hover:opacity-100 transition-opacity">
+            <ConversationSelector
+                conversations={savedConversations}
+                currentId={conversationId}
+                onSelect={handleSelectConversation}
+                onNew={handleNewConversation}
+                onRename={renameConversation}
+                onDelete={deleteConversation}
+                isLoading={isLoadingConversations}
+            />
+          </div>
+        )}
+      </div>
 
-  // Responsive: detect mobile
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+      {/* Global Actions */}
+      <div className="flex items-center gap-4">
+        <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => setHistoryOpen(!isHistoryOpen)}
+            color={isHistoryOpen ? 'primary' : 'surface'}
+        >
+            History
+        </Button>
+        <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => setSettingsOpen(true)}
+            color="surface"
+        >
+            Settings
+        </Button>
+        {onClose && (
+          <Button variant="ghost" size="sm" onClick={onClose} color="error" className="w-8 h-8 p-0 rounded-full">
+            ✕
+          </Button>
+        )}
+      </div>
+    </div>
+  );
 
-  const containerClass = fullscreen
-    ? 'fixed inset-0 bg-gray-900 overflow-hidden'
-    : 'relative w-full max-w-4xl mx-auto p-4 md:p-6';
+  const Sidebar = isHistoryOpen ? (
+    <div className="h-full flex flex-col min-w-[300px] bg-zinc-900/50">
+      <div className="p-6 border-b border-white/5">
+        <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Recent Activity</h3>
+      </div>
+      <div className="flex-1 overflow-hidden p-4">
+        <ConversationPanel messages={messages} compact />
+      </div>
+    </div>
+  ) : null;
+
+  const RightPanel = (
+    <div className="h-full flex flex-col p-6 gap-8 min-w-[320px] overflow-y-auto">
+        {/* Mission Control Header */}
+        <div>
+            <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">Control Center</h3>
+            
+            {/* Status Cards */}
+            <div className="grid grid-cols-2 gap-3 mb-6">
+                <div className="bg-zinc-800/50 rounded-xl p-3 border border-white/5">
+                    <div className="text-[10px] text-zinc-500 mb-1 font-medium">STATUS</div>
+                    <StatusBadge status={status as any} compact />
+                </div>
+                <div className="bg-zinc-800/50 rounded-xl p-3 border border-white/5">
+                    <div className="text-[10px] text-zinc-500 mb-1 font-medium">COMPUTE</div>
+                    <div className="text-xs font-medium text-teal-400">{tier || 'LOCAL'}</div>
+                </div>
+            </div>
+        </div>
+
+        {/* Current Mode */}
+        <div className="space-y-3">
+            <div className="flex justify-between items-center">
+                <span className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Active Mode</span>
+                <button onClick={() => setSettingsOpen(true)} className="text-[10px] text-teal-400 hover:text-teal-300 font-medium transition-colors">CHANGE</button>
+            </div>
+            
+            <div className="bg-zinc-800/30 rounded-xl border border-white/5 p-4 flex items-start gap-4">
+                <span className="text-2xl">{currentModeConfig?.icon}</span>
+                <div>
+                    <h3 className="text-sm font-medium text-zinc-200">{currentModeConfig?.name}</h3>
+                    <p className="text-xs text-zinc-500 mt-1">{currentModeConfig?.description}</p>
+                </div>
+            </div>
+        </div>
+
+        {/* Active Processes */}
+        <div className="flex-1 min-h-[200px] flex flex-col">
+            <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">Running Tasks</h3>
+            
+            <div className="flex-1 rounded-2xl bg-zinc-900/30 border border-white/5 overflow-hidden">
+                {toolExecutions.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-zinc-700 gap-2">
+                        <span className="text-xl opacity-20">⚡</span>
+                        <span className="text-xs font-medium">System Idle</span>
+                    </div>
+                ) : (
+                    <div className="p-2 h-full overflow-y-auto">
+                        <ToolExecutionList tools={toolExecutions} compact />
+                    </div>
+                )}
+            </div>
+        </div>
+
+        {/* System Details Toggle */}
+        <div className="mt-auto">
+            <button 
+                onClick={() => setShowDebug(!showDebug)}
+                className="flex items-center justify-between w-full py-3 text-xs font-medium text-zinc-600 hover:text-zinc-400 transition-colors border-t border-white/5"
+            >
+                <span>Technical Telemetry</span>
+                <span>{showDebug ? '−' : '+'}</span>
+            </button>
+            
+            <AnimatePresence>
+                {showDebug && (
+                    <motion.div 
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden"
+                    >
+                        <div className="pt-2 pb-4 grid grid-cols-2 gap-4">
+                            <div>
+                                <span className="text-[9px] text-zinc-600 block mb-1">LATENCY</span>
+                                <span className="text-xs font-mono text-zinc-400">24ms</span>
+                            </div>
+                            <div>
+                                <span className="text-[9px] text-zinc-600 block mb-1">AUDIO IN</span>
+                                <InputLevelMeter level={inputLevel} active={isCapturing} compact />
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    </div>
+  );
+
+  const MainContent = (
+    <div className="flex flex-col h-full w-full max-w-3xl mx-auto relative px-6">
+      
+      {/* Center Stage */}
+      <div className="flex-1 flex flex-col items-center justify-center relative min-h-[400px]">
+        
+        {/* Transcript / Content */}
+        <AnimatePresence mode="wait">
+            {(transcript || response) ? (
+                <motion.div 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    className="w-full z-10 flex flex-col gap-8 mb-12"
+                >
+                    {transcript && (
+                        <div className="text-center">
+                            <h2 className="text-2xl md:text-3xl font-light text-zinc-300 leading-tight">
+                                "{transcript}"
+                            </h2>
+                        </div>
+                    )}
+                    
+                    {response && (
+                        <div className="w-full bg-zinc-900/50 backdrop-blur-xl border border-white/5 rounded-2xl p-8 shadow-2xl">
+                            <div className="flex items-center gap-2 mb-4">
+                                <div className="w-6 h-6 rounded-full bg-teal-500/10 flex items-center justify-center">
+                                    <span className="text-[10px]">🤖</span>
+                                </div>
+                                <span className="text-xs font-semibold text-teal-500 uppercase tracking-widest">Assistant</span>
+                            </div>
+                            <p className="text-lg text-zinc-200 font-light leading-relaxed whitespace-pre-wrap">
+                                {response}
+                            </p>
+                        </div>
+                    )}
+                </motion.div>
+            ) : (
+                // Idle State - Large Visualizer
+                <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="absolute inset-0 flex items-center justify-center"
+                >
+                    <AudioVisualizer 
+                        fftData={fftData} 
+                        audioLevel={audioLevel} 
+                        status={status === 'listening' ? 'listening' : status === 'responding' ? 'responding' : 'idle'} 
+                        enable3D={true}
+                        size={isDesktop ? 400 : 300}
+                        modeColor={currentModeConfig?.color as any}
+                    />
+                </motion.div>
+            )}
+        </AnimatePresence>
+
+        {/* Minimized Visualizer (When content is present) */}
+        {(transcript || response) && (
+            <div className="absolute bottom-32 opacity-30 blur-[2px] pointer-events-none transform scale-75">
+                <AudioVisualizer 
+                    fftData={fftData} 
+                    audioLevel={audioLevel} 
+                    status={status === 'listening' ? 'listening' : status === 'responding' ? 'responding' : 'idle'} 
+                    enable3D={false}
+                    size={200}
+                    modeColor={currentModeConfig?.color as any}
+                />
+            </div>
+        )}
+      </div>
+
+      {/* Input Deck */}
+      <div className="shrink-0 pb-12 w-full z-20">
+        <div className="flex flex-col items-center gap-6">
+            
+            {/* Input Type Toggle */}
+            <div className="flex p-1 bg-zinc-900/50 rounded-full border border-white/5">
+                <button 
+                    onClick={() => setInputType('voice')}
+                    className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
+                        inputType === 'voice' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                    }`}
+                >
+                    Voice
+                </button>
+                <button 
+                    onClick={() => setInputType('text')}
+                    className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
+                        inputType === 'text' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                    }`}
+                >
+                    Keyboard
+                </button>
+            </div>
+
+            {/* Controls */}
+            <div className="w-full relative h-20 flex items-center justify-center">
+                <AnimatePresence mode="wait">
+                    {inputType === 'voice' ? (
+                        <motion.div
+                            key="voice"
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.9 }}
+                            className="absolute inset-0 flex items-center justify-center"
+                        >
+                            <Button
+                                size="lg"
+                                glow={isCapturing}
+                                color={isCapturing ? 'error' : 'primary'}
+                                onMouseDown={startCapture}
+                                onMouseUp={() => { stopCapture(); endAudio(); }}
+                                onTouchStart={startCapture}
+                                onTouchEnd={() => { stopCapture(); endAudio(); }}
+                                className={`
+                                    h-16 px-8 rounded-full font-bold tracking-widest text-sm shadow-xl
+                                    ${isCapturing ? 'scale-110 bg-red-500' : 'bg-teal-500 hover:bg-teal-400'}
+                                `}
+                                disabled={status === 'disconnected'}
+                            >
+                                {isCapturing ? 'LISTENING...' : 'PUSH TO TALK'}
+                            </Button>
+                        </motion.div>
+                    ) : (
+                        <motion.div
+                            key="text"
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 10 }}
+                            className="w-full max-w-xl"
+                        >
+                            <form onSubmit={handleTextSubmit} className="relative">
+                                <Input
+                                    placeholder="Type a command..." 
+                                    fullWidth 
+                                    className="h-14 pl-6 pr-12 rounded-2xl bg-zinc-900/80 border-white/10 text-lg focus:border-teal-500/50"
+                                    disabled={status === 'disconnected'}
+                                    autoFocus
+                                />
+                                <button
+                                    type="submit"
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-zinc-500 hover:text-teal-400 transition-colors"
+                                >
+                                    ↵
+                                </button>
+                            </form>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </div>
+
+            {/* Micro Controls */}
+            <div className="flex gap-6 text-[10px] font-medium tracking-widest text-zinc-500">
+                <button onClick={() => toggleWakeWord()} className={`hover:text-zinc-300 transition-colors ${wakeWordEnabled ? 'text-teal-500' : ''}`}>
+                    WAKE WORD: {wakeWordEnabled ? 'ON' : 'OFF'}
+                </button>
+                <button onClick={() => setPreferLocal(!preferLocal)} className="hover:text-zinc-300 transition-colors">
+                    MODE: {preferLocal ? 'LOCAL' : 'CLOUD'}
+                </button>
+            </div>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
-    <div className={containerClass}>
-      {/* Top bar with conversation selector and controls */}
-      <div className="flex items-center justify-between mb-4 px-2 gap-2">
-        <div className="flex items-center gap-2">
-          {/* Conversation selector */}
-          <ConversationSelector
-            conversations={savedConversations}
-            currentId={conversationId}
-            onSelect={handleSelectConversation}
-            onNew={handleNewConversation}
-            onRename={renameConversation}
-            onDelete={deleteConversation}
-            isLoading={isLoadingConversations}
-            compact={isMobile}
-          />
-
-          {/* History toggle */}
-          <button
-            onClick={() => setShowHistoryPanel(!showHistoryPanel)}
-            className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-gray-800/50 hover:bg-gray-700/50 border border-gray-700 text-gray-400 hover:text-cyan-400 transition-all text-sm"
-            title="Toggle history panel"
-          >
-            <span>{showHistoryPanel ? '◀' : '▶'}</span>
-            {!isMobile && <span>History</span>}
-            {messages.length > 0 && (
-              <span className="px-1.5 py-0.5 bg-cyan-500/20 rounded-full text-xs text-cyan-400">
-                {messages.length}
-              </span>
-            )}
-          </button>
-
-          {/* Settings/Mode button */}
-          <SettingsButton
-            currentMode={mode}
-            onClick={() => setShowSettingsDrawer(true)}
-            compact={isMobile}
-          />
-        </div>
-
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="w-9 h-9 rounded-full bg-cyan-500/20 hover:bg-cyan-500/40 border border-cyan-500/50 flex items-center justify-center transition-all"
-          >
-            <span className="text-cyan-400 text-xl font-bold leading-none">&times;</span>
-          </button>
-        )}
-      </div>
-
-      {/* Main content area - responsive flex layout */}
-      <div className={`flex ${fullscreen ? 'h-[calc(100vh-80px)]' : ''} gap-4 ${showHistoryPanel ? 'flex-col md:flex-row' : 'flex-col'}`}>
-        {/* Conversation History Panel - collapsible on mobile */}
-        {showHistoryPanel && (
-          <div className={`${fullscreen ? 'md:w-80 flex-shrink-0' : 'w-full md:w-72'} bg-gray-800/30 rounded-xl border border-gray-700/50 p-4 ${isMobile ? 'max-h-48' : ''} overflow-hidden`}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-cyan-400 text-sm font-semibold uppercase tracking-wider">
-                Conversation
-              </h3>
-              {messages.length > 0 && (
-                <button
-                  onClick={handleNewConversation}
-                  className="text-xs px-2 py-1 bg-cyan-500/20 hover:bg-cyan-500/30 rounded text-cyan-400 transition-all"
-                >
-                  New
-                </button>
-              )}
-            </div>
-            <ConversationPanel
-              messages={messages}
-              isStreaming={status === 'responding'}
-              maxHeight={fullscreen ? 'calc(100vh - 200px)' : isMobile ? '120px' : '300px'}
-              compact={isMobile}
-              autoScroll
-            />
-          </div>
-        )}
-
-        {/* Main interaction area */}
-        <div className={`flex-1 flex flex-col items-center ${fullscreen ? 'overflow-y-auto' : ''} ${showHistoryPanel ? '' : 'max-w-2xl mx-auto w-full'}`}>
-          {/* KITTY Logo/Visualizer */}
-          <div className="relative flex items-center justify-center mb-6">
-            <AudioVisualizer
-              fftData={fftData}
-              audioLevel={audioLevel}
-              status={visualizerStatus}
-              isProcessing={status === 'responding'}
-              size={isMobile ? 200 : 280}
-              modeColor={currentModeConfig?.color as 'cyan' | 'orange' | 'purple' | 'green' | 'pink' | undefined}
-            />
-
-            {/* Center content */}
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center">
-                <div className={`${isMobile ? 'text-4xl' : 'text-5xl'} mb-2`}>
-                  {status === 'error' ? '⚠️' : status === 'responding' ? '💭' : status === 'listening' ? '👂' : '🐱'}
-                </div>
-                {/* Status badge with visual hierarchy */}
-                <StatusBar
-                  status={status as VoiceStatus}
-                  isReconnecting={isReconnecting}
-                  reconnectAttempts={reconnectAttempts}
-                  tier={tier || undefined}
-                  preferLocal={preferLocal}
-                  compact={isMobile}
-                  mode={mode}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Streaming indicator - show when generating */}
-          {status === 'responding' && (
-            <div className="flex justify-center mb-4">
-              <StreamingIndicator
-                isStreaming={true}
-                label={toolExecutions.length > 0 ? 'Executing tools' : 'Generating response'}
-                showTime={true}
-                compact={isMobile}
-              />
-            </div>
-          )}
-
-          {/* Tool Executions - show when tools are being used */}
-          {toolExecutions.length > 0 && (
-            <div className="w-full mb-4 p-3 bg-gray-800/30 rounded-xl border border-gray-700/50">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-gray-400 text-xs uppercase tracking-wider">
-                  Tool Execution{toolExecutions.length > 1 ? 's' : ''}
-                </span>
-                {toolsUsed > 0 && (
-                  <span className="text-xs px-2 py-0.5 bg-cyan-500/20 rounded-full text-cyan-400">
-                    {toolsUsed} tool{toolsUsed !== 1 ? 's' : ''} used
-                  </span>
-                )}
-              </div>
-              <ToolExecutionList
-                tools={toolExecutions}
-                compact={isMobile}
-                maxVisible={isMobile ? 3 : 5}
-              />
-            </div>
-          )}
-
-          {/* Current exchange - only show if not in history view */}
-          {!showHistoryPanel && (
-            <>
-              {/* Transcript Display */}
-              {transcript && (
-                <div className="w-full mb-3 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
-                  <div className="text-gray-400 text-xs uppercase mb-1">You said:</div>
-                  <div className="text-white text-sm">{transcript}</div>
-                </div>
-              )}
-
-              {/* Response Display */}
-              {response && (
-                <div className="w-full mb-3 p-3 bg-cyan-900/20 rounded-lg border border-cyan-500/30">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-cyan-400 text-xs uppercase">KITTY</span>
-                    {tier && (
-                      <span className="text-xs px-2 py-0.5 bg-cyan-500/20 rounded-full text-cyan-300">
-                        {tier}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-white text-sm whitespace-pre-wrap">{response}</div>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Error Display */}
-          {(error || captureError) && (
-            <div className="w-full mb-3 p-3 bg-red-900/20 rounded-lg border border-red-500/30">
-              <div className="text-red-400 text-sm">{error || captureError}</div>
-            </div>
-          )}
-
-          {/* Controls */}
-          <HUDFrame
-            color={currentModeConfig?.color}
-            corners={true}
-            glow="subtle"
-            className="w-full p-4 bg-black/40 backdrop-blur-md mt-auto"
-          >
-            <div className="space-y-3">
-              {/* Input Level Meter */}
-              <div className="flex justify-center">
-                <InputLevelMeter level={inputLevel} active={isCapturing} compact={isMobile} />
-              </div>
-
-              {/* Push to Talk Button */}
-              <button
-                onMouseDown={handlePushToTalkStart}
-                onMouseUp={handlePushToTalkEnd}
-                onMouseLeave={handlePushToTalkEnd}
-                onTouchStart={handlePushToTalkStart}
-                onTouchEnd={handlePushToTalkEnd}
-                disabled={status === 'disconnected' || status === 'connecting'}
-                className={`w-full py-3 md:py-4 rounded-xl font-semibold transition-all text-sm md:text-base ${
-                  isCapturing
-                    ? 'bg-cyan-500 text-gray-900 shadow-[0_0_30px_rgba(34,211,238,0.5)]'
-                    : status === 'disconnected' || status === 'connecting'
-                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                    : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/20 hover:border-cyan-500/60 hover:shadow-[0_0_15px_rgba(34,211,238,0.15)]'
-                }`}
-              >
-                {isCapturing ? 'Release to Send' : isMobile ? 'Hold to Talk' : 'Hold to Talk (Space)'}
-              </button>
-
-              {/* Text Input (fallback) */}
-              <form onSubmit={handleTextSubmit} className="flex gap-2">
-                <input
-                  type="text"
-                  value={textInput}
-                  onChange={(e) => setTextInput(e.target.value)}
-                  placeholder={isMobile ? 'Type message...' : 'Or type your message...'}
-                  disabled={status === 'disconnected' || status === 'connecting'}
-                  className="flex-1 px-3 md:px-4 py-2 bg-gray-900/50 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 text-sm font-mono"
-                />
-                <button
-                  type="submit"
-                  disabled={!textInput.trim() || status === 'disconnected' || status === 'connecting'}
-                  className="px-4 md:px-6 py-2 bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 rounded-lg hover:bg-cyan-500/20 hover:shadow-[0_0_10px_rgba(34,211,238,0.1)] disabled:opacity-50 disabled:cursor-not-allowed text-sm uppercase tracking-wider font-semibold"
-                >
-                  Send
-                </button>
-              </form>
-
-              {/* Cancel Button */}
-              {status === 'responding' && (
-                <button
-                  onClick={cancel}
-                  className="w-full py-2 bg-red-500/10 text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/20 text-sm uppercase tracking-wider"
-                >
-                  Cancel Generation
-                </button>
-              )}
-
-              {/* Connection & Settings Row */}
-              <div className="flex flex-wrap items-center justify-center gap-2 pt-2 border-t border-white/5 mt-2">
-                {/* Connection button */}
-                {status === 'disconnected' ? (
-                  <button
-                    onClick={() => connect({ conversationId, userId })}
-                    className="px-3 py-1.5 bg-green-500/10 text-green-400 border border-green-500/30 rounded-lg hover:bg-green-500/20 text-xs uppercase tracking-wide"
-                  >
-                    Initialize System
-                  </button>
-                ) : (
-                  <button
-                    onClick={disconnect}
-                    className="px-3 py-1.5 bg-gray-500/10 text-gray-400 border border-gray-500/30 rounded-lg hover:bg-gray-500/20 text-xs uppercase tracking-wide"
-                  >
-                    Terminate Link
-                  </button>
-                )}
-
-                {/* Local/Cloud Toggle */}
-                {status !== 'disconnected' && (
-                  <div className="inline-flex rounded-lg border border-gray-700/50 overflow-hidden p-0.5 bg-gray-900/50">
-                    <button
-                      type="button"
-                      onClick={() => setPreferLocal(true)}
-                      className={`px-3 py-1 text-[10px] uppercase tracking-wider font-bold transition-all rounded-md ${
-                        preferLocal
-                          ? 'bg-cyan-500/20 text-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.2)]'
-                          : 'text-gray-500 hover:text-gray-300'
-                      }`}
-                    >
-                      Local
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPreferLocal(false)}
-                      className={`px-3 py-1 text-[10px] uppercase tracking-wider font-bold transition-all rounded-md ${
-                        !preferLocal
-                          ? 'bg-purple-500/20 text-purple-300 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
-                          : 'text-gray-500 hover:text-gray-300'
-                      }`}
-                    >
-                      Cloud
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Capabilities indicator - compact on mobile */}
-              {status !== 'disconnected' && (
-                <div className="flex justify-center gap-4 text-[10px] uppercase tracking-wider font-mono text-gray-500">
-                  <span className={`flex items-center gap-1 ${capabilities.stt ? 'text-green-400/80' : 'opacity-50'}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${capabilities.stt ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
-                    STT
-                  </span>
-                  <span className={`flex items-center gap-1 ${capabilities.tts ? 'text-green-400/80' : 'opacity-50'}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${capabilities.tts ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
-                    TTS{ttsProvider && <span className="text-gray-600 ml-0.5">({ttsProvider})</span>}
-                  </span>
-                  {!isMobile && (
-                    <span className={`flex items-center gap-1 ${capabilities.streaming ? 'text-green-400/80' : 'opacity-50'}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${capabilities.streaming ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
-                      Stream
-                    </span>
-                  )}
-                  {capabilities.wakeWord && (
-                    <button
-                      onClick={() => toggleWakeWord()}
-                      className={`flex items-center gap-1 transition-colors ${
-                        wakeWordEnabled
-                          ? 'text-yellow-400/80 hover:text-yellow-300'
-                          : 'text-gray-500 hover:text-gray-400'
-                      }`}
-                      title={wakeWordEnabled ? 'Wake word active - click to disable' : 'Click to enable wake word ("Hey Howdy")'}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        wakeWordEnabled ? 'bg-yellow-400 animate-pulse' : 'bg-gray-600'
-                      }`} />
-                      {wakeWordEnabled ? 'Listening' : 'Wake'}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          </HUDFrame>
-
-          {/* Instructions - hidden on mobile for space */}
-          {!isMobile && (
-            <div className="mt-4 text-center text-gray-500 text-xs">
-              <p>
-                <kbd className="px-1.5 py-0.5 bg-gray-800 rounded text-xs">Space</kbd> to talk
-                {' · '}
-                <kbd className="px-1.5 py-0.5 bg-gray-800 rounded text-xs">Esc</kbd> to cancel
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Settings Drawer */}
-      <SettingsDrawer
-        isOpen={showSettingsDrawer}
-        onClose={() => setShowSettingsDrawer(false)}
-        currentMode={mode}
-        onModeChange={setMode}
-        isConnected={status !== 'disconnected' && status !== 'connecting'}
+    <>
+      <MainLayout
+        header={Header}
+        sidebar={isHistoryOpen ? Sidebar : undefined}
+        rightPanel={RightPanel}
+        content={MainContent}
+        className="font-sans antialiased selection:bg-teal-500/30 text-zinc-100"
       />
-    </div>
+      
+      <SettingsDrawer
+        isOpen={isSettingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        currentMode={voiceStream.mode}
+        onModeChange={voiceStream.setMode}
+        isConnected={status === 'connected'}
+      />
+    </>
   );
 }

@@ -3,10 +3,10 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
-ENV PNPM_HOME=/root/.local/share/pnpm \
-    PATH="/root/.local/share/pnpm:$PATH"
-
-RUN corepack enable
+# Removed pnpm specific setup since we are using npm
+# ENV PNPM_HOME=/root/.local/share/pnpm \
+#     PATH="/root/.local/share/pnpm:$PATH"
+# RUN corepack enable
 
 ARG VITE_API_BASE=http://localhost:8080
 ARG VITE_MQTT_URL=ws://localhost:9002
@@ -15,11 +15,13 @@ ENV VITE_API_BASE=${VITE_API_BASE} \
     VITE_MQTT_URL=${VITE_MQTT_URL} \
     NODE_ENV=production
 
-COPY services/ui/pnpm-lock.yaml services/ui/package.json ./
-RUN pnpm install --frozen-lockfile
+# Changed to only copy package.json and use npm install to avoid lockfile platform issues
+# Added --include=dev to ensure vite (devDep) is installed despite NODE_ENV=production
+COPY services/ui/package.json ./
+RUN npm install --include=dev
 
 COPY services/ui/ ./
-RUN pnpm build
+RUN npm run build
 
 FROM nginx:1.27-alpine AS runtime
 
