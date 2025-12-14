@@ -48,11 +48,11 @@ export function VoiceAssistant({
 
   // Voice Logic
   const voiceStream = useVoiceStream({ customModes: settings?.custom_voice_modes || [] });
-  const { 
-    status, transcript, response, connect, disconnect, 
-    sendAudio, sendText, endAudio, toolExecutions, 
+  const {
+    status, transcript, response, connect, disconnect,
+    sendAudio, sendText, endAudio, toolExecutions,
     mode, setMode, capabilities, preferLocal, setPreferLocal,
-    wakeWordEnabled, toggleWakeWord, tier
+    wakeWordEnabled, toggleWakeWord, tier, ttsProvider
   } = voiceStream;
   
   // Audio Logic
@@ -270,23 +270,60 @@ export function VoiceAssistant({
                     >
                         <HUDFrame color="gray" className="p-3 bg-black/40">
                             <div className="grid grid-cols-2 gap-y-3 gap-x-4">
-                                <div className="flex flex-col">
-                                    <span className="text-[9px] text-gray-500">LATENCY</span>
-                                    <span className="text-xs font-mono text-cyan-400">24ms</span>
-                                </div>
+                                {/* Row 1: Processing */}
                                 <div className="flex flex-col">
                                     <span className="text-[9px] text-gray-500">TIER</span>
-                                    <span className="text-xs font-mono text-purple-400">{tier || 'LOCAL'}</span>
+                                    <span className="text-xs font-mono text-purple-400">{tier?.toUpperCase() || 'LOCAL'}</span>
                                 </div>
+                                <div className="flex flex-col">
+                                    <span className="text-[9px] text-gray-500">STT</span>
+                                    <span className={`text-xs font-mono ${capabilities.stt ? 'text-green-400' : 'text-gray-600'}`}>
+                                        {capabilities.stt ? 'WHISPER' : 'OFFLINE'}
+                                    </span>
+                                </div>
+
+                                {/* Row 2: Audio I/O */}
                                 <div className="flex flex-col">
                                     <span className="text-[9px] text-gray-500">AUDIO IN</span>
                                     <InputLevelMeter level={inputLevel} active={isCapturing} compact />
                                 </div>
                                 <div className="flex flex-col">
-                                    <span className="text-[9px] text-gray-500">WAKE WORD</span>
-                                    <span className={`text-xs font-mono ${wakeWordEnabled ? 'text-green-400' : 'text-gray-600'}`}>
-                                        {wakeWordEnabled ? 'ACTIVE' : 'DISABLED'}
+                                    <span className="text-[9px] text-gray-500">AUDIO OUT</span>
+                                    <span className={`text-xs font-mono ${capabilities.tts ? 'text-cyan-400' : 'text-gray-600'}`}>
+                                        {ttsProvider?.toUpperCase() || (capabilities.tts ? 'TTS' : 'MUTED')}
                                     </span>
+                                </div>
+
+                                {/* Row 3: Wake Word with Toggle */}
+                                <div className="col-span-2">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[9px] text-gray-500">WAKE WORD</span>
+                                        <button
+                                            onClick={() => toggleWakeWord()}
+                                            disabled={!capabilities.wakeWord}
+                                            className={`
+                                                text-[9px] px-2 py-0.5 rounded transition-all
+                                                ${!capabilities.wakeWord
+                                                    ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                                                    : wakeWordEnabled
+                                                        ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
+                                                        : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                                                }
+                                            `}
+                                        >
+                                            {!capabilities.wakeWord ? 'UNAVAILABLE' : wakeWordEnabled ? 'ON' : 'OFF'}
+                                        </button>
+                                    </div>
+                                    {capabilities.wakeWord && (
+                                        <span className="text-[8px] text-gray-600 mt-1 block">
+                                            Say "Hey Kitty" to activate
+                                        </span>
+                                    )}
+                                    {!capabilities.wakeWord && (
+                                        <span className="text-[8px] text-gray-600 mt-1 block">
+                                            Enable in .env: WAKE_WORD_ENABLED=true
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                         </HUDFrame>

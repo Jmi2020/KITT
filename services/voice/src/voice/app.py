@@ -6,6 +6,7 @@ app = FastAPI(title="KITTY Voice Service")
 
 
 @app.get("/healthz")
+@app.get("/api/voice/healthz")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
 
@@ -41,6 +42,7 @@ async def handle_transcript(payload: dict):
     return result
 
 
+@app.websocket("/stream")
 @app.websocket("/api/voice/stream")
 async def voice_stream(websocket: WebSocket):
     """WebSocket endpoint for real-time voice streaming.
