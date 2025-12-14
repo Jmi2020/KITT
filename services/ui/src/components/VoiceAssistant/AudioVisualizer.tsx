@@ -4,13 +4,14 @@ import { CodeCircleVisualizer } from './CodeCircleVisualizer';
 export interface AudioVisualizerProps {
   fftData: number[];
   audioLevel: number;
+  typingLevel?: number; // Added typingLevel prop
   status: 'idle' | 'listening' | 'responding' | 'error';
   isProcessing?: boolean;
   progress?: number | null;
   size?: number;
   modeColor?: 'cyan' | 'orange' | 'purple' | 'green' | 'pink';
   enable3D?: boolean;
-  visualizerMode?: 'ring' | 'wave' | 'code'; // Added 'code'
+  visualizerMode?: 'ring' | 'wave' | 'code';
 }
 
 /**

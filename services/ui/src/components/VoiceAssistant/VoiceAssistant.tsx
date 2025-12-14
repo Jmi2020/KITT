@@ -5,6 +5,7 @@ import { useAudioCapture } from '../../hooks/useAudioCapture';
 import { useAudioAnalyzer } from '../../hooks/useAudioAnalyzer';
 import { useSettings } from '../../hooks/useSettings';
 import { useWindowSize } from '../../hooks/useWindowSize';
+import { useTypingActivity } from '../../hooks/useTypingActivity';
 import { useVoiceStore } from './store/voiceStore';
 
 // Atomic Components
@@ -39,7 +40,11 @@ export function VoiceAssistant({
     initialConversationId || crypto.randomUUID()
   );
   const [inputType, setInputType] = useState<'voice' | 'text'>('voice');
+  const [textInput, setTextInput] = useState('');
   const [showDebug, setShowDebug] = useState(false);
+
+  // Typing Activity Hook
+  const { typingLevel, trigger: triggerTyping } = useTypingActivity(300);
 
   // Voice Logic
   const voiceStream = useVoiceStream({ customModes: settings?.custom_voice_modes || [] });
@@ -95,11 +100,15 @@ export function VoiceAssistant({
 
   const handleTextSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const input = (e.target as HTMLFormElement).querySelector('input') as HTMLInputElement;
-    if (input.value.trim()) {
-        sendText(input.value.trim());
-        input.value = '';
+    if (textInput.trim()) {
+        sendText(textInput.trim());
+        setTextInput('');
     }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setTextInput(e.target.value);
+    triggerTyping();
   };
 
   const currentModeConfig = getModeById(mode);
@@ -107,17 +116,23 @@ export function VoiceAssistant({
   // --- Layout Components ---
 
   const Header = (
-    <div className="flex items-center justify-between w-full px-8 py-4">
-      <div className="flex items-center gap-8">
-        {/* Minimal Logo */}
+    <div className="flex items-center justify-between w-full px-6 py-2">
+      <div className="flex items-center gap-6">
+        {/* Logo & Status */}
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-teal-500/10 rounded-lg flex items-center justify-center border border-teal-500/20">
-            <span className="text-sm">◉</span>
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-500 ${status === 'listening' ? 'bg-cyan-500 shadow-lg shadow-cyan-500/50 scale-110' : 'bg-gray-800'}`}>
+            <span className="text-lg">🐱</span>
           </div>
-          <h1 className="text-sm font-semibold tracking-wide text-zinc-300">KITTY</h1>
+          <div>
+            <h1 className="text-xs font-bold tracking-widest text-white uppercase">KITTY <span className="text-cyan-400">OS</span></h1>
+            <div className="flex items-center gap-2">
+                <span className={`w-1.5 h-1.5 rounded-full ${status === 'connected' ? 'bg-green-400' : 'bg-red-500'}`} />
+                <span className="text-[9px] font-mono text-gray-500 uppercase">{status}</span>
+            </div>
+          </div>
         </div>
 
-        {/* Conversation Context (Desktop) */}
+        {/* Conversation Context */}
         {!isMobile && (
           <div className="w-64 opacity-50 hover:opacity-100 transition-opacity">
             <ConversationSelector
@@ -134,23 +149,17 @@ export function VoiceAssistant({
       </div>
 
       {/* Global Actions */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2">
         <Button 
             variant="ghost" 
             size="sm" 
             onClick={() => setHistoryOpen(!isHistoryOpen)}
             color={isHistoryOpen ? 'primary' : 'surface'}
+            className="text-xs uppercase tracking-wider"
         >
-            History
+            Logs
         </Button>
-        <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={() => setSettingsOpen(true)}
-            color="surface"
-        >
-            Settings
-        </Button>
+        <div className="h-4 w-px bg-white/10 mx-1" />
         {onClose && (
           <Button variant="ghost" size="sm" onClick={onClose} color="error" className="w-8 h-8 p-0 rounded-full">
             ✕
@@ -161,60 +170,77 @@ export function VoiceAssistant({
   );
 
   const Sidebar = isHistoryOpen ? (
-    <div className="h-full flex flex-col min-w-[300px] bg-zinc-900/50">
-      <div className="p-6 border-b border-white/5">
-        <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Recent Activity</h3>
+    <div className="h-full flex flex-col min-w-[300px] bg-black/40">
+      <div className="p-4 border-b border-white/5">
+        <HUDLabel icon="📜">SESSION LOGS</HUDLabel>
       </div>
-      <div className="flex-1 overflow-hidden p-4">
+      <div className="flex-1 overflow-hidden p-2">
         <ConversationPanel messages={messages} compact />
       </div>
     </div>
   ) : null;
 
   const RightPanel = (
-    <div className="h-full flex flex-col p-6 gap-8 min-w-[320px] overflow-y-auto">
+    <div className="h-full flex flex-col p-6 gap-6 min-w-[320px] overflow-y-auto">
         {/* Mission Control Header */}
         <div>
-            <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">Control Center</h3>
-            
-            {/* Status Cards */}
-            <div className="grid grid-cols-2 gap-3 mb-6">
-                <div className="bg-zinc-800/50 rounded-xl p-3 border border-white/5">
-                    <div className="text-[10px] text-zinc-500 mb-1 font-medium">STATUS</div>
-                    <StatusBadge status={status as any} compact />
-                </div>
-                <div className="bg-zinc-800/50 rounded-xl p-3 border border-white/5">
-                    <div className="text-[10px] text-zinc-500 mb-1 font-medium">COMPUTE</div>
-                    <div className="text-xs font-medium text-teal-400">{tier || 'LOCAL'}</div>
-                </div>
-            </div>
+            <HUDLabel icon="🛸">MISSION CONTROL</HUDLabel>
+            <HUDDivider accent />
         </div>
 
-        {/* Current Mode */}
-        <div className="space-y-3">
-            <div className="flex justify-between items-center">
-                <span className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Active Mode</span>
-                <button onClick={() => setSettingsOpen(true)} className="text-[10px] text-teal-400 hover:text-teal-300 font-medium transition-colors">CHANGE</button>
-            </div>
-            
-            <div className="bg-zinc-800/30 rounded-xl border border-white/5 p-4 flex items-start gap-4">
-                <span className="text-2xl">{currentModeConfig?.icon}</span>
-                <div>
-                    <h3 className="text-sm font-medium text-zinc-200">{currentModeConfig?.name}</h3>
-                    <p className="text-xs text-zinc-500 mt-1">{currentModeConfig?.description}</p>
+        {/* Current Mode Card */}
+        <div className="space-y-2">
+            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Active Protocol</span>
+            <div className={`
+                relative overflow-hidden rounded-xl border p-4 transition-all duration-300
+                ${currentModeConfig?.bgClass} ${currentModeConfig?.borderClass}
+            `}>
+                <div className="flex justify-between items-start">
+                    <div className="flex gap-3">
+                        <span className="text-2xl">{currentModeConfig?.icon}</span>
+                        <div>
+                            <h3 className="font-bold text-white">{currentModeConfig?.name}</h3>
+                            <p className="text-xs text-gray-400 mt-1 leading-relaxed">{currentModeConfig?.description}</p>
+                        </div>
+                    </div>
+                    <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => setSettingsOpen(true)}
+                        className="h-6 px-2 text-[10px] bg-black/20 hover:bg-black/40"
+                    >
+                        CHANGE
+                    </Button>
                 </div>
+                
+                {/* Active Tools List in Mode Card */}
+                {currentModeConfig?.enabledTools && currentModeConfig.enabledTools.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1">
+                        {currentModeConfig.enabledTools.slice(0, 3).map(tool => (
+                            <span key={tool} className="text-[9px] px-1.5 py-0.5 rounded bg-black/20 text-white/70 border border-white/5">
+                                {tool.replace(/_/g, ' ')}
+                            </span>
+                        ))}
+                        {currentModeConfig.enabledTools.length > 3 && (
+                            <span className="text-[9px] px-1.5 py-0.5 text-white/50">+{currentModeConfig.enabledTools.length - 3}</span>
+                        )}
+                    </div>
+                )}
             </div>
         </div>
 
         {/* Active Processes */}
         <div className="flex-1 min-h-[200px] flex flex-col">
-            <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">Running Tasks</h3>
+            <div className="flex justify-between items-center mb-2">
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Runtime Tasks</span>
+                {toolExecutions.length > 0 && <span className="text-[9px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded animate-pulse">ACTIVE</span>}
+            </div>
             
-            <div className="flex-1 rounded-2xl bg-zinc-900/30 border border-white/5 overflow-hidden">
+            <div className="flex-1 rounded-xl bg-gray-900/30 border border-white/5 overflow-hidden">
                 {toolExecutions.length === 0 ? (
-                    <div className="h-full flex flex-col items-center justify-center text-zinc-700 gap-2">
+                    <div className="h-full flex flex-col items-center justify-center text-gray-600 gap-2">
                         <span className="text-xl opacity-20">⚡</span>
-                        <span className="text-xs font-medium">System Idle</span>
+                        <span className="text-xs">System Idle</span>
                     </div>
                 ) : (
                     <div className="p-2 h-full overflow-y-auto">
@@ -224,14 +250,14 @@ export function VoiceAssistant({
             </div>
         </div>
 
-        {/* System Details Toggle */}
-        <div className="mt-auto">
+        {/* System Vitals (Collapsible) */}
+        <div className="space-y-2">
             <button 
                 onClick={() => setShowDebug(!showDebug)}
-                className="flex items-center justify-between w-full py-3 text-xs font-medium text-zinc-600 hover:text-zinc-400 transition-colors border-t border-white/5"
+                className="flex items-center justify-between w-full text-[10px] font-bold text-gray-500 uppercase tracking-widest hover:text-cyan-400 transition-colors"
             >
-                <span>Technical Telemetry</span>
-                <span>{showDebug ? '−' : '+'}</span>
+                <span>System Vitals</span>
+                <span>{showDebug ? '▼' : '▶'}</span>
             </button>
             
             <AnimatePresence>
@@ -240,18 +266,30 @@ export function VoiceAssistant({
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: 'auto', opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
-                        className="overflow-hidden"
+                        className="space-y-2 overflow-hidden"
                     >
-                        <div className="pt-2 pb-4 grid grid-cols-2 gap-4">
-                            <div>
-                                <span className="text-[9px] text-zinc-600 block mb-1">LATENCY</span>
-                                <span className="text-xs font-mono text-zinc-400">24ms</span>
+                        <HUDFrame color="gray" className="p-3 bg-black/40">
+                            <div className="grid grid-cols-2 gap-y-3 gap-x-4">
+                                <div className="flex flex-col">
+                                    <span className="text-[9px] text-gray-500">LATENCY</span>
+                                    <span className="text-xs font-mono text-cyan-400">24ms</span>
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-[9px] text-gray-500">TIER</span>
+                                    <span className="text-xs font-mono text-purple-400">{tier || 'LOCAL'}</span>
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-[9px] text-gray-500">AUDIO IN</span>
+                                    <InputLevelMeter level={inputLevel} active={isCapturing} compact />
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-[9px] text-gray-500">WAKE WORD</span>
+                                    <span className={`text-xs font-mono ${wakeWordEnabled ? 'text-green-400' : 'text-gray-600'}`}>
+                                        {wakeWordEnabled ? 'ACTIVE' : 'DISABLED'}
+                                    </span>
+                                </div>
                             </div>
-                            <div>
-                                <span className="text-[9px] text-zinc-600 block mb-1">AUDIO IN</span>
-                                <InputLevelMeter level={inputLevel} active={isCapturing} compact />
-                            </div>
-                        </div>
+                        </HUDFrame>
                     </motion.div>
                 )}
             </AnimatePresence>
@@ -260,165 +298,134 @@ export function VoiceAssistant({
   );
 
   const MainContent = (
-    <div className="flex flex-col h-full w-full max-w-3xl mx-auto relative px-6">
+    <div className="flex flex-col h-full w-full max-w-4xl mx-auto relative">
       
-      {/* Center Stage */}
-      <div className="flex-1 flex flex-col items-center justify-center relative min-h-[400px]">
+      {/* Visualizer Stage */}
+      <div className="flex-1 flex flex-col items-center justify-center relative min-h-[300px]">
         
-        {/* Transcript / Content */}
+        {/* Ambient Glow */}
+        <div className={`absolute inset-0 bg-gradient-to-b from-${currentModeConfig?.color}-500/5 via-transparent to-transparent pointer-events-none transition-colors duration-1000`} />
+
+        {/* Teleprompter Transcript */}
         <AnimatePresence mode="wait">
-            {(transcript || response) ? (
+            {(transcript || response) && (
                 <motion.div 
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -20 }}
-                    className="w-full z-10 flex flex-col gap-8 mb-12"
+                    className="absolute top-[15%] w-full px-8 z-10 flex flex-col items-center gap-8"
                 >
                     {transcript && (
-                        <div className="text-center">
-                            <h2 className="text-2xl md:text-3xl font-light text-zinc-300 leading-tight">
-                                "{transcript}"
-                            </h2>
-                        </div>
+                        <h2 className="text-3xl md:text-4xl font-light text-white/90 text-center leading-tight tracking-tight max-w-2xl drop-shadow-2xl">
+                            "{transcript}"
+                        </h2>
                     )}
-                    
                     {response && (
-                        <div className="w-full bg-zinc-900/50 backdrop-blur-xl border border-white/5 rounded-2xl p-8 shadow-2xl">
-                            <div className="flex items-center gap-2 mb-4">
-                                <div className="w-6 h-6 rounded-full bg-teal-500/10 flex items-center justify-center">
-                                    <span className="text-[10px]">🤖</span>
-                                </div>
-                                <span className="text-xs font-semibold text-teal-500 uppercase tracking-widest">Assistant</span>
+                        <div className="w-full max-w-2xl bg-gray-900/60 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-2xl">
+                            <div className="flex items-center gap-2 mb-3 border-b border-white/5 pb-2">
+                                <span className="text-cyan-400 text-xs font-bold uppercase tracking-widest">KITTY AI</span>
+                                {status === 'responding' && <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse" />}
                             </div>
-                            <p className="text-lg text-zinc-200 font-light leading-relaxed whitespace-pre-wrap">
+                            <p className="text-lg text-gray-100 font-light leading-relaxed whitespace-pre-wrap">
                                 {response}
                             </p>
                         </div>
                     )}
                 </motion.div>
-            ) : (
-                // Idle State - Large Visualizer
-                <motion.div 
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="absolute inset-0 flex items-center justify-center"
-                >
-                    <AudioVisualizer 
-                        fftData={fftData} 
-                        audioLevel={audioLevel} 
-                        status={status === 'listening' ? 'listening' : status === 'responding' ? 'responding' : 'idle'} 
-                        enable3D={true}
-                        size={isDesktop ? 400 : 300}
-                        modeColor={currentModeConfig?.color as any}
-                    />
-                </motion.div>
             )}
         </AnimatePresence>
 
-        {/* Minimized Visualizer (When content is present) */}
-        {(transcript || response) && (
-            <div className="absolute bottom-32 opacity-30 blur-[2px] pointer-events-none transform scale-75">
-                <AudioVisualizer 
-                    fftData={fftData} 
-                    audioLevel={audioLevel} 
-                    status={status === 'listening' ? 'listening' : status === 'responding' ? 'responding' : 'idle'} 
-                    enable3D={false}
-                    size={200}
-                    modeColor={currentModeConfig?.color as any}
-                />
-            </div>
-        )}
+        {/* Visualizer */}
+        <div className={`transition-all duration-1000 ease-[cubic-bezier(0.23,1,0.32,1)] ${transcript || response ? 'translate-y-40 scale-75 opacity-40 blur-sm' : 'translate-y-0 scale-110 opacity-100'}`}>
+            <AudioVisualizer 
+                fftData={fftData} 
+                audioLevel={audioLevel} 
+                // Pass typingLevel as an override/addition to audioLevel
+                typingLevel={typingLevel}
+                status={status === 'listening' ? 'listening' : status === 'responding' ? 'responding' : 'idle'} 
+                enable3D={true}
+                size={isDesktop ? 420 : 300}
+                modeColor={currentModeConfig?.color as any}
+            />
+        </div>
       </div>
 
-      {/* Input Deck */}
-      <div className="shrink-0 pb-12 w-full z-20">
-        <div className="flex flex-col items-center gap-6">
-            
-            {/* Input Type Toggle */}
-            <div className="flex p-1 bg-zinc-900/50 rounded-full border border-white/5">
-                <button 
-                    onClick={() => setInputType('voice')}
-                    className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
-                        inputType === 'voice' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
-                    }`}
-                >
-                    Voice
-                </button>
-                <button 
-                    onClick={() => setInputType('text')}
-                    className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
-                        inputType === 'text' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
-                    }`}
-                >
-                    Keyboard
-                </button>
-            </div>
+      {/* Input / Command Deck */}
+      <div className="shrink-0 pb-12 w-full max-w-xl mx-auto z-20 px-4">
+        
+        {/* Toggle Bar */}
+        <div className="flex justify-center mb-4 gap-4">
+            <button 
+                onClick={() => setInputType('voice')}
+                className={`text-xs font-bold uppercase tracking-widest px-4 py-2 rounded-full transition-all ${inputType === 'voice' ? 'bg-white/10 text-white' : 'text-gray-600 hover:text-gray-400'}`}
+            >
+                Voice
+            </button>
+            <button 
+                onClick={() => setInputType('text')}
+                className={`text-xs font-bold uppercase tracking-widest px-4 py-2 rounded-full transition-all ${inputType === 'text' ? 'bg-white/10 text-white' : 'text-gray-600 hover:text-gray-400'}`}
+            >
+                Terminal
+            </button>
+        </div>
 
-            {/* Controls */}
-            <div className="w-full relative h-20 flex items-center justify-center">
-                <AnimatePresence mode="wait">
-                    {inputType === 'voice' ? (
-                        <motion.div
-                            key="voice"
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.9 }}
-                            className="absolute inset-0 flex items-center justify-center"
+        <div className="relative">
+            <AnimatePresence mode="wait">
+                {inputType === 'voice' ? (
+                    <motion.div
+                        key="voice-input"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        transition={{ duration: 0.2 }}
+                        className="flex flex-col items-center gap-4"
+                    >
+                        <Button
+                            size="lg"
+                            glow={isCapturing}
+                            color={isCapturing ? 'error' : 'primary'}
+                            onMouseDown={startCapture}
+                            onMouseUp={() => { stopCapture(); endAudio(); }}
+                            onTouchStart={startCapture}
+                            onTouchEnd={() => { stopCapture(); endAudio(); }}
+                            className={`
+                                h-20 w-20 rounded-full flex items-center justify-center transition-all duration-300
+                                ${isCapturing ? 'scale-110 shadow-[0_0_50px_rgba(239,68,68,0.4)]' : 'shadow-[0_0_30px_rgba(6,182,212,0.2)] hover:scale-105'}
+                            `}
+                            disabled={status === 'disconnected'}
                         >
-                            <Button
-                                size="lg"
-                                glow={isCapturing}
-                                color={isCapturing ? 'error' : 'primary'}
-                                onMouseDown={startCapture}
-                                onMouseUp={() => { stopCapture(); endAudio(); }}
-                                onTouchStart={startCapture}
-                                onTouchEnd={() => { stopCapture(); endAudio(); }}
-                                className={`
-                                    h-16 px-8 rounded-full font-bold tracking-widest text-sm shadow-xl
-                                    ${isCapturing ? 'scale-110 bg-red-500' : 'bg-teal-500 hover:bg-teal-400'}
-                                `}
+                            <span className="text-3xl">{isCapturing ? '🎙️' : '🎤'}</span>
+                        </Button>
+                        <span className="text-[10px] text-gray-500 font-mono uppercase tracking-[0.2em] animate-pulse">
+                            {isCapturing ? 'Transmitting Audio Data...' : 'Hold to Speak'}
+                        </span>
+                    </motion.div>
+                ) : (
+                    <motion.div
+                        key="text-input"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        transition={{ duration: 0.2 }}
+                        className="bg-black/60 backdrop-blur-xl rounded-2xl border border-white/10 p-2 shadow-2xl"
+                    >
+                        <form onSubmit={handleTextSubmit} className="flex gap-2">
+                            <Input
+                                value={textInput}
+                                onChange={handleInputChange}
+                                placeholder="Type a command..." 
+                                fullWidth 
+                                className="bg-transparent border-none text-lg h-12 focus:ring-0 px-4 font-mono text-cyan-300"
                                 disabled={status === 'disconnected'}
-                            >
-                                {isCapturing ? 'LISTENING...' : 'PUSH TO TALK'}
+                                autoFocus
+                            />
+                            <Button type="submit" variant="ghost" className="text-cyan-400">
+                                ↵
                             </Button>
-                        </motion.div>
-                    ) : (
-                        <motion.div
-                            key="text"
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: 10 }}
-                            className="w-full max-w-xl"
-                        >
-                            <form onSubmit={handleTextSubmit} className="relative">
-                                <Input
-                                    placeholder="Type a command..." 
-                                    fullWidth 
-                                    className="h-14 pl-6 pr-12 rounded-2xl bg-zinc-900/80 border-white/10 text-lg focus:border-teal-500/50"
-                                    disabled={status === 'disconnected'}
-                                    autoFocus
-                                />
-                                <button
-                                    type="submit"
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-zinc-500 hover:text-teal-400 transition-colors"
-                                >
-                                    ↵
-                                </button>
-                            </form>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-            </div>
-
-            {/* Micro Controls */}
-            <div className="flex gap-6 text-[10px] font-medium tracking-widest text-zinc-500">
-                <button onClick={() => toggleWakeWord()} className={`hover:text-zinc-300 transition-colors ${wakeWordEnabled ? 'text-teal-500' : ''}`}>
-                    WAKE WORD: {wakeWordEnabled ? 'ON' : 'OFF'}
-                </button>
-                <button onClick={() => setPreferLocal(!preferLocal)} className="hover:text-zinc-300 transition-colors">
-                    MODE: {preferLocal ? 'LOCAL' : 'CLOUD'}
-                </button>
-            </div>
+                        </form>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
       </div>
     </div>
@@ -431,7 +438,7 @@ export function VoiceAssistant({
         sidebar={isHistoryOpen ? Sidebar : undefined}
         rightPanel={RightPanel}
         content={MainContent}
-        className="font-sans antialiased selection:bg-teal-500/30 text-zinc-100"
+        className="font-sans antialiased selection:bg-cyan-500/30"
       />
       
       <SettingsDrawer
