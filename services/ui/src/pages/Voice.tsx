@@ -15,7 +15,7 @@ export default function Voice() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-900 relative overflow-hidden flex items-center justify-center p-4">
+    <div className="h-full w-full bg-gray-900 relative overflow-hidden">
       {/* Deep Space Background */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-gray-800 via-gray-900 to-black" />
 
@@ -37,7 +37,7 @@ export default function Voice() {
       <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] z-[1] bg-[length:100%_2px,3px_100%] opacity-20" />
 
       {/* Content Wrapper */}
-      <div className="relative z-10 w-full">
+      <div className="relative z-10 w-full h-full">
         <VoiceAssistant fullscreen onStatusChange={handleStatusChange} />
       </div>
 

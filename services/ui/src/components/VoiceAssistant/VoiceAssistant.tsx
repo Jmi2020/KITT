@@ -10,32 +10,34 @@ import { useVoiceStore } from './store/voiceStore';
 import { generateId } from '../../utils/user';
 import Markdown from 'react-markdown';
 
-// Atomic Components
-import { MainLayout } from './templates/MainLayout';
+// Layout
+import { VoiceLayout } from './layout/VoiceLayout';
+
+// Components
 import { AudioVisualizer } from './AudioVisualizer';
 import { SettingsDrawer } from './SettingsDrawer';
 import { Button } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
-import { StatusBadge } from './StatusBadge';
 import { ToolExecutionList } from './ToolExecutionCard';
 import { ConversationPanel } from './ConversationPanel';
 import { ConversationSelector } from './ConversationSelector';
 import { ConversationSidebar } from './ConversationSidebar';
-import { HUDFrame, HUDLabel, HUDDivider } from './HUDFrame';
+import { HUDLabel, HUDDivider } from './HUDFrame';
 import { InputLevelMeter } from './InputLevelMeter';
 import { useConversations } from '../../hooks/useConversations';
 import { useConversationApi } from '../../hooks/useConversationApi';
-import { getModeById, SYSTEM_MODES } from '../../types/voiceModes';
+import { getModeById } from '../../types/voiceModes';
 
 export function VoiceAssistant({
   initialConversationId,
   userId = 'anonymous',
   onClose,
   fullscreen = false,
+  onStatusChange,
 }: any) {
   // Global State
   const { isSettingsOpen, setSettingsOpen, isHistoryOpen, setHistoryOpen } = useVoiceStore();
-  const { isMobile, isDesktop } = useWindowSize();
+  const { isMobile } = useWindowSize();
   const { settings } = useSettings();
 
   // Local State
@@ -44,7 +46,6 @@ export function VoiceAssistant({
   );
   const [inputType, setInputType] = useState<'voice' | 'text'>('voice');
   const [textInput, setTextInput] = useState('');
-  const [showDebug, setShowDebug] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Typing Activity Hook
@@ -55,8 +56,7 @@ export function VoiceAssistant({
   const {
     status, transcript, response, connect, disconnect,
     sendAudio, sendText, endAudio, toolExecutions,
-    mode, setMode, capabilities, preferLocal, setPreferLocal,
-    wakeWordEnabled, toggleWakeWord, tier, ttsProvider
+    mode, setMode, capabilities, preferLocal, wakeWordEnabled, toggleWakeWord, tier, ttsProvider
   } = voiceStream;
   
   // Audio Logic
@@ -79,65 +79,74 @@ export function VoiceAssistant({
     fetchConversations();
     connect({ conversationId, userId, voice: 'default' });
     return () => disconnect();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); 
 
-  // Refresh conversation list when a response completes
-  const prevStatusRef = useRef(status);
-  const prevTranscriptRef = useRef('');
-  const prevResponseRef = useRef('');
+  // Scroll Logic
+  const scrollViewportRef = useRef<HTMLDivElement>(null);
+  const [userScrolledUp, setUserScrolledUp] = useState(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
-  useEffect(() => {
-    const wasResponding = prevStatusRef.current === 'responding';
-    const nowIdle = status === 'connected';
-    if (wasResponding && nowIdle) {
-      // Response just completed, refresh conversation list
-      fetchConversations();
+  // Handle scroll events to detect if user is at bottom
+  const handleScroll = useCallback(() => {
+    if (!scrollViewportRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollViewportRef.current;
+    
+    // If user is more than 100px from bottom, they are "scrolled up"
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
+    
+    setUserScrolledUp(!isAtBottom);
+    setShowScrollButton(!isAtBottom);
+  }, []);
+
+  // Scroll to bottom helper
+  const scrollToBottom = useCallback((smooth = true) => {
+    if (scrollViewportRef.current) {
+        scrollViewportRef.current.scrollTo({
+            top: scrollViewportRef.current.scrollHeight,
+            behavior: smooth ? 'smooth' : 'auto'
+        });
+        // Reset user state
+        setUserScrolledUp(false);
+        setShowScrollButton(false);
     }
-    prevStatusRef.current = status;
-  }, [status, fetchConversations]);
+  }, []);
 
-  // Accumulate messages when transcript/response are finalized
+  // Auto-scroll effect - Respects user manual scroll unless it's a new conversation load
   useEffect(() => {
-    // Add user message when transcript changes (user finished speaking)
-    if (transcript && transcript !== prevTranscriptRef.current && status !== 'listening') {
-      addUserMessage(transcript);
-      prevTranscriptRef.current = transcript;
+    // If user hasn't scrolled up manually, keep them at the bottom
+    if (!userScrolledUp) {
+        scrollToBottom();
     }
-  }, [transcript, status, addUserMessage]);
+  }, [messages.length, transcript, response, userScrolledUp, scrollToBottom]);
 
+  // When switching conversations, force reset scroll state
   useEffect(() => {
-    // Add assistant message when response completes
-    const wasResponding = prevStatusRef.current === 'responding';
-    const nowIdle = status === 'connected';
-    if (wasResponding && nowIdle && response && response !== prevResponseRef.current) {
-      addAssistantMessage(response, tier);
-      prevResponseRef.current = response;
-    }
-  }, [status, response, tier, addAssistantMessage]);
+    setUserScrolledUp(false);
+    setShowScrollButton(false);
+    // Slight delay to allow render
+    setTimeout(() => scrollToBottom(false), 50);
+  }, [conversationId, scrollToBottom]);
 
-  // Handle new conversation
+  // Status callback
+  useEffect(() => {
+    onStatusChange?.(status);
+  }, [status, onStatusChange]);
+
+  // Logic handlers
   const handleNewConversation = useCallback(() => {
     const newId = generateId();
     setConversationId(newId);
     clearMessages();
     createConversation(`Voice Session ${new Date().toLocaleTimeString()}`);
-    // Reset refs for new conversation
-    prevTranscriptRef.current = '';
-    prevResponseRef.current = '';
     disconnect();
     setTimeout(() => connect({ conversationId: newId, userId, voice: 'default' }), 100);
   }, [clearMessages, createConversation, connect, disconnect, userId]);
 
-  // Handle conversation switch
   const handleSelectConversation = useCallback(async (id: string) => {
     if (id === conversationId) return;
     setConversationId(id);
     clearMessages();
-    // Reset refs for conversation switch
-    prevTranscriptRef.current = '';
-    prevResponseRef.current = '';
     disconnect();
-    // Fetch and load messages for the selected conversation
     const loadedMessages = await fetchMessages(id);
     if (loadedMessages && loadedMessages.length > 0) {
       loadMessages(loadedMessages);
@@ -160,433 +169,350 @@ export function VoiceAssistant({
 
   const currentModeConfig = getModeById(mode);
 
-  // --- Layout Components ---
+  // --- UI SECTIONS ---
 
-  const Header = (
-    <div className="flex items-center justify-between w-full px-6 py-2">
-      <div className="flex items-center gap-6">
-        {/* Logo & Status */}
-        <div className="flex items-center gap-3">
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-500 ${status === 'listening' ? 'bg-cyan-500 shadow-lg shadow-cyan-500/50 scale-110' : 'bg-gray-800'}`}>
+  // 1. Header
+  const HeaderNode = (
+    <div className="flex items-center justify-between px-6 py-3 bg-black/40 backdrop-blur-md border-b border-white/5 h-16">
+       <div className="flex items-center gap-4">
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-500 ${status === 'listening' ? 'bg-cyan-500 shadow-[0_0_15px_rgba(6,182,212,0.5)]' : 'bg-gray-800/50 border border-white/10'}`}>
             <span className="text-lg">🐱</span>
           </div>
           <div>
-            <h1 className="text-xs font-bold tracking-widest text-white uppercase">KITTY <span className="text-cyan-400">OS</span></h1>
-            <div className="flex items-center gap-2">
-                <span className={`w-1.5 h-1.5 rounded-full ${status === 'connected' ? 'bg-green-400' : 'bg-red-500'}`} />
-                <span className="text-[9px] font-mono text-gray-500 uppercase">{status}</span>
+            <h1 className="text-sm font-bold tracking-[0.2em] text-white uppercase">KITTY <span className="text-cyan-400">OS</span></h1>
+            <div className="flex items-center gap-2 mt-0.5">
+                <div className={`w-1.5 h-1.5 rounded-full ${status === 'connected' ? 'bg-emerald-400' : 'bg-red-500'}`} />
+                <span className="text-[9px] font-mono text-gray-400 uppercase tracking-wider">{status}</span>
             </div>
           </div>
-        </div>
+       </div>
 
-        {/* Conversation Context */}
-        {!isMobile && (
-          <div className="w-64 opacity-50 hover:opacity-100 transition-opacity">
-            <ConversationSelector
-                conversations={savedConversations}
-                currentId={conversationId}
-                onSelect={handleSelectConversation}
-                onNew={handleNewConversation}
-                onRename={renameConversation}
-                onDelete={deleteConversation}
-                isLoading={isLoadingConversations}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Global Actions */}
-      <div className="flex items-center gap-2">
-        {/* Sidebar Toggle */}
-        {!sidebarOpen && (
-          <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSidebarOpen(true)}
-              color="surface"
-              className="text-xs uppercase tracking-wider"
-          >
-              History
-          </Button>
-        )}
-        <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setHistoryOpen(!isHistoryOpen)}
-            color={isHistoryOpen ? 'primary' : 'surface'}
-            className="text-xs uppercase tracking-wider"
-        >
-            Logs
-        </Button>
-        <div className="h-4 w-px bg-white/10 mx-1" />
-        {onClose && (
-          <Button variant="ghost" size="sm" onClick={onClose} color="error" className="w-8 h-8 p-0 rounded-full">
-            ✕
-          </Button>
-        )}
-      </div>
+       <div className="flex items-center gap-2">
+          {!isMobile && (
+            <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className={`text-[10px] uppercase tracking-wider h-8 px-3 ${!sidebarOpen ? 'text-gray-500' : 'text-cyan-400 bg-cyan-500/10'}`}
+            >
+                {sidebarOpen ? 'Sidebar On' : 'Sidebar Off'}
+            </Button>
+          )}
+          {onClose && (
+            <Button variant="ghost" size="sm" onClick={onClose} color="error" className="w-8 h-8 p-0 rounded-full hover:bg-white/5">
+              ✕
+            </Button>
+          )}
+       </div>
     </div>
   );
 
-  // Conversation History Sidebar
-  const HistorySidebar = sidebarOpen ? (
-    <ConversationSidebar
-      conversations={savedConversations}
-      currentId={conversationId}
-      onSelect={handleSelectConversation}
-      onNew={handleNewConversation}
-      onDelete={deleteConversation}
-      onRename={renameConversation}
-      onClose={() => setSidebarOpen(false)}
-      isLoading={isLoadingConversations}
-    />
-  ) : null;
-
-  // Session Logs Sidebar (when history panel is open from header)
-  const LogsSidebar = isHistoryOpen ? (
-    <div className="h-full flex flex-col min-w-[300px] bg-black/40">
-      <div className="p-4 border-b border-white/5">
-        <HUDLabel icon="📜">SESSION LOGS</HUDLabel>
-      </div>
-      <div className="flex-1 overflow-hidden p-2">
-        <ConversationPanel messages={messages} compact />
-      </div>
+  // 2. Sidebar (History)
+  const SidebarNode = sidebarOpen ? (
+    <div className="h-full flex flex-col">
+        <ConversationSidebar
+          conversations={savedConversations}
+          currentId={conversationId}
+          onSelect={handleSelectConversation}
+          onNew={handleNewConversation}
+          onDelete={deleteConversation}
+          onRename={renameConversation}
+          onClose={() => setSidebarOpen(false)}
+          isLoading={isLoadingConversations}
+        />
     </div>
   ) : null;
 
-  const RightPanel = (
-    <div className="h-full flex flex-col p-6 gap-6 min-w-[320px] overflow-y-auto">
-        {/* Mission Control Header */}
-        <div>
-            <HUDLabel icon="🛸">MISSION CONTROL</HUDLabel>
-            <HUDDivider accent />
+  // 3. Controls (Right Panel)
+  const ControlsNode = (
+    <div className="h-full flex flex-col p-4 gap-4 overflow-y-auto voice-scroll-container">
+        {/* Header */}
+        <div className="flex flex-col gap-2 pt-2">
+            <div className="flex items-center gap-2 px-1">
+                <span className="text-lg filter drop-shadow-md">🛸</span>
+                <span className="text-xs font-bold tracking-[0.2em] text-gray-400 uppercase">System Status</span>
+            </div>
+            <div className="h-px w-full bg-gradient-to-r from-white/10 via-white/5 to-transparent" />
         </div>
 
-        {/* Current Mode Card */}
-        <div className="space-y-2">
-            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Active Protocol</span>
-            <div className={`
-                relative overflow-hidden rounded-xl border p-4 transition-all duration-300
-                ${currentModeConfig?.bgClass} ${currentModeConfig?.borderClass}
-            `}>
-                <div className="flex justify-between items-start">
-                    <div className="flex gap-3">
-                        <span className="text-2xl">{currentModeConfig?.icon}</span>
-                        <div>
-                            <h3 className="font-bold text-white">{currentModeConfig?.name}</h3>
-                            <p className="text-xs text-gray-400 mt-1 leading-relaxed">{currentModeConfig?.description}</p>
-                        </div>
-                    </div>
-                    <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        onClick={() => setSettingsOpen(true)}
-                        className="h-6 px-2 text-[10px] bg-black/20 hover:bg-black/40"
-                    >
-                        CHANGE
-                    </Button>
+        {/* Mode Card */}
+        <div className="group relative overflow-hidden rounded-xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] transition-all p-4">
+            <div className="flex justify-between items-start mb-3">
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">PROTOCOL</span>
+                <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={() => setSettingsOpen(true)}
+                    className="h-5 px-2 text-[9px] bg-white/5 hover:bg-white/10 border border-white/5"
+                >
+                    EDIT
+                </Button>
+            </div>
+            
+            <div className="flex gap-3 items-center">
+                <div className="w-10 h-10 rounded-lg bg-black/40 flex items-center justify-center border border-white/5 shadow-inner text-2xl">
+                    {currentModeConfig?.icon}
                 </div>
-                
-                {/* Active Tools List in Mode Card */}
-                {currentModeConfig?.enabledTools && currentModeConfig.enabledTools.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-1">
-                        {currentModeConfig.enabledTools.slice(0, 3).map(tool => (
-                            <span key={tool} className="text-[9px] px-1.5 py-0.5 rounded bg-black/20 text-white/70 border border-white/5">
+                <div className="min-w-0 flex-1">
+                    <h3 className="font-bold text-gray-200 text-sm truncate">{currentModeConfig?.name}</h3>
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                         {currentModeConfig?.enabledTools?.slice(0, 2).map(tool => (
+                            <span key={tool} className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 truncate max-w-full">
                                 {tool.replace(/_/g, ' ')}
                             </span>
                         ))}
-                        {currentModeConfig.enabledTools.length > 3 && (
-                            <span className="text-[9px] px-1.5 py-0.5 text-white/50">+{currentModeConfig.enabledTools.length - 3}</span>
-                        )}
                     </div>
-                )}
+                </div>
             </div>
         </div>
 
-        {/* Active Processes */}
-        <div className="flex-1 min-h-[200px] flex flex-col">
-            <div className="flex justify-between items-center mb-2">
-                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Runtime Tasks</span>
-                {toolExecutions.length > 0 && <span className="text-[9px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded animate-pulse">ACTIVE</span>}
+        {/* Runtime Tasks */}
+        <div className="flex-1 min-h-[120px] flex flex-col border border-white/5 rounded-xl bg-black/20 overflow-hidden">
+            <div className="px-3 py-2 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Active Tasks</span>
+                {toolExecutions.length > 0 && (
+                    <div className="flex items-center gap-1.5">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                        </span>
+                    </div>
+                )}
             </div>
-            
-            <div className="flex-1 rounded-xl bg-gray-900/30 border border-white/5 overflow-hidden">
+            <div className="flex-1 overflow-y-auto p-2 voice-scroll-container">
                 {toolExecutions.length === 0 ? (
-                    <div className="h-full flex flex-col items-center justify-center text-gray-600 gap-2">
-                        <span className="text-xl opacity-20">⚡</span>
-                        <span className="text-xs">System Idle</span>
+                    <div className="h-full flex flex-col items-center justify-center text-gray-600 gap-2 opacity-60">
+                        <span className="text-lg">⚡</span>
+                        <span className="text-[10px] uppercase tracking-wider font-medium">System Idle</span>
                     </div>
                 ) : (
-                    <div className="p-2 h-full overflow-y-auto">
-                        <ToolExecutionList tools={toolExecutions} compact />
-                    </div>
+                    <ToolExecutionList tools={toolExecutions} compact />
                 )}
             </div>
         </div>
 
-        {/* System Vitals (Collapsible) */}
-        <div className="space-y-2">
-            <button 
-                onClick={() => setShowDebug(!showDebug)}
-                className="flex items-center justify-between w-full text-[10px] font-bold text-gray-500 uppercase tracking-widest hover:text-cyan-400 transition-colors"
-            >
-                <span>System Vitals</span>
-                <span>{showDebug ? '▼' : '▶'}</span>
-            </button>
-            
-            <AnimatePresence>
-                {showDebug && (
-                    <motion.div 
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        className="space-y-2 overflow-hidden"
-                    >
-                        <HUDFrame color="gray" className="p-3 bg-black/40">
-                            <div className="grid grid-cols-2 gap-y-3 gap-x-4">
-                                {/* Row 1: Processing */}
-                                <div className="flex flex-col">
-                                    <span className="text-[9px] text-gray-500">TIER</span>
-                                    <span className="text-xs font-mono text-purple-400">{tier?.toUpperCase() || 'LOCAL'}</span>
-                                </div>
-                                <div className="flex flex-col">
-                                    <span className="text-[9px] text-gray-500">STT</span>
-                                    <span className={`text-xs font-mono ${capabilities.stt ? 'text-green-400' : 'text-gray-600'}`}>
-                                        {capabilities.stt ? 'WHISPER' : 'OFFLINE'}
-                                    </span>
-                                </div>
+        {/* Vitals Grid */}
+        <div className="grid grid-cols-2 gap-2">
+             <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col justify-between min-h-[70px]">
+                <span className="text-[9px] text-gray-500 uppercase font-bold tracking-wider">Input Level</span>
+                <div className="flex-1 flex items-end pb-1">
+                    <InputLevelMeter level={inputLevel} active={isCapturing} compact />
+                </div>
+             </div>
+             
+             <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col justify-between min-h-[70px]">
+                <span className="text-[9px] text-gray-500 uppercase font-bold tracking-wider">Processing</span>
+                <div className="flex items-center gap-2">
+                    <div className={`w-1.5 h-1.5 rounded-full ${tier ? 'bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.5)]' : 'bg-gray-600'}`} />
+                    <span className="text-xs font-mono text-purple-300 tracking-tight">{tier?.toUpperCase() || 'LOCAL'}</span>
+                </div>
+             </div>
 
-                                {/* Row 2: Audio I/O */}
-                                <div className="flex flex-col">
-                                    <span className="text-[9px] text-gray-500">AUDIO IN</span>
-                                    <InputLevelMeter level={inputLevel} active={isCapturing} compact />
-                                </div>
-                                <div className="flex flex-col">
-                                    <span className="text-[9px] text-gray-500">AUDIO OUT</span>
-                                    <span className={`text-xs font-mono ${capabilities.tts ? 'text-cyan-400' : 'text-gray-600'}`}>
-                                        {ttsProvider?.toUpperCase() || (capabilities.tts ? 'TTS' : 'MUTED')}
-                                    </span>
-                                </div>
-
-                                {/* Row 3: Wake Word with Toggle */}
-                                <div className="col-span-2">
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-[9px] text-gray-500">WAKE WORD</span>
-                                        <button
-                                            onClick={() => toggleWakeWord()}
-                                            disabled={!capabilities.wakeWord}
-                                            className={`
-                                                text-[9px] px-2 py-0.5 rounded transition-all
-                                                ${!capabilities.wakeWord
-                                                    ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
-                                                    : wakeWordEnabled
-                                                        ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
-                                                        : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-                                                }
-                                            `}
-                                        >
-                                            {!capabilities.wakeWord ? 'UNAVAILABLE' : wakeWordEnabled ? 'ON' : 'OFF'}
-                                        </button>
-                                    </div>
-                                    {capabilities.wakeWord && (
-                                        <span className="text-[8px] text-gray-600 mt-1 block">
-                                            Say "Hey Kitty" to activate
-                                        </span>
-                                    )}
-                                    {!capabilities.wakeWord && (
-                                        <span className="text-[8px] text-gray-600 mt-1 block">
-                                            Enable in .env: WAKE_WORD_ENABLED=true
-                                        </span>
-                                    )}
-                                </div>
-                            </div>
-                        </HUDFrame>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+             <button 
+                onClick={() => toggleWakeWord()}
+                className={`col-span-2 p-3 rounded-xl border flex items-center justify-between transition-all group ${
+                    wakeWordEnabled && capabilities.wakeWord
+                    ? 'bg-emerald-500/5 border-emerald-500/20 hover:bg-emerald-500/10' 
+                    : 'bg-white/[0.02] border-white/5 hover:bg-white/[0.05]'
+                }`}
+                disabled={!capabilities.wakeWord}
+             >
+                <div className="flex flex-col items-start">
+                    <span className="text-[9px] uppercase font-bold tracking-wider text-gray-500 group-hover:text-gray-400 transition-colors">Wake Word</span>
+                    <span className={`text-[10px] font-medium mt-0.5 ${!capabilities.wakeWord ? 'text-gray-600' : wakeWordEnabled ? 'text-emerald-400' : 'text-gray-400'}`}>
+                        {capabilities.wakeWord ? (wakeWordEnabled ? 'ACTIVE' : 'DISABLED') : 'UNAVAILABLE'}
+                    </span>
+                </div>
+                <div className={`w-8 h-4 rounded-full p-0.5 transition-colors ${wakeWordEnabled && capabilities.wakeWord ? 'bg-emerald-500/20' : 'bg-gray-700/50'}`}>
+                    <div className={`w-3 h-3 rounded-full bg-current shadow-sm transition-transform duration-300 ${wakeWordEnabled && capabilities.wakeWord ? 'translate-x-4 text-emerald-400' : 'translate-x-0 text-gray-400'}`} />
+                </div>
+             </button>
         </div>
     </div>
   );
 
-  const MainContent = (
-    <div className="flex flex-col h-full w-full">
-      {/* Scrollable Content Area - conversation + visualizer */}
-      <div className="flex-1 min-h-0 overflow-y-auto pb-48">
-        <div className="max-w-4xl mx-auto">
-        {/* Conversation History - only show when there are past messages */}
-        {messages.length > 0 && (
-          <div className="px-4 pt-4">
-            <div className="bg-gray-900/40 backdrop-blur-sm border border-white/5 rounded-xl p-4">
-              <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/5">
-                <span className="text-gray-400 text-xs font-bold uppercase tracking-widest">Conversation</span>
-                <span className="text-gray-600 text-xs">{messages.length} messages</span>
-              </div>
-              <ConversationPanel messages={messages} maxHeight="none" autoScroll />
-            </div>
-          </div>
-        )}
+  // 4. Main Content (Messages + Visualizer)
+  const MainNode = (
+    <div className="flex flex-col h-full relative">
+       {/* Background Ambience */}
+       <div className={`absolute inset-0 bg-gradient-to-b from-${currentModeConfig?.color}-500/5 via-transparent to-transparent pointer-events-none transition-colors duration-1000`} />
+       
+       {/* Messages Area - SCROLLABLE */}
+       <div 
+          ref={scrollViewportRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto voice-scroll-container p-4 md:p-8 scroll-smooth relative" 
+          style={{ scrollBehavior: 'smooth' }}
+       >
+          <div className="max-w-3xl mx-auto flex flex-col gap-6 pb-8">
+              {/* Empty State / Visualizer Placeholder */}
+              {messages.length === 0 && (
+                <div className="h-[40vh] flex items-center justify-center">
+                    <div className={`transition-all duration-700 ${transcript ? 'scale-75 opacity-50' : 'scale-100 opacity-100'}`}>
+                        <AudioVisualizer
+                            fftData={fftData}
+                            audioLevel={audioLevel}
+                            typingLevel={typingLevel}
+                            status={status === 'listening' ? 'listening' : status === 'responding' ? 'responding' : 'idle'}
+                            enable3D={true}
+                            size={300}
+                            modeColor={currentModeConfig?.color as any}
+                        />
+                    </div>
+                </div>
+              )}
 
-        {/* Visualizer Stage */}
-        <div className="flex flex-col items-center justify-center relative min-h-[280px] py-4">
+              {/* Message List */}
+              <ConversationPanel 
+                  messages={messages} 
+                  maxHeight="none" 
+                  autoScroll={false} 
+                  disableScroll={true}
+              />
 
-        {/* Ambient Glow */}
-        <div className={`absolute inset-0 bg-gradient-to-b from-${currentModeConfig?.color}-500/5 via-transparent to-transparent pointer-events-none transition-colors duration-1000`} />
-
-        {/* Teleprompter Transcript */}
-        <AnimatePresence mode="wait">
-            {(transcript || response) && (
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
+              {/* Active Transcript (User) */}
+              {transcript && !response && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 20 }} 
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                    className="absolute top-[15%] w-full px-8 z-10 flex flex-col items-center gap-8"
+                    className="self-end max-w-[80%]"
+                  >
+                      <div className="bg-cyan-500/20 border border-cyan-500/30 text-cyan-100 px-6 py-4 rounded-2xl rounded-tr-sm backdrop-blur-md">
+                          <p className="text-lg font-light leading-relaxed">"{transcript}"</p>
+                      </div>
+                      <div className="text-right mt-1">
+                          <span className="text-[10px] uppercase tracking-widest text-cyan-500/50 font-bold">Listening...</span>
+                      </div>
+                  </motion.div>
+              )}
+
+              {/* Active Response (Assistant) */}
+              {response && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 20 }} 
+                    animate={{ opacity: 1, y: 0 }}
+                    className="self-start max-w-[85%]"
+                  >
+                      <div className="bg-gray-800/80 border border-white/10 text-gray-100 px-6 py-4 rounded-2xl rounded-tl-sm backdrop-blur-md shadow-xl">
+                          <div className="prose prose-invert prose-sm max-w-none">
+                            <Markdown>{response}</Markdown>
+                          </div>
+                      </div>
+                      <div className="text-left mt-1 flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse" />
+                          <span className="text-[10px] uppercase tracking-widest text-cyan-500/50 font-bold">Generative Stream</span>
+                      </div>
+                  </motion.div>
+              )}
+          </div>
+       </div>
+
+       {/* Scroll to Bottom Button */}
+       <AnimatePresence>
+          {showScrollButton && (
+            <motion.button
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                onClick={() => scrollToBottom(true)}
+                className="absolute bottom-4 right-8 z-50 bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-400 border border-cyan-500/30 rounded-full p-2 shadow-lg backdrop-blur-md transition-colors"
+            >
+                <span className="text-xl">↓</span>
+            </motion.button>
+          )}
+       </AnimatePresence>
+    </div>
+  );
+
+  // 5. Footer (Input)
+  const FooterNode = (
+    <div className="bg-gradient-to-t from-black via-black/95 to-transparent pb-6 pt-12 px-4">
+        <div className="max-w-2xl mx-auto flex flex-col items-center gap-4">
+            {/* Mode Switcher */}
+            <div className="flex gap-1 p-1 bg-white/5 rounded-full border border-white/5 backdrop-blur-md">
+                <button 
+                    onClick={() => setInputType('voice')}
+                    className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${inputType === 'voice' ? 'bg-white/10 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}
                 >
-                    {transcript && (
-                        <h2 className="text-3xl md:text-4xl font-light text-white/90 text-center leading-tight tracking-tight max-w-2xl drop-shadow-2xl">
-                            "{transcript}"
-                        </h2>
-                    )}
-                    {response && (
-                        <div className="w-full max-w-2xl bg-gray-900/60 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-2xl">
-                            <div className="flex items-center gap-2 mb-3 border-b border-white/5 pb-2">
-                                <span className="text-cyan-400 text-xs font-bold uppercase tracking-widest">KITTY AI</span>
-                                {status === 'responding' && <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse" />}
-                            </div>
-                            <div className="text-lg text-gray-100 font-light leading-relaxed prose prose-invert prose-sm max-w-none">
-                                <Markdown
-                                    components={{
-                                        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                                        strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
-                                        em: ({ children }) => <em className="italic text-gray-200">{children}</em>,
-                                        code: ({ children }) => <code className="bg-black/30 px-1 py-0.5 rounded text-sm font-mono text-cyan-200">{children}</code>,
-                                        pre: ({ children }) => <pre className="bg-black/50 p-3 rounded-lg text-sm font-mono overflow-x-auto my-2 border border-gray-800">{children}</pre>,
-                                        ul: ({ children }) => <ul className="list-disc list-inside space-y-1 my-2">{children}</ul>,
-                                        ol: ({ children }) => <ol className="list-decimal list-inside space-y-1 my-2">{children}</ol>,
-                                        li: ({ children }) => <li className="text-gray-200">{children}</li>,
-                                        a: ({ href, children }) => <a href={href} className="text-cyan-400 hover:text-cyan-300 underline" target="_blank" rel="noopener noreferrer">{children}</a>,
-                                        h1: ({ children }) => <h1 className="text-xl font-bold text-white mt-4 mb-2">{children}</h1>,
-                                        h2: ({ children }) => <h2 className="text-lg font-bold text-white mt-3 mb-2">{children}</h2>,
-                                        h3: ({ children }) => <h3 className="text-base font-bold text-white mt-2 mb-1">{children}</h3>,
-                                    }}
-                                >
-                                    {response}
-                                </Markdown>
-                            </div>
-                        </div>
-                    )}
-                </motion.div>
-            )}
-        </AnimatePresence>
+                    Voice
+                </button>
+                <button 
+                    onClick={() => setInputType('text')}
+                    className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${inputType === 'text' ? 'bg-white/10 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}
+                >
+                    Terminal
+                </button>
+            </div>
 
-        {/* Visualizer */}
-        <div className={`transition-all duration-1000 ease-[cubic-bezier(0.23,1,0.32,1)] ${transcript || response ? 'translate-y-40 scale-75 opacity-40 blur-sm' : 'translate-y-0 scale-110 opacity-100'}`}>
-            <AudioVisualizer
-                fftData={fftData}
-                audioLevel={audioLevel}
-                // Pass typingLevel as an override/addition to audioLevel
-                typingLevel={typingLevel}
-                status={status === 'listening' ? 'listening' : status === 'responding' ? 'responding' : 'idle'}
-                enable3D={true}
-                size={isDesktop ? 420 : 300}
-                modeColor={currentModeConfig?.color as any}
-            />
-        </div>
-        </div>
-        {/* Close max-w-4xl mx-auto */}
-        </div>
-      </div>
-
-      {/* Input / Command Deck - Fixed Footer at bottom of viewport */}
-      <div className="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-black via-black/95 to-transparent pt-8 pb-6 px-4 z-50">
-        <div className="max-w-xl mx-auto">
-        
-        {/* Toggle Bar */}
-        <div className="flex justify-center mb-4 gap-4">
-            <button 
-                onClick={() => setInputType('voice')}
-                className={`text-xs font-bold uppercase tracking-widest px-4 py-2 rounded-full transition-all ${inputType === 'voice' ? 'bg-white/10 text-white' : 'text-gray-600 hover:text-gray-400'}`}
-            >
-                Voice
-            </button>
-            <button 
-                onClick={() => setInputType('text')}
-                className={`text-xs font-bold uppercase tracking-widest px-4 py-2 rounded-full transition-all ${inputType === 'text' ? 'bg-white/10 text-white' : 'text-gray-600 hover:text-gray-400'}`}
-            >
-                Terminal
-            </button>
-        </div>
-
-        <div className="relative">
-            <AnimatePresence mode="wait">
-                {inputType === 'voice' ? (
-                    <motion.div
-                        key="voice-input"
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
-                        transition={{ duration: 0.2 }}
-                        className="flex flex-col items-center gap-4"
-                    >
-                        <Button
-                            size="lg"
-                            glow={isCapturing}
-                            color={isCapturing ? 'error' : 'primary'}
-                            onMouseDown={startCapture}
-                            onMouseUp={() => { stopCapture(); endAudio(); }}
-                            onTouchStart={startCapture}
-                            onTouchEnd={() => { stopCapture(); endAudio(); }}
-                            className={`
-                                h-20 w-20 rounded-full flex items-center justify-center transition-all duration-300
-                                ${isCapturing ? 'scale-110 shadow-[0_0_50px_rgba(239,68,68,0.4)]' : 'shadow-[0_0_30px_rgba(6,182,212,0.2)] hover:scale-105'}
-                            `}
-                            disabled={status === 'disconnected'}
+            {/* Input Controls */}
+            <div className="w-full relative min-h-[80px] flex items-center justify-center">
+                <AnimatePresence mode="wait">
+                    {inputType === 'voice' ? (
+                        <motion.div
+                            key="voice-input"
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.9 }}
+                            className="flex flex-col items-center gap-2"
                         >
-                            <span className="text-3xl">{isCapturing ? '🎙️' : '🎤'}</span>
-                        </Button>
-                        <span className="text-[10px] text-gray-500 font-mono uppercase tracking-[0.2em] animate-pulse">
-                            {isCapturing ? 'Transmitting Audio Data...' : 'Hold to Speak'}
-                        </span>
-                    </motion.div>
-                ) : (
-                    <motion.div
-                        key="text-input"
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
-                        transition={{ duration: 0.2 }}
-                        className="bg-black/60 backdrop-blur-xl rounded-2xl border border-white/10 p-2 shadow-2xl"
-                    >
-                        <form onSubmit={handleTextSubmit} className="flex gap-2">
-                            <Input
-                                value={textInput}
-                                onChange={handleInputChange}
-                                placeholder="Type a command..." 
-                                fullWidth 
-                                className="bg-transparent border-none text-lg h-12 focus:ring-0 px-4 font-mono text-cyan-300"
+                            <Button
+                                size="lg"
+                                glow={isCapturing}
+                                color={isCapturing ? 'error' : 'primary'}
+                                onMouseDown={startCapture}
+                                onMouseUp={() => { stopCapture(); endAudio(); }}
+                                onTouchStart={startCapture}
+                                onTouchEnd={() => { stopCapture(); endAudio(); }}
+                                className={`
+                                    h-16 w-16 rounded-full flex items-center justify-center transition-all duration-300
+                                    ${isCapturing ? 'scale-110 shadow-[0_0_40px_rgba(239,68,68,0.5)] bg-red-500 text-white' : 'shadow-[0_0_20px_rgba(6,182,212,0.3)] hover:scale-105 bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'}
+                                `}
                                 disabled={status === 'disconnected'}
-                                autoFocus
-                            />
-                            <Button type="submit" variant="ghost" className="text-cyan-400">
-                                ↵
+                            >
+                                <span className="text-2xl">{isCapturing ? '🎙️' : '🎤'}</span>
                             </Button>
-                        </form>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+                        </motion.div>
+                    ) : (
+                        <motion.div
+                            key="text-input"
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            className="w-full"
+                        >
+                            <form onSubmit={handleTextSubmit} className="relative group">
+                                <div className="absolute inset-0 bg-cyan-500/5 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity" />
+                                <div className="relative flex items-center bg-black/40 backdrop-blur-xl rounded-2xl border border-white/10 group-hover:border-white/20 transition-colors p-1">
+                                    <Input
+                                        value={textInput}
+                                        onChange={handleInputChange}
+                                        placeholder="Command input..." 
+                                        fullWidth 
+                                        className="bg-transparent border-none text-lg h-14 focus:ring-0 px-6 font-mono text-cyan-100 placeholder:text-gray-700"
+                                        disabled={status === 'disconnected'}
+                                        autoFocus
+                                    />
+                                    <Button type="submit" variant="ghost" className="h-12 w-12 rounded-xl text-cyan-500 hover:bg-cyan-500/10 hover:text-cyan-400">
+                                        ↵
+                                    </Button>
+                                </div>
+                            </form>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </div>
         </div>
-        </div>
-      </div>
     </div>
   );
 
   return (
     <>
-      <MainLayout
-        header={Header}
-        sidebar={HistorySidebar}
-        rightPanel={RightPanel}
-        content={MainContent}
-        className="font-sans antialiased selection:bg-cyan-500/30"
+      <VoiceLayout
+        header={HeaderNode}
+        sidebar={SidebarNode}
+        controls={ControlsNode}
+        main={MainNode}
+        footer={FooterNode}
       />
       
       <SettingsDrawer

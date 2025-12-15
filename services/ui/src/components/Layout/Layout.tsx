@@ -10,18 +10,16 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
+  { path: '/', icon: '🏠', label: 'Home' },
   { path: '/voice', icon: '🎙️', label: 'Voice' },
-  { path: '/shell', icon: '💬', label: 'Shell' },
-  { path: '/console', icon: '🎨', label: 'Fabricate' },
-  { path: '/dashboard', icon: '🖨️', label: 'Printers' },
   { path: '/research', icon: '🔬', label: 'Research' },
+  { path: '/console', icon: '🎨', label: 'Fabrication' },
   { path: '/settings', icon: '⚙️', label: 'Settings' },
 ];
 
 export function Layout() {
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
-  const isHome = location.pathname === '/';
   const isVoicePage = location.pathname === '/voice';
 
   return (
@@ -33,7 +31,7 @@ export function Layout() {
           </NavLink>
         </div>
         <nav>
-          {!isHome && navItems.map((item) => (
+          {navItems.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}
@@ -53,7 +51,7 @@ export function Layout() {
           </button>
         </nav>
       </header>
-      <main>
+      <main style={isVoicePage ? { padding: 0, maxWidth: 'none', margin: 0, height: 'calc(100vh - 64px)' } : undefined}>
         <Outlet />
       </main>
 

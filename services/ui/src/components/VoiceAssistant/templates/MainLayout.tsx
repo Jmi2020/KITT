@@ -28,7 +28,7 @@ export const MainLayout = ({
   const showSidebars = !isMobile;
 
   return (
-    <div className={`relative w-full flex flex-col bg-black text-white ${className}`} style={{ height: 'calc(100vh - 64px)', overflow: 'hidden' }}>
+    <div className={`relative w-full h-full flex flex-col bg-black text-white ${className}`} style={{ overflow: 'hidden' }}>
       {/* Background Ambience - Clean & Deep */}
       <div className="absolute inset-0 bg-gradient-to-b from-gray-950 via-black to-black pointer-events-none -z-20" />
       

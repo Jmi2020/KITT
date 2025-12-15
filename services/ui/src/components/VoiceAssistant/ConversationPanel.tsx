@@ -13,6 +13,8 @@ interface ConversationPanelProps {
   showTimestamps?: boolean;
   /** Auto-scroll to bottom on new messages */
   autoScroll?: boolean;
+  /** Disable internal scrolling (use when parent scrolls) */
+  disableScroll?: boolean;
 }
 
 /**
@@ -25,13 +27,14 @@ export const ConversationPanel = memo(function ConversationPanel({
   maxHeight = '400px',
   compact = false,
   autoScroll = true,
+  disableScroll = false,
 }: ConversationPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevMessagesLength = useRef(messages.length);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    if (!autoScroll) return;
+    if (!autoScroll || disableScroll) return;
 
     const shouldScroll =
       messages.length > prevMessagesLength.current || isStreaming;
@@ -44,7 +47,7 @@ export const ConversationPanel = memo(function ConversationPanel({
     }
 
     prevMessagesLength.current = messages.length;
-  }, [messages, isStreaming, autoScroll]);
+  }, [messages, isStreaming, autoScroll, disableScroll]);
 
   if (messages.length === 0) {
     return (
@@ -60,8 +63,8 @@ export const ConversationPanel = memo(function ConversationPanel({
   return (
     <div
       ref={scrollRef}
-      className="overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent"
-      style={{ maxHeight }}
+      className={`${disableScroll ? 'overflow-visible' : 'overflow-y-auto'} space-y-3 pr-2 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent`}
+      style={{ maxHeight: disableScroll ? 'none' : maxHeight }}
     >
       {messages.map((message, index) => (
         <ConversationMessage
