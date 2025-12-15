@@ -31,8 +31,14 @@ class HollowingConfig:
     # Post-hollowing mesh cleanup options
     # Simplification reduces triangle count while preserving shape
     enable_simplification: bool = True
-    simplification_ratio: float = 0.3  # Reduce to 30% of original faces
+    simplification_ratio: float = 0.3  # Reduce to 30% of original faces (voxel method)
     target_faces: Optional[int] = None  # Override ratio with specific count
+
+    # Surface shell inner surface simplification
+    # The inner surface is not visible, so we aggressively simplify it
+    # 0.1 = reduce to 10% of faces (90% reduction) - default for quality/size balance
+    surface_shell_inner_ratio: float = 0.1
+    surface_shell_inner_min_faces: int = 1000  # Minimum faces to keep for stability
 
     # Smoothing reduces jagged voxel artifacts
     enable_smoothing: bool = True
@@ -158,8 +164,11 @@ class SdfHollower:
             inner_tm = trimesh.Trimesh(vertices=inner_vertices, faces=tm.faces.copy())
 
             # Aggressively simplify inner mesh - no one sees the inside!
-            # Target 10% of original faces for inner surface
-            inner_target_faces = max(1000, len(tm.faces) // 10)
+            # Use configurable ratio (default 0.1 = 10% of faces = 90% reduction)
+            inner_target_faces = max(
+                self.config.surface_shell_inner_min_faces,
+                int(len(tm.faces) * self.config.surface_shell_inner_ratio)
+            )
             original_inner_faces = len(inner_tm.faces)
 
             try:

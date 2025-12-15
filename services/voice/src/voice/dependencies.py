@@ -5,6 +5,7 @@ Provides lazy-initialized components for the voice service:
 - TTS (Kokoro/Piper local + OpenAI fallback)
 - Wake word detection (Porcupine)
 - WebSocket handler for real-time streaming
+- Brain HTTP client for LLM queries (ensures proper SlotManager lifecycle)
 """
 
 from __future__ import annotations
@@ -18,8 +19,8 @@ from typing import TYPE_CHECKING
 from common.cache import SemanticCache
 from common.config import settings
 from common.mqtt import MQTTClient
-from brain.dependencies import get_orchestrator
 
+from .brain_client import BrainClient
 from .parser import VoiceParser
 from .router import VoiceRouter
 
@@ -60,9 +61,22 @@ def get_parser() -> VoiceParser:
 
 
 @lru_cache(maxsize=1)
+def get_brain_client() -> BrainClient:
+    """Get Brain HTTP client for LLM queries.
+
+    Uses HTTP to Brain service instead of direct orchestrator import.
+    This ensures proper SlotManager lifecycle (auto-restart idle LLM servers).
+    """
+    brain_url = os.getenv("BRAIN_API_URL", "http://localhost:8000")
+    return BrainClient(base_url=brain_url, timeout=120.0)
+
+
+@lru_cache(maxsize=1)
 def get_router() -> VoiceRouter:
+    """Get voice router with Brain HTTP client."""
     mqtt_client = MQTTClient(client_id="voice")
-    return VoiceRouter(get_parser(), mqtt_client, get_orchestrator(), SemanticCache())
+    brain_client = get_brain_client()
+    return VoiceRouter(get_parser(), mqtt_client, brain_client, SemanticCache())
 
 
 @lru_cache(maxsize=1)

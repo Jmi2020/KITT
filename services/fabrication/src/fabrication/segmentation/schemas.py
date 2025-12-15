@@ -70,7 +70,7 @@ class SegmentationConfig:
     wall_thickness_mm: float = 10.0  # Must be >= pin_diameter for integrated joints
     enable_hollowing: bool = True
     min_wall_thickness_mm: float = 1.2
-    hollowing_strategy: HollowingStrategy = HollowingStrategy.HOLLOW_THEN_SEGMENT
+    hollowing_strategy: HollowingStrategy = HollowingStrategy.SURFACE_SHELL
     # Voxel resolution for hollowing: higher = more detail but slower
     # 200 = fast/coarse (~5mm voxels for 1m model), 500 = medium (~2mm), 1000+ = high quality
     hollowing_resolution: int = 200
@@ -199,9 +199,9 @@ class SegmentMeshRequest(BaseModel):
         description="Enable mesh hollowing to save material",
     )
     hollowing_strategy: HollowingStrategy = Field(
-        default=HollowingStrategy.HOLLOW_THEN_SEGMENT,
-        description="When to hollow: 'hollow_then_segment' (default) creates shell first for wall panels, "
-        "'segment_then_hollow' hollows each piece after cutting",
+        default=HollowingStrategy.SURFACE_SHELL,
+        description="Hollowing strategy: 'surface_shell' (default) preserves surface detail, "
+        "'hollow_then_segment' uses faster voxel method, 'segment_then_hollow' hollows each piece after cutting",
     )
     pin_diameter_mm: float = Field(
         default=5.0,
