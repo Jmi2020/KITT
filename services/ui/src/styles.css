@@ -83,14 +83,14 @@
 
 body {
   margin: 0;
-  min-height: 100vh;
+  min-min-height: 100vh;
   background: var(--gradient-radial-1), var(--gradient-radial-2), var(--bg-primary);
   color: var(--text-primary);
   transition: background 0.3s ease, color 0.3s ease;
 }
 
 #root {
-  min-height: 100vh;
+  min-min-height: 100vh;
 }
 
 /* Typography */
@@ -127,11 +127,11 @@ a:hover {
 
 /* App Layout */
 .kitty-app {
-  height: 100vh;
-  max-height: 100vh;
+  min-min-height: 100vh;
+  max-min-min-height: 100vh;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  
 }
 
 .kitty-app header {
@@ -195,14 +195,14 @@ a:hover {
   align-items: center;
 }
 
-.kitty-app main {
+.kitty-app main { overflow-y: auto; overflow-x: hidden;
   flex: 1;
   min-height: 0;
   padding: 2rem 1.5rem;
   max-width: 1600px;
   width: 100%;
   margin: 0 auto;
-  overflow: hidden;
+  overflow-y: auto; overflow-x: hidden;
 }
 
 /* Buttons */
@@ -604,7 +604,7 @@ details[open] summary {
     padding: 1rem;
   }
 
-  .kitty-app main {
+  .kitty-app main { overflow-y: auto; overflow-x: hidden;
     padding: 1.5rem 1rem;
   }
 
@@ -853,7 +853,7 @@ details[open] summary {
 .w-full { width: 100%; }
 .h-full { height: 100%; }
 .w-screen { width: 100vw; }
-.h-screen { height: 100vh; }
+.h-screen { min-height: 100vh; }
 .min-h-0 { min-height: 0; }
 .min-w-0 { min-width: 0; }
 
@@ -877,7 +877,7 @@ details[open] summary {
 .voice-layout { height: 100%;
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  min-height: 100vh;
   width: 100vw;
   overflow: hidden;
   background-color: #000;

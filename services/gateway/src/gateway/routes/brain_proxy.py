@@ -269,3 +269,10 @@ async def proxy_usage_metrics(request: Request) -> Response:
 async def proxy_routing_models(request: Request) -> Response:
     """Proxy routing models to brain."""
     return await proxy_to_brain(request, "/api/routing/models")
+
+
+# System statistics endpoint
+@router.get("/api/system/stats")
+async def proxy_system_stats(request: Request) -> Response:
+    """Proxy system stats to brain."""
+    return await proxy_to_brain(request, "/system/stats")

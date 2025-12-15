@@ -47,8 +47,9 @@ export function VoiceAssistant({
   const [inputType, setInputType] = useState<'voice' | 'text'>('voice');
   const [textInput, setTextInput] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [controlsOpen, setControlsOpen] = useState(true); // Collapsible Status Column
 
-  // Typing Activity Hook
+  // Hooks
   const { typingLevel, trigger: triggerTyping } = useTypingActivity(300);
 
   // Voice Logic
@@ -81,58 +82,47 @@ export function VoiceAssistant({
     return () => disconnect();
   }, []); 
 
-  // Scroll Logic
+  // Auto-scroll logic
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
 
-  // Handle scroll events to detect if user is at bottom
   const handleScroll = useCallback(() => {
     if (!scrollViewportRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollViewportRef.current;
-    
-    // If user is more than 100px from bottom, they are "scrolled up"
     const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
-    
     setUserScrolledUp(!isAtBottom);
     setShowScrollButton(!isAtBottom);
   }, []);
 
-  // Scroll to bottom helper
   const scrollToBottom = useCallback((smooth = true) => {
     if (scrollViewportRef.current) {
         scrollViewportRef.current.scrollTo({
             top: scrollViewportRef.current.scrollHeight,
             behavior: smooth ? 'smooth' : 'auto'
         });
-        // Reset user state
         setUserScrolledUp(false);
         setShowScrollButton(false);
     }
   }, []);
 
-  // Auto-scroll effect - Respects user manual scroll unless it's a new conversation load
   useEffect(() => {
-    // If user hasn't scrolled up manually, keep them at the bottom
     if (!userScrolledUp) {
         scrollToBottom();
     }
   }, [messages.length, transcript, response, userScrolledUp, scrollToBottom]);
 
-  // When switching conversations, force reset scroll state
   useEffect(() => {
     setUserScrolledUp(false);
     setShowScrollButton(false);
-    // Slight delay to allow render
     setTimeout(() => scrollToBottom(false), 50);
   }, [conversationId, scrollToBottom]);
 
-  // Status callback
   useEffect(() => {
     onStatusChange?.(status);
   }, [status, onStatusChange]);
 
-  // Logic handlers
+  // Handlers
   const handleNewConversation = useCallback(() => {
     const newId = generateId();
     setConversationId(newId);
@@ -189,14 +179,25 @@ export function VoiceAssistant({
 
        <div className="flex items-center gap-2">
           {!isMobile && (
-            <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className={`text-[10px] uppercase tracking-wider h-8 px-3 ${!sidebarOpen ? 'text-gray-500' : 'text-cyan-400 bg-cyan-500/10'}`}
-            >
-                {sidebarOpen ? 'Sidebar On' : 'Sidebar Off'}
-            </Button>
+            <>
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSidebarOpen(!sidebarOpen)}
+                    className={`text-[10px] uppercase tracking-wider h-8 px-3 ${!sidebarOpen ? 'text-gray-500' : 'text-cyan-400 bg-cyan-500/10'}`}
+                >
+                    History
+                </Button>
+                <div className="w-px h-4 bg-white/10" />
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setControlsOpen(!controlsOpen)}
+                    className={`text-[10px] uppercase tracking-wider h-8 px-3 ${!controlsOpen ? 'text-gray-500' : 'text-cyan-400 bg-cyan-500/10'}`}
+                >
+                    Status
+                </Button>
+            </>
           )}
           {onClose && (
             <Button variant="ghost" size="sm" onClick={onClose} color="error" className="w-8 h-8 p-0 rounded-full hover:bg-white/5">
@@ -223,8 +224,8 @@ export function VoiceAssistant({
     </div>
   ) : null;
 
-  // 3. Controls (Right Panel)
-  const ControlsNode = (
+  // 3. Controls (Right Panel - Redesigned)
+  const ControlsNode = controlsOpen ? (
     <div className="h-full flex flex-col p-4 gap-4 overflow-y-auto voice-scroll-container">
         {/* Header */}
         <div className="flex flex-col gap-2 pt-2">
@@ -235,10 +236,10 @@ export function VoiceAssistant({
             <div className="h-px w-full bg-gradient-to-r from-white/10 via-white/5 to-transparent" />
         </div>
 
-        {/* Mode Card */}
+        {/* 1. Protocol / Mode */}
         <div className="group relative overflow-hidden rounded-xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] transition-all p-4">
             <div className="flex justify-between items-start mb-3">
-                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">PROTOCOL</span>
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Protocol</span>
                 <Button 
                     variant="ghost" 
                     size="sm" 
@@ -255,28 +256,59 @@ export function VoiceAssistant({
                 </div>
                 <div className="min-w-0 flex-1">
                     <h3 className="font-bold text-gray-200 text-sm truncate">{currentModeConfig?.name}</h3>
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                         {currentModeConfig?.enabledTools?.slice(0, 2).map(tool => (
-                            <span key={tool} className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 truncate max-w-full">
-                                {tool.replace(/_/g, ' ')}
-                            </span>
-                        ))}
-                    </div>
+                    <span className="text-[10px] text-gray-500 font-mono">{tier?.toUpperCase() || 'LOCAL'} TIER</span>
                 </div>
             </div>
         </div>
 
-        {/* Runtime Tasks */}
+        {/* 2. Wake Word Toggle (Prominent) */}
+        <button 
+            onClick={() => toggleWakeWord()}
+            className={`w-full p-4 rounded-xl border flex items-center justify-between transition-all group relative overflow-hidden ${
+                wakeWordEnabled && capabilities.wakeWord
+                ? 'bg-emerald-900/10 border-emerald-500/30' 
+                : 'bg-white/[0.02] border-white/5'
+            }`}
+            disabled={!capabilities.wakeWord}
+        >
+            <div className="flex flex-col items-start z-10">
+                <span className={`text-[10px] uppercase font-bold tracking-wider mb-1 ${wakeWordEnabled ? 'text-emerald-400' : 'text-gray-500'}`}>
+                    Wake Word
+                </span>
+                <span className={`text-xs font-mono ${wakeWordEnabled ? 'text-white' : 'text-gray-600'}`}>
+                    {capabilities.wakeWord ? (wakeWordEnabled ? 'ACTIVE' : 'DISABLED') : 'N/A'}
+                </span>
+            </div>
+            
+            {/* Toggle Switch Visual */}
+            <div className={`w-10 h-5 rounded-full p-0.5 transition-colors z-10 ${wakeWordEnabled && capabilities.wakeWord ? 'bg-emerald-500' : 'bg-gray-700'}`}>
+                <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-300 ${wakeWordEnabled && capabilities.wakeWord ? 'translate-x-5' : 'translate-x-0'}`} />
+            </div>
+
+            {/* Subtle Glow */}
+            {wakeWordEnabled && <div className="absolute inset-0 bg-emerald-500/5 blur-xl" />}
+        </button>
+
+        {/* 3. Audio Input */}
+        <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 flex flex-col gap-2">
+            <div className="flex justify-between items-center">
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Audio Input</span>
+                <span className={`text-[9px] ${isCapturing ? 'text-red-400 animate-pulse' : 'text-gray-600'}`}>
+                    {isCapturing ? 'LIVE' : 'OFF'}
+                </span>
+            </div>
+            <InputLevelMeter level={inputLevel} active={isCapturing} />
+        </div>
+
+        {/* 4. Runtime Tasks */}
         <div className="flex-1 min-h-[120px] flex flex-col border border-white/5 rounded-xl bg-black/20 overflow-hidden">
             <div className="px-3 py-2 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
-                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Active Tasks</span>
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Tasks</span>
                 {toolExecutions.length > 0 && (
-                    <div className="flex items-center gap-1.5">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                        </span>
-                    </div>
+                    <span className="flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-green-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                    </span>
                 )}
             </div>
             <div className="flex-1 overflow-y-auto p-2 voice-scroll-container">
@@ -290,46 +322,8 @@ export function VoiceAssistant({
                 )}
             </div>
         </div>
-
-        {/* Vitals Grid */}
-        <div className="grid grid-cols-2 gap-2">
-             <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col justify-between min-h-[70px]">
-                <span className="text-[9px] text-gray-500 uppercase font-bold tracking-wider">Input Level</span>
-                <div className="flex-1 flex items-end pb-1">
-                    <InputLevelMeter level={inputLevel} active={isCapturing} compact />
-                </div>
-             </div>
-             
-             <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col justify-between min-h-[70px]">
-                <span className="text-[9px] text-gray-500 uppercase font-bold tracking-wider">Processing</span>
-                <div className="flex items-center gap-2">
-                    <div className={`w-1.5 h-1.5 rounded-full ${tier ? 'bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.5)]' : 'bg-gray-600'}`} />
-                    <span className="text-xs font-mono text-purple-300 tracking-tight">{tier?.toUpperCase() || 'LOCAL'}</span>
-                </div>
-             </div>
-
-             <button 
-                onClick={() => toggleWakeWord()}
-                className={`col-span-2 p-3 rounded-xl border flex items-center justify-between transition-all group ${
-                    wakeWordEnabled && capabilities.wakeWord
-                    ? 'bg-emerald-500/5 border-emerald-500/20 hover:bg-emerald-500/10' 
-                    : 'bg-white/[0.02] border-white/5 hover:bg-white/[0.05]'
-                }`}
-                disabled={!capabilities.wakeWord}
-             >
-                <div className="flex flex-col items-start">
-                    <span className="text-[9px] uppercase font-bold tracking-wider text-gray-500 group-hover:text-gray-400 transition-colors">Wake Word</span>
-                    <span className={`text-[10px] font-medium mt-0.5 ${!capabilities.wakeWord ? 'text-gray-600' : wakeWordEnabled ? 'text-emerald-400' : 'text-gray-400'}`}>
-                        {capabilities.wakeWord ? (wakeWordEnabled ? 'ACTIVE' : 'DISABLED') : 'UNAVAILABLE'}
-                    </span>
-                </div>
-                <div className={`w-8 h-4 rounded-full p-0.5 transition-colors ${wakeWordEnabled && capabilities.wakeWord ? 'bg-emerald-500/20' : 'bg-gray-700/50'}`}>
-                    <div className={`w-3 h-3 rounded-full bg-current shadow-sm transition-transform duration-300 ${wakeWordEnabled && capabilities.wakeWord ? 'translate-x-4 text-emerald-400' : 'translate-x-0 text-gray-400'}`} />
-                </div>
-             </button>
-        </div>
     </div>
-  );
+  ) : null;
 
   // 4. Main Content (Messages + Visualizer)
   const MainNode = (
@@ -453,7 +447,8 @@ export function VoiceAssistant({
                             initial={{ opacity: 0, scale: 0.9 }}
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.9 }}
-                            className="flex flex-col items-center gap-2"
+                            transition={{ duration: 0.2 }}
+                            className="flex flex-col items-center gap-3"
                         >
                             <Button
                                 size="lg"
@@ -471,6 +466,9 @@ export function VoiceAssistant({
                             >
                                 <span className="text-2xl">{isCapturing ? '🎙️' : '🎤'}</span>
                             </Button>
+                            <span className="text-[9px] text-gray-500 font-mono uppercase tracking-[0.2em] animate-pulse">
+                                {isCapturing ? 'LISTENING...' : 'HOLD TO SPEAK'}
+                            </span>
                         </motion.div>
                     ) : (
                         <motion.div

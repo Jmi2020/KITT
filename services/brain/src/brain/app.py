@@ -37,6 +37,7 @@ from .routes.usage import router as usage_router
 from .routes.conversations import router as conversations_router
 from .research.routes import router as research_router
 from .routes.services import router as services_router
+from .routes.system import router as system_router
 
 # Configure standard logging
 configure_logging()
@@ -479,6 +480,7 @@ app.include_router(providers_router)
 app.include_router(metrics_router)
 app.include_router(research_router)  # Autonomous research sessions
 app.include_router(services_router)  # ServiceManager API routes
+app.include_router(system_router)    # System statistics
 
 
 @app.get("/healthz")
