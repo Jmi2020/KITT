@@ -10,7 +10,15 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from . import SessionLocal
-from .models import ConversationMessage, ConversationRole, ConversationSession
+from .models import (
+    ConversationMessage,
+    ConversationRole,
+    ConversationSession,
+    RoutingDecision,
+    CADJob,
+    DeviceCommand,
+    ConversationProject,
+)
 
 
 def _normalize_whitespace(text: str) -> str:
@@ -173,9 +181,10 @@ def rename_conversation(conversation_id: str, title: str) -> Optional[Conversati
 
 
 def delete_conversation(conversation_id: str) -> bool:
-    """Soft-delete a conversation by marking it as deleted.
+    """Delete a conversation and all associated records.
 
-    This removes the session and all associated messages.
+    This removes the session and all associated messages, routing decisions,
+    CAD jobs, and device commands.
 
     Args:
         conversation_id: The conversation ID to delete
@@ -188,6 +197,37 @@ def delete_conversation(conversation_id: str) -> bool:
         session_row = db.get(ConversationSession, conversation_id)
         if not session_row:
             return False
+
+        # Delete all related records that have foreign keys to conversation_sessions
+        # Order matters: delete child records before parent
+
+        # Delete routing decisions
+        db.execute(
+            RoutingDecision.__table__.delete().where(
+                RoutingDecision.conversation_id == conversation_id
+            )
+        )
+
+        # Delete CAD jobs
+        db.execute(
+            CADJob.__table__.delete().where(
+                CADJob.conversation_id == conversation_id
+            )
+        )
+
+        # Delete conversation projects
+        db.execute(
+            ConversationProject.__table__.delete().where(
+                ConversationProject.conversation_id == conversation_id
+            )
+        )
+
+        # Nullify device command references (FK is nullable)
+        db.execute(
+            DeviceCommand.__table__.update()
+            .where(DeviceCommand.conversation_id == conversation_id)
+            .values(conversation_id=None)
+        )
 
         # Delete all messages in the conversation
         db.execute(

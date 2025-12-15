@@ -127,9 +127,11 @@ a:hover {
 
 /* App Layout */
 .kitty-app {
-  min-height: 100vh;
+  height: 100vh;
+  max-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .kitty-app header {
@@ -195,10 +197,12 @@ a:hover {
 
 .kitty-app main {
   flex: 1;
+  min-height: 0;
   padding: 2rem 1.5rem;
   max-width: 1600px;
   width: 100%;
   margin: 0 auto;
+  overflow: hidden;
 }
 
 /* Buttons */

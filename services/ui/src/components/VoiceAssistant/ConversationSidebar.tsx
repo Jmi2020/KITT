@@ -78,7 +78,7 @@ export const ConversationSidebar = memo(function ConversationSidebar({
   };
 
   return (
-    <div className="h-full flex flex-col bg-gray-900/50">
+    <div className="flex flex-col bg-gray-900/50" style={{ height: 'calc(100vh - 64px - 64px)', maxHeight: 'calc(100vh - 64px - 64px)', overflow: 'hidden' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
         <h2 className="text-sm font-medium text-gray-300 tracking-wide uppercase">History</h2>
@@ -109,7 +109,7 @@ export const ConversationSidebar = memo(function ConversationSidebar({
       </div>
 
       {/* Conversation List */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1" style={{ minHeight: 0, overflowY: 'auto' }}>
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-400" />

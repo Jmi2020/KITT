@@ -28,7 +28,7 @@ export const MainLayout = ({
   const showSidebars = !isMobile;
 
   return (
-    <div className={`relative w-full flex flex-col bg-black text-white overflow-hidden ${className}`} style={{ height: 'calc(100vh - 64px)' }}>
+    <div className={`relative w-full flex flex-col bg-black text-white ${className}`} style={{ height: 'calc(100vh - 64px)', overflow: 'hidden' }}>
       {/* Background Ambience - Clean & Deep */}
       <div className="absolute inset-0 bg-gradient-to-b from-gray-950 via-black to-black pointer-events-none -z-20" />
       
@@ -38,22 +38,23 @@ export const MainLayout = ({
       </header>
 
       {/* Main Layout Container (Flexbox) */}
-      <div className="flex-1 flex overflow-hidden relative w-full">
+      <div className="flex-1 flex overflow-hidden relative w-full" style={{ minHeight: 0 }}>
         
         {/* Left Sidebar (History) */}
         <AnimatePresence mode="wait">
           {sidebar && (
-            <motion.aside 
+            <motion.aside
               initial={isMobile ? { x: -320, position: 'absolute' } : { width: 0, opacity: 0 }}
               animate={isMobile ? { x: 0, position: 'absolute' } : { width: 280, opacity: 1, position: 'relative' }}
               exit={isMobile ? { x: -320, position: 'absolute' } : { width: 0, opacity: 0 }}
               transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
               className={`
-                shrink-0 border-r border-white/5 bg-gray-900/10 backdrop-blur-sm z-30 flex flex-col overflow-hidden h-full
+                shrink-0 border-r border-white/5 bg-gray-900/10 backdrop-blur-sm z-30 flex flex-col overflow-hidden h-full min-h-0
                 ${isMobile ? 'inset-y-0 left-0 w-80 shadow-2xl bg-black/90' : ''}
               `}
+              style={{ minHeight: 0 }}
             >
-              <div className="w-80 h-full flex flex-col">
+              <div className="w-80 h-full flex flex-col min-h-0" style={{ minHeight: 0 }}>
                 {sidebar}
               </div>
             </motion.aside>

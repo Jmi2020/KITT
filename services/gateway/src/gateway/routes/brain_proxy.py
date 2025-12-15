@@ -116,6 +116,12 @@ async def proxy_conversation_title(request: Request, conversation_id: str) -> Re
     return await proxy_to_brain(request, f"/api/conversations/{conversation_id}/title")
 
 
+@router.delete("/api/conversations/{conversation_id}")
+async def proxy_conversation_delete(request: Request, conversation_id: str) -> Response:
+    """Proxy conversation delete to brain."""
+    return await proxy_to_brain(request, f"/api/conversations/{conversation_id}")
+
+
 # Memory endpoints
 @router.post("/api/memory/remember")
 async def proxy_memory_remember(request: Request) -> Response:
