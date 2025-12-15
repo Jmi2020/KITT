@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 
@@ -74,6 +75,7 @@ export const ConversationMessage = memo(function ConversationMessage({
 
       <div className={`markdown-content text-sm leading-relaxed ${message.isStreaming ? 'streaming' : ''}`}>
         <Markdown
+          remarkPlugins={[remarkGfm]}
           components={{
             img: ({ node, ...props }) => (
               <div className="my-2 rounded-lg overflow-hidden border border-gray-700 bg-black/50">
@@ -84,6 +86,16 @@ export const ConversationMessage = memo(function ConversationMessage({
             a: ({ node, ...props }) => <a {...props} className="text-cyan-400 hover:text-cyan-300 underline decoration-cyan-500/30" target="_blank" rel="noopener noreferrer" />,
             code: ({ node, ...props }) => <code {...props} className="bg-black/30 px-1 py-0.5 rounded text-xs font-mono text-cyan-200" />,
             pre: ({ node, ...props }) => <pre {...props} className="bg-black/50 p-2 rounded-lg text-xs font-mono overflow-x-auto my-2 border border-gray-800" />,
+            table: ({ node, ...props }) => (
+              <div className="my-3 overflow-x-auto rounded-lg border border-gray-700">
+                <table {...props} className="min-w-full text-xs" />
+              </div>
+            ),
+            thead: ({ node, ...props }) => <thead {...props} className="bg-gray-800/80" />,
+            tbody: ({ node, ...props }) => <tbody {...props} className="divide-y divide-gray-700/50" />,
+            tr: ({ node, ...props }) => <tr {...props} className="hover:bg-gray-800/30 transition-colors" />,
+            th: ({ node, ...props }) => <th {...props} className="px-3 py-2 text-left font-semibold text-cyan-300 border-b border-gray-600" />,
+            td: ({ node, ...props }) => <td {...props} className="px-3 py-2 text-gray-300" />,
           }}
         >
           {message.content}
