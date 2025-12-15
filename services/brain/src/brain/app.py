@@ -36,6 +36,7 @@ from .routes.memory import router as memory_router
 from .routes.usage import router as usage_router
 from .routes.conversations import router as conversations_router
 from .research.routes import router as research_router
+from .routes.services import router as services_router
 
 # Configure standard logging
 configure_logging()
@@ -378,6 +379,25 @@ async def lifespan(app: FastAPI):
         logger.info("IdleReaper disabled (ENABLE_PARALLEL_AGENTS=false)")
         app.state.idle_reaper = None
 
+    # Start ServiceManager for dynamic service health monitoring and on-demand activation
+    service_manager_enabled = os.getenv("ENABLE_SERVICE_MANAGER", "true").lower() == "true"
+    if service_manager_enabled:
+        try:
+            from common.service_manager import get_service_manager
+
+            app.state.service_manager = get_service_manager()
+
+            logger.info(
+                f"ServiceManager initialized: {app.state.service_manager.service_count} services "
+                f"({len(app.state.service_manager._registry.get_auto_startable())} auto-startable)"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize ServiceManager: {e}")
+            app.state.service_manager = None
+    else:
+        logger.info("ServiceManager disabled (ENABLE_SERVICE_MANAGER=false)")
+        app.state.service_manager = None
+
     yield
 
     # Shutdown
@@ -391,6 +411,15 @@ async def lifespan(app: FastAPI):
             logger.info("IdleReaper stopped")
         except Exception as e:
             logger.error(f"Error stopping IdleReaper: {e}")
+
+    # Cleanup ServiceManager
+    if hasattr(app.state, 'service_manager') and app.state.service_manager is not None:
+        logger.info("Closing ServiceManager")
+        try:
+            await app.state.service_manager.close()
+            logger.info("ServiceManager closed")
+        except Exception as e:
+            logger.error(f"Error closing ServiceManager: {e}")
 
     # Graceful shutdown for research session manager (wait for pending writes)
     if hasattr(app.state, 'session_manager') and app.state.session_manager is not None:
@@ -449,6 +478,7 @@ app.include_router(usage_router)
 app.include_router(providers_router)
 app.include_router(metrics_router)
 app.include_router(research_router)  # Autonomous research sessions
+app.include_router(services_router)  # ServiceManager API routes
 
 
 @app.get("/healthz")
