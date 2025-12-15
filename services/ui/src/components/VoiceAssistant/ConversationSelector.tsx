@@ -199,23 +199,23 @@ export const ConversationSelector = memo(function ConversationSelector({
                       </div>
 
                       {/* Actions */}
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 hover:opacity-100">
+                      <div className="flex items-center gap-1 shrink-0">
                         {onRename && (
                           <button
                             onClick={(e) => handleStartEdit(conv, e)}
-                            className="p-1 text-gray-500 hover:text-cyan-400 transition-colors"
+                            className="w-7 h-7 flex items-center justify-center rounded bg-gray-700/50 hover:bg-cyan-500/30 transition-all text-sm"
                             title="Rename"
                           >
-                            ✎
+                            ✏️
                           </button>
                         )}
                         {onDelete && (
                           <button
                             onClick={(e) => handleDelete(conv.id, e)}
-                            className="p-1 text-gray-500 hover:text-red-400 transition-colors"
+                            className="w-7 h-7 flex items-center justify-center rounded bg-gray-700/50 hover:bg-red-500/30 transition-all text-sm"
                             title="Delete"
                           >
-                            ✕
+                            🗑️
                           </button>
                         )}
                       </div>

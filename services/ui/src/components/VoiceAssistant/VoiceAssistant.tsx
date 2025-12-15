@@ -409,31 +409,33 @@ export function VoiceAssistant({
   );
 
   const MainContent = (
-    <div className="flex flex-col h-full w-full max-w-4xl mx-auto relative">
-
-      {/* Conversation History - only show when there are past messages */}
-      {messages.length > 0 && (
-        <div className="shrink-0 max-h-[40vh] overflow-hidden px-4 pt-4">
-          <div className="bg-gray-900/40 backdrop-blur-sm border border-white/5 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/5">
-              <span className="text-gray-400 text-xs font-bold uppercase tracking-widest">Conversation</span>
-              <span className="text-gray-600 text-xs">{messages.length} messages</span>
+    <div className="flex flex-col h-full w-full">
+      {/* Scrollable Content Area - conversation + visualizer */}
+      <div className="flex-1 min-h-0 overflow-y-auto pb-48">
+        <div className="max-w-4xl mx-auto">
+        {/* Conversation History - only show when there are past messages */}
+        {messages.length > 0 && (
+          <div className="px-4 pt-4">
+            <div className="bg-gray-900/40 backdrop-blur-sm border border-white/5 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/5">
+                <span className="text-gray-400 text-xs font-bold uppercase tracking-widest">Conversation</span>
+                <span className="text-gray-600 text-xs">{messages.length} messages</span>
+              </div>
+              <ConversationPanel messages={messages} maxHeight="none" autoScroll />
             </div>
-            <ConversationPanel messages={messages} maxHeight="30vh" autoScroll />
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Visualizer Stage */}
-      <div className="flex-1 flex flex-col items-center justify-center relative min-h-[300px]">
-        
+        {/* Visualizer Stage */}
+        <div className="flex flex-col items-center justify-center relative min-h-[280px] py-4">
+
         {/* Ambient Glow */}
         <div className={`absolute inset-0 bg-gradient-to-b from-${currentModeConfig?.color}-500/5 via-transparent to-transparent pointer-events-none transition-colors duration-1000`} />
 
         {/* Teleprompter Transcript */}
         <AnimatePresence mode="wait">
             {(transcript || response) && (
-                <motion.div 
+                <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -20 }}
@@ -478,21 +480,25 @@ export function VoiceAssistant({
 
         {/* Visualizer */}
         <div className={`transition-all duration-1000 ease-[cubic-bezier(0.23,1,0.32,1)] ${transcript || response ? 'translate-y-40 scale-75 opacity-40 blur-sm' : 'translate-y-0 scale-110 opacity-100'}`}>
-            <AudioVisualizer 
-                fftData={fftData} 
-                audioLevel={audioLevel} 
+            <AudioVisualizer
+                fftData={fftData}
+                audioLevel={audioLevel}
                 // Pass typingLevel as an override/addition to audioLevel
                 typingLevel={typingLevel}
-                status={status === 'listening' ? 'listening' : status === 'responding' ? 'responding' : 'idle'} 
+                status={status === 'listening' ? 'listening' : status === 'responding' ? 'responding' : 'idle'}
                 enable3D={true}
                 size={isDesktop ? 420 : 300}
                 modeColor={currentModeConfig?.color as any}
             />
         </div>
+        </div>
+        {/* Close max-w-4xl mx-auto */}
+        </div>
       </div>
 
-      {/* Input / Command Deck */}
-      <div className="shrink-0 pb-12 w-full max-w-xl mx-auto z-20 px-4">
+      {/* Input / Command Deck - Fixed Footer at bottom of viewport */}
+      <div className="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-black via-black/95 to-transparent pt-8 pb-6 px-4 z-50">
+        <div className="max-w-xl mx-auto">
         
         {/* Toggle Bar */}
         <div className="flex justify-center mb-4 gap-4">
@@ -567,6 +573,7 @@ export function VoiceAssistant({
                     </motion.div>
                 )}
             </AnimatePresence>
+        </div>
         </div>
       </div>
     </div>

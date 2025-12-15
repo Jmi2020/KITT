@@ -28,7 +28,7 @@ export const MainLayout = ({
   const showSidebars = !isMobile;
 
   return (
-    <div className={`relative w-full h-full flex flex-col bg-black text-white overflow-hidden ${className}`} style={{ minHeight: 'calc(100vh - 64px)' }}>
+    <div className={`relative w-full flex flex-col bg-black text-white overflow-hidden ${className}`} style={{ height: 'calc(100vh - 64px)' }}>
       {/* Background Ambience - Clean & Deep */}
       <div className="absolute inset-0 bg-gradient-to-b from-gray-950 via-black to-black pointer-events-none -z-20" />
       
@@ -61,10 +61,8 @@ export const MainLayout = ({
         </AnimatePresence>
 
         {/* Center Stage */}
-        <main className="flex-1 relative flex flex-col min-w-0 overflow-hidden h-full">
-          <div className="flex-1 w-full h-full flex flex-col items-center justify-center">
-            {content}
-          </div>
+        <main className="flex-1 min-w-0 min-h-0 relative h-full">
+          {content}
         </main>
 
         {/* Right Panel (Context/Tools) */}
