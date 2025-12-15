@@ -6,14 +6,14 @@ const API_BASE = '/api';
 
 interface ConversationListResponse {
   conversations: Array<{
-    id: string;
+    conversationId: string;
     title: string;
-    message_count: number;
-    last_message?: string;
-    created_at: string;
-    updated_at: string;
+    messageCount: number;
+    lastMessage?: string;
+    createdAt: string;
+    lastMessageAt: string;
   }>;
-  total: number;
+  total?: number;
 }
 
 interface ConversationMessagesResponse {
@@ -74,12 +74,12 @@ export function useConversationApi(): UseConversationApiReturn {
       const data: ConversationListResponse = await response.json();
 
       const summaries: ConversationSummary[] = data.conversations.map((conv) => ({
-        id: conv.id,
-        title: conv.title || `Conversation ${conv.id.slice(0, 8)}`,
-        messageCount: conv.message_count,
-        lastMessage: conv.last_message,
-        createdAt: new Date(conv.created_at),
-        updatedAt: new Date(conv.updated_at),
+        id: conv.conversationId,
+        title: conv.title || `Conversation ${conv.conversationId.slice(0, 8)}`,
+        messageCount: conv.messageCount,
+        lastMessage: conv.lastMessage,
+        createdAt: new Date(conv.createdAt),
+        updatedAt: new Date(conv.lastMessageAt),
       }));
 
       // Sort by updated time, newest first

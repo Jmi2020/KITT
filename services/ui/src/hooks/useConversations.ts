@@ -30,6 +30,8 @@ interface UseConversationsReturn {
   updateToolCall: (messageId: string, toolId: string, updates: Partial<ToolCall>) => void;
   /** Clear all messages */
   clearMessages: () => void;
+  /** Load messages (for switching conversations) */
+  loadMessages: (messages: Message[]) => void;
   /** Get conversation by ID */
   getConversation: (id: string) => Conversation | undefined;
 }
@@ -140,6 +142,13 @@ export function useConversations(): UseConversationsReturn {
     );
   }, []);
 
+  const loadMessages = useCallback((newMessages: Message[]) => {
+    setMessages(newMessages);
+    setConversation((prev) =>
+      prev ? { ...prev, updatedAt: new Date() } : prev
+    );
+  }, []);
+
   const getConversation = useCallback(
     (id: string) => {
       return conversation?.id === id ? conversation : undefined;
@@ -158,6 +167,7 @@ export function useConversations(): UseConversationsReturn {
     addToolCall,
     updateToolCall,
     clearMessages,
+    loadMessages,
     getConversation,
   };
 }

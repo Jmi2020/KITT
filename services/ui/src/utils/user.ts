@@ -4,7 +4,14 @@ export const generateId = (): string => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
   }
-  return `web-${Math.random().toString(16).slice(2, 10)}-${Date.now().toString(16)}`;
+  // Fallback: Generate UUID v4 format for non-secure contexts
+  const hex = () => Math.floor(Math.random() * 16).toString(16);
+  const hex4 = () => hex() + hex() + hex() + hex();
+  const hex8 = () => hex4() + hex4();
+  // UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+  // y is 8, 9, a, or b
+  const y = ['8', '9', 'a', 'b'][Math.floor(Math.random() * 4)];
+  return `${hex8()}-${hex4()}-4${hex4().slice(1)}-${y}${hex4().slice(1)}-${hex8()}${hex4()}`;
 };
 
 export const getWebUserId = (): string => {

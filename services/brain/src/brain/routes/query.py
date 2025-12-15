@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ConfigDict
 
-from common.db.conversations import record_conversation_message
+from common.db.conversations import record_conversation_message, fetch_conversation_messages
 from common.db.models import ConversationRole, RoutingTier
 from common.verbosity import VerbosityLevel, clamp_level, describe_level, get_verbosity_level
 from ..dependencies import get_orchestrator
@@ -98,6 +98,48 @@ def _detect_provider_from_model(model: str) -> Optional[str]:
             return provider
 
     return None
+
+
+def _build_conversation_history(conversation_id: str, max_tokens: int = 8000) -> str:
+    """Load recent messages and format for LLM context.
+
+    Fetches conversation history from the database and formats it for inclusion
+    in the LLM prompt. Uses token estimation to stay within budget.
+
+    Args:
+        conversation_id: The conversation to load history for
+        max_tokens: Maximum token budget for history (default 8k for 32k context models)
+
+    Returns:
+        Formatted conversation history string wrapped in XML tags, or empty string
+    """
+    try:
+        messages = fetch_conversation_messages(conversation_id, limit=50)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to fetch conversation history for %s: %s", conversation_id, exc)
+        return ""
+
+    if not messages:
+        return ""
+
+    # Simple token estimation: ~4 chars per token (conservative)
+    history_parts = []
+    estimated_tokens = 0
+
+    for msg in messages:
+        role = "User" if msg.role.value == "user" else "Assistant"
+        entry = f"[{role}]: {msg.content}"
+        entry_tokens = len(entry) // 4
+
+        if estimated_tokens + entry_tokens > max_tokens:
+            break
+        history_parts.append(entry)
+        estimated_tokens += entry_tokens
+
+    if not history_parts:
+        return ""
+
+    return "<conversation_history>\n" + "\n\n".join(history_parts) + "\n</conversation_history>"
 
 
 class QueryInput(BaseModel):
@@ -278,10 +320,18 @@ async def post_query(
     if effective_model_hint:
         effective_model_hint = model_id_to_alias.get(effective_model_hint, effective_model_hint)
 
+    # Load conversation history for context continuity
+    conversation_history = _build_conversation_history(body.conversation_id)
+    prompt_with_history = (
+        f"{conversation_history}\n\n{cleaned_prompt}"
+        if conversation_history
+        else cleaned_prompt
+    )
+
     routing_result = await orchestrator.generate_response(
         conversation_id=body.conversation_id,
         request_id=uuid4().hex,
-        prompt=cleaned_prompt,
+        prompt=prompt_with_history,
         user_id=body.user_id,
         force_tier=body.force_tier,
         freshness_required=body.freshness_required,
@@ -407,6 +457,14 @@ async def post_query_stream(
     if stream_model_hint:
         stream_model_hint = model_id_to_alias.get(stream_model_hint, stream_model_hint)
 
+    # Load conversation history for context continuity
+    conversation_history = _build_conversation_history(body.conversation_id)
+    prompt_with_history = (
+        f"{conversation_history}\n\n{cleaned_prompt}"
+        if conversation_history
+        else cleaned_prompt
+    )
+
     async def event_generator():
         """Generate SSE events for streaming response."""
         full_content = ""
@@ -417,7 +475,7 @@ async def post_query_stream(
             async for chunk in orchestrator.generate_response_stream(
                 conversation_id=body.conversation_id,
                 request_id=uuid4().hex,
-                prompt=cleaned_prompt,
+                prompt=prompt_with_history,
                 user_id=body.user_id,
                 force_tier=body.force_tier,
                 freshness_required=body.freshness_required,

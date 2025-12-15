@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useVoiceStream } from '../../hooks/useVoiceStream';
 import { useAudioCapture } from '../../hooks/useAudioCapture';
@@ -8,6 +8,7 @@ import { useWindowSize } from '../../hooks/useWindowSize';
 import { useTypingActivity } from '../../hooks/useTypingActivity';
 import { useVoiceStore } from './store/voiceStore';
 import { generateId } from '../../utils/user';
+import Markdown from 'react-markdown';
 
 // Atomic Components
 import { MainLayout } from './templates/MainLayout';
@@ -19,6 +20,7 @@ import { StatusBadge } from './StatusBadge';
 import { ToolExecutionList } from './ToolExecutionCard';
 import { ConversationPanel } from './ConversationPanel';
 import { ConversationSelector } from './ConversationSelector';
+import { ConversationSidebar } from './ConversationSidebar';
 import { HUDFrame, HUDLabel, HUDDivider } from './HUDFrame';
 import { InputLevelMeter } from './InputLevelMeter';
 import { useConversations } from '../../hooks/useConversations';
@@ -43,6 +45,7 @@ export function VoiceAssistant({
   const [inputType, setInputType] = useState<'voice' | 'text'>('voice');
   const [textInput, setTextInput] = useState('');
   const [showDebug, setShowDebug] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Typing Activity Hook
   const { typingLevel, trigger: triggerTyping } = useTypingActivity(300);
@@ -62,7 +65,7 @@ export function VoiceAssistant({
   const { fftData, audioLevel } = useAudioAnalyzer(stream);
 
   // Conversation Logic
-  const { messages, clearMessages, createConversation } = useConversations();
+  const { messages, clearMessages, createConversation, loadMessages, addUserMessage, addAssistantMessage } = useConversations();
   const { 
     conversations: savedConversations, 
     isLoading: isLoadingConversations,
@@ -78,26 +81,69 @@ export function VoiceAssistant({
     return () => disconnect();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Refresh conversation list when a response completes
+  const prevStatusRef = useRef(status);
+  const prevTranscriptRef = useRef('');
+  const prevResponseRef = useRef('');
+
+  useEffect(() => {
+    const wasResponding = prevStatusRef.current === 'responding';
+    const nowIdle = status === 'connected';
+    if (wasResponding && nowIdle) {
+      // Response just completed, refresh conversation list
+      fetchConversations();
+    }
+    prevStatusRef.current = status;
+  }, [status, fetchConversations]);
+
+  // Accumulate messages when transcript/response are finalized
+  useEffect(() => {
+    // Add user message when transcript changes (user finished speaking)
+    if (transcript && transcript !== prevTranscriptRef.current && status !== 'listening') {
+      addUserMessage(transcript);
+      prevTranscriptRef.current = transcript;
+    }
+  }, [transcript, status, addUserMessage]);
+
+  useEffect(() => {
+    // Add assistant message when response completes
+    const wasResponding = prevStatusRef.current === 'responding';
+    const nowIdle = status === 'connected';
+    if (wasResponding && nowIdle && response && response !== prevResponseRef.current) {
+      addAssistantMessage(response, tier);
+      prevResponseRef.current = response;
+    }
+  }, [status, response, tier, addAssistantMessage]);
+
   // Handle new conversation
   const handleNewConversation = useCallback(() => {
     const newId = generateId();
     setConversationId(newId);
     clearMessages();
     createConversation(`Voice Session ${new Date().toLocaleTimeString()}`);
+    // Reset refs for new conversation
+    prevTranscriptRef.current = '';
+    prevResponseRef.current = '';
     disconnect();
     setTimeout(() => connect({ conversationId: newId, userId, voice: 'default' }), 100);
   }, [clearMessages, createConversation, connect, disconnect, userId]);
 
   // Handle conversation switch
-  const handleSelectConversation = useCallback((id: string) => {
+  const handleSelectConversation = useCallback(async (id: string) => {
     if (id === conversationId) return;
     setConversationId(id);
     clearMessages();
+    // Reset refs for conversation switch
+    prevTranscriptRef.current = '';
+    prevResponseRef.current = '';
     disconnect();
-    fetchMessages(id).then(() => {
-        connect({ conversationId: id, userId, voice: 'default' });
-    });
-  }, [conversationId, clearMessages, connect, disconnect, userId, fetchMessages]);
+    // Fetch and load messages for the selected conversation
+    const loadedMessages = await fetchMessages(id);
+    if (loadedMessages && loadedMessages.length > 0) {
+      loadMessages(loadedMessages);
+    }
+    connect({ conversationId: id, userId, voice: 'default' });
+  }, [conversationId, clearMessages, connect, disconnect, userId, fetchMessages, loadMessages]);
 
   const handleTextSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -151,9 +197,21 @@ export function VoiceAssistant({
 
       {/* Global Actions */}
       <div className="flex items-center gap-2">
-        <Button 
-            variant="ghost" 
-            size="sm" 
+        {/* Sidebar Toggle */}
+        {!sidebarOpen && (
+          <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSidebarOpen(true)}
+              color="surface"
+              className="text-xs uppercase tracking-wider"
+          >
+              History
+          </Button>
+        )}
+        <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setHistoryOpen(!isHistoryOpen)}
             color={isHistoryOpen ? 'primary' : 'surface'}
             className="text-xs uppercase tracking-wider"
@@ -170,7 +228,22 @@ export function VoiceAssistant({
     </div>
   );
 
-  const Sidebar = isHistoryOpen ? (
+  // Conversation History Sidebar
+  const HistorySidebar = sidebarOpen ? (
+    <ConversationSidebar
+      conversations={savedConversations}
+      currentId={conversationId}
+      onSelect={handleSelectConversation}
+      onNew={handleNewConversation}
+      onDelete={deleteConversation}
+      onRename={renameConversation}
+      onClose={() => setSidebarOpen(false)}
+      isLoading={isLoadingConversations}
+    />
+  ) : null;
+
+  // Session Logs Sidebar (when history panel is open from header)
+  const LogsSidebar = isHistoryOpen ? (
     <div className="h-full flex flex-col min-w-[300px] bg-black/40">
       <div className="p-4 border-b border-white/5">
         <HUDLabel icon="📜">SESSION LOGS</HUDLabel>
@@ -337,7 +410,20 @@ export function VoiceAssistant({
 
   const MainContent = (
     <div className="flex flex-col h-full w-full max-w-4xl mx-auto relative">
-      
+
+      {/* Conversation History - only show when there are past messages */}
+      {messages.length > 0 && (
+        <div className="shrink-0 max-h-[40vh] overflow-hidden px-4 pt-4">
+          <div className="bg-gray-900/40 backdrop-blur-sm border border-white/5 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/5">
+              <span className="text-gray-400 text-xs font-bold uppercase tracking-widest">Conversation</span>
+              <span className="text-gray-600 text-xs">{messages.length} messages</span>
+            </div>
+            <ConversationPanel messages={messages} maxHeight="30vh" autoScroll />
+          </div>
+        </div>
+      )}
+
       {/* Visualizer Stage */}
       <div className="flex-1 flex flex-col items-center justify-center relative min-h-[300px]">
         
@@ -364,9 +450,26 @@ export function VoiceAssistant({
                                 <span className="text-cyan-400 text-xs font-bold uppercase tracking-widest">KITTY AI</span>
                                 {status === 'responding' && <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse" />}
                             </div>
-                            <p className="text-lg text-gray-100 font-light leading-relaxed whitespace-pre-wrap">
-                                {response}
-                            </p>
+                            <div className="text-lg text-gray-100 font-light leading-relaxed prose prose-invert prose-sm max-w-none">
+                                <Markdown
+                                    components={{
+                                        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                                        strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
+                                        em: ({ children }) => <em className="italic text-gray-200">{children}</em>,
+                                        code: ({ children }) => <code className="bg-black/30 px-1 py-0.5 rounded text-sm font-mono text-cyan-200">{children}</code>,
+                                        pre: ({ children }) => <pre className="bg-black/50 p-3 rounded-lg text-sm font-mono overflow-x-auto my-2 border border-gray-800">{children}</pre>,
+                                        ul: ({ children }) => <ul className="list-disc list-inside space-y-1 my-2">{children}</ul>,
+                                        ol: ({ children }) => <ol className="list-decimal list-inside space-y-1 my-2">{children}</ol>,
+                                        li: ({ children }) => <li className="text-gray-200">{children}</li>,
+                                        a: ({ href, children }) => <a href={href} className="text-cyan-400 hover:text-cyan-300 underline" target="_blank" rel="noopener noreferrer">{children}</a>,
+                                        h1: ({ children }) => <h1 className="text-xl font-bold text-white mt-4 mb-2">{children}</h1>,
+                                        h2: ({ children }) => <h2 className="text-lg font-bold text-white mt-3 mb-2">{children}</h2>,
+                                        h3: ({ children }) => <h3 className="text-base font-bold text-white mt-2 mb-1">{children}</h3>,
+                                    }}
+                                >
+                                    {response}
+                                </Markdown>
+                            </div>
                         </div>
                     )}
                 </motion.div>
@@ -473,7 +576,7 @@ export function VoiceAssistant({
     <>
       <MainLayout
         header={Header}
-        sidebar={isHistoryOpen ? Sidebar : undefined}
+        sidebar={HistorySidebar}
         rightPanel={RightPanel}
         content={MainContent}
         className="font-sans antialiased selection:bg-cyan-500/30"
