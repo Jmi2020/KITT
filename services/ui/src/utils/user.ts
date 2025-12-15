@@ -1,6 +1,6 @@
 const STORAGE_KEY = 'kitty_user_id';
 
-const randomId = (): string => {
+export const generateId = (): string => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
   }
@@ -22,10 +22,10 @@ export const getWebUserId = (): string => {
     if (stored && stored.trim()) {
       return stored.trim();
     }
-    const generated = randomId();
+    const generated = generateId();
     localStorage.setItem(STORAGE_KEY, generated);
     return generated;
   }
 
-  return randomId();
+  return generateId();
 };

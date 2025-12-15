@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import VisionNyan from '../../../components/VisionNyan';
 import type { ImageResult } from '../../../types/media';
 import { GALLERY_STARTER_PROMPTS } from '../../../types/media';
+import { generateId } from '../../../utils/user';
 import './Gallery.css';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
@@ -18,7 +19,7 @@ interface GalleryProps {
 
 const Gallery = ({ initialQuery = '', initialSession }: GalleryProps) => {
   const sessionId = useMemo(
-    () => initialSession ?? crypto.randomUUID(),
+    () => initialSession ?? generateId(),
     [initialSession]
   );
 

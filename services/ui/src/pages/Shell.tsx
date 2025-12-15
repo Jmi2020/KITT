@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import '../styles/Shell.css';
 import ProviderSelector from '../components/ProviderSelector';
 import ProviderBadge, { ProviderMetadata } from '../components/ProviderBadge';
+import { generateId } from '../utils/user';
 
 interface Message {
   id: string;
@@ -130,7 +131,7 @@ const Shell = () => {
   const [input, setInput] = useState('');
   const [isThinking, setIsThinking] = useState(false);
   const [state, setState] = useState<ShellState>({
-    conversationId: crypto.randomUUID(),
+    conversationId: generateId(),
     verbosity: 3,
     agentEnabled: true,
     traceEnabled: false,
@@ -221,7 +222,7 @@ Verbosity: ${state.verbosity}/5  |  Agent: ${state.agentEnabled ? 'ON' : 'OFF'} 
 
   const addMessage = (type: Message['type'], content: string, metadata?: any) => {
     const msg: Message = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       type,
       content,
       timestamp: new Date(),
@@ -318,7 +319,7 @@ Commands are executed locally when possible.`);
         return true;
 
       case 'reset':
-        const newId = crypto.randomUUID();
+        const newId = generateId();
         setState(prev => ({ ...prev, conversationId: newId }));
         addMessage('system', `🔄 Started new session: ${newId.slice(0, 8)}...
 (Conversation context cleared)`);
@@ -442,7 +443,7 @@ Commands are executed locally when possible.`);
 
     // Show thinking animation
     setIsThinking(true);
-    const thinkingId = crypto.randomUUID();
+    const thinkingId = generateId();
     setMessages(prev => [...prev, {
       id: thinkingId,
       type: 'thinking',
@@ -571,7 +572,7 @@ Examples:
         let streamedContent = '';
         let streamedThinking = '';
         let routingData: any = null;
-        const responseId = crypto.randomUUID();
+        const responseId = generateId();
 
         // Update thinking message with elapsed time
         const elapsedInterval = setInterval(() => {
@@ -767,7 +768,7 @@ Examples:
         metadata: msg.metadata,
       }));
       const resumeNote: Message = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         type: 'system',
         content: `Resumed session ${summary.conversationId.slice(0, 8)}...`,
         timestamp: new Date(),

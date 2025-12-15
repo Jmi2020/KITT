@@ -7,6 +7,7 @@ import { useSettings } from '../../hooks/useSettings';
 import { useWindowSize } from '../../hooks/useWindowSize';
 import { useTypingActivity } from '../../hooks/useTypingActivity';
 import { useVoiceStore } from './store/voiceStore';
+import { generateId } from '../../utils/user';
 
 // Atomic Components
 import { MainLayout } from './templates/MainLayout';
@@ -37,7 +38,7 @@ export function VoiceAssistant({
 
   // Local State
   const [conversationId, setConversationId] = useState<string>(
-    initialConversationId || crypto.randomUUID()
+    initialConversationId || generateId()
   );
   const [inputType, setInputType] = useState<'voice' | 'text'>('voice');
   const [textInput, setTextInput] = useState('');
@@ -79,7 +80,7 @@ export function VoiceAssistant({
 
   // Handle new conversation
   const handleNewConversation = useCallback(() => {
-    const newId = crypto.randomUUID();
+    const newId = generateId();
     setConversationId(newId);
     clearMessages();
     createConversation(`Voice Session ${new Date().toLocaleTimeString()}`);
