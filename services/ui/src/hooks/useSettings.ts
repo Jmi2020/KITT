@@ -60,7 +60,7 @@ interface UseSettingsReturn {
 
 const DEFAULT_SETTINGS: AppSettings = {
   voice: {
-    voice: 'alloy',
+    voice: 'default',  // Uses KOKORO_DEFAULT_VOICE env var (bf_emma)
     language: 'en',
     hotword: 'kitty',
     prefer_local: true,

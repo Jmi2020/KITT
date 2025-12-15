@@ -261,10 +261,10 @@ class KokoroTTSClient(TTSProvider):
     def __init__(
         self,
         default_voice: str | None = None,
-        speed: float = 1.0,
+        speed: float | None = None,
     ) -> None:
         self._default_voice = default_voice or os.getenv("KOKORO_DEFAULT_VOICE", "am_michael")
-        self._speed = speed
+        self._speed = speed or float(os.getenv("KOKORO_SPEED", "1.0"))
         self._available = False
         self._tts = None
         self._check_availability()
@@ -309,6 +309,9 @@ class KokoroTTSClient(TTSProvider):
 
     def _get_voice(self, voice: str) -> str:
         """Map voice name to Kokoro voice."""
+        # Use configured default voice for "default", otherwise check voice map
+        if voice == "default":
+            return self._default_voice
         return self.VOICE_MAP.get(voice, self._default_voice)
 
     async def synthesize(
@@ -355,7 +358,9 @@ class KokoroTTSClient(TTSProvider):
 
         # Set voice temporarily
         original_voice = self._tts.voice
-        self._tts.voice = self._get_voice(voice)
+        resolved_voice = self._get_voice(voice)
+        print(f"[Kokoro] Voice: requested={voice}, resolved={resolved_voice}, default={self._default_voice}", flush=True)
+        self._tts.voice = resolved_voice
 
         try:
             async for chunk in self._tts.synthesize_streaming(text):

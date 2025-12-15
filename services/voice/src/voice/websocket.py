@@ -67,7 +67,7 @@ class VoiceSession:
     cancelled: bool = False
 
     # Configuration
-    voice: str = "alloy"  # TTS voice
+    voice: str = "default"  # TTS voice (uses KOKORO_DEFAULT_VOICE env var)
     language: str = "en"  # STT language hint
     sample_rate: int = 16000  # Audio sample rate
     channels: int = 1  # Mono audio
@@ -434,6 +434,7 @@ class VoiceWebSocketHandler:
         try:
             import base64
 
+            logger.info("Starting TTS - voice: %s, text: %s...", session.voice, text[:50] if len(text) > 50 else text)
             async for audio_chunk in self._tts.synthesize_stream(
                 text, voice=session.voice
             ):
@@ -441,11 +442,15 @@ class VoiceWebSocketHandler:
                     break
 
                 # Send base64 encoded audio chunk
+                # Kokoro outputs 24kHz audio, Piper outputs 16kHz
                 audio_b64 = base64.b64encode(audio_chunk).decode("ascii")
+                active_provider = self._tts.get_active_provider()
+                tts_sample_rate = 24000 if active_provider == "kokoro" else 16000
+                print(f"[TTS] Sending audio chunk - provider: {active_provider}, format: pcm_{tts_sample_rate}", flush=True)
                 await self._send(
                     websocket,
                     MessageType.RESPONSE_AUDIO,
-                    {"audio": audio_b64, "format": "pcm_16000"},
+                    {"audio": audio_b64, "format": f"pcm_{tts_sample_rate}"},
                 )
 
         except Exception as e:

@@ -157,10 +157,16 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
   stateRef.current = state;
 
   // Play audio chunks from TTS
-  const playAudioChunk = useCallback(async (base64Audio: string) => {
+  const playAudioChunk = useCallback(async (base64Audio: string, format?: string) => {
     try {
+      // Parse sample rate from format (e.g., "pcm_24000" -> 24000)
+      const sampleRate = format ? parseInt(format.replace('pcm_', ''), 10) || 24000 : 24000;
+      console.log('[VoiceStream] Audio chunk received - format:', format, 'parsed sampleRate:', sampleRate);
+
       if (!audioContextRef.current) {
-        audioContextRef.current = new AudioContext({ sampleRate: 16000 });
+        // Create context at system default rate - it will resample automatically
+        audioContextRef.current = new AudioContext();
+        console.log('[VoiceStream] Created AudioContext with sampleRate:', audioContextRef.current.sampleRate);
       }
 
       // Decode base64 to ArrayBuffer
@@ -177,8 +183,8 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
         float32[i] = pcm16[i] / 32768;
       }
 
-      // Create audio buffer
-      const audioBuffer = audioContextRef.current.createBuffer(1, float32.length, 16000);
+      // Create audio buffer at source sample rate (Web Audio handles resampling)
+      const audioBuffer = audioContextRef.current.createBuffer(1, float32.length, sampleRate);
       audioBuffer.getChannelData(0).set(float32);
       audioQueueRef.current.push(audioBuffer);
 
@@ -296,7 +302,7 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
           break;
 
         case 'response.audio':
-          playAudioChunk(msg.audio);
+          playAudioChunk(msg.audio, msg.format);
           break;
 
         case 'response.end':
@@ -405,7 +411,7 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
         config: {
           conversation_id: config.conversationId || 'default',
           user_id: config.userId || 'anonymous',
-          voice: config.voice || 'alloy',
+          voice: config.voice || 'default',  // Use 'default' to pick up KOKORO_DEFAULT_VOICE env var
           language: config.language || 'en',
           sample_rate: config.sampleRate || 16000,
           prefer_local: config.preferLocal ?? true,

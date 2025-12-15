@@ -74,7 +74,7 @@ export function VoiceAssistant({
 
   useEffect(() => {
     fetchConversations();
-    connect({ conversationId, userId });
+    connect({ conversationId, userId, voice: 'default' });
     return () => disconnect();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -85,7 +85,7 @@ export function VoiceAssistant({
     clearMessages();
     createConversation(`Voice Session ${new Date().toLocaleTimeString()}`);
     disconnect();
-    setTimeout(() => connect({ conversationId: newId, userId }), 100);
+    setTimeout(() => connect({ conversationId: newId, userId, voice: 'default' }), 100);
   }, [clearMessages, createConversation, connect, disconnect, userId]);
 
   // Handle conversation switch
@@ -95,7 +95,7 @@ export function VoiceAssistant({
     clearMessages();
     disconnect();
     fetchMessages(id).then(() => {
-        connect({ conversationId: id, userId });
+        connect({ conversationId: id, userId, voice: 'default' });
     });
   }, [conversationId, clearMessages, connect, disconnect, userId, fetchMessages]);
 
