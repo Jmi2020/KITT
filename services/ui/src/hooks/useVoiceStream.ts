@@ -71,6 +71,8 @@ interface VoiceStreamConfig {
   language?: string;
   sampleRate?: number;
   preferLocal?: boolean;
+  /** TTS speech speed (0.5-2.0) */
+  speed?: number;
   /** Voice mode (basic, maker, research, home, creative) */
   mode?: string;
   /** Allow paid API calls */
@@ -411,10 +413,11 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
         config: {
           conversation_id: config.conversationId || 'default',
           user_id: config.userId || 'anonymous',
-          voice: config.voice || 'default',  // Use 'default' to pick up KOKORO_DEFAULT_VOICE env var
+          voice: config.voice || 'bf_emma',  // Default Kokoro voice
           language: config.language || 'en',
           sample_rate: config.sampleRate || 16000,
           prefer_local: config.preferLocal ?? true,
+          speed: config.speed ?? 1.1,  // TTS speech speed
           mode: config.mode || 'basic',
           allow_paid: config.allowPaid ?? false,
           enabled_tools: config.enabledTools || [],
@@ -591,6 +594,16 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
     }
   }, [customModes]);
 
+  // Update voice configuration mid-session (voice, speed)
+  const updateVoiceConfig = useCallback((voiceConfig: { voice?: string; speed?: number }) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'config',
+        config: voiceConfig,
+      }));
+    }
+  }, []);
+
   const toggleWakeWord = useCallback((enable?: boolean) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       // If enable is undefined, toggle the current state
@@ -620,5 +633,6 @@ export function useVoiceStream(options: UseVoiceStreamOptions = {}): UseVoiceStr
     setPreferLocal,
     setMode,
     toggleWakeWord,
+    updateVoiceConfig,
   };
 }

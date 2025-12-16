@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VoiceMode } from '../types/voiceModes';
 
-interface VoiceSettings {
+export interface VoiceSettings {
   voice: string;
   language: string;
   hotword: string;
   prefer_local: boolean;
   sample_rate: number;
   push_to_talk: boolean;
+  speed: number;  // TTS speed multiplier (0.5-2.0)
 }
 
 interface FabricationSettings {
@@ -60,12 +61,13 @@ interface UseSettingsReturn {
 
 const DEFAULT_SETTINGS: AppSettings = {
   voice: {
-    voice: 'default',  // Uses KOKORO_DEFAULT_VOICE env var (bf_emma)
+    voice: 'bf_emma',  // Default Kokoro voice
     language: 'en',
     hotword: 'kitty',
     prefer_local: true,
     sample_rate: 16000,
     push_to_talk: true,
+    speed: 1.1,  // Default speech speed
   },
   fabrication: {
     default_material: 'pla_black_esun',

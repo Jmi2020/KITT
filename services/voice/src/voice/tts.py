@@ -248,15 +248,20 @@ class KokoroTTSClient(TTSProvider):
     """
 
     # Map OpenAI voice names to Kokoro voices
+    # Kokoro native voices use format: {accent}{gender}_{name}
+    # e.g., bf_emma (British Female Emma), am_michael (American Male Michael)
     VOICE_MAP = {
         "default": "am_michael",
         "alloy": "am_michael",
         "echo": "am_michael",
-        "fable": "af",  # Female voice
+        "fable": "af_bella",  # Female voice
         "onyx": "am_michael",
-        "nova": "af",
-        "shimmer": "af",
+        "nova": "af_sarah",
+        "shimmer": "bf_emma",
     }
+
+    # Valid Kokoro voice prefixes (for passthrough validation)
+    KOKORO_PREFIXES = ("af_", "am_", "bf_", "bm_")
 
     def __init__(
         self,
@@ -308,10 +313,21 @@ class KokoroTTSClient(TTSProvider):
         )
 
     def _get_voice(self, voice: str) -> str:
-        """Map voice name to Kokoro voice."""
-        # Use configured default voice for "default", otherwise check voice map
+        """Map voice name to Kokoro voice.
+
+        Supports:
+        - "default": Uses KOKORO_DEFAULT_VOICE env var
+        - OpenAI voice names: Mapped via VOICE_MAP
+        - Native Kokoro voices (e.g., bf_emma): Passed through directly
+        """
         if voice == "default":
             return self._default_voice
+
+        # Pass through native Kokoro voice names (e.g., bf_emma, am_michael)
+        if voice.startswith(self.KOKORO_PREFIXES):
+            return voice
+
+        # Map OpenAI-style voice names, fallback to default
         return self.VOICE_MAP.get(voice, self._default_voice)
 
     async def synthesize(

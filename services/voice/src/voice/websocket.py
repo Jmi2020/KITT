@@ -72,6 +72,7 @@ class VoiceSession:
     sample_rate: int = 16000  # Audio sample rate
     channels: int = 1  # Mono audio
     prefer_local: bool = True  # Prefer local STT/TTS over cloud
+    speed: float = 1.0  # TTS speech speed multiplier
 
     # Mode and tool settings
     mode: str = "basic"  # Voice mode: basic, maker, research, home, creative
@@ -190,6 +191,8 @@ class VoiceWebSocketHandler:
             session.sample_rate = config.get("sample_rate", session.sample_rate)
             if "prefer_local" in config:
                 session.prefer_local = config.get("prefer_local", True)
+            if "speed" in config:
+                session.speed = float(config.get("speed", 1.0))
 
             # Mode and tool settings
             if "mode" in config:

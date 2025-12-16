@@ -57,7 +57,8 @@ export function VoiceAssistant({
   const {
     status, transcript, response, connect, disconnect,
     sendAudio, sendText, endAudio, toolExecutions,
-    mode, setMode, capabilities, preferLocal, wakeWordEnabled, toggleWakeWord, tier, ttsProvider
+    mode, setMode, capabilities, preferLocal, wakeWordEnabled, toggleWakeWord, tier, ttsProvider,
+    updateVoiceConfig
   } = voiceStream;
   
   // Audio Logic
@@ -78,9 +79,32 @@ export function VoiceAssistant({
 
   useEffect(() => {
     fetchConversations();
-    connect({ conversationId, userId, voice: 'default' });
+    connect({
+      conversationId,
+      userId,
+      voice: settings?.voice?.voice || 'bf_emma',
+      speed: settings?.voice?.speed || 1.1,
+    });
     return () => disconnect();
-  }, []); 
+  }, []);
+
+  // Update voice config when settings change (live update without reconnect)
+  const prevVoiceRef = useRef(settings?.voice?.voice);
+  const prevSpeedRef = useRef(settings?.voice?.speed);
+  useEffect(() => {
+    const currentVoice = settings?.voice?.voice;
+    const currentSpeed = settings?.voice?.speed;
+
+    // Only send update if values actually changed (not on mount)
+    if (prevVoiceRef.current !== currentVoice || prevSpeedRef.current !== currentSpeed) {
+      updateVoiceConfig({
+        voice: currentVoice || 'bf_emma',
+        speed: currentSpeed ?? 1.1,
+      });
+      prevVoiceRef.current = currentVoice;
+      prevSpeedRef.current = currentSpeed;
+    }
+  }, [settings?.voice?.voice, settings?.voice?.speed, updateVoiceConfig]); 
 
   // Auto-scroll logic
   const scrollViewportRef = useRef<HTMLDivElement>(null);
@@ -129,8 +153,13 @@ export function VoiceAssistant({
     clearMessages();
     createConversation(`Voice Session ${new Date().toLocaleTimeString()}`);
     disconnect();
-    setTimeout(() => connect({ conversationId: newId, userId, voice: 'default' }), 100);
-  }, [clearMessages, createConversation, connect, disconnect, userId]);
+    setTimeout(() => connect({
+      conversationId: newId,
+      userId,
+      voice: settings?.voice?.voice || 'bf_emma',
+      speed: settings?.voice?.speed || 1.1,
+    }), 100);
+  }, [clearMessages, createConversation, connect, disconnect, userId, settings?.voice?.voice, settings?.voice?.speed]);
 
   const handleSelectConversation = useCallback(async (id: string) => {
     if (id === conversationId) return;
@@ -141,8 +170,13 @@ export function VoiceAssistant({
     if (loadedMessages && loadedMessages.length > 0) {
       loadMessages(loadedMessages);
     }
-    connect({ conversationId: id, userId, voice: 'default' });
-  }, [conversationId, clearMessages, connect, disconnect, userId, fetchMessages, loadMessages]);
+    connect({
+      conversationId: id,
+      userId,
+      voice: settings?.voice?.voice || 'bf_emma',
+      speed: settings?.voice?.speed || 1.1,
+    });
+  }, [conversationId, clearMessages, connect, disconnect, userId, fetchMessages, loadMessages, settings?.voice?.voice, settings?.voice?.speed]);
 
   const handleTextSubmit = (e: React.FormEvent) => {
     e.preventDefault();
