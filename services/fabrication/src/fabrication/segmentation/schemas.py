@@ -96,7 +96,7 @@ class SegmentationConfig:
     smooth_iterations: int = 0  # Number of Laplacian smoothing passes
 
     # Joints
-    joint_type: JointType = JointType.DOWEL
+    joint_type: JointType = JointType.INTEGRATED  # Printed pins on one part, holes on other
     joint_tolerance_mm: float = 0.3  # Clearance for joint fit (0.3mm works for printed pins)
     dowel_diameter_mm: float = 4.0
     dowel_depth_mm: float = 10.0
