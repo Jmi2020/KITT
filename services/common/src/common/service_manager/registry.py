@@ -17,6 +17,40 @@ logger = logging.getLogger(__name__)
 _KITTY_ROOT = Path(__file__).parents[6]  # services/common/src/common/service_manager -> root
 
 
+def _is_running_in_docker() -> bool:
+    """Detect if we're running inside a Docker container."""
+    # Check for Docker-specific files/markers
+    return (
+        os.path.exists("/.dockerenv")
+        or os.getenv("RUNNING_IN_DOCKER", "").lower() in ("true", "1", "yes")
+    )
+
+
+def _get_host_for_service(service_type: ServiceType, docker_service_name: Optional[str]) -> str:
+    """Get the correct host for a service based on runtime environment.
+
+    When running inside Docker:
+    - Docker services should use their Docker DNS name (e.g., 'gateway', 'cad')
+    - Native processes on host should use 'host.docker.internal'
+
+    When running on host (not in Docker):
+    - All services use 'localhost'
+    """
+    if not _is_running_in_docker():
+        return "localhost"
+
+    # Running inside Docker
+    if service_type == ServiceType.NATIVE_PROCESS:
+        # Native processes run on host, reach via host.docker.internal
+        return "host.docker.internal"
+    elif docker_service_name:
+        # Docker services use their container DNS name
+        return docker_service_name
+    else:
+        # Fallback (shouldn't happen for properly configured services)
+        return "localhost"
+
+
 def _get_env_bool(key: str, default: bool = True) -> bool:
     """Get boolean from environment variable."""
     return os.getenv(key, str(default)).lower() in ("true", "1", "yes")
@@ -39,6 +73,7 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         display_name="Voice Service",
         service_type=ServiceType.NATIVE_PROCESS,
         port=_get_env_int("VOICE_PORT", 8410),
+        host=_get_host_for_service(ServiceType.NATIVE_PROCESS, None),
         health_endpoint="/healthz",
         health_timeout_seconds=5.0,
         start_script=str(_KITTY_ROOT / "ops/scripts/start-voice-service.sh"),
@@ -53,6 +88,7 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         display_name="Brain Service",
         service_type=ServiceType.DOCKER_SERVICE,
         port=8000,
+        host=_get_host_for_service(ServiceType.DOCKER_SERVICE, "brain"),
         health_endpoint="/health",
         health_check_type=HealthCheckType.HTTP_JSON,
         docker_service_name="brain",
@@ -65,6 +101,7 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         display_name="Gateway (HAProxy)",
         service_type=ServiceType.DOCKER_SERVICE,
         port=8080,
+        host=_get_host_for_service(ServiceType.DOCKER_SERVICE, "load-balancer"),
         health_endpoint="/healthz",
         docker_service_name="load-balancer",  # Start HAProxy, which needs gateways
         startup_timeout_seconds=30.0,
@@ -77,6 +114,7 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         display_name="CAD Service",
         service_type=ServiceType.DOCKER_SERVICE,
         port=8200,
+        host=_get_host_for_service(ServiceType.DOCKER_SERVICE, "cad"),
         health_endpoint="/healthz",
         docker_service_name="cad",
         startup_timeout_seconds=30.0,
@@ -88,6 +126,7 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         display_name="Fabrication Service",
         service_type=ServiceType.DOCKER_SERVICE,
         port=8300,
+        host=_get_host_for_service(ServiceType.DOCKER_SERVICE, "fabrication"),
         health_endpoint="/healthz",
         docker_service_name="fabrication",
         startup_timeout_seconds=30.0,
@@ -99,6 +138,7 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         display_name="Discovery Service",
         service_type=ServiceType.DOCKER_SERVICE,
         port=8500,
+        host=_get_host_for_service(ServiceType.DOCKER_SERVICE, "discovery"),
         health_endpoint="/healthz",
         docker_service_name="discovery",
         startup_timeout_seconds=30.0,
@@ -110,6 +150,7 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         display_name="Broker Service",
         service_type=ServiceType.DOCKER_SERVICE,
         port=8777,
+        host=_get_host_for_service(ServiceType.DOCKER_SERVICE, "broker"),
         health_endpoint="/healthz",
         docker_service_name="broker",
         startup_timeout_seconds=30.0,
@@ -121,6 +162,7 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         display_name="Settings Service",
         service_type=ServiceType.DOCKER_SERVICE,
         port=8450,
+        host=_get_host_for_service(ServiceType.DOCKER_SERVICE, "settings"),
         health_endpoint="/healthz",
         docker_service_name="settings",
         startup_timeout_seconds=30.0,
@@ -132,6 +174,7 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         display_name="Memory Service",
         service_type=ServiceType.DOCKER_SERVICE,
         port=8765,
+        host=_get_host_for_service(ServiceType.DOCKER_SERVICE, "mem0-mcp"),
         health_endpoint="/healthz",
         docker_service_name="mem0-mcp",
         startup_timeout_seconds=30.0,
@@ -143,6 +186,7 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         display_name="PostgreSQL",
         service_type=ServiceType.DOCKER_INFRA,
         port=5432,
+        host=_get_host_for_service(ServiceType.DOCKER_INFRA, "postgres"),
         health_check_type=HealthCheckType.TCP_CONNECT,
         health_endpoint="",  # TCP check, no HTTP endpoint
         docker_service_name="postgres",
@@ -153,6 +197,7 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         display_name="Redis",
         service_type=ServiceType.DOCKER_INFRA,
         port=6379,
+        host=_get_host_for_service(ServiceType.DOCKER_INFRA, "redis"),
         health_check_type=HealthCheckType.TCP_CONNECT,
         health_endpoint="",
         docker_service_name="redis",
@@ -163,6 +208,7 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         display_name="RabbitMQ",
         service_type=ServiceType.DOCKER_INFRA,
         port=5672,
+        host=_get_host_for_service(ServiceType.DOCKER_INFRA, "rabbitmq"),
         health_check_type=HealthCheckType.TCP_CONNECT,
         health_endpoint="",
         docker_service_name="rabbitmq",
@@ -173,6 +219,7 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         display_name="MQTT Broker",
         service_type=ServiceType.DOCKER_INFRA,
         port=1883,
+        host=_get_host_for_service(ServiceType.DOCKER_INFRA, "mosquitto"),
         health_check_type=HealthCheckType.TCP_CONNECT,
         health_endpoint="",
         docker_service_name="mosquitto",
@@ -183,6 +230,7 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         display_name="Qdrant Vector DB",
         service_type=ServiceType.DOCKER_INFRA,
         port=6333,
+        host=_get_host_for_service(ServiceType.DOCKER_INFRA, "qdrant"),
         health_endpoint="/",
         docker_service_name="qdrant",
         auto_start_enabled=False,
@@ -192,6 +240,7 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         display_name="Home Assistant",
         service_type=ServiceType.DOCKER_INFRA,
         port=8123,
+        host=_get_host_for_service(ServiceType.DOCKER_INFRA, "homeassistant"),
         health_endpoint="/api/",
         docker_service_name="homeassistant",
         auto_start_enabled=False,

@@ -3,12 +3,6 @@ import useKittyContext from '../hooks/useKittyContext';
 import MeshSegmenter from '../components/MeshSegmenter';
 import './FabricationConsole.css';
 
-type LocalModelResponse = {
-  local: string[];
-  aliases: Record<string, string | null>;
-  frontier?: string[];
-};
-
 interface Artifact {
   provider: string;
   artifactType: string;
@@ -41,27 +35,8 @@ interface CadResponse {
   artifacts: Artifact[];
 }
 
-interface QueryResponse {
-  result: {
-    output: string;
-    verbosityLevel?: number;
-  };
-  routing?: Record<string, unknown> | null;
-}
-
-const VERBOSITY_OPTIONS = [
-  { value: 1, label: '1 — extremely terse' },
-  { value: 2, label: '2 — concise' },
-  { value: 3, label: '3 — detailed (default)' },
-  { value: 4, label: '4 — comprehensive' },
-  { value: 5, label: '5 — exhaustive & nuanced' },
-];
-
 const FabricationConsole = () => {
   const { context } = useKittyContext();
-  const [models, setModels] = useState<string[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>('');
-  const [verbosity, setVerbosity] = useState<number>(3);
   const [cadPrompt, setCadPrompt] = useState('');
   const [conversationId, setConversationId] = useState(() => `ui-${Date.now()}`);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
@@ -69,30 +44,7 @@ const FabricationConsole = () => {
   const [cadError, setCadError] = useState<string | null>(null);
   const [selectedArtifact, setSelectedArtifact] = useState<string>('');
   const [selectedPrinter, setSelectedPrinter] = useState<string>('');
-  const [llmPrompt, setLlmPrompt] = useState('');
-  const [llmResponse, setLlmResponse] = useState<string>('');
-  const [llmRouting, setLlmRouting] = useState<Record<string, unknown> | null>(null);
-  const [llmError, setLlmError] = useState<string | null>(null);
-  const [llmLoading, setLlmLoading] = useState(false);
   const [printStatus, setPrintStatus] = useState<string>('');
-
-  useEffect(() => {
-    const loadModels = async () => {
-      try {
-        const response = await fetch('/api/routing/models');
-        if (!response.ok) throw new Error('Failed to fetch model list');
-        const data = (await response.json()) as LocalModelResponse;
-        const list = data.local ?? [];
-        setModels(list);
-        if (list.length && !selectedModel) {
-          setSelectedModel(list[0]);
-        }
-      } catch (error) {
-        console.warn('Unable to load models', error);
-      }
-    };
-    loadModels();
-  }, [selectedModel]);
 
   const printers = useMemo(() => {
     return Object.values(context.devices).filter((device) => {
@@ -136,39 +88,6 @@ const FabricationConsole = () => {
     }
   };
 
-  const handleTestPrompt = async () => {
-    if (!llmPrompt.trim()) {
-      setLlmError('Enter a prompt to test the model.');
-      return;
-    }
-    setLlmLoading(true);
-    setLlmError(null);
-    setLlmResponse('');
-    setLlmRouting(null);
-    try {
-      const response = await fetch('/api/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          conversationId,
-          userId: 'ui-console',
-          intent: 'chat.prompt',
-          prompt: llmPrompt,
-          verbosity,
-          modelAlias: selectedModel || null,
-        }),
-      });
-      if (!response.ok) throw new Error('Query failed');
-      const data = (await response.json()) as QueryResponse;
-      setLlmResponse(data.result?.output ?? '');
-      setLlmRouting((data.routing as Record<string, unknown>) ?? null);
-    } catch (error) {
-      setLlmError((error as Error).message);
-    } finally {
-      setLlmLoading(false);
-    }
-  };
-
   const handleSendToPrinter = async () => {
     if (!selectedArtifact) {
       setPrintStatus('Select an artifact first.');
@@ -203,50 +122,7 @@ const FabricationConsole = () => {
     setConversationId(nextId);
     setArtifacts([]);
     setSelectedArtifact('');
-    setLlmResponse('');
-    setLlmRouting(null);
   };
-
-  const copyCommand = async (command: string) => {
-    try {
-      await navigator.clipboard.writeText(command);
-      alert('Command copied to clipboard');
-    } catch (error) {
-      console.warn('Clipboard copy failed, showing prompt instead.');
-      window.prompt('Copy command', command);
-    }
-  };
-
-  const serviceControls = [
-    {
-      name: 'Ollama (GPT-OSS)',
-      start: 'ops/scripts/ollama/start.sh',
-      stop: 'ops/scripts/ollama/stop.sh',
-      restart: 'ops/scripts/ollama/stop.sh && ops/scripts/ollama/start.sh',
-      description: 'Primary reasoning + judge stack (GPT-OSS via Ollama).',
-    },
-    {
-      name: 'llama.cpp (Legacy)',
-      start: 'ops/scripts/llama/start.sh',
-      stop: 'ops/scripts/llama/stop.sh',
-      restart: 'ops/scripts/llama/stop.sh && ops/scripts/llama/start.sh',
-      description: 'Fallback local inference stack.',
-    },
-    {
-      name: 'Docker Compose (Core Stack)',
-      start: 'ops/scripts/start-all.sh',
-      stop: 'ops/scripts/stop-all.sh',
-      restart: 'ops/scripts/stop-all.sh && ops/scripts/start-all.sh',
-      description: 'Gateway/brain/api services.',
-    },
-    {
-      name: 'Images Service',
-      start: 'ops/scripts/start-images-service.sh',
-      stop: 'ops/scripts/stop-images-service.sh',
-      restart: 'ops/scripts/stop-images-service.sh && ops/scripts/start-images-service.sh',
-      description: 'Stable Diffusion/image generation backend.',
-    },
-  ];
 
   return (
     <section className="fabrication-console">
@@ -256,78 +132,6 @@ const FabricationConsole = () => {
           New Session
         </button>
       </header>
-
-      <div className="panel grid service-grid">
-        <div>
-          <h3>Runtime Controls</h3>
-          <p className="text-muted">Start/stop/restart individual stacks quickly.</p>
-        </div>
-        <div className="service-list">
-          {serviceControls.map((svc) => (
-            <div key={svc.name} className="service-card">
-              <div className="service-card-header">
-                <strong>{svc.name}</strong>
-              </div>
-              <p className="text-muted">{svc.description}</p>
-              <div className="service-actions">
-                <button type="button" onClick={() => copyCommand(svc.start)}>Start</button>
-                <button type="button" onClick={() => copyCommand(svc.stop)}>Stop</button>
-                <button type="button" onClick={() => copyCommand(svc.restart)}>Restart</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="panel">
-        <h3>Model & Verbosity</h3>
-        <label>
-          Verbosity Level
-          <select value={verbosity} onChange={(event) => setVerbosity(Number(event.target.value))}>
-            {VERBOSITY_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Local Model
-          <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
-            {models.map((model) => (
-              <option key={model} value={model}>
-                {model}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <div className="panel">
-        <h3>Test Prompt</h3>
-        <textarea
-          rows={4}
-          value={llmPrompt}
-          onChange={(event) => setLlmPrompt(event.target.value)}
-          placeholder="Ask KITTY something to gauge verbosity and model output."
-        />
-        <button type="button" onClick={handleTestPrompt} disabled={llmLoading}>
-          {llmLoading ? 'Running…' : 'Run Prompt'}
-        </button>
-        {llmError && <p className="error">{llmError}</p>}
-        {llmResponse && (
-          <div className="llm-output">
-            <h4>Response</h4>
-            <pre>{llmResponse}</pre>
-            {llmRouting && (
-              <details>
-                <summary>Routing Details</summary>
-                <pre>{JSON.stringify(llmRouting, null, 2)}</pre>
-              </details>
-            )}
-          </div>
-        )}
-      </div>
 
       <div className="panel">
         <h3>CAD Generation</h3>

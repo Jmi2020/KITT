@@ -276,3 +276,58 @@ async def proxy_routing_models(request: Request) -> Response:
 async def proxy_system_stats(request: Request) -> Response:
     """Proxy system stats to brain."""
     return await proxy_to_brain(request, "/system/stats")
+
+
+# Service management endpoints (Runtime tab)
+@router.get("/api/services/status")
+async def proxy_services_status(request: Request) -> Response:
+    """Proxy all services status to brain."""
+    return await proxy_to_brain(request, "/services/status")
+
+
+@router.get("/api/services/list")
+async def proxy_services_list(request: Request) -> Response:
+    """Proxy services list to brain."""
+    return await proxy_to_brain(request, "/services/list")
+
+
+@router.get("/api/services/summary")
+async def proxy_services_summary(request: Request) -> Response:
+    """Proxy services summary to brain."""
+    return await proxy_to_brain(request, "/services/summary")
+
+
+@router.get("/api/services/status/{service_name}")
+async def proxy_service_status(request: Request, service_name: str) -> Response:
+    """Proxy single service status to brain."""
+    return await proxy_to_brain(request, f"/services/status/{service_name}")
+
+
+@router.get("/api/services/health/{service_name}")
+async def proxy_service_health(request: Request, service_name: str) -> Response:
+    """Proxy service health check to brain."""
+    return await proxy_to_brain(request, f"/services/health/{service_name}")
+
+
+@router.post("/api/services/{service_name}/start")
+async def proxy_service_start(request: Request, service_name: str) -> Response:
+    """Proxy service start to brain."""
+    return await proxy_to_brain(request, f"/services/{service_name}/start")
+
+
+@router.post("/api/services/{service_name}/stop")
+async def proxy_service_stop(request: Request, service_name: str) -> Response:
+    """Proxy service stop to brain."""
+    return await proxy_to_brain(request, f"/services/{service_name}/stop")
+
+
+@router.post("/api/services/{service_name}/restart")
+async def proxy_service_restart(request: Request, service_name: str) -> Response:
+    """Proxy service restart to brain."""
+    return await proxy_to_brain(request, f"/services/{service_name}/restart")
+
+
+@router.post("/api/services/{service_name}/ensure")
+async def proxy_service_ensure(request: Request, service_name: str) -> Response:
+    """Proxy service ensure running to brain."""
+    return await proxy_to_brain(request, f"/services/{service_name}/ensure")

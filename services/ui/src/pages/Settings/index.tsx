@@ -1,6 +1,6 @@
 /**
  * Settings Page - Consolidated settings with System tab
- * Includes: Connections, Voice, Voice Modes, Fabrication, UI, System (IOControl)
+ * Includes: Connections, Voice, Voice Modes, Fabrication, UI, Runtime, System (IOControl)
  */
 
 import { useState, useCallback, useEffect } from 'react';
@@ -11,9 +11,12 @@ import { useSettings } from '../../hooks/useSettings';
 import { useIOControl } from '../../hooks/useIOControl';
 import type { VoiceMode } from '../../types/voiceModes';
 import SystemTab from './tabs/SystemTab';
+import RuntimeTab from './tabs/RuntimeTab';
+import ModelTestingTab from './tabs/ModelTestingTab';
+import { VoiceTab } from './tabs/VoiceTab';
 import './Settings.css';
 
-type SettingsTab = 'connections' | 'voice' | 'voice_modes' | 'fabrication' | 'ui' | 'system';
+type SettingsTab = 'connections' | 'voice' | 'voice_modes' | 'fabrication' | 'ui' | 'runtime' | 'model_testing' | 'system';
 
 /**
  * Settings page with service connections, preferences, and system configuration.
@@ -43,6 +46,8 @@ export default function Settings() {
     { id: 'voice_modes', label: 'Voice Modes', icon: '🎭' },
     { id: 'fabrication', label: 'Fabrication', icon: '🖨️' },
     { id: 'ui', label: 'Interface', icon: '🎨' },
+    { id: 'runtime', label: 'Runtime', icon: '🚀' },
+    { id: 'model_testing', label: 'Model Testing', icon: '🧪' },
     { id: 'system', label: 'System', icon: '⚙️' },
   ];
 
@@ -108,65 +113,7 @@ export default function Settings() {
 
           {/* Voice Tab */}
           {activeTab === 'voice' && settings && (
-            <div className="settings-section">
-              <h2>Voice Settings</h2>
-              <div className="settings-card">
-                {/* Prefer Local */}
-                <div className="setting-row">
-                  <div className="setting-info">
-                    <div className="setting-label">Prefer Local Processing</div>
-                    <div className="setting-description">
-                      Use local Whisper/Piper when available
-                    </div>
-                  </div>
-                  <button
-                    onClick={() =>
-                      updateSection('voice', { prefer_local: !settings.voice.prefer_local })
-                    }
-                    className={`toggle-button ${settings.voice.prefer_local ? 'active' : ''}`}
-                    aria-label="Toggle prefer local"
-                  >
-                    <span className="toggle-thumb" />
-                  </button>
-                </div>
-
-                {/* TTS Voice */}
-                <div className="setting-row">
-                  <label className="setting-label" htmlFor="voice-select">TTS Voice</label>
-                  <select
-                    id="voice-select"
-                    value={settings.voice.voice}
-                    onChange={(e) => updateSection('voice', { voice: e.target.value })}
-                    className="setting-select"
-                  >
-                    <option value="alloy">Alloy (Neutral)</option>
-                    <option value="echo">Echo (Male)</option>
-                    <option value="fable">Fable (British)</option>
-                    <option value="onyx">Onyx (Deep)</option>
-                    <option value="nova">Nova (Female)</option>
-                    <option value="shimmer">Shimmer (Soft)</option>
-                  </select>
-                </div>
-
-                {/* Language */}
-                <div className="setting-row">
-                  <label className="setting-label" htmlFor="language-select">Language</label>
-                  <select
-                    id="language-select"
-                    value={settings.voice.language}
-                    onChange={(e) => updateSection('voice', { language: e.target.value })}
-                    className="setting-select"
-                  >
-                    <option value="en">English</option>
-                    <option value="es">Spanish</option>
-                    <option value="fr">French</option>
-                    <option value="de">German</option>
-                    <option value="ja">Japanese</option>
-                    <option value="zh">Chinese</option>
-                  </select>
-                </div>
-              </div>
-            </div>
+            <VoiceTab settings={settings} updateSection={updateSection} />
           )}
 
           {/* Voice Modes Tab */}
@@ -303,6 +250,12 @@ export default function Settings() {
               </div>
             </div>
           )}
+
+          {/* Runtime Tab (Service Management) */}
+          {activeTab === 'runtime' && <RuntimeTab />}
+
+          {/* Model Testing Tab (LLM Debugging) */}
+          {activeTab === 'model_testing' && <ModelTestingTab />}
 
           {/* System Tab (IOControl) */}
           {activeTab === 'system' && <SystemTab api={ioControlApi} />}
