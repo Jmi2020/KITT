@@ -37,6 +37,11 @@ interface CadResponse {
   artifacts: Artifact[];
 }
 
+interface BedZone {
+  temperature: number | null;
+  target: number | null;
+}
+
 interface PrinterStatus {
   printer_id: string;
   is_online: boolean;
@@ -48,6 +53,7 @@ interface PrinterStatus {
   bed_target: number | null;
   extruder_temp: number | null;
   extruder_target: number | null;
+  bed_zones?: Record<string, BedZone>;
 }
 
 const FabricationConsole = () => {
@@ -309,6 +315,7 @@ const FabricationConsole = () => {
                   bedTarget={elegooStatus.bed_target}
                   nozzleTemp={elegooStatus.extruder_temp}
                   nozzleTarget={elegooStatus.extruder_target}
+                  bedZones={elegooStatus.bed_zones}
                   onRefresh={fetchPrinters}
                 />
                 <GcodeConsole printerId="elegoo_giga" />

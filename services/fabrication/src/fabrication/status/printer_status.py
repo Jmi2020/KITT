@@ -32,6 +32,8 @@ class PrinterStatus:
     extruder_temp: Optional[float] = None
     extruder_target: Optional[float] = None
     last_updated: Optional[datetime] = None
+    # Multi-zone bed support (Elegoo Giga has 4 bed zones)
+    bed_zones: Optional[Dict[str, Dict[str, float]]] = None
 
 
 class PrinterStatusChecker:
@@ -138,12 +140,20 @@ class PrinterStatusChecker:
                 return cached
 
         # Query Moonraker for full status including thermals
+        # The Elegoo Giga has 4 bed heating zones
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 # Query printer objects for status, temps, and progress
+                # Include all 4 bed zones for the Giga's multi-zone heated bed
+                query_objects = (
+                    "print_stats&heater_bed&extruder&virtual_sdcard"
+                    "&heater_generic%20heater_bed1"
+                    "&heater_generic%20heater_bed2"
+                    "&heater_generic%20heater_bed3"
+                )
                 response = await client.get(
                     f"http://{self.settings.elegoo_ip}:{self.settings.elegoo_moonraker_port}"
-                    f"/printer/objects/query?print_stats&heater_bed&extruder&virtual_sdcard"
+                    f"/printer/objects/query?{query_objects}"
                 )
                 response.raise_for_status()
                 result = response.json().get("result", {})
@@ -170,6 +180,26 @@ class PrinterStatusChecker:
                 extruder = data.get("extruder", {})
                 virtual_sd = data.get("virtual_sdcard", {})
 
+                # Extract multi-zone bed data (Elegoo Giga has 4 zones)
+                bed_zones = {
+                    "heater_bed": {
+                        "temperature": heater_bed.get("temperature"),
+                        "target": heater_bed.get("target"),
+                    },
+                    "heater_bed1": {
+                        "temperature": data.get("heater_generic heater_bed1", {}).get("temperature"),
+                        "target": data.get("heater_generic heater_bed1", {}).get("target"),
+                    },
+                    "heater_bed2": {
+                        "temperature": data.get("heater_generic heater_bed2", {}).get("temperature"),
+                        "target": data.get("heater_generic heater_bed2", {}).get("target"),
+                    },
+                    "heater_bed3": {
+                        "temperature": data.get("heater_generic heater_bed3", {}).get("temperature"),
+                        "target": data.get("heater_generic heater_bed3", {}).get("target"),
+                    },
+                }
+
                 # Calculate progress (Moonraker returns 0.0-1.0, we want 0-100)
                 progress = virtual_sd.get("progress", 0)
                 progress_percent = round(progress * 100, 1) if progress else None
@@ -188,7 +218,8 @@ class PrinterStatusChecker:
                     bed_target=heater_bed.get("target"),
                     extruder_temp=extruder.get("temperature"),
                     extruder_target=extruder.get("target"),
-                    last_updated=datetime.now()
+                    last_updated=datetime.now(),
+                    bed_zones=bed_zones,
                 )
 
         except Exception as e:

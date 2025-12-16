@@ -741,7 +741,10 @@ async def get_printer_status() -> PrinterStatusResponse:
 
 class SetTemperatureRequest(BaseModel):
     """Request to set bed or nozzle temperature."""
-    heater: str = Field(..., description="Heater to control: 'heater_bed' or 'extruder'")
+    heater: str = Field(
+        ...,
+        description="Heater to control: 'heater_bed', 'heater_bed1', 'heater_bed2', 'heater_bed3', or 'extruder'"
+    )
     target: float = Field(..., ge=0, le=350, description="Target temperature in Celsius")
 
 
@@ -784,23 +787,29 @@ async def set_elegoo_temperature(request: SetTemperatureRequest) -> SetTemperatu
     Set bed or nozzle temperature on the Elegoo Giga.
 
     Heater options:
-    - 'heater_bed': Set bed temperature (M140)
-    - 'extruder': Set nozzle/extruder temperature (M104)
+    - 'heater_bed': Main bed zone (M140)
+    - 'heater_bed1': Bed zone 1 (SET_HEATER_TEMPERATURE)
+    - 'heater_bed2': Bed zone 2 (SET_HEATER_TEMPERATURE)
+    - 'heater_bed3': Bed zone 3 (SET_HEATER_TEMPERATURE)
+    - 'extruder': Nozzle temperature (M104)
 
     Target is in Celsius. Set to 0 to turn off heater.
     """
-    # Validate heater name
-    if request.heater not in ("heater_bed", "extruder"):
+    valid_heaters = ("heater_bed", "heater_bed1", "heater_bed2", "heater_bed3", "extruder")
+    if request.heater not in valid_heaters:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid heater: {request.heater}. Must be 'heater_bed' or 'extruder'"
+            detail=f"Invalid heater: {request.heater}. Must be one of: {', '.join(valid_heaters)}"
         )
 
-    # Build G-code command
+    # Build G-code command based on heater type
     if request.heater == "heater_bed":
         gcode = f"M140 S{request.target}"
-    else:
+    elif request.heater == "extruder":
         gcode = f"M104 S{request.target}"
+    else:
+        # Generic heaters (heater_bed1, heater_bed2, heater_bed3) use Klipper command
+        gcode = f"SET_HEATER_TEMPERATURE HEATER={request.heater} TARGET={request.target}"
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:

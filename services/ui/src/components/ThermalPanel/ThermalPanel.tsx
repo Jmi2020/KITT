@@ -1,27 +1,64 @@
 import { useState, useCallback } from 'react';
 import './ThermalPanel.css';
 
+interface BedZone {
+  temperature: number | null;
+  target: number | null;
+}
+
 interface ThermalPanelProps {
   bedTemp: number | null;
   bedTarget: number | null;
   nozzleTemp: number | null;
   nozzleTarget: number | null;
+  bedZones?: Record<string, BedZone>;
   onRefresh?: () => void;
 }
 
-type HeaterType = 'heater_bed' | 'extruder';
+type HeaterType = 'heater_bed' | 'heater_bed1' | 'heater_bed2' | 'heater_bed3' | 'extruder';
+
+interface HeaterConfig {
+  id: HeaterType;
+  label: string;
+  maxTemp: number;
+}
+
+const HEATERS: HeaterConfig[] = [
+  { id: 'extruder', label: 'Extruder', maxTemp: 350 },
+  { id: 'heater_bed', label: 'Heater Bed', maxTemp: 120 },
+  { id: 'heater_bed1', label: 'Heater Bed 1', maxTemp: 120 },
+  { id: 'heater_bed2', label: 'Heater Bed 2', maxTemp: 120 },
+  { id: 'heater_bed3', label: 'Heater Bed 3', maxTemp: 120 },
+];
 
 export default function ThermalPanel({
-  bedTemp,
-  bedTarget,
   nozzleTemp,
   nozzleTarget,
+  bedZones,
   onRefresh,
 }: ThermalPanelProps) {
-  const [newBedTarget, setNewBedTarget] = useState<string>('60');
-  const [newNozzleTarget, setNewNozzleTarget] = useState<string>('200');
+  const [targets, setTargets] = useState<Record<string, string>>({
+    extruder: '200',
+    heater_bed: '60',
+    heater_bed1: '60',
+    heater_bed2: '60',
+    heater_bed3: '60',
+  });
   const [settingTemp, setSettingTemp] = useState<HeaterType | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const getHeaterData = (heaterId: HeaterType): { temp: number | null; target: number | null } => {
+    if (heaterId === 'extruder') {
+      return { temp: nozzleTemp, target: nozzleTarget };
+    }
+    if (bedZones && bedZones[heaterId]) {
+      return {
+        temp: bedZones[heaterId].temperature,
+        target: bedZones[heaterId].target,
+      };
+    }
+    return { temp: null, target: null };
+  };
 
   const setTemperature = useCallback(async (heater: HeaterType, target: number) => {
     setSettingTemp(heater);
@@ -39,7 +76,6 @@ export default function ThermalPanel({
         throw new Error(data.detail || 'Failed to set temperature');
       }
 
-      // Trigger refresh to get updated temps
       if (onRefresh) {
         setTimeout(onRefresh, 500);
       }
@@ -50,49 +86,66 @@ export default function ThermalPanel({
     }
   }, [onRefresh]);
 
-  const handleSetBedTemp = () => {
-    const target = parseFloat(newBedTarget);
-    if (!isNaN(target) && target >= 0 && target <= 120) {
-      setTemperature('heater_bed', target);
+  const handleSetTemp = (heaterId: HeaterType, maxTemp: number) => {
+    const target = parseFloat(targets[heaterId] || '0');
+    if (!isNaN(target) && target >= 0 && target <= maxTemp) {
+      setTemperature(heaterId, target);
     }
   };
 
-  const handleSetNozzleTemp = () => {
-    const target = parseFloat(newNozzleTarget);
-    if (!isNaN(target) && target >= 0 && target <= 350) {
-      setTemperature('extruder', target);
-    }
+  const handleTurnOff = (heaterId: HeaterType) => {
+    setTemperature(heaterId, 0);
   };
 
-  const handleBedOff = () => setTemperature('heater_bed', 0);
-  const handleNozzleOff = () => setTemperature('extruder', 0);
+  const handlePreheat = async (preset: 'PLA' | 'PETG' | 'ABS') => {
+    const temps = {
+      PLA: { extruder: 200, bed: 60 },
+      PETG: { extruder: 240, bed: 80 },
+      ABS: { extruder: 250, bed: 100 },
+    };
+    const t = temps[preset];
 
-  // Temperature color coding
-  const getTempColor = (current: number | null, target: number | null): string => {
-    if (current === null) return 'temp-unknown';
-    if (target === null || target === 0) {
-      return current < 40 ? 'temp-cold' : 'temp-cooling';
-    }
-    const diff = Math.abs(current - target);
-    if (diff <= 2) return 'temp-at-target';
-    if (current < target) return 'temp-heating';
-    return 'temp-cooling';
+    // Set all heaters
+    await Promise.all([
+      setTemperature('extruder', t.extruder),
+      setTemperature('heater_bed', t.bed),
+      setTemperature('heater_bed1', t.bed),
+      setTemperature('heater_bed2', t.bed),
+      setTemperature('heater_bed3', t.bed),
+    ]);
+  };
+
+  const handleCooldown = async () => {
+    await Promise.all([
+      setTemperature('extruder', 0),
+      setTemperature('heater_bed', 0),
+      setTemperature('heater_bed1', 0),
+      setTemperature('heater_bed2', 0),
+      setTemperature('heater_bed3', 0),
+    ]);
   };
 
   const formatTemp = (temp: number | null): string => {
     if (temp === null) return '--';
-    return `${temp.toFixed(1)}`;
+    return temp.toFixed(1);
+  };
+
+  const getPowerState = (target: number | null): string => {
+    if (target === null || target === 0) return 'off';
+    return 'on';
   };
 
   return (
     <div className="thermal-panel">
       <div className="thermal-header">
-        <h4>Thermal Control</h4>
-        {onRefresh && (
-          <button className="refresh-btn" onClick={onRefresh} title="Refresh">
-            &#x21bb;
-          </button>
-        )}
+        <h4>Thermals</h4>
+        <div className="thermal-actions">
+          {onRefresh && (
+            <button className="refresh-btn" onClick={onRefresh} title="Refresh">
+              &#x21bb;
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -102,119 +155,87 @@ export default function ThermalPanel({
         </div>
       )}
 
-      <div className="thermal-grid">
-        {/* Bed Temperature Card */}
-        <div className="thermal-card">
-          <div className="thermal-label">Bed</div>
-          <div className={`thermal-current ${getTempColor(bedTemp, bedTarget)}`}>
-            {formatTemp(bedTemp)}°C
-          </div>
-          <div className="thermal-target">
-            Target: {bedTarget !== null ? `${bedTarget}°C` : '--'}
-          </div>
-          <div className="thermal-controls">
-            <input
-              type="number"
-              value={newBedTarget}
-              onChange={(e) => setNewBedTarget(e.target.value)}
-              min="0"
-              max="120"
-              step="5"
-              placeholder="60"
-            />
-            <button
-              className="set-btn"
-              onClick={handleSetBedTemp}
-              disabled={settingTemp === 'heater_bed'}
-            >
-              {settingTemp === 'heater_bed' ? '...' : 'Set'}
-            </button>
-            <button
-              className="off-btn"
-              onClick={handleBedOff}
-              disabled={settingTemp === 'heater_bed'}
-            >
-              Off
-            </button>
-          </div>
+      {/* Heater List - Fluidd style */}
+      <div className="heater-list">
+        <div className="heater-list-header">
+          <span className="col-name">Name</span>
+          <span className="col-power">Power</span>
+          <span className="col-actual">Actual</span>
+          <span className="col-target">Target</span>
         </div>
 
-        {/* Nozzle Temperature Card */}
-        <div className="thermal-card">
-          <div className="thermal-label">Nozzle</div>
-          <div className={`thermal-current ${getTempColor(nozzleTemp, nozzleTarget)}`}>
-            {formatTemp(nozzleTemp)}°C
-          </div>
-          <div className="thermal-target">
-            Target: {nozzleTarget !== null ? `${nozzleTarget}°C` : '--'}
-          </div>
-          <div className="thermal-controls">
-            <input
-              type="number"
-              value={newNozzleTarget}
-              onChange={(e) => setNewNozzleTarget(e.target.value)}
-              min="0"
-              max="350"
-              step="5"
-              placeholder="200"
-            />
-            <button
-              className="set-btn"
-              onClick={handleSetNozzleTemp}
-              disabled={settingTemp === 'extruder'}
-            >
-              {settingTemp === 'extruder' ? '...' : 'Set'}
-            </button>
-            <button
-              className="off-btn"
-              onClick={handleNozzleOff}
-              disabled={settingTemp === 'extruder'}
-            >
-              Off
-            </button>
-          </div>
-        </div>
+        {HEATERS.map((heater) => {
+          const data = getHeaterData(heater.id);
+          const powerState = getPowerState(data.target);
+
+          return (
+            <div key={heater.id} className="heater-row">
+              <span className="col-name">
+                <span className={`heater-icon ${powerState}`}>&#x1F525;</span>
+                {heater.label}
+              </span>
+              <span className={`col-power ${powerState}`}>{powerState}</span>
+              <span className="col-actual">{formatTemp(data.temp)}°C /</span>
+              <span className="col-target">
+                <input
+                  type="number"
+                  value={targets[heater.id]}
+                  onChange={(e) => setTargets(prev => ({ ...prev, [heater.id]: e.target.value }))}
+                  min="0"
+                  max={heater.maxTemp}
+                  step="5"
+                  disabled={settingTemp !== null}
+                />
+                <span className="unit">°C</span>
+                <button
+                  className="set-btn"
+                  onClick={() => handleSetTemp(heater.id, heater.maxTemp)}
+                  disabled={settingTemp === heater.id}
+                  title="Set temperature"
+                >
+                  {settingTemp === heater.id ? '...' : '✓'}
+                </button>
+                <button
+                  className="off-btn"
+                  onClick={() => handleTurnOff(heater.id)}
+                  disabled={settingTemp === heater.id}
+                  title="Turn off"
+                >
+                  ✕
+                </button>
+              </span>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Quick Preheat Buttons */}
+      {/* Preheat Presets */}
       <div className="thermal-presets">
         <span className="preset-label">Preheat:</span>
         <button
           className="preset-btn"
-          onClick={() => {
-            setTemperature('heater_bed', 60);
-            setTemperature('extruder', 200);
-          }}
+          onClick={() => handlePreheat('PLA')}
           disabled={settingTemp !== null}
         >
           PLA
         </button>
         <button
           className="preset-btn"
-          onClick={() => {
-            setTemperature('heater_bed', 80);
-            setTemperature('extruder', 240);
-          }}
+          onClick={() => handlePreheat('PETG')}
           disabled={settingTemp !== null}
         >
           PETG
         </button>
         <button
           className="preset-btn"
-          onClick={() => {
-            setTemperature('heater_bed', 100);
-            setTemperature('extruder', 250);
-          }}
+          onClick={() => handlePreheat('ABS')}
           disabled={settingTemp !== null}
         >
           ABS
         </button>
         <button
           className="cooldown-btn"
-          onClick={() => {
-            setTemperature('heater_bed', 0);
-            setTemperature('extruder', 0);
-          }}
+          onClick={handleCooldown}
           disabled={settingTemp !== null}
         >
           Cooldown

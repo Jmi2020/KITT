@@ -19,6 +19,11 @@
   color: var(--text-primary, #fff);
 }
 
+.thermal-actions {
+  display: flex;
+  gap: 6px;
+}
+
 .refresh-btn {
   background: transparent;
   border: 1px solid var(--border-color, #333);
@@ -26,7 +31,7 @@
   padding: 4px 8px;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .refresh-btn:hover {
@@ -56,121 +61,138 @@
   padding: 0 4px;
 }
 
-.thermal-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
+/* Fluidd-style Heater List */
+.heater-list {
+  background: var(--bg-tertiary, #2a2a2a);
+  border-radius: 6px;
+  overflow: hidden;
   margin-bottom: 12px;
 }
 
-.thermal-card {
-  background: var(--bg-tertiary, #2a2a2a);
-  border-radius: 6px;
-  padding: 12px;
-  text-align: center;
-}
-
-.thermal-label {
-  font-size: 12px;
+.heater-list-header {
+  display: grid;
+  grid-template-columns: 1fr 60px 80px 140px;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-primary, #121212);
+  font-size: 11px;
   font-weight: 500;
   color: var(--text-secondary, #888);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin-bottom: 4px;
 }
 
-.thermal-current {
-  font-size: 28px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  margin-bottom: 2px;
+.heater-row {
+  display: grid;
+  grid-template-columns: 1fr 60px 80px 140px;
+  gap: 8px;
+  padding: 10px 12px;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color, #333);
 }
 
-/* Temperature color states */
-.temp-unknown {
-  color: var(--text-secondary, #888);
+.heater-row:last-child {
+  border-bottom: none;
 }
 
-.temp-cold {
-  color: #60a5fa; /* blue */
-}
-
-.temp-heating {
-  color: #fb923c; /* orange - heating up */
-}
-
-.temp-at-target {
-  color: #4ade80; /* green - at target */
-}
-
-.temp-cooling {
-  color: #f472b6; /* pink - cooling down */
-}
-
-.thermal-target {
-  font-size: 11px;
-  color: var(--text-secondary, #666);
-  margin-bottom: 8px;
-}
-
-.thermal-controls {
+.col-name {
   display: flex;
-  gap: 4px;
-  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary, #fff);
 }
 
-.thermal-controls input {
-  width: 60px;
-  padding: 6px 8px;
-  border: 1px solid var(--border-color, #333);
+.heater-icon {
+  font-size: 14px;
+  opacity: 0.5;
+}
+
+.heater-icon.on {
+  opacity: 1;
+  filter: hue-rotate(-30deg) saturate(2);
+}
+
+.col-power {
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+}
+
+.col-power.on {
+  color: #fb923c;
+}
+
+.col-actual {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary, #fff);
+  text-align: right;
+}
+
+.col-target {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.col-target input {
+  width: 50px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-color, #444);
   border-radius: 4px;
   background: var(--bg-primary, #121212);
   color: var(--text-primary, #fff);
   font-size: 12px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
-.thermal-controls input:focus {
+.col-target input:focus {
   outline: none;
   border-color: var(--accent-color, #3b82f6);
 }
 
-.thermal-controls button {
-  padding: 6px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
+.col-target input:disabled {
+  opacity: 0.5;
 }
 
-.set-btn {
+.col-target .unit {
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+}
+
+.col-target .set-btn,
+.col-target .off-btn {
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.col-target .set-btn {
   background: var(--accent-color, #3b82f6);
-  border: none;
   color: white;
 }
 
-.set-btn:hover:not(:disabled) {
+.col-target .set-btn:hover:not(:disabled) {
   background: var(--accent-hover, #2563eb);
 }
 
-.set-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.off-btn {
+.col-target .off-btn {
   background: transparent;
-  border: 1px solid var(--border-color, #444);
+  border-color: var(--border-color, #444);
   color: var(--text-secondary, #888);
 }
 
-.off-btn:hover:not(:disabled) {
+.col-target .off-btn:hover:not(:disabled) {
   border-color: #ef4444;
   color: #f87171;
 }
 
-.off-btn:disabled {
+.col-target .set-btn:disabled,
+.col-target .off-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -190,7 +212,7 @@
 }
 
 .preset-btn {
-  padding: 4px 10px;
+  padding: 5px 12px;
   background: var(--bg-tertiary, #2a2a2a);
   border: 1px solid var(--border-color, #333);
   border-radius: 4px;
@@ -211,7 +233,7 @@
 }
 
 .cooldown-btn {
-  padding: 4px 10px;
+  padding: 5px 12px;
   background: transparent;
   border: 1px solid #ef4444;
   border-radius: 4px;
@@ -231,9 +253,15 @@
 }
 
 /* Responsive */
-@media (max-width: 400px) {
-  .thermal-grid {
-    grid-template-columns: 1fr;
+@media (max-width: 500px) {
+  .heater-list-header,
+  .heater-row {
+    grid-template-columns: 1fr 50px 70px 120px;
+    font-size: 11px;
+  }
+
+  .col-target input {
+    width: 40px;
   }
 
   .thermal-presets {
