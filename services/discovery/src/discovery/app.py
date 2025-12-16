@@ -69,38 +69,6 @@ class ArpIngestRequest(BaseModel):
     entries: list[ArpIngestEntry]
 
 
-@app.post("/api/discovery/arp")
-async def ingest_arp(body: ArpIngestRequest) -> Dict[str, Any]:
-    """
-    Ingest ARP scan results (IP/MAC/vendor) from a host-side scan.
-
-    This endpoint expects trusted input (no auth implemented here).
-    """
-    try:
-        if not device_store:
-            raise HTTPException(status_code=500, detail="Device store not initialized")
-
-        count = 0
-        for entry in body.entries:
-            try:
-                await device_store.upsert_manual_device(
-                    ip_address=entry.ip_address,
-                    mac_address=entry.mac_address,
-                    vendor_hint=entry.vendor,
-                    discovery_method="arp_scan",
-                )
-                count += 1
-            except Exception as e:
-                logger.error(f"Failed to upsert ARP entry {entry.ip_address}: {e}")
-
-        return {"ingested": count}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"ARP ingest failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
@@ -174,6 +142,42 @@ app = FastAPI(
 async def health_check() -> Dict[str, str]:
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+# ==============================================================================
+# ARP Ingest
+# ==============================================================================
+
+@app.post("/api/discovery/arp")
+async def ingest_arp(body: ArpIngestRequest) -> Dict[str, Any]:
+    """
+    Ingest ARP scan results (IP/MAC/vendor) from a host-side scan.
+
+    This endpoint expects trusted input (no auth implemented here).
+    """
+    try:
+        if not device_store:
+            raise HTTPException(status_code=500, detail="Device store not initialized")
+
+        count = 0
+        for entry in body.entries:
+            try:
+                await device_store.upsert_manual_device(
+                    ip_address=entry.ip_address,
+                    mac_address=entry.mac_address,
+                    vendor_hint=entry.vendor,
+                    discovery_method="arp_scan",
+                )
+                count += 1
+            except Exception as e:
+                logger.error(f"Failed to upsert ARP entry {entry.ip_address}: {e}")
+
+        return {"ingested": count}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"ARP ingest failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==============================================================================
