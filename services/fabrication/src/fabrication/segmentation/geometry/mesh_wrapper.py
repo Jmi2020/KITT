@@ -300,9 +300,21 @@ class MeshWrapper:
             plane_pos = plane.origin[axis]
 
             # Extract the cross-section at the cut plane
+            # IMPORTANT: Offset the section plane slightly INTO the part, otherwise
+            # trimesh's section() may return None when the plane is exactly at the
+            # mesh boundary (no faces CROSS the plane, only touch it).
+            section_offset = 0.1  # mm offset into the part
+            section_origin = list(plane.origin)
+            if side == "positive":
+                # Part is above plane, offset section slightly up
+                section_origin[axis] += section_offset * (1 if normal[axis] >= 0 else -1)
+            else:
+                # Part is below plane, offset section slightly down
+                section_origin[axis] -= section_offset * (1 if normal[axis] >= 0 else -1)
+
             try:
                 section = tm.section(
-                    plane_origin=plane.origin,
+                    plane_origin=section_origin,
                     plane_normal=plane.normal,
                 )
 
@@ -396,17 +408,12 @@ class MeshWrapper:
 
                 part_m3d = part.as_manifold
 
-                # IMPORTANT: Intersect the cap with the part to bound it within the model
-                # This ensures reinforcement doesn't extend beyond the shell boundary
-                bounded_cap = ext_m3d ^ part_m3d  # Intersection
-
-                # If intersection failed or is empty, fall back to simple union
-                if bounded_cap.is_empty():
-                    LOGGER.debug(f"Intersection produced empty result, using direct union for {side} side")
-                    result_m3d = part_m3d + ext_m3d
-                else:
-                    # Union the bounded cap with the original part
-                    result_m3d = part_m3d + bounded_cap
+                # Union the cap directly with the part.
+                # The cap is already bounded by the outer polygon from the cross-section,
+                # so it won't extend beyond the shell boundary.
+                # NOTE: Do NOT intersect with the hollow part - that removes the cap
+                # because hollow shells have empty cavities inside.
+                result_m3d = part_m3d + ext_m3d
 
                 if result_m3d.status() != m3d.Error.NoError:
                     LOGGER.warning(f"Cut face reinforcement union failed: {result_m3d.status()}")
@@ -445,83 +452,33 @@ class MeshWrapper:
         depth_mm: float,
     ) -> "MeshWrapper":
         """
-        Fallback cut face reinforcement using bounding box approach.
+        Fallback cut face reinforcement - returns part unchanged.
 
-        Creates a slab at the cut face and INTERSECTS it with the part geometry
-        to ensure reinforcement stays within the model boundary.
+        The cross-section method is preferred because it creates geometry that
+        exactly matches the cut face contour. This fallback is called when
+        cross-section extraction fails (rare).
+
+        For hollow shells, a bounding box approach doesn't work well because:
+        - Intersecting with the hollow part removes the fill (shell has cavity)
+        - Without intersection, the box extends beyond the model boundary
+
+        The shell walls themselves provide some structural integrity at cut faces
+        even without additional reinforcement.
 
         Args:
-            part: The cut mesh part to reinforce
+            part: The cut mesh part (returned unchanged)
             plane: The cutting plane
-            side: "positive" or "negative" - which side of the plane this part is on
-            depth_mm: How deep the solid reinforcement extends into the part
+            side: "positive" or "negative" - which side of the plane
+            depth_mm: Depth parameter (unused)
 
         Returns:
-            MeshWrapper with solid reinforcement at cut face, bounded by model geometry
+            The original part unchanged
         """
-        try:
-            import manifold3d as m3d
-
-            # Get part bounding box for slab dimensions
-            bb = part.bounding_box
-            normal = np.array(plane.normal)
-            axis = int(np.argmax(np.abs(normal)))
-            plane_pos = plane.origin[axis]
-
-            # Create slab dimensions slightly larger than bounding box in XY
-            margin = 1.0  # mm margin
-            dims = list(bb.dimensions)
-            dims[0] += margin * 2
-            dims[1] += margin * 2
-            dims[2] += margin * 2
-
-            # Create a box slab at the cut plane
-            # The slab extends by depth_mm into the part
-            slab_center = list(bb.center)
-
-            if side == "positive":
-                # Part is above plane, slab goes from plane_pos to plane_pos + depth
-                slab_center[axis] = plane_pos + depth_mm / 2
-                dims[axis] = depth_mm
-            else:
-                # Part is below plane, slab goes from plane_pos - depth to plane_pos
-                slab_center[axis] = plane_pos - depth_mm / 2
-                dims[axis] = depth_mm
-
-            # Create slab using manifold
-            slab_m3d = m3d.Manifold.cube(dims, center=True)
-            slab_m3d = slab_m3d.translate(slab_center)
-
-            part_m3d = part.as_manifold
-
-            # INTERSECT slab with part to bound it within model geometry
-            bounded_slab = slab_m3d ^ part_m3d
-
-            if bounded_slab.is_empty():
-                LOGGER.debug(f"Box intersection empty for {side} side, returning unchanged")
-                return part
-
-            # Union bounded slab with part
-            result_m3d = part_m3d + bounded_slab
-
-            if result_m3d.status() != m3d.Error.NoError:
-                LOGGER.warning(f"Box reinforcement union failed: {result_m3d.status()}")
-                return part
-
-            result = MeshWrapper._from_manifold(result_m3d)
-
-            # Log volume change
-            orig_vol = part.volume_cm3
-            new_vol = result.volume_cm3
-            added = new_vol - orig_vol
-            if added > 0.01:
-                LOGGER.info(f"Cut face reinforcement box ({side}): +{added:.2f} cm³")
-
-            return result
-
-        except Exception as e:
-            LOGGER.warning(f"Box reinforcement failed: {e}")
-            return part
+        LOGGER.debug(
+            f"Box reinforcement fallback for {side} side - "
+            f"cross-section method preferred, returning unchanged"
+        )
+        return part
 
     def _split_trimesh(self, plane: CuttingPlane) -> Tuple["MeshWrapper", "MeshWrapper"]:
         """Fallback split using trimesh (may produce non-manifold results)."""
