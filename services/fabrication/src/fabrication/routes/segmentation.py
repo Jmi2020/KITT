@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Optional
+import io
 import tempfile
+import uuid
+import zipfile
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from common.logging import get_logger
@@ -42,6 +46,94 @@ class SegmentationJobStatus(BaseModel):
     progress: float = 0.0
     result: Optional[SegmentMeshResponse] = None
     error: Optional[str] = None
+
+
+class UploadMeshResponse(BaseModel):
+    """Response from mesh file upload."""
+
+    success: bool
+    filename: str
+    container_path: str
+    file_size_bytes: int
+    file_type: str  # "3mf" or "stl"
+
+
+# File upload constants
+MAX_FILE_SIZE_MB = 100
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+
+
+@router.post("/upload", response_model=UploadMeshResponse)
+async def upload_mesh_file(
+    file: UploadFile = File(..., description="3MF or STL mesh file to upload")
+) -> UploadMeshResponse:
+    """
+    Upload a 3MF or STL mesh file for segmentation.
+
+    Files are saved to /app/artifacts/3mf/ or /app/artifacts/stl/ based on extension.
+    Returns the container path for use with segmentation endpoints.
+
+    Max file size: 100MB
+    Accepted formats: .3mf, .stl
+    """
+    # Validate file extension
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+
+    filename_lower = file.filename.lower()
+    if filename_lower.endswith(".3mf"):
+        file_type = "3mf"
+        target_dir = Path("/app/artifacts/3mf")
+    elif filename_lower.endswith(".stl"):
+        file_type = "stl"
+        target_dir = Path("/app/artifacts/stl")
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file type. Only .3mf and .stl files are accepted.",
+        )
+
+    # Ensure target directory exists
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate unique filename to avoid collisions
+    unique_id = uuid.uuid4().hex[:8]
+    safe_name = Path(file.filename).stem  # Remove extension
+    # Sanitize filename (remove special chars)
+    safe_name = "".join(c for c in safe_name if c.isalnum() or c in "-_")[:50]
+    new_filename = f"{safe_name}_{unique_id}.{file_type}"
+    target_path = target_dir / new_filename
+
+    # Read file in chunks and check size
+    total_size = 0
+    try:
+        with open(target_path, "wb") as buffer:
+            while chunk := await file.read(1024 * 1024):  # 1MB chunks
+                total_size += len(chunk)
+                if total_size > MAX_FILE_SIZE_BYTES:
+                    # Clean up partial file
+                    target_path.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large. Maximum size is {MAX_FILE_SIZE_MB}MB.",
+                    )
+                buffer.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as e:
+        target_path.unlink(missing_ok=True)
+        logger.error(f"Upload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+    logger.info(f"Uploaded mesh file: {target_path} ({total_size} bytes)")
+
+    return UploadMeshResponse(
+        success=True,
+        filename=new_filename,
+        container_path=str(target_path),
+        file_size_bytes=total_size,
+        file_type=file_type,
+    )
 
 
 @router.post("/check")
@@ -241,6 +333,60 @@ async def list_printer_configs() -> list[dict[str, Any]]:
         ]
 
 
+@router.get("/download/{job_id}")
+async def download_segmented_zip(job_id: str) -> StreamingResponse:
+    """
+    Download all segmented parts as a ZIP file.
+
+    Returns a ZIP archive containing all exported part files from the job.
+    """
+    if job_id not in _segmentation_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job = _segmentation_jobs[job_id]
+    if job["status"] != "completed" or not job.get("result"):
+        raise HTTPException(status_code=400, detail="Job not completed or no result available")
+
+    result = job["result"]
+
+    # Create ZIP in memory
+    zip_buffer = io.BytesIO()
+    files_added = 0
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        # Add individual parts
+        for part in result.parts:
+            part_path = Path(part.file_path)
+            if part_path.exists():
+                zf.write(part_path, part_path.name)
+                files_added += 1
+            else:
+                logger.warning(f"Part file not found: {part_path}")
+
+        # Add combined assembly if available
+        if result.combined_3mf_path:
+            combined_path = Path(result.combined_3mf_path)
+            if combined_path.exists():
+                zf.write(combined_path, combined_path.name)
+                files_added += 1
+            else:
+                logger.warning(f"Combined assembly not found: {combined_path}")
+
+    if files_added == 0:
+        raise HTTPException(status_code=404, detail="No part files found to download")
+
+    zip_buffer.seek(0)
+    logger.info(f"Created ZIP with {files_added} parts for job {job_id[:8]}")
+
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="segmented_parts_{job_id[:8]}.zip"'
+        },
+    )
+
+
 def _get_build_volume(printer_id: Optional[str]) -> tuple[float, float, float]:
     """Get build volume for a printer."""
     if not printer_id:
@@ -272,12 +418,18 @@ async def _run_segmentation_job(job_id: str, request: SegmentMeshRequest) -> Non
     """Background task for segmentation."""
     try:
         _segmentation_jobs[job_id]["status"] = "running"
-        _segmentation_jobs[job_id]["progress"] = 0.1
+        _segmentation_jobs[job_id]["progress"] = 0.05
+
+        # Progress callback to update job status
+        def on_progress(progress: float, stage: str):
+            """Update job progress from engine callback."""
+            _segmentation_jobs[job_id]["progress"] = progress
+            logger.debug(f"Segmentation progress: {progress:.0%} - {stage}")
 
         # Load mesh (supports both 3MF and STL)
         mesh_path = Path(request.mesh_path)
         mesh = MeshWrapper(mesh_path)
-        _segmentation_jobs[job_id]["progress"] = 0.2
+        _segmentation_jobs[job_id]["progress"] = 0.08
 
         # Get build volume - custom overrides printer_id
         if request.custom_build_volume:
@@ -303,10 +455,9 @@ async def _run_segmentation_job(job_id: str, request: SegmentMeshRequest) -> Non
         )
 
         engine = PlanarSegmentationEngine(config)
-        _segmentation_jobs[job_id]["progress"] = 0.3
 
-        result = engine.segment(mesh, output_dir=str(output_dir))
-        _segmentation_jobs[job_id]["progress"] = 0.9
+        # Run segmentation with progress callback
+        result = engine.segment(mesh, output_dir=str(output_dir), progress_callback=on_progress)
 
         if result.success:
             part_responses = [

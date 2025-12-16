@@ -114,6 +114,7 @@ class PlanarSegmentationEngine(SegmentationEngine):
         mesh: MeshWrapper,
         request: Optional["SegmentMeshRequest"] = None,
         output_dir: Optional[str] = None,
+        progress_callback: Optional[callable] = None,
     ) -> SegmentationResult:
         """
         Segment mesh into parts fitting build volume.
@@ -127,6 +128,7 @@ class PlanarSegmentationEngine(SegmentationEngine):
             mesh: The mesh to segment
             request: Optional request object (for backwards compatibility, config from __init__ is used)
             output_dir: Optional directory to export parts to (creates 3MF files)
+            progress_callback: Optional callback(progress: float, stage: str) for progress updates
 
         Returns:
             SegmentationResult with part info and optional file paths
@@ -134,6 +136,16 @@ class PlanarSegmentationEngine(SegmentationEngine):
         # Note: request parameter is for backwards compatibility but not used
         # Engine config is set at initialization time
         strategy = self.config.hollowing_strategy
+
+        def report_progress(progress: float, stage: str):
+            """Report progress if callback provided."""
+            if progress_callback:
+                try:
+                    progress_callback(progress, stage)
+                except Exception as e:
+                    LOGGER.warning(f"Progress callback error: {e}")
+
+        report_progress(0.05, "analyzing")
 
         # HOLLOW FIRST if strategy is HOLLOW_THEN_SEGMENT or SURFACE_SHELL
         # Handle both enum and string values
@@ -149,6 +161,7 @@ class PlanarSegmentationEngine(SegmentationEngine):
                 strategy == HollowingStrategy.SURFACE_SHELL or strategy == "surface_shell"
             ) else "voxel"
 
+            report_progress(0.10, "hollowing")
             LOGGER.info(
                 f"Hollowing mesh BEFORE segmentation using {hollow_strategy} method "
                 f"(wall_thickness={self.config.wall_thickness_mm}mm)..."
@@ -168,11 +181,15 @@ class PlanarSegmentationEngine(SegmentationEngine):
         if self.config.max_parts == 0:
             self._auto_calculate_max_parts(mesh)
 
+        report_progress(0.30, "checking_dimensions")
+
         # Check if segmentation needed (on potentially-hollowed mesh)
         if not self.needs_segmentation(mesh):
             LOGGER.info("Mesh fits build volume, no segmentation needed")
+            report_progress(1.0, "complete")
             return self._create_single_part_result(mesh, output_dir)
 
+        report_progress(0.35, "segmenting")
         LOGGER.info(
             f"Starting segmentation: mesh dims {mesh.dimensions}, "
             f"build volume {self.build_volume}"
@@ -188,6 +205,8 @@ class PlanarSegmentationEngine(SegmentationEngine):
             # Use greedy iterative approach (original algorithm)
             parts, cut_planes, seam_pairs = self._segment_greedy(mesh)
 
+        report_progress(0.60, "post_processing")
+
         # HOLLOW AFTER if strategy is SEGMENT_THEN_HOLLOW
         should_hollow_after = (
             strategy == HollowingStrategy.SEGMENT_THEN_HOLLOW
@@ -199,11 +218,16 @@ class PlanarSegmentationEngine(SegmentationEngine):
 
         # APPLY JOINTS to parts if joint generation is enabled
         if self.joint_factory and seam_pairs:
+            report_progress(0.70, "creating_joints")
             LOGGER.info(f"Applying joints to {len(seam_pairs)} seams...")
             parts = self._apply_joints(parts, seam_pairs)
 
+        report_progress(0.80, "exporting")
+
         # Create result and optionally export
-        return self._create_result(parts, cut_planes, output_dir)
+        result = self._create_result(parts, cut_planes, output_dir)
+        report_progress(1.0, "complete")
+        return result
 
     def find_best_cut(
         self, mesh: MeshWrapper, state: SegmentationState

@@ -173,10 +173,10 @@ class SegmentMeshRequest(BaseModel):
         examples=["bamboo_h2d"],
     )
     wall_thickness_mm: float = Field(
-        default=2.0,
+        default=10.0,
         description="Wall thickness for hollowing (mm)",
         ge=1.2,
-        le=10.0,
+        le=50.0,
     )
     joint_type: JointType = Field(
         default=JointType.INTEGRATED,

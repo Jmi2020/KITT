@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, UploadFile, File
 import httpx
 
 
@@ -178,6 +178,35 @@ async def list_printers() -> list[dict[str, Any]]:
         raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
 
 
+@router.post("/segmentation/upload")
+async def upload_mesh_file(file: UploadFile = File(...)) -> dict[str, Any]:
+    """
+    Upload a 3MF or STL mesh file for segmentation.
+
+    Files are saved to the artifacts directory and the container path is returned
+    for use with segmentation endpoints.
+
+    Max file size: 100MB
+    Accepted formats: .3mf, .stl
+    """
+    try:
+        # Read file content and forward as multipart
+        file_content = await file.read()
+        files = {"file": (file.filename, file_content, file.content_type)}
+
+        async with httpx.AsyncClient(timeout=120.0) as client:  # Long timeout for uploads
+            response = await client.post(
+                f"{FABRICATION_BASE}/api/segmentation/upload",
+                files=files
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
 @router.post("/segmentation/check")
 async def check_segmentation(request: Request) -> dict[str, Any]:
     """
@@ -242,6 +271,96 @@ async def get_segmentation_job(job_id: str) -> dict[str, Any]:
             response = await client.get(f"{FABRICATION_BASE}/api/segmentation/jobs/{job_id}")
             response.raise_for_status()
             return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.post("/segmentation/segment/async")
+async def segment_mesh_async(request: Request) -> dict[str, Any]:
+    """
+    Start async segmentation job for large models.
+
+    Returns job ID for status polling via /segmentation/jobs/{job_id}.
+    """
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{FABRICATION_BASE}/api/segmentation/segment/async",
+                json=body,
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.get("/segmentation/download/{job_id}")
+async def download_segmented_zip(job_id: str):
+    """
+    Download all segmented parts as a ZIP file.
+
+    Streams the ZIP file from the fabrication service.
+    """
+    from fastapi.responses import StreamingResponse
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(
+                f"{FABRICATION_BASE}/api/segmentation/download/{job_id}",
+            )
+            response.raise_for_status()
+
+            # Stream the ZIP response
+            return StreamingResponse(
+                iter([response.content]),
+                media_type="application/zip",
+                headers=dict(response.headers),
+            )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.get("/artifacts/{file_path:path}")
+async def serve_artifact(file_path: str):
+    """
+    Serve artifact files (segmented 3MF/STL parts) from the fabrication service.
+
+    Proxies file requests to the fabrication service's mounted artifacts directory.
+    Used for downloading individual segmented parts and combined assemblies.
+    """
+    from fastapi.responses import StreamingResponse
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(
+                f"{FABRICATION_BASE}/api/fabrication/artifacts/{file_path}",
+            )
+            response.raise_for_status()
+
+            # Determine content type based on file extension
+            content_type = "application/octet-stream"
+            if file_path.endswith(".3mf"):
+                content_type = "application/vnd.ms-package.3dmanufacturing-3dmodel+xml"
+            elif file_path.endswith(".stl"):
+                content_type = "application/sla"
+
+            # Stream the file response with download disposition
+            filename = file_path.split("/")[-1]
+            return StreamingResponse(
+                iter([response.content]),
+                media_type=content_type,
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Length": str(len(response.content)),
+                },
+            )
     except httpx.HTTPStatusError as e:
         raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
     except httpx.HTTPError as e:

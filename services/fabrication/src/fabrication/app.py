@@ -252,6 +252,13 @@ static_dir = Path(__file__).parent.parent.parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+# Mount artifacts directory for serving segmented parts and other files
+# This enables downloading segmented 3MF/STL files via /api/fabrication/artifacts/*
+ARTIFACTS_DIR = Path("/app/artifacts")
+if ARTIFACTS_DIR.exists():
+    app.mount("/api/fabrication/artifacts", StaticFiles(directory=str(ARTIFACTS_DIR)), name="artifacts")
+    LOGGER.info("Mounted artifacts directory", path=str(ARTIFACTS_DIR))
+
 # Include Bambu Labs printer routes
 app.include_router(bambu_router)
 

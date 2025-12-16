@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import './MeshSegmenter.css';
 
 interface Printer {
@@ -10,47 +10,40 @@ interface Printer {
 
 interface CheckResult {
   needs_segmentation: boolean;
-  model_dimensions: {
-    x: number;
-    y: number;
-    z: number;
-  };
-  build_volume: {
-    x: number;
-    y: number;
-    z: number;
-  };
-  exceeds: {
-    x: boolean;
-    y: boolean;
-    z: boolean;
-  };
+  model_dimensions_mm: [number, number, number];
+  build_volume_mm: [number, number, number];
+  exceeds_by_mm: [number, number, number];
   recommended_cuts: number;
-  printer_id: string;
 }
 
 interface SegmentPart {
-  part_id: string;
-  path: string;
-  dimensions: {
-    x: number;
-    y: number;
-    z: number;
-  };
-  volume_mm3: number;
-  joint_count: number;
+  index: number;
+  name: string;
+  dimensions_mm: [number, number, number];
+  volume_cm3: number;
+  file_path: string;
+  minio_uri: string;
+  requires_supports: boolean;
 }
 
 interface SegmentResult {
+  success: boolean;
   needs_segmentation: boolean;
   num_parts: number;
   parts: SegmentPart[];
-  combined_3mf_path?: string;
-  combined_3mf_uri?: string;
-  hardware_required: {
-    dowels?: { count: number; diameter_mm: number; length_mm: number };
-  };
-  assembly_notes?: string;
+  combined_3mf_path: string;
+  combined_3mf_uri: string;
+  hardware_required: Record<string, unknown>;
+  assembly_notes: string;
+  error?: string;
+}
+
+interface SegmentJobStatus {
+  job_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  progress: number;
+  result?: SegmentResult;
+  error?: string;
 }
 
 interface MeshSegmenterProps {
@@ -89,6 +82,18 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
   const [maxParts, setMaxParts] = useState(0); // 0 = auto-calculate
   const [quality, setQuality] = useState<'fast' | 'medium' | 'high'>('high');
 
+  // File upload state
+  const [inputMode, setInputMode] = useState<'upload' | 'path'>('upload');
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Segmentation job state
+  const [segmentJobId, setSegmentJobId] = useState<string | null>(null);
+  const [segmentProgress, setSegmentProgress] = useState<number>(0);
+  const [completedJobId, setCompletedJobId] = useState<string | null>(null);
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
   // Load available printers
   useEffect(() => {
     const loadPrinters = async () => {
@@ -116,6 +121,105 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
       setSegmentResult(null);
     }
   }, [artifactPath]);
+
+  // File upload handler with XMLHttpRequest for progress tracking
+  const handleFileUpload = useCallback((file: File) => {
+    if (!file) return;
+
+    // Validate file type
+    const validExtensions = ['.3mf', '.stl'];
+    const ext = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+    if (!validExtensions.includes(ext)) {
+      setError('Invalid file type. Only .3mf and .stl files are accepted.');
+      return;
+    }
+
+    // Validate file size (100MB limit)
+    const maxSize = 100 * 1024 * 1024;
+    if (file.size > maxSize) {
+      setError('File too large. Maximum size is 100MB.');
+      return;
+    }
+
+    setError(null);
+    setUploadProgress(0);
+    setCheckResult(null);
+    setSegmentResult(null);
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    // Use XMLHttpRequest for upload progress
+    const xhr = new XMLHttpRequest();
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const percent = Math.round((event.loaded / event.total) * 100);
+        setUploadProgress(percent);
+      }
+    };
+
+    xhr.onload = () => {
+      setUploadProgress(null);
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const response = JSON.parse(xhr.responseText);
+          setFilePath(response.container_path);
+          setUploadedFileName(response.filename);
+        } catch {
+          setError('Failed to parse upload response');
+        }
+      } else {
+        try {
+          const errData = JSON.parse(xhr.responseText);
+          setError(errData.detail || 'Upload failed');
+        } catch {
+          setError(`Upload failed (${xhr.status})`);
+        }
+      }
+    };
+
+    xhr.onerror = () => {
+      setUploadProgress(null);
+      setError('Upload failed - network error');
+    };
+
+    xhr.open('POST', '/api/fabrication/segmentation/upload');
+    xhr.send(formData);
+  }, []);
+
+  // Handle file input change
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleFileUpload(file);
+    }
+  }, [handleFileUpload]);
+
+  // Handle drag-and-drop
+  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      handleFileUpload(file);
+    }
+  }, [handleFileUpload]);
+
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const clearUpload = useCallback(() => {
+    setFilePath('');
+    setUploadedFileName(null);
+    setCheckResult(null);
+    setSegmentResult(null);
+    setCompletedJobId(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, []);
 
   const handleCheck = useCallback(async () => {
     if (!filePath.trim()) {
@@ -151,6 +255,50 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
     }
   }, [filePath, selectedPrinter]);
 
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+      }
+    };
+  }, []);
+
+  // Poll job status
+  const pollJobStatus = useCallback(async (jobId: string) => {
+    try {
+      const response = await fetch(`/api/fabrication/segmentation/jobs/${jobId}`);
+      if (!response.ok) {
+        throw new Error('Failed to get job status');
+      }
+      const status: SegmentJobStatus = await response.json();
+
+      setSegmentProgress(status.progress * 100);
+
+      if (status.status === 'completed' && status.result) {
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+        setSegmentResult(status.result);
+        setLoading(false);
+        setCompletedJobId(jobId);  // Preserve job ID for ZIP download
+        setSegmentJobId(null);
+        onSegmentComplete?.(status.result);
+      } else if (status.status === 'failed') {
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+        setError(status.error || 'Segmentation failed');
+        setLoading(false);
+        setSegmentJobId(null);
+      }
+    } catch (err) {
+      console.error('Polling error:', err);
+    }
+  }, [onSegmentComplete]);
+
   const handleSegment = useCallback(async () => {
     if (!filePath.trim()) {
       setError('Please enter a file path');
@@ -160,10 +308,14 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
     setLoading(true);
     setError(null);
     setSegmentResult(null);
+    setSegmentProgress(0);
+    setCompletedJobId(null);
 
     try {
       const hollowingResolution = QUALITY_PRESETS.find(q => q.value === quality)?.resolution || 1000;
-      const response = await fetch('/api/fabrication/segmentation/segment', {
+
+      // Use async endpoint for progress tracking
+      const response = await fetch('/api/fabrication/segmentation/segment/async', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -179,26 +331,40 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.detail || 'Segmentation failed');
+        throw new Error(errData.detail || 'Failed to start segmentation');
       }
 
-      const data = await response.json();
-      setSegmentResult(data);
-      onSegmentComplete?.(data);
+      const { job_id } = await response.json();
+      setSegmentJobId(job_id);
+
+      // Start polling for status
+      pollingRef.current = setInterval(() => {
+        pollJobStatus(job_id);
+      }, 1000);
+
+      // Initial poll
+      pollJobStatus(job_id);
+
     } catch (err) {
       setError((err as Error).message);
-    } finally {
       setLoading(false);
     }
-  }, [filePath, selectedPrinter, enableHollowing, wallThickness, jointType, maxParts, quality, onSegmentComplete]);
+  }, [filePath, selectedPrinter, enableHollowing, wallThickness, jointType, maxParts, quality, pollJobStatus]);
 
-  const formatDimensions = (dims: { x: number; y: number; z: number }) => {
-    return `${dims.x.toFixed(1)} x ${dims.y.toFixed(1)} x ${dims.z.toFixed(1)} mm`;
+  const formatDimensions = (dims: [number, number, number]) => {
+    return `${dims[0].toFixed(1)} x ${dims[1].toFixed(1)} x ${dims[2].toFixed(1)} mm`;
   };
 
   const formatTupleDimensions = (dims: [number, number, number]) => {
     return `${dims[0].toFixed(0)} x ${dims[1].toFixed(0)} x ${dims[2].toFixed(0)} mm`;
   };
+
+  // Check if any dimension exceeds build volume
+  const dimensionExceeds = (dims: [number, number, number], buildVol: [number, number, number]) => ({
+    x: dims[0] > buildVol[0],
+    y: dims[1] > buildVol[1],
+    z: dims[2] > buildVol[2],
+  });
 
   return (
     <div className="mesh-segmenter">
@@ -208,17 +374,87 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
       </div>
 
       <div className="segmenter-form">
-        <div className="form-row">
-          <label>
-            STL/3MF File Path
-            <input
-              type="text"
-              value={filePath}
-              onChange={(e) => setFilePath(e.target.value)}
-              placeholder="/path/to/model.stl or artifacts/stl/model.stl"
-            />
-          </label>
+        {/* Input Mode Toggle */}
+        <div className="input-mode-toggle">
+          <button
+            type="button"
+            className={`toggle-btn ${inputMode === 'upload' ? 'active' : ''}`}
+            onClick={() => setInputMode('upload')}
+          >
+            Upload File
+          </button>
+          <button
+            type="button"
+            className={`toggle-btn ${inputMode === 'path' ? 'active' : ''}`}
+            onClick={() => setInputMode('path')}
+          >
+            Enter Path
+          </button>
         </div>
+
+        {inputMode === 'upload' ? (
+          <div
+            className="file-upload-zone"
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".3mf,.stl"
+              onChange={handleFileChange}
+              style={{ display: 'none' }}
+            />
+
+            {uploadProgress !== null ? (
+              <div className="upload-progress">
+                <div className="progress-bar">
+                  <div
+                    className="progress-fill"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+                <span className="progress-text">{uploadProgress}%</span>
+              </div>
+            ) : uploadedFileName ? (
+              <div className="uploaded-file">
+                <span className="file-icon">📁</span>
+                <span className="file-name">{uploadedFileName}</span>
+                <button
+                  type="button"
+                  className="btn-clear"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    clearUpload();
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+            ) : (
+              <div className="upload-placeholder">
+                <span className="upload-icon">📤</span>
+                <span className="upload-text">
+                  Drop 3MF or STL file here, or click to browse
+                </span>
+                <span className="upload-hint">Max file size: 100MB</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="form-row">
+            <label>
+              STL/3MF File Path
+              <input
+                type="text"
+                value={filePath}
+                onChange={(e) => setFilePath(e.target.value)}
+                placeholder="/app/artifacts/3mf/model.3mf"
+              />
+            </label>
+          </div>
+        )}
 
         <div className="form-row two-col">
           <label>
@@ -262,7 +498,7 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
               value={wallThickness}
               onChange={(e) => setWallThickness(parseFloat(e.target.value) || 10.0)}
               min={1.2}
-              max={15}
+              max={50}
               step={0.5}
               disabled={!enableHollowing}
             />
@@ -302,7 +538,7 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
             type="button"
             className="btn-secondary"
             onClick={handleCheck}
-            disabled={checking || !filePath.trim()}
+            disabled={checking || loading || !filePath.trim()}
           >
             {checking ? 'Checking...' : 'Check Dimensions'}
           </button>
@@ -315,6 +551,25 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
             {loading ? 'Segmenting...' : 'Segment Model'}
           </button>
         </div>
+
+        {/* Segmentation Progress */}
+        {loading && (
+          <div className="segmentation-progress">
+            <div className="progress-header">
+              <span>Segmenting model...</span>
+              <span className="progress-percent">{Math.round(segmentProgress)}%</span>
+            </div>
+            <div className="progress-bar">
+              <div
+                className="progress-fill"
+                style={{ width: `${segmentProgress}%` }}
+              />
+            </div>
+            <p className="progress-hint">
+              This may take several minutes for large models with hollowing enabled.
+            </p>
+          </div>
+        )}
       </div>
 
       {error && <div className="status-error">{error}</div>}
@@ -325,11 +580,11 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
           <div className="dimension-comparison">
             <div className="dimension-card">
               <span className="label">Model Size</span>
-              <span className="value">{formatDimensions(checkResult.model_dimensions)}</span>
+              <span className="value">{formatDimensions(checkResult.model_dimensions_mm)}</span>
             </div>
             <div className="dimension-card">
               <span className="label">Build Volume</span>
-              <span className="value">{formatDimensions(checkResult.build_volume)}</span>
+              <span className="value">{formatDimensions(checkResult.build_volume_mm)}</span>
             </div>
           </div>
 
@@ -347,13 +602,16 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
             )}
           </div>
 
-          {checkResult.exceeds && (
-            <div className="exceeds-detail">
-              {checkResult.exceeds.x && <span className="badge badge-warning">Exceeds X</span>}
-              {checkResult.exceeds.y && <span className="badge badge-warning">Exceeds Y</span>}
-              {checkResult.exceeds.z && <span className="badge badge-warning">Exceeds Z</span>}
-            </div>
-          )}
+          {checkResult.needs_segmentation && (() => {
+            const exceeds = dimensionExceeds(checkResult.model_dimensions_mm, checkResult.build_volume_mm);
+            return (
+              <div className="exceeds-detail">
+                {exceeds.x && <span className="badge badge-warning">Exceeds X</span>}
+                {exceeds.y && <span className="badge badge-warning">Exceeds Y</span>}
+                {exceeds.z && <span className="badge badge-warning">Exceeds Z</span>}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -392,20 +650,20 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
                       <th>Part</th>
                       <th>Dimensions</th>
                       <th>Volume</th>
-                      <th>Joints</th>
+                      <th>Supports</th>
                       <th>Download</th>
                     </tr>
                   </thead>
                   <tbody>
                     {segmentResult.parts.map((part) => (
-                      <tr key={part.part_id}>
-                        <td>{part.part_id}</td>
-                        <td>{formatDimensions(part.dimensions)}</td>
-                        <td>{(part.volume_mm3 / 1000).toFixed(1)} cm³</td>
-                        <td>{part.joint_count}</td>
+                      <tr key={part.index}>
+                        <td>{part.name}</td>
+                        <td>{formatDimensions(part.dimensions_mm)}</td>
+                        <td>{part.volume_cm3.toFixed(1)} cm³</td>
+                        <td>{part.requires_supports ? 'Yes' : 'No'}</td>
                         <td>
                           <a
-                            href={`/api/fabrication/artifacts/${part.path.replace('artifacts/', '')}`}
+                            href={`/api/fabrication/artifacts/${part.file_path.replace(/^\/app\/artifacts\//, '').replace(/^artifacts\//, '')}`}
                             className="download-link"
                             download
                           >
@@ -421,12 +679,21 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
               {segmentResult.combined_3mf_path && (
                 <div className="combined-download">
                   <a
-                    href={`/api/fabrication/artifacts/${segmentResult.combined_3mf_path.replace('artifacts/', '')}`}
+                    href={`/api/fabrication/artifacts/${segmentResult.combined_3mf_path.replace(/^\/app\/artifacts\//, '').replace(/^artifacts\//, '')}`}
                     className="btn-primary download-btn"
                     download
                   >
                     📦 Download Combined 3MF Assembly
                   </a>
+                  {completedJobId && (
+                    <a
+                      href={`/api/fabrication/segmentation/download/${completedJobId}`}
+                      className="btn-secondary download-btn"
+                      download
+                    >
+                      📁 Download All Parts (.zip)
+                    </a>
+                  )}
                 </div>
               )}
 
