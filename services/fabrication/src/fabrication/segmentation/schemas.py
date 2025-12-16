@@ -21,9 +21,9 @@ class JointType(str, Enum):
 class HollowingStrategy(str, Enum):
     """When to apply hollowing during segmentation."""
 
-    HOLLOW_THEN_SEGMENT = "hollow_then_segment"  # Hollow first, then segment shell (default)
+    HOLLOW_THEN_SEGMENT = "hollow_then_segment"  # Hollow first via voxelization, then segment
     SEGMENT_THEN_HOLLOW = "segment_then_hollow"  # Segment solid, then hollow each piece
-    SURFACE_SHELL = "surface_shell"  # Preserve original surface, offset inward (best quality)
+    SURFACE_SHELL = "surface_shell"  # Preserve original surface, offset inward (default, best quality)
     NONE = "none"  # No hollowing
 
 
@@ -81,9 +81,9 @@ class SegmentationConfig:
 
     # Wall reinforcement at cuts - adds solid material at cut faces during the split operation
     # This fills the hollow cavity at cut interfaces to enforce minimum wall thickness
-    # Works for all hollowing strategies. Set to wall_thickness_mm for best results.
+    # Works for all hollowing strategies. Recommended: 8mm for structural stability.
     # 0 = disabled, >0 = depth of solid reinforcement at each cut face
-    cut_wall_reinforcement_mm: float = 0.0
+    cut_wall_reinforcement_mm: float = 8.0
 
     # Post-hollowing mesh cleanup
     # Simplification reduces excessive triangles from voxelization
@@ -265,10 +265,10 @@ class SegmentMeshRequest(BaseModel):
         le=60.0,
     )
     cut_wall_reinforcement_mm: float = Field(
-        default=0.0,
+        default=8.0,
         description="Depth of solid wall reinforcement at cut faces (mm). "
         "When cutting hollow meshes, this fills the exposed cavity to enforce minimum wall thickness. "
-        "Set to wall_thickness_mm for best results. 0 = disabled.",
+        "Recommended: 8mm for structural stability. 0 = disabled.",
         ge=0.0,
         le=50.0,
     )
