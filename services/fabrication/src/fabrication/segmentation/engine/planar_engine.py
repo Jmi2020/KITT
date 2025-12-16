@@ -147,6 +147,9 @@ class PlanarSegmentationEngine(SegmentationEngine):
 
         report_progress(0.05, "analyzing")
 
+        # Store original solid mesh for flange creation (before any hollowing)
+        original_solid_mesh = mesh
+
         # HOLLOW FIRST if strategy is HOLLOW_THEN_SEGMENT or SURFACE_SHELL
         # Handle both enum and string values
         should_hollow_first = (
@@ -207,6 +210,16 @@ class PlanarSegmentationEngine(SegmentationEngine):
 
         report_progress(0.60, "post_processing")
 
+        # ADD CUT FACE FLANGES for HOLLOW_THEN_SEGMENT / SURFACE_SHELL strategies
+        # These strategies hollow first, so cut faces are paper-thin
+        # We add solid flanges at cut interfaces using the original solid mesh
+        flange_depth = getattr(self.config, 'cut_face_flange_depth_mm', 10.0)
+        if should_hollow_first and flange_depth > 0 and seam_pairs:
+            LOGGER.info(f"Adding cut face flanges to {len(parts)} pre-hollowed parts...")
+            parts = self._add_flanges_to_parts(
+                parts, seam_pairs, original_solid_mesh, flange_depth
+            )
+
         # HOLLOW AFTER if strategy is SEGMENT_THEN_HOLLOW
         should_hollow_after = (
             strategy == HollowingStrategy.SEGMENT_THEN_HOLLOW
@@ -214,7 +227,26 @@ class PlanarSegmentationEngine(SegmentationEngine):
         )
         if should_hollow_after and self.hollower:
             LOGGER.info("Hollowing parts AFTER segmentation...")
-            parts = self._apply_hollowing(parts)
+
+            # Build mapping of part index to cut planes touching that part
+            # This enables adding solid flanges at cut faces after hollowing
+            part_cut_planes: Dict[int, List[CuttingPlane]] = {i: [] for i in range(len(parts))}
+            for part_a, part_b, plane in seam_pairs:
+                # Find indices of these parts in the current parts list
+                idx_a = self._find_part_index(part_a, parts)
+                idx_b = self._find_part_index(part_b, parts)
+                if idx_a is not None:
+                    part_cut_planes[idx_a].append(plane)
+                if idx_b is not None:
+                    part_cut_planes[idx_b].append(plane)
+
+            # Store original solid parts for flange generation (before hollowing)
+            original_parts = [p for p in parts]  # Shallow copy of list
+
+            parts = self._apply_hollowing(parts, part_cut_planes)
+
+            # Replace hollowed parts with flange-reinforced versions
+            # Note: _apply_hollowing now handles this internally
 
         # APPLY JOINTS to parts if joint generation is enabled
         if self.joint_factory and seam_pairs:
@@ -691,24 +723,329 @@ class PlanarSegmentationEngine(SegmentationEngine):
 
         return target_part, target_idx
 
-    def _apply_hollowing(self, parts: List[MeshWrapper]) -> List[MeshWrapper]:
-        """Apply hollowing to all parts."""
+    def _apply_hollowing(
+        self,
+        parts: List[MeshWrapper],
+        part_cut_planes: Optional[Dict[int, List[CuttingPlane]]] = None,
+    ) -> List[MeshWrapper]:
+        """
+        Apply hollowing to all parts, with optional cut face reinforcement.
+
+        Args:
+            parts: List of mesh parts to hollow
+            part_cut_planes: Optional mapping of part index to cut planes touching that part.
+                            If provided, solid flanges are added at cut faces after hollowing.
+
+        Returns:
+            List of hollowed (and optionally flange-reinforced) parts
+        """
         hollowed_parts = []
+        flange_depth = getattr(self.config, 'cut_face_flange_depth_mm', 10.0)
 
         for i, part in enumerate(parts):
             LOGGER.info(f"Hollowing part {i + 1}/{len(parts)}")
             result = self.hollower.hollow(part)
 
             if result.success and result.mesh is not None:
-                hollowed_parts.append(result.mesh)
+                hollowed_mesh = result.mesh
                 LOGGER.info(
                     f"Part {i + 1}: {result.material_savings_percent:.1f}% material savings"
                 )
+
+                # Add solid flanges at cut faces if enabled
+                if part_cut_planes and i in part_cut_planes and flange_depth > 0:
+                    planes = part_cut_planes[i]
+                    if planes:
+                        LOGGER.info(f"Adding {len(planes)} cut face flange(s) to part {i + 1}")
+                        hollowed_mesh = self._add_cut_face_flanges(
+                            hollowed_mesh, part, planes, flange_depth
+                        )
+
+                hollowed_parts.append(hollowed_mesh)
             else:
                 LOGGER.warning(f"Hollowing failed for part {i + 1}, using solid")
                 hollowed_parts.append(part)
 
         return hollowed_parts
+
+    def _add_cut_face_flanges(
+        self,
+        hollowed_mesh: MeshWrapper,
+        original_part: MeshWrapper,
+        cut_planes: List[CuttingPlane],
+        flange_depth: float,
+    ) -> MeshWrapper:
+        """
+        Add solid flanges at cut faces to reinforce thin walls after hollowing.
+
+        Creates a solid slab at each cut interface, then boolean-unions it with
+        the hollowed mesh. This ensures cut faces have solid mounting surfaces
+        rather than paper-thin shell walls.
+
+        Args:
+            hollowed_mesh: The hollowed mesh to reinforce
+            original_part: The original solid part (used for bounding box)
+            cut_planes: List of cut planes that touch this part
+            flange_depth: Depth of the solid flange (mm)
+
+        Returns:
+            Mesh with flanges added at cut faces
+        """
+        import trimesh
+        import numpy as np
+
+        try:
+            import manifold3d as m3d
+
+            result_mesh = hollowed_mesh.as_trimesh.copy()
+            bbox = original_part.bounding_box
+
+            for plane in cut_planes:
+                # Determine which axis the cut plane is perpendicular to
+                normal = np.array(plane.normal)
+                axis = np.argmax(np.abs(normal))
+                plane_pos = plane.origin[axis]
+
+                # Determine which side of the plane this part is on
+                # by checking if part center is above or below plane
+                part_center = np.array(original_part.bounding_box.center)
+                side = 1 if part_center[axis] > plane_pos else -1
+
+                # Create a box for the flange
+                # Size: covers the full cross-section of the part at the cut plane
+                # Depth: flange_depth into the part
+                if axis == 0:  # X-axis cut
+                    size = [flange_depth, bbox.max_y - bbox.min_y + 2, bbox.max_z - bbox.min_z + 2]
+                    if side > 0:
+                        center = [plane_pos + flange_depth / 2, bbox.center[1], bbox.center[2]]
+                    else:
+                        center = [plane_pos - flange_depth / 2, bbox.center[1], bbox.center[2]]
+                elif axis == 1:  # Y-axis cut
+                    size = [bbox.max_x - bbox.min_x + 2, flange_depth, bbox.max_z - bbox.min_z + 2]
+                    if side > 0:
+                        center = [bbox.center[0], plane_pos + flange_depth / 2, bbox.center[2]]
+                    else:
+                        center = [bbox.center[0], plane_pos - flange_depth / 2, bbox.center[2]]
+                else:  # Z-axis cut
+                    size = [bbox.max_x - bbox.min_x + 2, bbox.max_y - bbox.min_y + 2, flange_depth]
+                    if side > 0:
+                        center = [bbox.center[0], bbox.center[1], plane_pos + flange_depth / 2]
+                    else:
+                        center = [bbox.center[0], bbox.center[1], plane_pos - flange_depth / 2]
+
+                # Create flange box
+                flange_box = trimesh.creation.box(extents=size)
+                flange_box.apply_translation(center)
+
+                # Boolean intersection: flange box with original part shape
+                # This ensures the flange only exists where the original part was
+                original_tm = original_part.as_trimesh
+                try:
+                    # Convert to manifold3d for boolean ops
+                    flange_m3d = m3d.Manifold(m3d.Mesh(
+                        vert_properties=flange_box.vertices.astype(np.float32),
+                        tri_verts=flange_box.faces.astype(np.uint32),
+                    ))
+                    original_m3d = m3d.Manifold(m3d.Mesh(
+                        vert_properties=original_tm.vertices.astype(np.float32),
+                        tri_verts=original_tm.faces.astype(np.uint32),
+                    ))
+
+                    # Intersect flange box with original to get actual flange shape
+                    flange_shape = flange_m3d ^ original_m3d  # Intersection
+
+                    if flange_shape.status() == m3d.Error.NoError and flange_shape.num_tri() > 0:
+                        # Union flange with hollowed mesh
+                        result_m3d = m3d.Manifold(m3d.Mesh(
+                            vert_properties=result_mesh.vertices.astype(np.float32),
+                            tri_verts=result_mesh.faces.astype(np.uint32),
+                        ))
+
+                        combined = result_m3d + flange_shape  # Union
+
+                        if combined.status() == m3d.Error.NoError:
+                            mesh_data = combined.to_mesh()
+                            verts = np.array(mesh_data.vert_properties)[:, :3]
+                            faces = np.array(mesh_data.tri_verts)
+                            result_mesh = trimesh.Trimesh(vertices=verts, faces=faces)
+                            LOGGER.debug(f"Added flange at axis {axis}, position {plane_pos:.1f}")
+                        else:
+                            LOGGER.warning(f"Flange union failed: {combined.status()}")
+                    else:
+                        LOGGER.warning(f"Flange intersection produced empty result")
+
+                except Exception as e:
+                    LOGGER.warning(f"Failed to add flange at plane {plane.origin}: {e}")
+                    continue
+
+            return MeshWrapper(result_mesh)
+
+        except ImportError:
+            LOGGER.warning("manifold3d not available, skipping cut face flanges")
+            return hollowed_mesh
+        except Exception as e:
+            LOGGER.error(f"Cut face flange addition failed: {e}")
+            return hollowed_mesh
+
+    def _add_flanges_to_parts(
+        self,
+        parts: List[MeshWrapper],
+        seam_pairs: List[Tuple[MeshWrapper, MeshWrapper, CuttingPlane]],
+        original_solid_mesh: MeshWrapper,
+        flange_depth: float,
+    ) -> List[MeshWrapper]:
+        """
+        Add solid flanges to pre-hollowed parts at cut faces.
+
+        Used for HOLLOW_THEN_SEGMENT / SURFACE_SHELL strategies where parts
+        are already hollow shells when cut, leaving paper-thin cut faces.
+
+        Args:
+            parts: List of segmented (and possibly hollow) parts
+            seam_pairs: List of (part_a, part_b, plane) tuples from cutting
+            original_solid_mesh: The original solid mesh before hollowing
+            flange_depth: Depth of solid flange to add at cut faces
+
+        Returns:
+            Parts with flanges added at cut faces
+        """
+        import trimesh
+        import numpy as np
+
+        try:
+            import manifold3d as m3d
+        except ImportError:
+            LOGGER.warning("manifold3d not available, skipping cut face flanges")
+            return parts
+
+        # Build mapping of part index to cut planes
+        part_planes: Dict[int, List[CuttingPlane]] = {i: [] for i in range(len(parts))}
+
+        for part_a, part_b, plane in seam_pairs:
+            idx_a = self._find_part_index(part_a, parts)
+            idx_b = self._find_part_index(part_b, parts)
+            if idx_a is not None:
+                part_planes[idx_a].append(plane)
+            if idx_b is not None:
+                part_planes[idx_b].append(plane)
+
+        original_bbox = original_solid_mesh.bounding_box
+        result_parts = []
+
+        for i, part in enumerate(parts):
+            planes = part_planes.get(i, [])
+            if not planes:
+                result_parts.append(part)
+                continue
+
+            try:
+                result_mesh = part.as_trimesh.copy()
+                part_bbox = part.bounding_box
+
+                for plane in planes:
+                    # Determine which axis the cut plane is perpendicular to
+                    normal = np.array(plane.normal)
+                    axis = np.argmax(np.abs(normal))
+                    plane_pos = plane.origin[axis]
+
+                    # Determine which side of the plane this part is on
+                    part_center = np.array(part_bbox.center)
+                    side = 1 if part_center[axis] > plane_pos else -1
+
+                    # Create a flange box at the cut face
+                    # Use the ORIGINAL solid mesh dimensions for proper coverage
+                    if axis == 0:  # X-axis cut
+                        size = [
+                            flange_depth,
+                            original_bbox.max_y - original_bbox.min_y + 2,
+                            original_bbox.max_z - original_bbox.min_z + 2
+                        ]
+                        if side > 0:
+                            center = [plane_pos + flange_depth / 2, part_bbox.center[1], part_bbox.center[2]]
+                        else:
+                            center = [plane_pos - flange_depth / 2, part_bbox.center[1], part_bbox.center[2]]
+                    elif axis == 1:  # Y-axis cut
+                        size = [
+                            original_bbox.max_x - original_bbox.min_x + 2,
+                            flange_depth,
+                            original_bbox.max_z - original_bbox.min_z + 2
+                        ]
+                        if side > 0:
+                            center = [part_bbox.center[0], plane_pos + flange_depth / 2, part_bbox.center[2]]
+                        else:
+                            center = [part_bbox.center[0], plane_pos - flange_depth / 2, part_bbox.center[2]]
+                    else:  # Z-axis cut
+                        size = [
+                            original_bbox.max_x - original_bbox.min_x + 2,
+                            original_bbox.max_y - original_bbox.min_y + 2,
+                            flange_depth
+                        ]
+                        if side > 0:
+                            center = [part_bbox.center[0], part_bbox.center[1], plane_pos + flange_depth / 2]
+                        else:
+                            center = [part_bbox.center[0], part_bbox.center[1], plane_pos - flange_depth / 2]
+
+                    # Create flange box
+                    flange_box = trimesh.creation.box(extents=size)
+                    flange_box.apply_translation(center)
+
+                    # Create a bounding box for the current part (slightly expanded)
+                    # This clips the flange to only the region where this part exists
+                    part_clip_box = trimesh.creation.box(extents=[
+                        part_bbox.max_x - part_bbox.min_x + 4,
+                        part_bbox.max_y - part_bbox.min_y + 4,
+                        part_bbox.max_z - part_bbox.min_z + 4,
+                    ])
+                    part_clip_box.apply_translation(list(part_bbox.center))
+
+                    # Intersect flange with ORIGINAL solid mesh to get proper shape
+                    original_tm = original_solid_mesh.as_trimesh
+                    flange_m3d = m3d.Manifold(m3d.Mesh(
+                        vert_properties=flange_box.vertices.astype(np.float32),
+                        tri_verts=flange_box.faces.astype(np.uint32),
+                    ))
+                    original_m3d = m3d.Manifold(m3d.Mesh(
+                        vert_properties=original_tm.vertices.astype(np.float32),
+                        tri_verts=original_tm.faces.astype(np.uint32),
+                    ))
+                    clip_m3d = m3d.Manifold(m3d.Mesh(
+                        vert_properties=part_clip_box.vertices.astype(np.float32),
+                        tri_verts=part_clip_box.faces.astype(np.uint32),
+                    ))
+
+                    # Intersect: flange_box AND original_solid AND part_clip_box
+                    # This gives us a solid flange that only covers where this part exists
+                    flange_shape = flange_m3d ^ original_m3d ^ clip_m3d
+
+                    if flange_shape.status() != m3d.Error.NoError or flange_shape.num_tri() == 0:
+                        LOGGER.debug(f"Flange intersection empty for part {i} at plane {plane_pos}")
+                        continue
+
+                    # Union flange with the part
+                    result_m3d = m3d.Manifold(m3d.Mesh(
+                        vert_properties=result_mesh.vertices.astype(np.float32),
+                        tri_verts=result_mesh.faces.astype(np.uint32),
+                    ))
+
+                    combined = result_m3d + flange_shape
+
+                    if combined.status() == m3d.Error.NoError:
+                        mesh_data = combined.to_mesh()
+                        verts = np.array(mesh_data.vert_properties)[:, :3]
+                        faces = np.array(mesh_data.tri_verts)
+                        result_mesh = trimesh.Trimesh(vertices=verts, faces=faces)
+                        LOGGER.debug(f"Added flange to part {i} at axis {axis}, pos {plane_pos:.1f}")
+                    else:
+                        LOGGER.warning(f"Flange union failed for part {i}: {combined.status()}")
+
+                result_parts.append(MeshWrapper(result_mesh))
+                LOGGER.info(f"Part {i}: Added {len(planes)} cut face flange(s)")
+
+            except Exception as e:
+                LOGGER.warning(f"Failed to add flanges to part {i}: {e}")
+                result_parts.append(part)
+
+        return result_parts
 
     def _validate_wall_thickness_for_joints(self) -> None:
         """

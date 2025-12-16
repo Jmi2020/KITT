@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useTheme } from '../../contexts/ThemeContext';
 import { KittyBadge } from '../KittyBadge';
@@ -17,10 +18,20 @@ const navItems: NavItem[] = [
   { path: '/settings', icon: '⚙️', label: 'Settings' },
 ];
 
+const moreItems: NavItem[] = [
+  { path: '/dashboard', icon: '📊', label: 'Dashboard' },
+  { path: '/media', icon: '🖼️', label: 'Media Hub' },
+  { path: '/projects', icon: '📁', label: 'Projects' },
+  { path: '/shell', icon: '💬', label: 'Shell' },
+  { path: '/intelligence', icon: '📈', label: 'Intelligence' },
+  { path: '/wall', icon: '🖥️', label: 'Wall' },
+];
+
 export function Layout() {
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
   const isVoicePage = location.pathname === '/voice';
+  const [moreOpen, setMoreOpen] = useState(false);
 
   return (
     <div className="kitty-app">
@@ -42,6 +53,29 @@ export function Layout() {
               {item.icon} {item.label}
             </NavLink>
           ))}
+          <div className="nav-dropdown-wrapper" onMouseLeave={() => setMoreOpen(false)}>
+            <button
+              className="nav-button nav-dropdown-trigger"
+              onClick={() => setMoreOpen(!moreOpen)}
+              onMouseEnter={() => setMoreOpen(true)}
+            >
+              More ▾
+            </button>
+            {moreOpen && (
+              <div className="nav-dropdown-menu">
+                {moreItems.map((item) => (
+                  <NavLink
+                    key={item.path}
+                    to={item.path}
+                    className="nav-dropdown-item"
+                    onClick={() => setMoreOpen(false)}
+                  >
+                    {item.icon} {item.label}
+                  </NavLink>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             className="theme-toggle"
             onClick={toggleTheme}

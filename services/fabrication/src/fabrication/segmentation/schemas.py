@@ -75,6 +75,10 @@ class SegmentationConfig:
     # 200 = fast/coarse (~5mm voxels for 1m model), 500 = medium (~2mm), 1000+ = high quality
     hollowing_resolution: int = 200
 
+    # Cut face reinforcement - add solid flanges at cut interfaces
+    # This prevents paper-thin walls when hollowing cuts through shell walls
+    cut_face_flange_depth_mm: float = 10.0  # Depth of solid flange at cut faces (0 = disabled)
+
     # Post-hollowing mesh cleanup
     # Simplification reduces excessive triangles from voxelization
     enable_simplification: bool = True

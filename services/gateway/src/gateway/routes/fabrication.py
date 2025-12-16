@@ -327,6 +327,120 @@ async def download_segmented_zip(job_id: str):
         raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
 
 
+# === Print Outcome Endpoints ===
+
+
+@router.get("/outcomes/statistics")
+async def get_outcome_statistics(request: Request) -> dict[str, Any]:
+    """
+    Get print outcome statistics.
+
+    Returns success rate, average quality score, duration, and total cost.
+    Proxies to fabrication service.
+    """
+    try:
+        # Forward query params
+        query_string = str(request.query_params) if request.query_params else ""
+        url = f"{FABRICATION_BASE}/api/fabrication/outcomes/statistics"
+        if query_string:
+            url = f"{url}?{query_string}"
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.get("/outcomes")
+async def list_outcomes(request: Request) -> list[dict[str, Any]]:
+    """
+    List print outcomes with optional filters.
+
+    Query params: printer_id, material_id, success, limit, offset
+    Proxies to fabrication service.
+    """
+    try:
+        query_string = str(request.query_params) if request.query_params else ""
+        url = f"{FABRICATION_BASE}/api/fabrication/outcomes"
+        if query_string:
+            url = f"{url}?{query_string}"
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.get("/outcomes/{job_id}")
+async def get_outcome(job_id: str) -> dict[str, Any]:
+    """
+    Get print outcome by job ID.
+
+    Proxies to fabrication service.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{FABRICATION_BASE}/api/fabrication/outcomes/{job_id}")
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.post("/outcomes")
+async def record_outcome(request: Request) -> dict[str, Any]:
+    """
+    Record a print outcome.
+
+    Proxies to fabrication service.
+    """
+    try:
+        data = await request.json()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{FABRICATION_BASE}/api/fabrication/outcomes",
+                json=data
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.patch("/outcomes/{job_id}/review")
+async def update_outcome_review(job_id: str, request: Request) -> dict[str, Any]:
+    """
+    Update print outcome with human review.
+
+    Proxies to fabrication service.
+    """
+    try:
+        data = await request.json()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.patch(
+                f"{FABRICATION_BASE}/api/fabrication/outcomes/{job_id}/review",
+                json=data
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
 @router.get("/artifacts/{file_path:path}")
 async def serve_artifact(file_path: str):
     """

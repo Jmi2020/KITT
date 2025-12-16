@@ -363,6 +363,7 @@ class PrintOutcomeTracker:
         material_id: Optional[str] = None,
         success: Optional[bool] = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> List[PrintOutcome]:
         """List print outcomes with optional filters.
 
@@ -371,6 +372,7 @@ class PrintOutcomeTracker:
             material_id: Filter by material
             success: Filter by success status
             limit: Maximum number of results
+            offset: Number of results to skip (for pagination)
 
         Returns:
             List of matching outcomes, sorted by completed_at descending
@@ -386,7 +388,7 @@ class PrintOutcomeTracker:
         if success is not None:
             query = query.filter(PrintOutcome.success == success)
 
-        outcomes = query.order_by(PrintOutcome.completed_at.desc()).limit(limit).all()
+        outcomes = query.order_by(PrintOutcome.completed_at.desc()).offset(offset).limit(limit).all()
 
         LOGGER.debug(
             "Listed print outcomes",

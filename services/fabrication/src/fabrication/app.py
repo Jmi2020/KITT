@@ -1148,6 +1148,33 @@ async def record_print_outcome(request: RecordOutcomeRequest) -> PrintOutcomeRes
         raise HTTPException(status_code=500, detail=f"Failed to record outcome: {e}")
 
 
+@app.get("/api/fabrication/outcomes/statistics", response_model=OutcomeStatisticsResponse)
+async def get_outcome_statistics(
+    printer_id: Optional[str] = Query(None, description="Filter by printer"),
+    material_id: Optional[str] = Query(None, description="Filter by material"),
+) -> OutcomeStatisticsResponse:
+    """
+    Get print outcome statistics.
+
+    Returns success rate, average quality score, duration, and total cost.
+    Used for printer/material performance tracking and intelligence training.
+    """
+    if not outcome_tracker:
+        raise HTTPException(status_code=500, detail="Outcome tracker not initialized")
+
+    try:
+        stats = outcome_tracker.get_statistics(
+            printer_id=printer_id,
+            material_id=material_id,
+        )
+
+        return OutcomeStatisticsResponse(**stats)
+
+    except Exception as e:
+        LOGGER.error("Failed to get statistics", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get statistics: {e}")
+
+
 @app.get("/api/fabrication/outcomes/{job_id}", response_model=PrintOutcomeResponse)
 async def get_print_outcome(job_id: str) -> PrintOutcomeResponse:
     """
@@ -1254,33 +1281,6 @@ async def update_outcome_review(job_id: str, request: UpdateReviewRequest) -> Pr
     except Exception as e:
         LOGGER.error("Failed to update review", job_id=job_id, error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to update review: {e}")
-
-
-@app.get("/api/fabrication/outcomes/statistics", response_model=OutcomeStatisticsResponse)
-async def get_outcome_statistics(
-    printer_id: Optional[str] = Query(None, description="Filter by printer"),
-    material_id: Optional[str] = Query(None, description="Filter by material"),
-) -> OutcomeStatisticsResponse:
-    """
-    Get print outcome statistics.
-
-    Returns success rate, average quality score, duration, and total cost.
-    Used for printer/material performance tracking and intelligence training.
-    """
-    if not outcome_tracker:
-        raise HTTPException(status_code=500, detail="Outcome tracker not initialized")
-
-    try:
-        stats = outcome_tracker.get_statistics(
-            printer_id=printer_id,
-            material_id=material_id,
-        )
-
-        return OutcomeStatisticsResponse(**stats)
-
-    except Exception as e:
-        LOGGER.error("Failed to get statistics", error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to get statistics: {e}")
 
 
 def _outcome_to_response(outcome: PrintOutcomeModel) -> PrintOutcomeResponse:

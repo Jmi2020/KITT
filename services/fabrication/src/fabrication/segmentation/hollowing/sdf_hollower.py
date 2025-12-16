@@ -159,8 +159,50 @@ class SdfHollower:
             # Get smooth vertex normals
             vertex_normals = tm.vertex_normals
 
-            # Create inner surface by offsetting vertices inward
-            inner_vertices = tm.vertices - vertex_normals * wall_thickness
+            # THIN WALL PROTECTION: Compute safe offset distance per vertex
+            # to prevent paper-thin walls in areas where geometry converges
+            from scipy.spatial import cKDTree
+
+            # Build KD-tree for fast nearest neighbor lookup
+            tree = cKDTree(tm.vertices)
+
+            # Build adjacency set for each vertex (vertices connected by edges)
+            vertex_adjacency = [set() for _ in range(len(tm.vertices))]
+            for face in tm.faces:
+                for i in range(3):
+                    vertex_adjacency[face[i]].update(face)
+
+            # Find 2nd nearest neighbor for each vertex (1st is itself or adjacent)
+            # Query k=10 neighbors to skip adjacent vertices
+            k = min(10, len(tm.vertices))
+            distances, indices = tree.query(tm.vertices, k=k)
+
+            # For each vertex, find distance to nearest NON-ADJACENT vertex
+            safe_offsets = np.full(len(tm.vertices), wall_thickness, dtype=np.float32)
+            min_wall = self.config.min_wall_thickness_mm
+
+            for i in range(len(tm.vertices)):
+                adjacent = vertex_adjacency[i]
+                for j in range(1, k):  # Skip 0 (self)
+                    neighbor_idx = indices[i, j]
+                    if neighbor_idx not in adjacent:
+                        dist = distances[i, j]
+                        if dist < wall_thickness * 2.5:
+                            # Limit offset to prevent crossing over
+                            max_safe_offset = max(min_wall, (dist - min_wall) / 2)
+                            safe_offsets[i] = min(wall_thickness, max_safe_offset)
+                        break  # Found nearest non-adjacent
+
+            # Count vertices with reduced offset (thin regions)
+            reduced_count = np.sum(safe_offsets < wall_thickness * 0.9)
+            if reduced_count > 0:
+                LOGGER.info(
+                    f"Thin wall protection: {reduced_count:,} vertices "
+                    f"({reduced_count / len(tm.vertices) * 100:.1f}%) have reduced offset"
+                )
+
+            # Create inner surface by offsetting vertices inward with safe offsets
+            inner_vertices = tm.vertices - vertex_normals * safe_offsets[:, np.newaxis]
             inner_tm = trimesh.Trimesh(vertices=inner_vertices, faces=tm.faces.copy())
 
             # Aggressively simplify inner mesh - no one sees the inside!
@@ -377,11 +419,36 @@ class SdfHollower:
             # Calculate erosion iterations - need enough to create wall thickness
             erosion_iterations = max(1, int(self.config.wall_thickness_mm / voxel_size))
 
+            # THIN WALL PROTECTION: Use distance transform to identify thin features
+            # that would become paper-thin or disappear after erosion
+            # These areas should be left solid rather than hollowed
+            distance_to_surface = ndimage.distance_transform_edt(filled)
+
+            # Areas where the distance to surface is less than wall_thickness
+            # are "thin features" - the interior doesn't have room for hollowing
+            min_interior_distance = erosion_iterations  # In voxel units
+            thin_feature_mask = (distance_to_surface > 0) & (distance_to_surface < min_interior_distance)
+
+            # Standard erosion for thick regions
             eroded = ndimage.binary_erosion(
                 filled,
                 iterations=erosion_iterations,
             )
+
+            # Create shell, but preserve thin features as solid
             shell = filled & ~eroded
+
+            # Add back thin features as solid (don't hollow them)
+            # This ensures areas that would become paper-thin stay solid
+            thin_features_to_keep = filled & thin_feature_mask
+            shell = shell | thin_features_to_keep
+
+            thin_voxel_count = thin_features_to_keep.sum()
+            if thin_voxel_count > 0:
+                LOGGER.info(
+                    f"Thin wall protection: preserved {thin_voxel_count:,} voxels "
+                    f"({thin_voxel_count / filled.sum() * 100:.1f}% of model) as solid"
+                )
 
             # Convert shell back to mesh using trimesh's VoxelGrid
             from trimesh.voxel import VoxelGrid
