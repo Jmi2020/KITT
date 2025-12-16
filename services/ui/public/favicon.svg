@@ -1,0 +1,19 @@
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- Dark background circle -->
+  <circle cx="16" cy="16" r="15" fill="#0f172a" stroke="#00f3ff" stroke-width="1.5"/>
+  <!-- Cat ears -->
+  <path d="M 8 12 L 10 6 L 13 11" fill="none" stroke="#00f3ff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 24 12 L 22 6 L 19 11" fill="none" stroke="#00f3ff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Cat head -->
+  <ellipse cx="16" cy="15" rx="7" ry="6" fill="none" stroke="#00f3ff" stroke-width="1.2"/>
+  <!-- Eyes -->
+  <ellipse cx="13" cy="14" rx="1.3" ry="1.6" fill="#00f3ff"/>
+  <ellipse cx="19" cy="14" rx="1.3" ry="1.6" fill="#00f3ff"/>
+  <!-- Nose -->
+  <path d="M 15 17 L 16 18.5 L 17 17" fill="none" stroke="#00f3ff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Whiskers -->
+  <line x1="10" y1="16" x2="6" y2="15" stroke="#00f3ff" stroke-width="0.8" stroke-linecap="round"/>
+  <line x1="10" y1="17.5" x2="6" y2="18" stroke="#00f3ff" stroke-width="0.8" stroke-linecap="round"/>
+  <line x1="22" y1="16" x2="26" y2="15" stroke="#00f3ff" stroke-width="0.8" stroke-linecap="round"/>
+  <line x1="22" y1="17.5" x2="26" y2="18" stroke="#00f3ff" stroke-width="0.8" stroke-linecap="round"/>
+</svg>
