@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ssl
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, Optional
@@ -27,7 +28,9 @@ class PrinterStatus:
     current_job: Optional[str] = None
     progress_percent: Optional[float] = None
     bed_temp: Optional[float] = None
+    bed_target: Optional[float] = None
     extruder_temp: Optional[float] = None
+    extruder_target: Optional[float] = None
     last_updated: Optional[datetime] = None
 
 
@@ -97,11 +100,16 @@ class PrinterStatusChecker:
         self._bamboo_mqtt.username_pw_set("bblp", self.settings.bamboo_access_code)
         self._bamboo_mqtt.on_message = self._on_bamboo_message
 
+        # Enable TLS for port 8883 (Bambu LAN mode uses TLS with self-signed certs)
+        if mqtt_port == 8883:
+            self._bamboo_mqtt.tls_set(cert_reqs=ssl.CERT_NONE)
+            self._bamboo_mqtt.tls_insecure_set(True)
+
         try:
             self._bamboo_mqtt.connect(mqtt_host, mqtt_port, keepalive=60)
             self._bamboo_mqtt.subscribe(f"device/{self.settings.bamboo_serial}/report")
             self._bamboo_mqtt.loop_start()
-            LOGGER.info("Connected to Bamboo MQTT", host=mqtt_host, port=mqtt_port)
+            LOGGER.info("Connected to Bamboo MQTT", host=mqtt_host, port=mqtt_port, tls=mqtt_port == 8883)
         except Exception as e:
             LOGGER.error("Failed to connect to Bamboo MQTT", error=str(e))
 
@@ -117,6 +125,7 @@ class PrinterStatusChecker:
         Check Elegoo Giga status via Moonraker HTTP.
 
         Returns cached status if fresh (<30s old).
+        Queries full thermal data including bed/nozzle temps and targets.
         """
         printer_id = "elegoo_giga"
 
@@ -128,23 +137,57 @@ class PrinterStatusChecker:
                 LOGGER.debug("Using cached Elegoo status", age_seconds=age.total_seconds())
                 return cached
 
-        # Query Moonraker
+        # Query Moonraker for full status including thermals
         try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                # Query printer objects for status, temps, and progress
                 response = await client.get(
-                    f"http://{self.settings.elegoo_ip}:{self.settings.elegoo_moonraker_port}/printer/info"
+                    f"http://{self.settings.elegoo_ip}:{self.settings.elegoo_moonraker_port}"
+                    f"/printer/objects/query?print_stats&heater_bed&extruder&virtual_sdcard"
                 )
                 response.raise_for_status()
-                data = response.json()
+                result = response.json().get("result", {})
+                data = result.get("status", {})
 
-                state = data.get("result", {}).get("state", "offline")
+                # Extract print state
+                print_stats = data.get("print_stats", {})
+                state = print_stats.get("state", "standby")
                 is_printing = state == "printing"
+
+                # Map Klipper states to our status strings
+                state_map = {
+                    "standby": "idle",
+                    "printing": "printing",
+                    "paused": "paused",
+                    "complete": "idle",
+                    "cancelled": "idle",
+                    "error": "error",
+                }
+                status_str = state_map.get(state, "idle")
+
+                # Extract thermal data
+                heater_bed = data.get("heater_bed", {})
+                extruder = data.get("extruder", {})
+                virtual_sd = data.get("virtual_sdcard", {})
+
+                # Calculate progress (Moonraker returns 0.0-1.0, we want 0-100)
+                progress = virtual_sd.get("progress", 0)
+                progress_percent = round(progress * 100, 1) if progress else None
+
+                # Get current job filename
+                current_job = print_stats.get("filename") if is_printing else None
 
                 status = PrinterStatus(
                     printer_id=printer_id,
                     is_online=True,
                     is_printing=is_printing,
-                    status="printing" if is_printing else "idle",
+                    status=status_str,
+                    current_job=current_job,
+                    progress_percent=progress_percent,
+                    bed_temp=heater_bed.get("temperature"),
+                    bed_target=heater_bed.get("target"),
+                    extruder_temp=extruder.get("temperature"),
+                    extruder_target=extruder.get("target"),
                     last_updated=datetime.now()
                 )
 

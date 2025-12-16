@@ -1,0 +1,242 @@
+.thermal-panel {
+  background: var(--bg-secondary, #1e1e1e);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.thermal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.thermal-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+}
+
+.refresh-btn {
+  background: transparent;
+  border: 1px solid var(--border-color, #333);
+  color: var(--text-secondary, #888);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.refresh-btn:hover {
+  background: var(--bg-hover, #333);
+  color: var(--text-primary, #fff);
+}
+
+.thermal-error {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+  padding: 8px 12px;
+  border-radius: 4px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.thermal-error button {
+  background: transparent;
+  border: none;
+  color: #f87171;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+}
+
+.thermal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.thermal-card {
+  background: var(--bg-tertiary, #2a2a2a);
+  border-radius: 6px;
+  padding: 12px;
+  text-align: center;
+}
+
+.thermal-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.thermal-current {
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 2px;
+}
+
+/* Temperature color states */
+.temp-unknown {
+  color: var(--text-secondary, #888);
+}
+
+.temp-cold {
+  color: #60a5fa; /* blue */
+}
+
+.temp-heating {
+  color: #fb923c; /* orange - heating up */
+}
+
+.temp-at-target {
+  color: #4ade80; /* green - at target */
+}
+
+.temp-cooling {
+  color: #f472b6; /* pink - cooling down */
+}
+
+.thermal-target {
+  font-size: 11px;
+  color: var(--text-secondary, #666);
+  margin-bottom: 8px;
+}
+
+.thermal-controls {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+
+.thermal-controls input {
+  width: 60px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color, #333);
+  border-radius: 4px;
+  background: var(--bg-primary, #121212);
+  color: var(--text-primary, #fff);
+  font-size: 12px;
+  text-align: center;
+}
+
+.thermal-controls input:focus {
+  outline: none;
+  border-color: var(--accent-color, #3b82f6);
+}
+
+.thermal-controls button {
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.set-btn {
+  background: var(--accent-color, #3b82f6);
+  border: none;
+  color: white;
+}
+
+.set-btn:hover:not(:disabled) {
+  background: var(--accent-hover, #2563eb);
+}
+
+.set-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.off-btn {
+  background: transparent;
+  border: 1px solid var(--border-color, #444);
+  color: var(--text-secondary, #888);
+}
+
+.off-btn:hover:not(:disabled) {
+  border-color: #ef4444;
+  color: #f87171;
+}
+
+.off-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Preheat presets */
+.thermal-presets {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.preset-label {
+  font-size: 11px;
+  color: var(--text-secondary, #666);
+  margin-right: 4px;
+}
+
+.preset-btn {
+  padding: 4px 10px;
+  background: var(--bg-tertiary, #2a2a2a);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 4px;
+  color: var(--text-primary, #fff);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.preset-btn:hover:not(:disabled) {
+  background: var(--bg-hover, #333);
+  border-color: var(--accent-color, #3b82f6);
+}
+
+.preset-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cooldown-btn {
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid #ef4444;
+  border-radius: 4px;
+  color: #f87171;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cooldown-btn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.cooldown-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Responsive */
+@media (max-width: 400px) {
+  .thermal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .thermal-presets {
+    justify-content: center;
+  }
+}

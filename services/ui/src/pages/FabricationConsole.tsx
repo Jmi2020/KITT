@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import useKittyContext from '../hooks/useKittyContext';
 import MeshSegmenter from '../components/MeshSegmenter';
+import ThermalPanel from '../components/ThermalPanel';
+import GcodeConsole from '../components/GcodeConsole';
 import './FabricationConsole.css';
 
 interface Artifact {
@@ -35,6 +37,19 @@ interface CadResponse {
   artifacts: Artifact[];
 }
 
+interface PrinterStatus {
+  printer_id: string;
+  is_online: boolean;
+  is_printing: boolean;
+  status: string;
+  current_job: string | null;
+  progress_percent: number | null;
+  bed_temp: number | null;
+  bed_target: number | null;
+  extruder_temp: number | null;
+  extruder_target: number | null;
+}
+
 const FabricationConsole = () => {
   const { context } = useKittyContext();
   const [cadPrompt, setCadPrompt] = useState('');
@@ -46,18 +61,38 @@ const FabricationConsole = () => {
   const [selectedPrinter, setSelectedPrinter] = useState<string>('');
   const [printStatus, setPrintStatus] = useState<string>('');
 
-  const printers = useMemo(() => {
-    return Object.values(context.devices).filter((device) => {
-      const meta = device.payload || {};
-      const category = typeof meta.category === 'string' ? meta.category.toLowerCase() : '';
-      const type = typeof meta.type === 'string' ? meta.type.toLowerCase() : '';
-      return category === 'printer' || type === 'printer' || device.deviceId.toLowerCase().includes('print');
-    });
-  }, [context.devices]);
+  // Printer status from REST API (replaces MQTT-based device filtering)
+  const [printers, setPrinters] = useState<PrinterStatus[]>([]);
+  const [printersLoading, setPrintersLoading] = useState(true);
 
+  // Fetch printer status from fabrication service
+  const fetchPrinters = useCallback(async () => {
+    try {
+      const response = await fetch('/api/fabrication/printer_status');
+      if (response.ok) {
+        const data = await response.json();
+        setPrinters(Object.values(data.printers) as PrinterStatus[]);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch printers:', err);
+    } finally {
+      setPrintersLoading(false);
+    }
+  }, []);
+
+  // Poll printer status - faster when Elegoo is selected for thermal responsiveness
+  useEffect(() => {
+    fetchPrinters();
+    // Use 2s polling when Elegoo is selected (for thermal updates), 10s otherwise
+    const pollInterval = selectedPrinter === 'elegoo_giga' ? 2000 : 10000;
+    const interval = setInterval(fetchPrinters, pollInterval);
+    return () => clearInterval(interval);
+  }, [fetchPrinters, selectedPrinter]);
+
+  // Auto-select first printer
   useEffect(() => {
     if (printers.length && !selectedPrinter) {
-      setSelectedPrinter(printers[0].deviceId);
+      setSelectedPrinter(printers[0].printer_id);
     }
   }, [printers, selectedPrinter]);
 
@@ -237,17 +272,19 @@ const FabricationConsole = () => {
       <div className="panel">
         <h3>Printer Selection</h3>
         {printers.length === 0 ? (
-          <p>
-            No printers online. Ensure devices publish to{' '}
-            <code>kitty/devices/&lt;printer&gt;/state</code>.
-          </p>
+          printersLoading ? (
+            <p>Loading printers...</p>
+          ) : (
+            <p>No printers configured. Check fabrication service connection.</p>
+          )
         ) : (
           <label>
             Printer
             <select value={selectedPrinter} onChange={(event) => setSelectedPrinter(event.target.value)}>
               {printers.map((printer) => (
-                <option key={printer.deviceId} value={printer.deviceId}>
-                  {printer.deviceId} — {printer.status}
+                <option key={printer.printer_id} value={printer.printer_id}>
+                  {printer.printer_id} — {printer.is_online ? printer.status : 'offline'}
+                  {printer.is_printing && printer.progress_percent !== null && ` (${printer.progress_percent}%)`}
                 </option>
               ))}
             </select>
@@ -258,6 +295,32 @@ const FabricationConsole = () => {
         </button>
         {printStatus && <p>{printStatus}</p>}
       </div>
+
+      {/* Elegoo Giga Control Panel - shown when Elegoo is selected */}
+      {selectedPrinter === 'elegoo_giga' && (() => {
+        const elegooStatus = printers.find(p => p.printer_id === 'elegoo_giga');
+        return (
+          <div className="panel elegoo-control-panel">
+            <h3>Elegoo Giga Control</h3>
+            {elegooStatus?.is_online ? (
+              <>
+                <ThermalPanel
+                  bedTemp={elegooStatus.bed_temp}
+                  bedTarget={elegooStatus.bed_target}
+                  nozzleTemp={elegooStatus.extruder_temp}
+                  nozzleTarget={elegooStatus.extruder_target}
+                  onRefresh={fetchPrinters}
+                />
+                <GcodeConsole printerId="elegoo_giga" />
+              </>
+            ) : (
+              <p className="offline-message">
+                Printer is offline. Check connection to 192.168.0.63.
+              </p>
+            )}
+          </div>
+        );
+      })()}
     </section>
   );
 };

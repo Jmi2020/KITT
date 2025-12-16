@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -731,6 +732,203 @@ async def get_printer_status() -> PrinterStatusResponse:
     except Exception as e:
         LOGGER.error("Failed to get printer status", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get status: {e}")
+
+
+# ============================================================================
+# Elegoo Giga Direct Control Endpoints (Moonraker API)
+# ============================================================================
+
+
+class SetTemperatureRequest(BaseModel):
+    """Request to set bed or nozzle temperature."""
+    heater: str = Field(..., description="Heater to control: 'heater_bed' or 'extruder'")
+    target: float = Field(..., ge=0, le=350, description="Target temperature in Celsius")
+
+
+class SetTemperatureResponse(BaseModel):
+    """Response from temperature set request."""
+    success: bool
+    heater: str
+    target: float
+    message: str
+
+
+class SendGcodeRequest(BaseModel):
+    """Request to send G-code command to printer."""
+    command: str = Field(..., min_length=1, description="G-code command(s) to execute")
+
+
+class GcodeResponse(BaseModel):
+    """Response from G-code execution."""
+    success: bool
+    command: str
+    response: Optional[str] = None
+    error: Optional[str] = None
+
+
+class GcodeHistoryEntry(BaseModel):
+    """Single entry from G-code history."""
+    message: str
+    time: float
+    type: str = "command"
+
+
+class GcodeHistoryResponse(BaseModel):
+    """Response containing G-code history."""
+    history: List[GcodeHistoryEntry]
+
+
+@app.post("/api/fabrication/elegoo/temperature")
+async def set_elegoo_temperature(request: SetTemperatureRequest) -> SetTemperatureResponse:
+    """
+    Set bed or nozzle temperature on the Elegoo Giga.
+
+    Heater options:
+    - 'heater_bed': Set bed temperature (M140)
+    - 'extruder': Set nozzle/extruder temperature (M104)
+
+    Target is in Celsius. Set to 0 to turn off heater.
+    """
+    # Validate heater name
+    if request.heater not in ("heater_bed", "extruder"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid heater: {request.heater}. Must be 'heater_bed' or 'extruder'"
+        )
+
+    # Build G-code command
+    if request.heater == "heater_bed":
+        gcode = f"M140 S{request.target}"
+    else:
+        gcode = f"M104 S{request.target}"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"http://{settings.elegoo_ip}:{settings.elegoo_moonraker_port}/printer/gcode/script",
+                json={"script": gcode}
+            )
+            response.raise_for_status()
+
+            LOGGER.info(
+                "Set Elegoo temperature",
+                heater=request.heater,
+                target=request.target,
+                gcode=gcode
+            )
+
+            return SetTemperatureResponse(
+                success=True,
+                heater=request.heater,
+                target=request.target,
+                message=f"Temperature set to {request.target}°C"
+            )
+
+    except httpx.TimeoutException:
+        LOGGER.error("Timeout setting Elegoo temperature", heater=request.heater)
+        raise HTTPException(status_code=504, detail="Printer connection timeout")
+    except httpx.HTTPStatusError as e:
+        LOGGER.error("HTTP error setting temperature", status=e.response.status_code)
+        raise HTTPException(status_code=502, detail=f"Printer error: {e.response.status_code}")
+    except Exception as e:
+        LOGGER.error("Failed to set temperature", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to set temperature: {e}")
+
+
+@app.post("/api/fabrication/elegoo/gcode")
+async def send_elegoo_gcode(request: SendGcodeRequest) -> GcodeResponse:
+    """
+    Send a G-code command to the Elegoo Giga.
+
+    Common commands:
+    - G28: Home all axes
+    - G28 X Y: Home X and Y only
+    - M114: Report current position
+    - M503: Report settings
+    - M106 S255: Fan on full
+    - M107: Fan off
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"http://{settings.elegoo_ip}:{settings.elegoo_moonraker_port}/printer/gcode/script",
+                json={"script": request.command}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            LOGGER.info("Sent G-code to Elegoo", command=request.command)
+
+            return GcodeResponse(
+                success=True,
+                command=request.command,
+                response=result.get("result", "ok")
+            )
+
+    except httpx.TimeoutException:
+        LOGGER.error("Timeout sending G-code", command=request.command)
+        return GcodeResponse(
+            success=False,
+            command=request.command,
+            error="Printer connection timeout"
+        )
+    except httpx.HTTPStatusError as e:
+        LOGGER.error("HTTP error sending G-code", command=request.command, status=e.response.status_code)
+        return GcodeResponse(
+            success=False,
+            command=request.command,
+            error=f"Printer error: {e.response.status_code}"
+        )
+    except Exception as e:
+        LOGGER.error("Failed to send G-code", command=request.command, error=str(e))
+        return GcodeResponse(
+            success=False,
+            command=request.command,
+            error=str(e)
+        )
+
+
+@app.get("/api/fabrication/elegoo/gcode_history")
+async def get_elegoo_gcode_history(
+    count: int = Query(50, ge=1, le=500, description="Number of entries to retrieve")
+) -> GcodeHistoryResponse:
+    """
+    Get recent G-code command history from the Elegoo Giga.
+
+    Returns the last N commands sent to the printer along with timestamps.
+    This is useful for debugging and monitoring printer activity.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"http://{settings.elegoo_ip}:{settings.elegoo_moonraker_port}/server/gcode_store",
+                params={"count": count}
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            gcode_store = result.get("result", {}).get("gcode_store", [])
+
+            history = [
+                GcodeHistoryEntry(
+                    message=entry.get("message", ""),
+                    time=entry.get("time", 0),
+                    type=entry.get("type", "command")
+                )
+                for entry in gcode_store
+            ]
+
+            return GcodeHistoryResponse(history=history)
+
+    except httpx.TimeoutException:
+        LOGGER.error("Timeout getting G-code history")
+        raise HTTPException(status_code=504, detail="Printer connection timeout")
+    except httpx.HTTPStatusError as e:
+        LOGGER.error("HTTP error getting G-code history", status=e.response.status_code)
+        raise HTTPException(status_code=502, detail=f"Printer error: {e.response.status_code}")
+    except Exception as e:
+        LOGGER.error("Failed to get G-code history", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get history: {e}")
 
 
 # ============================================================================
