@@ -261,6 +261,31 @@ class PlanarSegmentationEngine(SegmentationEngine):
         report_progress(1.0, "complete")
         return result
 
+    def execute_cut(
+        self, mesh: MeshWrapper, plane: CuttingPlane
+    ) -> Tuple[MeshWrapper, MeshWrapper]:
+        """
+        Execute a cut on the mesh with optional wall reinforcement.
+
+        Overrides base class to add wall reinforcement at cut faces when
+        cut_wall_reinforcement_mm is configured. This prevents paper-thin
+        walls when cutting hollow meshes.
+
+        Args:
+            mesh: Mesh to cut
+            plane: Cutting plane
+
+        Returns:
+            Tuple of (positive_half, negative_half)
+        """
+        # Get wall reinforcement depth from config (default 0 = disabled)
+        wall_reinforcement = getattr(self.config, 'cut_wall_reinforcement_mm', 0.0)
+
+        if wall_reinforcement > 0:
+            LOGGER.debug(f"Cutting with wall reinforcement: {wall_reinforcement}mm")
+
+        return mesh.split(plane, wall_reinforcement_mm=wall_reinforcement)
+
     def find_best_cut(
         self, mesh: MeshWrapper, state: SegmentationState
     ) -> Optional[CutCandidate]:

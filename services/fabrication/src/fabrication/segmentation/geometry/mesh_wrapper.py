@@ -199,12 +199,22 @@ class MeshWrapper:
 
     # === Operations ===
 
-    def split(self, plane: CuttingPlane) -> Tuple["MeshWrapper", "MeshWrapper"]:
+    def split(
+        self,
+        plane: CuttingPlane,
+        wall_reinforcement_mm: float = 0.0,
+    ) -> Tuple["MeshWrapper", "MeshWrapper"]:
         """
         Split mesh along plane using Manifold3D.
 
         Returns (positive_half, negative_half) relative to plane normal.
         Manifold3D guarantees both halves are manifold with capped faces.
+
+        Args:
+            plane: The cutting plane
+            wall_reinforcement_mm: If > 0, adds solid material at cut faces to
+                                   enforce minimum wall thickness. This prevents
+                                   paper-thin walls when cutting hollow meshes.
         """
         try:
             import manifold3d as m3d
@@ -228,11 +238,355 @@ class MeshWrapper:
             positive = MeshWrapper._from_manifold(positive_manifold)
             negative = MeshWrapper._from_manifold(negative_manifold)
 
+            # Apply wall reinforcement if requested
+            if wall_reinforcement_mm > 0:
+                positive = self._add_cut_face_reinforcement(
+                    positive, plane, "positive", wall_reinforcement_mm
+                )
+                negative = self._add_cut_face_reinforcement(
+                    negative, plane, "negative", wall_reinforcement_mm
+                )
+
             return (positive, negative)
 
         except ImportError:
             LOGGER.warning("manifold3d not available, falling back to trimesh")
             return self._split_trimesh(plane)
+
+    def _add_cut_face_reinforcement(
+        self,
+        part: "MeshWrapper",
+        plane: CuttingPlane,
+        side: str,
+        depth_mm: float,
+    ) -> "MeshWrapper":
+        """
+        Add solid reinforcement at the cut face to prevent paper-thin walls.
+
+        When cutting a hollow shell, the cut face exposes the cavity. This method
+        fills the cut face area with solid material extending inward by depth_mm.
+
+        Strategy:
+        1. Create a solid slab at the cut face extending into the part
+        2. Get the cut face contour (boundary of the part at the cut plane)
+        3. Extrude the contour to create a solid cap that fills the cavity
+        4. Union the cap with the part
+
+        Args:
+            part: The cut mesh part to reinforce
+            plane: The cutting plane
+            side: "positive" or "negative" - which side of the plane this part is on
+            depth_mm: How deep the solid reinforcement extends into the part
+
+        Returns:
+            MeshWrapper with solid reinforcement at cut face
+        """
+        try:
+            import manifold3d as m3d
+
+            # Get part trimesh for cross-section extraction
+            tm = part.as_trimesh
+
+            # Determine which axis the plane is perpendicular to
+            normal = np.array(plane.normal)
+            axis = int(np.argmax(np.abs(normal)))
+            plane_pos = plane.origin[axis]
+
+            # Extract the cross-section at the cut plane
+            # This gives us the 2D contour of the part at the cut face
+            try:
+                # Use trimesh section to get the cut face contour
+                section = tm.section(
+                    plane_origin=plane.origin,
+                    plane_normal=plane.normal,
+                )
+
+                if section is None:
+                    LOGGER.debug(f"No cross-section found at cut plane for {side} side, using box method")
+                    return self._add_cut_face_reinforcement_box(part, plane, side, depth_mm)
+
+                # Get the 2D path and convert to 3D polygon
+                path_2d, transform = section.to_planar()
+
+                if path_2d is None or len(path_2d.polygons_closed) == 0:
+                    LOGGER.debug(f"No closed polygons in cross-section for {side} side, using box method")
+                    return self._add_cut_face_reinforcement_box(part, plane, side, depth_mm)
+
+                # Create a solid extrusion from the cross-section
+                # Extrude in the direction INTO the part
+                extrude_dir = -1 if side == "positive" else 1
+                if normal[axis] < 0:
+                    extrude_dir *= -1
+
+                # Extrude the 2D cross-section to create a solid cap
+                extrusion = path_2d.extrude(depth_mm * extrude_dir)
+
+                if extrusion is None or len(extrusion.vertices) == 0:
+                    LOGGER.debug(f"Extrusion failed for {side} side, using box method")
+                    return self._add_cut_face_reinforcement_box(part, plane, side, depth_mm)
+
+                # Transform back to 3D space
+                extrusion.apply_transform(transform)
+
+                # Ensure the extrusion is positioned correctly at the cut face
+                # The section is at plane_pos, extrusion goes INTO the part
+                # Check if we need to shift the extrusion
+                ext_bounds = extrusion.bounds
+                ext_center_axis = (ext_bounds[0][axis] + ext_bounds[1][axis]) / 2
+
+                # The extrusion should start at the cut plane and go INTO the part
+                # If side=="positive", part is above plane, extrusion should go up (+)
+                # If side=="negative", part is below plane, extrusion should go down (-)
+                if side == "positive":
+                    # Part is on + side, extrusion should be between plane_pos and plane_pos+depth
+                    target_min = plane_pos
+                    actual_min = ext_bounds[0][axis]
+                    shift = target_min - actual_min
+                else:
+                    # Part is on - side, extrusion should be between plane_pos-depth and plane_pos
+                    target_max = plane_pos
+                    actual_max = ext_bounds[1][axis]
+                    shift = target_max - actual_max
+
+                if abs(shift) > 0.01:  # Only shift if needed
+                    shift_vec = np.zeros(3)
+                    shift_vec[axis] = shift
+                    extrusion.apply_translation(shift_vec)
+
+                # Convert extrusion to manifold and union with part
+                ext_m3d = m3d.Manifold(m3d.Mesh(
+                    vert_properties=extrusion.vertices.astype(np.float32),
+                    tri_verts=extrusion.faces.astype(np.uint32),
+                ))
+
+                part_m3d = part.as_manifold
+
+                # Union: adds the solid cap to fill the cavity
+                result_m3d = part_m3d + ext_m3d
+
+                if result_m3d.status() != m3d.Error.NoError:
+                    LOGGER.warning(f"Cut face reinforcement union failed: {result_m3d.status()}")
+                    return part
+
+                result = MeshWrapper._from_manifold(result_m3d)
+
+                # Log the volume change
+                orig_vol = part.volume_cm3
+                new_vol = result.volume_cm3
+                added = new_vol - orig_vol
+                if added > 0.01:  # Only log if meaningful change
+                    LOGGER.info(
+                        f"Cut face reinforcement ({side}): "
+                        f"+{added:.2f} cm³ ({depth_mm}mm cap)"
+                    )
+
+                return result
+
+            except Exception as e:
+                LOGGER.warning(f"Cross-section extraction failed: {e}, trying box method")
+                # Fall back to simple box-based approach
+                return self._add_cut_face_reinforcement_box(part, plane, side, depth_mm)
+
+        except ImportError:
+            LOGGER.warning("manifold3d not available for cut face reinforcement")
+            return part
+        except Exception as e:
+            LOGGER.warning(f"Cut face reinforcement failed: {e}")
+            return part
+
+    def _add_cut_face_reinforcement_box(
+        self,
+        part: "MeshWrapper",
+        plane: CuttingPlane,
+        side: str,
+        depth_mm: float,
+    ) -> "MeshWrapper":
+        """
+        Box-based cut face reinforcement that fills hollow interiors.
+
+        Creates a solid slab at the cut face that fills the hollow cavity,
+        providing solid mounting surfaces for assembly.
+
+        Strategy:
+        1. Get the convex hull of the cut face (outer boundary)
+        2. Create a solid disk/cylinder from the hull
+        3. Trim to match the part's outer profile
+        4. Union with the part to fill the cavity
+        """
+        try:
+            import manifold3d as m3d
+
+            bbox = part.bounding_box
+            normal = np.array(plane.normal)
+            axis = int(np.argmax(np.abs(normal)))
+            plane_pos = plane.origin[axis]
+
+            # Get the cross-section size at the cut plane
+            # For a proper solid fill, we create a cylinder/disk that matches
+            # the OUTER boundary of the part at the cut face
+            if axis == 0:  # X-axis cut
+                # Cross-section is in Y-Z plane
+                radius = max(
+                    bbox.max_y - bbox.center[1],
+                    bbox.center[1] - bbox.min_y,
+                    bbox.max_z - bbox.center[2],
+                    bbox.center[2] - bbox.min_z,
+                ) + 1.0  # Slight margin
+                center_2d = (bbox.center[1], bbox.center[2])
+            elif axis == 1:  # Y-axis cut
+                # Cross-section is in X-Z plane
+                radius = max(
+                    bbox.max_x - bbox.center[0],
+                    bbox.center[0] - bbox.min_x,
+                    bbox.max_z - bbox.center[2],
+                    bbox.center[2] - bbox.min_z,
+                ) + 1.0
+                center_2d = (bbox.center[0], bbox.center[2])
+            else:  # Z-axis cut
+                # Cross-section is in X-Y plane
+                radius = max(
+                    bbox.max_x - bbox.center[0],
+                    bbox.center[0] - bbox.min_x,
+                    bbox.max_y - bbox.center[1],
+                    bbox.center[1] - bbox.min_y,
+                ) + 1.0
+                center_2d = (bbox.center[0], bbox.center[1])
+
+            # Create a cylinder that covers the entire cross-section
+            # This will be trimmed to the part's actual boundary
+            cylinder = trimesh.creation.cylinder(
+                radius=radius,
+                height=depth_mm,
+                sections=64,  # Smooth circular cross-section
+            )
+
+            # Rotate cylinder to align with cut axis
+            if axis == 0:  # X-axis
+                # Cylinder default is Z-up, rotate to X-up
+                cylinder.apply_transform(trimesh.transformations.rotation_matrix(
+                    np.pi / 2, [0, 1, 0]
+                ))
+                if side == "positive":
+                    cylinder.apply_translation([plane_pos + depth_mm / 2, center_2d[0], center_2d[1]])
+                else:
+                    cylinder.apply_translation([plane_pos - depth_mm / 2, center_2d[0], center_2d[1]])
+            elif axis == 1:  # Y-axis
+                # Rotate to Y-up
+                cylinder.apply_transform(trimesh.transformations.rotation_matrix(
+                    np.pi / 2, [1, 0, 0]
+                ))
+                if side == "positive":
+                    cylinder.apply_translation([center_2d[0], plane_pos + depth_mm / 2, center_2d[1]])
+                else:
+                    cylinder.apply_translation([center_2d[0], plane_pos - depth_mm / 2, center_2d[1]])
+            else:  # Z-axis (default orientation)
+                if side == "positive":
+                    cylinder.apply_translation([center_2d[0], center_2d[1], plane_pos + depth_mm / 2])
+                else:
+                    cylinder.apply_translation([center_2d[0], center_2d[1], plane_pos - depth_mm / 2])
+
+            # Convert cylinder to manifold
+            cyl_m3d = m3d.Manifold(m3d.Mesh(
+                vert_properties=cylinder.vertices.astype(np.float32),
+                tri_verts=cylinder.faces.astype(np.uint32),
+            ))
+
+            part_m3d = part.as_manifold
+
+            # INTERSECT cylinder with part to get the shape that matches
+            # the part's boundary at the cut face
+            # This trims the cylinder to only where the part exists
+            trimmed_disk = cyl_m3d ^ part_m3d
+
+            if trimmed_disk.status() != m3d.Error.NoError or trimmed_disk.num_tri() == 0:
+                LOGGER.debug(f"Cylinder trim failed for {side} side")
+                return part
+
+            # The trimmed disk is the shell walls at the cut face
+            # For a hollow part, this is just the ring (annulus)
+            # To FILL the cavity, we need a different approach:
+            # Create a solid version by filling inside the outer boundary
+
+            # Get the outer profile of the part at the cut plane
+            # by checking which part of the cylinder is OUTSIDE the part
+            # and then filling everything inside
+
+            # Alternative: Use the bounding box intersection as a solid fill
+            # This is simpler and works for most shapes
+            slab_size = [0, 0, 0]
+            slab_center = list(bbox.center)
+
+            margin = 0.5  # Small overlap with part
+            if axis == 0:
+                slab_size = [depth_mm, bbox.max_y - bbox.min_y + margin, bbox.max_z - bbox.min_z + margin]
+                if side == "positive":
+                    slab_center[0] = plane_pos + depth_mm / 2
+                else:
+                    slab_center[0] = plane_pos - depth_mm / 2
+            elif axis == 1:
+                slab_size = [bbox.max_x - bbox.min_x + margin, depth_mm, bbox.max_z - bbox.min_z + margin]
+                if side == "positive":
+                    slab_center[1] = plane_pos + depth_mm / 2
+                else:
+                    slab_center[1] = plane_pos - depth_mm / 2
+            else:
+                slab_size = [bbox.max_x - bbox.min_x + margin, bbox.max_y - bbox.min_y + margin, depth_mm]
+                if side == "positive":
+                    slab_center[2] = plane_pos + depth_mm / 2
+                else:
+                    slab_center[2] = plane_pos - depth_mm / 2
+
+            slab_box = trimesh.creation.box(extents=slab_size)
+            slab_box.apply_translation(slab_center)
+
+            slab_m3d = m3d.Manifold(m3d.Mesh(
+                vert_properties=slab_box.vertices.astype(np.float32),
+                tri_verts=slab_box.faces.astype(np.uint32),
+            ))
+
+            # Get the HULL of the part's boundary at the cut plane
+            # by trimming the slab to the convex hull of the part
+            # First, create a reference "solid" from the part's convex hull
+            part_tm = part.as_trimesh
+            hull = part_tm.convex_hull
+
+            hull_m3d = m3d.Manifold(m3d.Mesh(
+                vert_properties=hull.vertices.astype(np.float32),
+                tri_verts=hull.faces.astype(np.uint32),
+            ))
+
+            # Intersect slab with hull to get solid disk matching outer profile
+            solid_disk = slab_m3d ^ hull_m3d
+
+            if solid_disk.status() != m3d.Error.NoError or solid_disk.num_tri() == 0:
+                LOGGER.debug(f"Hull intersection failed for {side} side")
+                return part
+
+            # Union the solid disk with the part
+            # This fills the hollow cavity at the cut face
+            result_m3d = part_m3d + solid_disk
+
+            if result_m3d.status() != m3d.Error.NoError:
+                LOGGER.warning(f"Cut face fill union failed: {result_m3d.status()}")
+                return part
+
+            result = MeshWrapper._from_manifold(result_m3d)
+
+            # Log volume change
+            orig_vol = part.volume_cm3
+            new_vol = result.volume_cm3
+            added = new_vol - orig_vol
+            if added > 0.01:
+                LOGGER.info(
+                    f"Cut face reinforcement ({side}): "
+                    f"+{added:.2f} cm³ (filled {depth_mm}mm)"
+                )
+
+            return result
+
+        except Exception as e:
+            LOGGER.warning(f"Box reinforcement failed: {e}")
+            return part
 
     def _split_trimesh(self, plane: CuttingPlane) -> Tuple["MeshWrapper", "MeshWrapper"]:
         """Fallback split using trimesh (may produce non-manifold results)."""

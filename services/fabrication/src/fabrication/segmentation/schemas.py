@@ -77,7 +77,13 @@ class SegmentationConfig:
 
     # Cut face reinforcement - add solid flanges at cut interfaces
     # This prevents paper-thin walls when hollowing cuts through shell walls
-    cut_face_flange_depth_mm: float = 10.0  # Depth of solid flange at cut faces (0 = disabled)
+    cut_face_flange_depth_mm: float = 10.0  # DEPRECATED: Use cut_wall_reinforcement_mm instead
+
+    # Wall reinforcement at cuts - adds solid material at cut faces during the split operation
+    # This fills the hollow cavity at cut interfaces to enforce minimum wall thickness
+    # Works for all hollowing strategies. Set to wall_thickness_mm for best results.
+    # 0 = disabled, >0 = depth of solid reinforcement at each cut face
+    cut_wall_reinforcement_mm: float = 0.0
 
     # Post-hollowing mesh cleanup
     # Simplification reduces excessive triangles from voxelization
@@ -257,6 +263,14 @@ class SegmentMeshRequest(BaseModel):
         "30° = strict (cleaner surfaces), 45° = standard FDM threshold.",
         ge=15.0,
         le=60.0,
+    )
+    cut_wall_reinforcement_mm: float = Field(
+        default=0.0,
+        description="Depth of solid wall reinforcement at cut faces (mm). "
+        "When cutting hollow meshes, this fills the exposed cavity to enforce minimum wall thickness. "
+        "Set to wall_thickness_mm for best results. 0 = disabled.",
+        ge=0.0,
+        le=50.0,
     )
 
 

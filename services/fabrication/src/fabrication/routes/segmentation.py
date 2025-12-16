@@ -201,6 +201,12 @@ async def segment_mesh(request: SegmentMeshRequest) -> SegmentMeshResponse:
             build_volume = _get_build_volume(request.printer_id)
 
         # Configure segmentation
+        # Set wall reinforcement: use request value if specified, otherwise default to wall_thickness
+        wall_reinforcement = getattr(request, 'cut_wall_reinforcement_mm', 0.0)
+        if wall_reinforcement == 0.0 and request.enable_hollowing:
+            # Auto-enable wall reinforcement when hollowing is enabled
+            wall_reinforcement = request.wall_thickness_mm
+
         config = SegmentationConfig(
             build_volume=build_volume,
             wall_thickness_mm=request.wall_thickness_mm,
@@ -213,6 +219,7 @@ async def segment_mesh(request: SegmentMeshRequest) -> SegmentMeshResponse:
             pin_diameter_mm=request.pin_diameter_mm,
             pin_height_mm=request.pin_height_mm,
             overhang_threshold_deg=request.overhang_threshold_deg,
+            cut_wall_reinforcement_mm=wall_reinforcement,
         )
 
         # Get output directory for exported parts
@@ -441,6 +448,12 @@ async def _run_segmentation_job(job_id: str, request: SegmentMeshRequest) -> Non
         output_dir = _get_output_directory(mesh_path)
 
         # Configure and run
+        # Set wall reinforcement: use request value if specified, otherwise default to wall_thickness
+        wall_reinforcement = getattr(request, 'cut_wall_reinforcement_mm', 0.0)
+        if wall_reinforcement == 0.0 and request.enable_hollowing:
+            # Auto-enable wall reinforcement when hollowing is enabled
+            wall_reinforcement = request.wall_thickness_mm
+
         config = SegmentationConfig(
             build_volume=build_volume,
             wall_thickness_mm=request.wall_thickness_mm,
@@ -452,6 +465,7 @@ async def _run_segmentation_job(job_id: str, request: SegmentMeshRequest) -> Non
             max_parts=request.max_parts,
             pin_diameter_mm=request.pin_diameter_mm,
             pin_height_mm=request.pin_height_mm,
+            cut_wall_reinforcement_mm=wall_reinforcement,
         )
 
         engine = PlanarSegmentationEngine(config)
