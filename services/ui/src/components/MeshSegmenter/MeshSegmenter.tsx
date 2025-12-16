@@ -82,6 +82,11 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
   const [maxParts, setMaxParts] = useState(0); // 0 = auto-calculate
   const [quality, setQuality] = useState<'fast' | 'medium' | 'high'>('high');
 
+  // Custom build volume
+  const [customBuildX, setCustomBuildX] = useState(300);
+  const [customBuildY, setCustomBuildY] = useState(300);
+  const [customBuildZ, setCustomBuildZ] = useState(400);
+
   // File upload state
   const [inputMode, setInputMode] = useState<'upload' | 'path'>('upload');
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -232,13 +237,20 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
     setCheckResult(null);
 
     try {
+      const requestBody: Record<string, unknown> = {
+        stl_path: filePath,
+      };
+
+      if (selectedPrinter === 'custom') {
+        requestBody.custom_build_volume = [customBuildX, customBuildY, customBuildZ];
+      } else if (selectedPrinter) {
+        requestBody.printer_id = selectedPrinter;
+      }
+
       const response = await fetch('/api/fabrication/segmentation/check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          stl_path: filePath,
-          printer_id: selectedPrinter || undefined,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -253,7 +265,7 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
     } finally {
       setChecking(false);
     }
-  }, [filePath, selectedPrinter]);
+  }, [filePath, selectedPrinter, customBuildX, customBuildY, customBuildZ]);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -314,19 +326,26 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
     try {
       const hollowingResolution = QUALITY_PRESETS.find(q => q.value === quality)?.resolution || 1000;
 
+      const requestBody: Record<string, unknown> = {
+        stl_path: filePath,
+        enable_hollowing: enableHollowing,
+        wall_thickness_mm: wallThickness,
+        joint_type: jointType,
+        max_parts: maxParts,
+        hollowing_resolution: hollowingResolution,
+      };
+
+      if (selectedPrinter === 'custom') {
+        requestBody.custom_build_volume = [customBuildX, customBuildY, customBuildZ];
+      } else if (selectedPrinter) {
+        requestBody.printer_id = selectedPrinter;
+      }
+
       // Use async endpoint for progress tracking
       const response = await fetch('/api/fabrication/segmentation/segment/async', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          stl_path: filePath,
-          printer_id: selectedPrinter || undefined,
-          enable_hollowing: enableHollowing,
-          wall_thickness_mm: wallThickness,
-          joint_type: jointType,
-          max_parts: maxParts,
-          hollowing_resolution: hollowingResolution,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -349,7 +368,7 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
       setError((err as Error).message);
       setLoading(false);
     }
-  }, [filePath, selectedPrinter, enableHollowing, wallThickness, jointType, maxParts, quality, pollJobStatus]);
+  }, [filePath, selectedPrinter, customBuildX, customBuildY, customBuildZ, enableHollowing, wallThickness, jointType, maxParts, quality, pollJobStatus]);
 
   const formatDimensions = (dims: [number, number, number]) => {
     return `${dims[0].toFixed(1)} x ${dims[1].toFixed(1)} x ${dims[2].toFixed(1)} mm`;
@@ -466,6 +485,7 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
                   {printer.name} ({formatTupleDimensions(printer.build_volume_mm)})
                 </option>
               ))}
+              <option value="custom">Custom Dimensions...</option>
             </select>
           </label>
 
@@ -480,6 +500,44 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
             </select>
           </label>
         </div>
+
+        {selectedPrinter === 'custom' && (
+          <div className="form-row three-col custom-dimensions">
+            <label>
+              Build X (mm)
+              <input
+                type="number"
+                value={customBuildX}
+                onChange={(e) => setCustomBuildX(parseInt(e.target.value, 10) || 0)}
+                min={50}
+                max={2000}
+                step={10}
+              />
+            </label>
+            <label>
+              Build Y (mm)
+              <input
+                type="number"
+                value={customBuildY}
+                onChange={(e) => setCustomBuildY(parseInt(e.target.value, 10) || 0)}
+                min={50}
+                max={2000}
+                step={10}
+              />
+            </label>
+            <label>
+              Build Z (mm)
+              <input
+                type="number"
+                value={customBuildZ}
+                onChange={(e) => setCustomBuildZ(parseInt(e.target.value, 10) || 0)}
+                min={50}
+                max={2000}
+                step={10}
+              />
+            </label>
+          </div>
+        )}
 
         <div className="form-row four-col">
           <label className="checkbox-label">

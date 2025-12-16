@@ -318,6 +318,10 @@ class CheckSegmentationRequest(BaseModel):
         alias="stl_path",  # Backwards compatibility
     )
     printer_id: Optional[str] = Field(default=None, description="Target printer")
+    custom_build_volume: Optional[tuple[float, float, float]] = Field(
+        default=None,
+        description="Custom build volume (X, Y, Z in mm). Overrides printer_id if provided.",
+    )
 
 
 class CheckSegmentationResponse(BaseModel):

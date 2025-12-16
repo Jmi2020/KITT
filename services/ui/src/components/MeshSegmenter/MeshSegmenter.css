@@ -46,6 +46,16 @@
   align-items: end;
 }
 
+.mesh-segmenter .form-row.custom-dimensions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1rem;
+  background: var(--bg-subtle);
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px dashed var(--border-subtle);
+}
+
 .mesh-segmenter .form-row.four-col {
   display: grid;
   grid-template-columns: auto 1fr 1fr 1fr;

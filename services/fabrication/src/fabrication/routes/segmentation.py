@@ -151,8 +151,11 @@ async def check_segmentation(request: CheckSegmentationRequest) -> CheckSegmenta
 
         mesh = MeshWrapper(mesh_path)
 
-        # Get build volume from printer config or defaults
-        build_volume = _get_build_volume(request.printer_id)
+        # Get build volume: custom > printer config > defaults
+        if request.custom_build_volume:
+            build_volume = request.custom_build_volume
+        else:
+            build_volume = _get_build_volume(request.printer_id)
 
         # Create engine for analysis
         config = SegmentationConfig(build_volume=build_volume)
