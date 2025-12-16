@@ -11,11 +11,11 @@ from pydantic import BaseModel, Field
 class JointType(str, Enum):
     """Joint type for part assembly."""
 
-    DOWEL = "dowel"  # Cylindrical holes for external pins
-    INTEGRATED = "integrated"  # Printed pins on one part, holes on other (no hardware)
+    DOWEL = "dowel"  # Cylindrical holes for external wooden/metal dowel pins
+    INTEGRATED = "integrated"  # Printed pins on one part, holes on other (default, no hardware needed)
     DOVETAIL = "dovetail"  # Trapezoidal key/slot (Phase 2)
     PYRAMID = "pyramid"  # Self-centering cones (Phase 2)
-    NONE = "none"  # No joints, glue only
+    NONE = "none"  # No joints - use glue, magnets, or other external attachment methods
 
 
 class HollowingStrategy(str, Enum):
@@ -190,7 +190,10 @@ class SegmentMeshRequest(BaseModel):
     )
     joint_type: JointType = Field(
         default=JointType.INTEGRATED,
-        description="Joint type for assembly",
+        description="Joint type for part assembly. Options: "
+        "'integrated' (default) - printed pins on one part, holes on other, no hardware needed; "
+        "'dowel' - cylindrical holes for external wooden/metal dowel pins; "
+        "'none' - no joints, use external attachment methods (glue, magnets, etc).",
     )
     joint_tolerance_mm: float = Field(
         default=0.2,
