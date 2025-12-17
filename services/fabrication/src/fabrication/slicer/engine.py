@@ -64,7 +64,11 @@ class SlicerEngine:
         """
         self.bin_path = Path(bin_path)
         self.output_base_dir = Path(output_base_dir)
+        self.profiles_dir = Path(profiles_dir)
         self.profiles = ProfileManager(profiles_dir)
+
+        # CuraEngine definition file (contains all default settings)
+        self.definition_file = self.profiles_dir / "definitions" / "fdmprinter.def.json"
 
         # In-memory job storage (matches segmentation pattern)
         self._jobs: dict[str, SlicingJob] = {}
@@ -90,6 +94,12 @@ class SlicerEngine:
             LOGGER.warning(
                 "CuraEngine not found - slicing disabled",
                 expected_path=str(self.bin_path),
+            )
+            return False
+        if not self.definition_file.exists():
+            LOGGER.warning(
+                "CuraEngine definition file not found - slicing disabled",
+                expected_path=str(self.definition_file),
             )
             return False
         return True
@@ -259,27 +269,90 @@ class SlicerEngine:
     async def _build_command(self, job: SlicingJob) -> list[str]:
         """Build CuraEngine CLI command with settings.
 
-        CuraEngine syntax: CuraEngine slice -v -p -s key=value ... -l model.stl -o output.gcode
+        CuraEngine syntax: CuraEngine slice -v -p -j definition.json -s key=value ... -l model.stl -o output.gcode
+
+        Uses the fdmprinter.def.json definition file which contains all default settings,
+        then overrides specific settings via -s flags.
         """
         cmd = [str(self.bin_path), "slice", "-v", "-p"]
+
+        # Load the definition file with all default settings
+        cmd.extend(["-j", str(self.definition_file)])
+
+        # Override key settings that the definition file doesn't handle well
+        # These are mesh-level settings that need explicit values
+        essential_overrides = [
+            # Mesh transformation - identity matrix (model as-is)
+            "mesh_rotation_matrix=[[1,0,0],[0,1,0],[0,0,1]]",
+            # Center the object on build plate
+            "center_object=true",
+            # Use 1.75mm filament (definition defaults to 2.85mm)
+            "material_diameter=1.75",
+            # Basic machine settings that definition file may not have
+            "machine_width=400",
+            "machine_depth=400",
+            "machine_height=400",
+            "machine_heated_bed=true",
+            "machine_nozzle_size=0.4",
+            "machine_gcode_flavor=Marlin",
+            # Adhesion
+            "adhesion_type=skirt",
+            "skirt_line_count=3",
+            # Basic layer settings (will be overridden by quality profile)
+            "layer_height=0.2",
+            "layer_height_0=0.25",
+            # Line width
+            "line_width=0.4",
+            "wall_line_width=0.4",
+            "infill_line_width=0.4",
+            # Wall settings
+            "wall_line_count=3",
+            # Top/bottom layers
+            "top_layers=4",
+            "bottom_layers=4",
+            # Speed defaults (mm/s)
+            "speed_print=60",
+            "speed_infill=60",
+            "speed_wall=30",
+            "speed_travel=150",
+            # Infill
+            "infill_sparse_density=20",
+            "infill_pattern=grid",
+            # Temperature (will be overridden by material profile)
+            "material_print_temperature=210",
+            "material_bed_temperature=60",
+            # Retraction
+            "retraction_enable=true",
+            "retraction_amount=5",
+            "retraction_speed=45",
+            # Cooling
+            "cool_fan_enabled=true",
+            "cool_fan_speed=100",
+            # Support (will be overridden if enabled)
+            "support_enable=false",
+        ]
+
+        # Add overrides to command
+        for setting in essential_overrides:
+            cmd.extend(["-s", setting])
+
+        # NO LONGER NEEDED - definition file handles these:
+        # All the mesh fixing, wireframe, fuzzy skin, multi-extruder,
+        # acceleration, jerk, and hundreds of other settings come from
+        # fdmprinter.def.json via the -j flag
 
         # Add printer settings from profile
         printer = self.profiles.get_printer_profile(job.config.printer_id)
         if printer and printer.curaengine_settings:
             for key, value in printer.curaengine_settings.items():
                 cmd.extend(["-s", f"{key}={value}"])
-        else:
+        elif printer:
             # Fallback: use build volume from basic profile
-            if printer:
-                cmd.extend(["-s", f"machine_width={int(printer.build_volume[0])}"])
-                cmd.extend(["-s", f"machine_depth={int(printer.build_volume[1])}"])
-                cmd.extend(["-s", f"machine_height={int(printer.build_volume[2])}"])
-                cmd.extend(["-s", f"machine_nozzle_size={printer.nozzle_diameter}"])
-                cmd.extend(["-s", f"machine_heated_bed={'true' if printer.heated_bed else 'false'}"])
-            LOGGER.warning(
-                "Printer profile missing curaengine_settings, using fallback",
-                printer_id=job.config.printer_id,
-            )
+            cmd.extend(["-s", f"machine_width={int(printer.build_volume[0])}"])
+            cmd.extend(["-s", f"machine_depth={int(printer.build_volume[1])}"])
+            cmd.extend(["-s", f"machine_height={int(printer.build_volume[2])}"])
+            cmd.extend(["-s", f"machine_nozzle_size={printer.nozzle_diameter}"])
+            cmd.extend(["-s", f"machine_heated_bed={'true' if printer.heated_bed else 'false'}"])
 
         # Add material settings from profile
         material = self.profiles.get_material_profile(
@@ -288,39 +361,27 @@ class SlicerEngine:
         if material and material.curaengine_settings:
             for key, value in material.curaengine_settings.items():
                 cmd.extend(["-s", f"{key}={value}"])
-        else:
+        elif material:
             # Fallback: use basic profile values
-            if material:
-                cmd.extend(["-s", f"material_print_temperature={material.default_nozzle_temp}"])
-                cmd.extend(["-s", f"material_bed_temperature={material.default_bed_temp}"])
-                cmd.extend(["-s", f"cool_fan_speed={material.cooling_fan_speed}"])
-            LOGGER.warning(
-                "Material profile missing curaengine_settings, using fallback",
-                material_id=job.config.material_id,
-            )
+            cmd.extend(["-s", f"material_print_temperature={material.default_nozzle_temp}"])
+            cmd.extend(["-s", f"material_bed_temperature={material.default_bed_temp}"])
+            cmd.extend(["-s", f"cool_fan_speed={material.cooling_fan_speed}"])
 
         # Add quality settings from profile
         quality = self.profiles.get_quality_profile(job.config.quality.value)
         if quality and quality.curaengine_settings:
             for key, value in quality.curaengine_settings.items():
                 cmd.extend(["-s", f"{key}={value}"])
-        else:
-            # Fallback: convert mm to microns (CuraEngine uses microns)
-            if quality:
-                layer_height_microns = int(quality.layer_height * 1000)
-                first_layer_microns = int(quality.first_layer_height * 1000)
-                cmd.extend(["-s", f"layer_height={layer_height_microns}"])
-                cmd.extend(["-s", f"layer_height_0={first_layer_microns}"])
-                cmd.extend(["-s", f"wall_line_count={quality.perimeters}"])
-                cmd.extend(["-s", f"top_layers={quality.top_solid_layers}"])
-                cmd.extend(["-s", f"bottom_layers={quality.bottom_solid_layers}"])
-                cmd.extend(["-s", f"infill_sparse_density={quality.fill_density}"])
-                cmd.extend(["-s", f"infill_pattern={quality.fill_pattern}"])
-                cmd.extend(["-s", f"speed_print={quality.print_speed}"])
-            LOGGER.warning(
-                "Quality profile missing curaengine_settings, using fallback",
-                quality_id=job.config.quality.value,
-            )
+        elif quality:
+            # Fallback: use basic profile values
+            cmd.extend(["-s", f"layer_height={quality.layer_height}"])
+            cmd.extend(["-s", f"layer_height_0={quality.first_layer_height}"])
+            cmd.extend(["-s", f"wall_line_count={quality.perimeters}"])
+            cmd.extend(["-s", f"top_layers={quality.top_solid_layers}"])
+            cmd.extend(["-s", f"bottom_layers={quality.bottom_solid_layers}"])
+            cmd.extend(["-s", f"infill_sparse_density={quality.fill_density}"])
+            cmd.extend(["-s", f"infill_pattern={quality.fill_pattern}"])
+            cmd.extend(["-s", f"speed_print={quality.print_speed}"])
 
         # Add support settings based on config
         if job.config.support_type == SupportType.TREE:
@@ -338,8 +399,7 @@ class SlicerEngine:
 
         # Add config overrides
         if job.config.layer_height_mm:
-            layer_height_microns = int(job.config.layer_height_mm * 1000)
-            cmd.extend(["-s", f"layer_height={layer_height_microns}"])
+            cmd.extend(["-s", f"layer_height={job.config.layer_height_mm}"])
         if job.config.nozzle_temp_c:
             cmd.extend(["-s", f"material_print_temperature={job.config.nozzle_temp_c}"])
         if job.config.bed_temp_c:

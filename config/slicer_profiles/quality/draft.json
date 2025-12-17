@@ -33,8 +33,8 @@
     "support_material_threshold": 45
   },
   "curaengine_settings": {
-    "layer_height": 300,
-    "layer_height_0": 350,
+    "layer_height": 0.3,
+    "layer_height_0": 0.35,
     "wall_line_count": 2,
     "top_layers": 3,
     "bottom_layers": 3,

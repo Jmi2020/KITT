@@ -36,8 +36,8 @@
     "detect_thin_wall": true
   },
   "curaengine_settings": {
-    "layer_height": 120,
-    "layer_height_0": 200,
+    "layer_height": 0.12,
+    "layer_height_0": 0.2,
     "wall_line_count": 4,
     "top_layers": 7,
     "bottom_layers": 5,
