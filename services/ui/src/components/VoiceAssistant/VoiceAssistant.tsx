@@ -75,6 +75,12 @@ export function VoiceAssistant({
   const autoStopLevel = settings?.voice?.auto_stop_level ?? 0.08;
   const [processingSince, setProcessingSince] = useState<number | null>(null);
   const [processingElapsedMs, setProcessingElapsedMs] = useState<number>(0);
+  const quickPrompts = [
+    'Summarize this URL',
+    'What happened in the last 24h on X for <topic>?',
+    'Outline steps to fix my build error',
+    'Create a 3-bullet daily plan',
+  ];
 
   // Conversation Logic
   const { messages, clearMessages, createConversation, loadMessages, addUserMessage, addAssistantMessage } = useConversations();
@@ -375,9 +381,9 @@ export function VoiceAssistant({
 
   // 3. Controls (Right Panel - Redesigned)
   const ControlsNode = controlsOpen ? (
-    <div className="h-full flex flex-col p-4 gap-4 overflow-y-auto voice-scroll-container">
+    <div className="h-full flex flex-col p-3 md:p-4 gap-3 overflow-y-auto voice-scroll-container">
         {/* Header */}
-        <div className="flex flex-col gap-2 pt-2">
+        <div className="flex flex-col gap-2 pt-1">
             <div className="flex items-center gap-2 px-1">
                 <span className="text-lg filter drop-shadow-md">🛸</span>
                 <span className="text-xs font-bold tracking-[0.2em] text-gray-400 uppercase">System Status</span>
@@ -386,14 +392,14 @@ export function VoiceAssistant({
         </div>
 
         {/* 1. Protocol / Mode */}
-        <div className="group relative overflow-hidden rounded-xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] transition-all p-4">
+        <div className="group relative overflow-hidden rounded-xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] transition-all p-3.5">
             <div className="flex justify-between items-start mb-3">
                 <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Protocol</span>
                 <Button 
                     variant="ghost" 
                     size="sm" 
                     onClick={() => setSettingsOpen(true)}
-                    className="h-5 px-2 text-[9px] bg-white/5 hover:bg-white/10 border border-white/5"
+                    className="h-6 px-2 text-[10px] bg-white/5 hover:bg-white/10 border border-white/5"
                 >
                     EDIT
                 </Button>
@@ -413,7 +419,7 @@ export function VoiceAssistant({
         {/* 2. Wake Word Toggle (Prominent) */}
         <button 
             onClick={() => toggleWakeWord()}
-            className={`w-full p-4 rounded-xl border flex items-center justify-between transition-all group relative overflow-hidden ${
+            className={`w-full p-3.5 rounded-xl border flex items-center justify-between transition-all group relative overflow-hidden ${
                 wakeWordEnabled && capabilities.wakeWord
                 ? 'bg-emerald-900/10 border-emerald-500/30' 
                 : 'bg-white/[0.02] border-white/5'
@@ -439,14 +445,16 @@ export function VoiceAssistant({
         </button>
 
         {/* 3. Audio Input */}
-        <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 flex flex-col gap-2">
+        <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3.5 flex flex-col gap-2">
             <div className="flex justify-between items-center">
                 <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Audio Input</span>
-                <span className={`text-[9px] ${isCapturing ? 'text-red-400 animate-pulse' : 'text-gray-600'}`}>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full border ${isCapturing ? 'text-emerald-300 border-emerald-400/40 bg-emerald-500/10' : 'text-gray-500 border-white/10 bg-white/5'}`}>
                     {isCapturing ? 'LIVE' : 'OFF'}
                 </span>
             </div>
-            <InputLevelMeter level={inputLevel} active={isCapturing} />
+            <div className="pt-1 flex justify-center">
+              <InputLevelMeter level={inputLevel} active={isCapturing} />
+            </div>
         </div>
 
         {/* 4. Runtime Tasks */}
@@ -509,7 +517,7 @@ export function VoiceAssistant({
 
               {/* Empty State / Visualizer Placeholder */}
               {messages.length === 0 && (
-                <div className="h-[40vh] flex items-center justify-center">
+                <div className="h-[48vh] flex flex-col items-center justify-center gap-6">
                     <div className={`transition-all duration-700 ${transcript ? 'scale-75 opacity-50' : 'scale-100 opacity-100'}`}>
                         <AudioVisualizer
                             fftData={fftData}
@@ -517,9 +525,23 @@ export function VoiceAssistant({
                             typingLevel={typingLevel}
                             status={status === 'listening' ? 'listening' : status === 'responding' ? 'responding' : 'idle'}
                             enable3D={true}
-                            size={300}
+                            size={260}
                             modeColor={currentModeConfig?.color as any}
                         />
+                    </div>
+                    <div className="max-w-md w-full rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl p-4 shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-semibold text-white">Quick starts</span>
+                        <span className="px-2 py-0.5 text-[10px] rounded-full border border-white/10 text-cyan-200 bg-cyan-500/10">Tap mic below</span>
+                      </div>
+                      <ul className="space-y-1 text-sm text-gray-300">
+                        {quickPrompts.map((prompt) => (
+                          <li key={prompt} className="flex items-start gap-2">
+                            <span className="text-cyan-300 text-xs mt-0.5">•</span>
+                            <span>{prompt}</span>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                 </div>
               )}
@@ -629,7 +651,7 @@ export function VoiceAssistant({
 
   // 5. Footer (Input)
   const FooterNode = (
-    <div className="bg-gradient-to-t from-black via-black/95 to-transparent pb-6 pt-12 px-4">
+    <div className="bg-gradient-to-t from-black via-black/95 to-transparent pb-5 pt-6 px-4">
         <div className="max-w-2xl mx-auto flex flex-col items-center gap-4">
             {/* Mode Switcher */}
             <div className="voice-mode-toggle">
@@ -659,7 +681,7 @@ export function VoiceAssistant({
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.9 }}
                             transition={{ duration: 0.2 }}
-                            className="flex flex-col items-center gap-3"
+                            className="flex flex-col items-center gap-2"
                         >
                             <div className="voice-mic-wrap">
                                 <div className={`voice-mic-ring ${isCapturing ? 'active' : ''}`} />
@@ -673,11 +695,13 @@ export function VoiceAssistant({
                                     <span className="icon">{isCapturing ? '🎙️' : '🎤'}</span>
                                 </Button>
                             </div>
-                            <div className="voice-button-hint">
-                                <span>{isCapturing ? 'Listening live' : 'Tap to start'}</span>
-                                <span className="voice-chip">{currentModeConfig?.name || 'Realtime'}</span>
-                                <span className="voice-chip">{preferLocal ? 'Local' : (ttsProvider?.toUpperCase() || 'Cloud')}</span>
-                                <span className="voice-chip">Auto-stop on silence</span>
+                            <div className="flex flex-wrap justify-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-gray-400">
+                                <span className="px-2 py-0.5 rounded-full border border-white/10 bg-white/5 text-white">
+                                  {isCapturing ? 'Listening live' : 'Tap to start'}
+                                </span>
+                                <span className="px-2 py-0.5 rounded-full border border-white/10 bg-white/5">{currentModeConfig?.name || 'Realtime'}</span>
+                                <span className="px-2 py-0.5 rounded-full border border-white/10 bg-white/5">{preferLocal ? 'Local' : (ttsProvider?.toUpperCase() || 'Cloud')}</span>
+                                <span className="px-2 py-0.5 rounded-full border border-white/10 bg-white/5">Auto-stop</span>
                             </div>
                             {captureError && (
                               <div className="text-xs text-red-400 text-center mt-2 max-w-xs">

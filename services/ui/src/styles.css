@@ -259,17 +259,18 @@ button:disabled {
 }
 
 .kitty-app header nav button {
-  border: 1px solid rgba(124, 92, 255, 0.3);
-  background: rgba(124, 92, 255, 0.12);
+  border: 1px solid rgba(124, 92, 255, 0.35);
+  background: linear-gradient(135deg, rgba(124, 92, 255, 0.18), rgba(0, 210, 255, 0.12));
   color: var(--text-primary);
   padding: 0.5rem 1rem;
-  border-radius: 999px;
+  border-radius: 14px;
   font-size: 0.9rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 
 .kitty-app header nav button:hover {
-  background: rgba(124, 92, 255, 0.25);
-  border-color: rgba(124, 92, 255, 0.5);
+  background: linear-gradient(135deg, rgba(124, 92, 255, 0.28), rgba(0, 210, 255, 0.22));
+  border-color: rgba(124, 92, 255, 0.55);
   transform: translateY(-1px);
 }
 
