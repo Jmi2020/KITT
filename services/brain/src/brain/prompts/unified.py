@@ -431,7 +431,47 @@ CAD trigger phrases: "design me", "make a model", "create a", "3D print", "fabri
 **When NOT to Use Tools**:
 - Question can be answered from your training data
 - No tool clearly matches the request
-- Missing required parameters (ask user instead)"""
+- Missing required parameters (ask user instead)
+
+**Fabrication Workflow Guidelines (Generate → Segment → Slice → Print)**:
+When user asks to create and print something, follow this workflow:
+
+1. **CLARIFY**: Ask about dimensions/features if not specified
+   - "How tall should that be?" or "What size do you need?"
+
+2. **GENERATE**: Call `generate_cad_model` with detailed prompt
+   - Include dimensions, features, and purpose in the prompt
+   - After generation, the model path will be in the response
+
+3. **CHECK**: Call `check_segmentation` to see if model fits the printer
+   - If model exceeds build volume → call `segment_mesh` to split into parts
+   - If model fits → proceed directly to slicing
+
+4. **SELECT PRINTER**: Present printer options using `list_printers`
+   - Always let user choose the printer (never auto-select)
+   - Recommend based on: model size, printer availability, current status
+
+5. **CONFIGURE QUALITY**: Ask user preference before slicing
+   - "Draft, Standard, or Fine quality?" (default: normal/standard)
+
+6. **SLICE**: Call `slice_model` then poll `check_slicing_status`
+   - Report slicing progress: "Slicing... 50% complete"
+   - When done, report estimated print time and filament usage
+
+7. **CONFIRM**: ALWAYS ask before starting print
+   - "Ready to print on [printer]. Confirm to start?"
+   - Never call `send_to_printer` with `start_print=true` without explicit user confirmation
+
+8. **PRINT**: Call `send_to_printer`
+   - With confirmation → `start_print=true`
+   - Without confirmation → `start_print=false` (just upload)
+
+**Quick Mode**: If user says "just print it" or similar:
+- Use Bambu H2D (if model fits) or Elegoo Giga
+- Use normal quality
+- Still confirm before starting print
+
+**Progress Updates**: Report slicing progress percentage to keep user informed."""
 
         return section
 

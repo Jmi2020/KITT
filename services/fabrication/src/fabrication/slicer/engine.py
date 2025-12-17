@@ -191,6 +191,55 @@ class SlicerEngine:
             return job.output_path
         return None
 
+    def _convert_3mf_to_stl(self, input_path: Path, output_dir: Path) -> Path:
+        """Convert 3MF file to STL for CuraEngine compatibility.
+
+        CuraEngine 5.0 only supports STL files, not 3MF.
+        Uses trimesh to load and export the mesh.
+
+        Args:
+            input_path: Path to 3MF file
+            output_dir: Directory to save converted STL
+
+        Returns:
+            Path to converted STL file
+        """
+        import trimesh
+
+        LOGGER.info("Converting 3MF to STL", input=str(input_path))
+
+        # Load the 3MF file (trimesh handles 3MF as a scene)
+        scene = trimesh.load(str(input_path))
+
+        # If it's a scene with multiple meshes, combine them
+        if isinstance(scene, trimesh.Scene):
+            # Get all meshes from the scene
+            meshes = [g for g in scene.geometry.values() if isinstance(g, trimesh.Trimesh)]
+            if not meshes:
+                raise ValueError(f"No valid meshes found in 3MF file: {input_path}")
+            # Combine all meshes into one
+            if len(meshes) == 1:
+                mesh = meshes[0]
+            else:
+                mesh = trimesh.util.concatenate(meshes)
+        elif isinstance(scene, trimesh.Trimesh):
+            mesh = scene
+        else:
+            raise ValueError(f"Unexpected type from 3MF load: {type(scene)}")
+
+        # Export as STL
+        stl_path = output_dir / (input_path.stem + ".stl")
+        mesh.export(str(stl_path), file_type="stl")
+
+        LOGGER.info(
+            "3MF converted to STL",
+            output=str(stl_path),
+            vertices=len(mesh.vertices),
+            faces=len(mesh.faces),
+        )
+
+        return stl_path
+
     async def _execute_slicing(self, job: SlicingJob) -> None:
         """Execute slicing in background.
 
@@ -201,8 +250,17 @@ class SlicerEngine:
         job.progress = 0.1  # Starting
 
         try:
-            # Build CLI command
-            cmd = await self._build_command(job)
+            # Convert 3MF to STL if needed (CuraEngine only supports STL)
+            slicing_input = job.input_path
+            if job.input_path.suffix.lower() == ".3mf":
+                job.progress = 0.05
+                slicing_input = self._convert_3mf_to_stl(
+                    job.input_path,
+                    job.output_path.parent,  # Same directory as output
+                )
+
+            # Build CLI command (use converted STL path if applicable)
+            cmd = await self._build_command(job, slicing_input)
             LOGGER.debug("Executing slicer command", cmd=" ".join(cmd))
 
             # Run slicer subprocess
@@ -266,13 +324,17 @@ class SlicerEngine:
                 error=str(e),
             )
 
-    async def _build_command(self, job: SlicingJob) -> list[str]:
+    async def _build_command(self, job: SlicingJob, slicing_input: Path) -> list[str]:
         """Build CuraEngine CLI command with settings.
 
         CuraEngine syntax: CuraEngine slice -v -p -j definition.json -s key=value ... -l model.stl -o output.gcode
 
         Uses the fdmprinter.def.json definition file which contains all default settings,
         then overrides specific settings via -s flags.
+
+        Args:
+            job: Slicing job with config
+            slicing_input: Path to STL file (may differ from job.input_path if 3MF was converted)
         """
         cmd = [str(self.bin_path), "slice", "-v", "-p"]
 
@@ -405,8 +467,8 @@ class SlicerEngine:
         if job.config.bed_temp_c:
             cmd.extend(["-s", f"material_bed_temperature={job.config.bed_temp_c}"])
 
-        # Input file (-l for load model)
-        cmd.extend(["-l", str(job.input_path)])
+        # Input file (-l for load model) - use converted STL if 3MF was converted
+        cmd.extend(["-l", str(slicing_input)])
 
         # Output file
         cmd.extend(["-o", str(job.output_path)])

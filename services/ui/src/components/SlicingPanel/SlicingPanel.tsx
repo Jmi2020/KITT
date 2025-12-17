@@ -227,25 +227,33 @@ export default function SlicingPanel({
       if (!response.ok) {
         throw new Error('Failed to get job status');
       }
-      const status: SlicingJobStatus = await response.json();
+      // API returns flat structure, not nested result
+      const apiResponse = await response.json();
 
-      setSlicingProgress(status.progress * 100);
+      setSlicingProgress(apiResponse.progress * 100);
 
-      if (status.status === 'completed' && status.result) {
+      if (apiResponse.status === 'completed' && apiResponse.gcode_path) {
         if (pollingRef.current) {
           clearInterval(pollingRef.current);
           pollingRef.current = null;
         }
-        setSlicingResult(status.result);
+        // Construct result from top-level API fields
+        const result: SlicingResult = {
+          gcode_path: apiResponse.gcode_path,
+          print_time_seconds: apiResponse.estimated_print_time_seconds || 0,
+          filament_used_mm: 0, // Not provided by API
+          filament_used_grams: apiResponse.estimated_filament_grams || 0,
+        };
+        setSlicingResult(result);
         setLoading(false);
         setSlicingJobId(null);
-        onSliceComplete?.(status.result);
-      } else if (status.status === 'failed') {
+        onSliceComplete?.(result);
+      } else if (apiResponse.status === 'failed') {
         if (pollingRef.current) {
           clearInterval(pollingRef.current);
           pollingRef.current = null;
         }
-        setError(status.error || 'Slicing failed');
+        setError(apiResponse.error || 'Slicing failed');
         setLoading(false);
         setSlicingJobId(null);
       }

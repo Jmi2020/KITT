@@ -322,6 +322,13 @@ export function GenerateStep({
                 const stlUrl = artifact.metadata?.stl_location
                   ? translateArtifactPath(artifact.metadata.stl_location)
                   : null;
+                // 3MF can be location itself or stored in metadata
+                const threemfPath = artifact.location?.endsWith('.3mf')
+                  ? artifact.location
+                  : artifact.metadata?.threemf_location || null;
+                const threemfDownloadUrl = threemfPath
+                  ? `/api/fabrication/segmentation/download-file?path=${encodeURIComponent(threemfPath)}`
+                  : null;
                 const isSelected = selectedArtifact?.location === artifact.location;
 
                 return (
@@ -383,6 +390,20 @@ export function GenerateStep({
                             <path d="M3.5 3.5v9h9v-9h-9z" fill="none" stroke="currentColor" strokeWidth="1.5"/>
                           </svg>
                           STL
+                        </a>
+                      )}
+                      {threemfDownloadUrl && (
+                        <a
+                          href={threemfDownloadUrl}
+                          download
+                          className="generate-step__format-link generate-step__format-link--bambu"
+                          title="Download 3MF for Bambu Studio"
+                        >
+                          <svg viewBox="0 0 16 16" className="generate-step__format-icon">
+                            <path d="M8 1L2 4v8l6 3 6-3V4L8 1z" fill="none" stroke="currentColor" strokeWidth="1.2"/>
+                            <path d="M2 4l6 3 6-3M8 7v8" fill="none" stroke="currentColor" strokeWidth="1.2"/>
+                          </svg>
+                          3MF
                         </a>
                       )}
                     </div>

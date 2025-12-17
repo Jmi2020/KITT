@@ -491,6 +491,19 @@
   color: var(--color-text-primary, #fff);
 }
 
+/* Bambu Studio 3MF download button - highlighted green */
+.generate-step__format-link--bambu {
+  background: rgba(0, 174, 66, 0.15);
+  color: #00ae42;
+  border: 1px solid rgba(0, 174, 66, 0.3);
+}
+
+.generate-step__format-link--bambu:hover {
+  background: rgba(0, 174, 66, 0.25);
+  color: #00d150;
+  border-color: rgba(0, 174, 66, 0.5);
+}
+
 .generate-step__format-icon {
   width: 12px;
   height: 12px;

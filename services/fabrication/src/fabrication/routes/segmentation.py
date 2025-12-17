@@ -397,6 +397,99 @@ async def download_segmented_zip(job_id: str) -> StreamingResponse:
     )
 
 
+@router.get("/download-3mf/{job_id}")
+async def download_combined_3mf(job_id: str) -> StreamingResponse:
+    """
+    Download the combined 3MF file for a segmentation job.
+
+    This is useful for opening in external slicers like Bambu Studio.
+    Returns the combined assembly 3MF file with all parts and colors.
+    """
+    if job_id not in _segmentation_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job = _segmentation_jobs[job_id]
+    if job["status"] != "completed" or not job.get("result"):
+        raise HTTPException(status_code=400, detail="Job not completed or no result available")
+
+    result = job["result"]
+
+    if not result.combined_3mf_path:
+        raise HTTPException(status_code=404, detail="No combined 3MF file available")
+
+    combined_path = Path(result.combined_3mf_path)
+    if not combined_path.exists():
+        raise HTTPException(status_code=404, detail="Combined 3MF file not found on disk")
+
+    # Read file into memory
+    file_content = combined_path.read_bytes()
+    file_buffer = io.BytesIO(file_content)
+
+    logger.info(f"Serving 3MF download for job {job_id[:8]}: {combined_path.name}")
+
+    return StreamingResponse(
+        file_buffer,
+        media_type="application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
+        headers={
+            "Content-Disposition": f'attachment; filename="{combined_path.name}"'
+        },
+    )
+
+
+@router.get("/download-file")
+async def download_artifact_file(path: str) -> StreamingResponse:
+    """
+    Download any artifact file by path.
+
+    This endpoint allows downloading 3MF, STL, or G-code files from the
+    artifacts directory. Useful for opening files in external applications
+    like Bambu Studio.
+
+    Security: Only allows files within the /app/artifacts directory.
+    """
+    # Security: Ensure path is within artifacts directory
+    file_path = Path(path)
+
+    # Normalize and validate path
+    allowed_prefixes = ["/app/artifacts", "/app/storage"]
+    is_allowed = any(str(file_path).startswith(prefix) for prefix in allowed_prefixes)
+
+    if not is_allowed:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: Only artifact files can be downloaded"
+        )
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=400, detail="Path is not a file")
+
+    # Determine media type
+    suffix = file_path.suffix.lower()
+    media_types = {
+        ".3mf": "application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
+        ".stl": "application/sla",
+        ".gcode": "text/plain",
+    }
+    media_type = media_types.get(suffix, "application/octet-stream")
+
+    # Read file
+    file_content = file_path.read_bytes()
+    file_buffer = io.BytesIO(file_content)
+
+    logger.info(f"Serving artifact download: {file_path.name}")
+
+    return StreamingResponse(
+        file_buffer,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{file_path.name}"'
+        },
+    )
+
+
 def _get_build_volume(printer_id: Optional[str]) -> tuple[float, float, float]:
     """Get build volume for a printer."""
     if not printer_id:
