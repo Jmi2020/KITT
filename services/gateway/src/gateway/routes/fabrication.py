@@ -4,6 +4,7 @@ Proxies multi-printer control requests to the fabrication service
 """
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
@@ -11,6 +12,7 @@ from fastapi import APIRouter, Request, HTTPException, UploadFile, File
 import httpx
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/fabrication", tags=["fabrication"])
 
 FABRICATION_BASE = os.getenv("FABRICATION_BASE", "http://fabrication:8300")
@@ -286,16 +288,21 @@ async def segment_mesh_async(request: Request) -> dict[str, Any]:
     """
     try:
         body = await request.json()
+        logger.info(f"Starting async segmentation: mesh_path={body.get('mesh_path')}, joint_type={body.get('joint_type')}")
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 f"{FABRICATION_BASE}/api/segmentation/segment/async",
                 json=body,
             )
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            logger.info(f"Segmentation job started: {result.get('job_id')}")
+            return result
     except httpx.HTTPStatusError as e:
+        logger.error(f"Segmentation HTTP error: status={e.response.status_code}, detail={e.response.text}")
         raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
     except httpx.HTTPError as e:
+        logger.error(f"Segmentation connection error: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
 
 
