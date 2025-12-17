@@ -37,6 +37,9 @@ export const ConversationMessage = memo(function ConversationMessage({
 }: ConversationMessageProps) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+  const timestamp =
+    message.timestamp instanceof Date ? message.timestamp : new Date(message.timestamp);
+  const hasValidTime = !Number.isNaN(timestamp?.getTime?.());
 
   const containerClass = isUser
     ? 'bg-gray-800/50 border-gray-700'
@@ -66,9 +69,9 @@ export const ConversationMessage = memo(function ConversationMessage({
             {message.tier}
           </span>
         )}
-        {!compact && (
+        {!compact && hasValidTime && (
           <span className="text-[10px] text-gray-600 ml-auto font-mono">
-            {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            {timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
         )}
       </div>
