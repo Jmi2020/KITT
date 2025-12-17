@@ -30,6 +30,11 @@ Working notes for incremental voice page polish. Keep this updated as phases shi
 - [ ] Markdown/readability: slightly larger text for responses, max-width and elevation to avoid edge-to-edge spans
 - [ ] Keep inference ribbon visible only during processing, with subtle glow bar
 
+### Phase 4 — Grid + Readability + Inference Glow (in progress)
+- [ ] Tune background grid contrast/edge fade to highlight the conversation center
+- [ ] Improve response markdown readability (font size/line height, max width, table spacing)
+- [ ] Add a subtle glow/progress bar to the inference ribbon for long runs
+
 ## Notes
 - Avoid disturbing main mic ring pulse; keep sidebar meters minimal.
 - Respect existing voice engine flows; no backend changes planned.

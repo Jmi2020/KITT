@@ -5,6 +5,7 @@ import logging
 import os
 import time
 import uuid
+from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional, Callable
 
@@ -16,6 +17,12 @@ from common.db.conversations import record_conversation_message
 from common.db.models import ConversationRole
 
 from ..agents.collective.metrics import pairwise_diversity
+from ..agents.collective.providers import (
+    get_available_specialists,
+    get_specialists_by_ids,
+    estimate_total_cost,
+    SpecialistConfig,
+)
 
 # Use async graph for better performance (concurrent proposals)
 # Fall back to sync graph if async disabled via env var
@@ -75,6 +82,109 @@ proposal_diversity = Histogram(
     ["pattern"],
     buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 )
+
+
+# =============================================================================
+# Specialist Provider Endpoints
+# =============================================================================
+
+class SpecialistConfigResponse(BaseModel):
+    """Specialist configuration for API response."""
+    id: str
+    display_name: str
+    provider: str
+    model: str
+    description: str
+    cost_per_1m_in: float
+    cost_per_1m_out: float
+    is_available: bool
+
+
+class SpecialistsListResponse(BaseModel):
+    """Response listing available specialists."""
+    specialists: List[SpecialistConfigResponse]
+    local_count: int
+    cloud_count: int
+    available_count: int
+
+
+class CostEstimateRequest(BaseModel):
+    """Request to estimate cost for selected specialists."""
+    specialist_ids: List[str]
+    tokens_per_proposal: int = Field(4000, ge=1000, le=20000)
+
+
+class CostEstimateResponse(BaseModel):
+    """Response with estimated cost."""
+    specialist_ids: List[str]
+    estimated_cost_usd: float
+    tokens_per_proposal: int
+
+
+@router.get("/specialists", response_model=SpecialistsListResponse)
+async def list_specialists(
+    include_unavailable: bool = Query(
+        True, description="Include specialists without API keys"
+    ),
+):
+    """List available specialists for collective deliberation.
+
+    Returns local models (always available) and cloud providers
+    (available if API key is configured).
+
+    Example:
+        GET /api/collective/specialists
+
+    Returns:
+        - specialists: List of available specialists with config
+        - local_count: Number of local models
+        - cloud_count: Number of cloud providers
+        - available_count: Number currently available (API keys set)
+    """
+    specialists = get_available_specialists(include_unavailable=include_unavailable)
+
+    return SpecialistsListResponse(
+        specialists=[
+            SpecialistConfigResponse(
+                id=s.id,
+                display_name=s.display_name,
+                provider=s.provider,
+                model=s.model,
+                description=s.description,
+                cost_per_1m_in=s.cost_per_1m_in,
+                cost_per_1m_out=s.cost_per_1m_out,
+                is_available=s.is_available,
+            )
+            for s in specialists
+        ],
+        local_count=sum(1 for s in specialists if s.provider == "local"),
+        cloud_count=sum(1 for s in specialists if s.provider != "local"),
+        available_count=sum(1 for s in specialists if s.is_available),
+    )
+
+
+@router.post("/specialists/estimate", response_model=CostEstimateResponse)
+async def estimate_specialist_cost(req: CostEstimateRequest):
+    """Estimate cost for running collective with selected specialists.
+
+    Example:
+        POST /api/collective/specialists/estimate
+        {
+            "specialist_ids": ["local_q4", "openai_gpt4o_mini", "anthropic_haiku"],
+            "tokens_per_proposal": 4000
+        }
+
+    Returns:
+        - estimated_cost_usd: Total estimated cost
+    """
+    cost = estimate_total_cost(req.specialist_ids, req.tokens_per_proposal)
+
+    return CostEstimateResponse(
+        specialist_ids=req.specialist_ids,
+        estimated_cost_usd=cost,
+        tokens_per_proposal=req.tokens_per_proposal,
+    )
+
 
 class RunReq(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -310,18 +420,33 @@ class CollectiveSession:
         pattern: str,
         k: int,
         user_id: Optional[str] = None,
+        enable_search_phase: bool = False,
+        selected_specialists: Optional[List[str]] = None,
     ):
         self.session_id = session_id
         self.task = task
         self.pattern = pattern
         self.k = k
         self.user_id = user_id
+        self.enable_search_phase = enable_search_phase
+        self.selected_specialists = selected_specialists  # List of specialist IDs
+        self.specialist_configs: List[SpecialistConfig] = []  # Resolved configs
         self.created_at = datetime.now(timezone.utc)
+        self.started_at: Optional[datetime] = None
+        self.completed_at: Optional[datetime] = None
         self.status = "pending"
         self.proposals: List[Dict[str, Any]] = []
         self.verdict: Optional[str] = None
         self.error: Optional[str] = None
+        self.search_results: Dict[str, Any] = {}
+        self.phase1_outputs: List[Dict[str, Any]] = []
         self._callbacks: List[Callable] = []
+
+        # Resolve specialist configs if IDs provided
+        if selected_specialists:
+            self.specialist_configs = get_specialists_by_ids(selected_specialists)
+            # Update k to match specialist count
+            self.k = len(self.specialist_configs)
 
     def add_callback(self, callback: Callable):
         """Register a callback for progress events."""
@@ -341,9 +466,197 @@ class CollectiveSession:
                 logger.warning(f"Callback error: {e}")
 
 
-# In-memory session store (could be Redis for production)
+# In-memory session store (for active sessions)
 _sessions: Dict[str, CollectiveSession] = {}
 _sessions_lock = asyncio.Lock()
+
+
+# =============================================================================
+# Database Persistence
+# =============================================================================
+
+def _get_db_session():
+    """Get a database session."""
+    try:
+        from common.db import SessionLocal
+        return SessionLocal()
+    except Exception as e:
+        logger.warning(f"Could not get database session: {e}")
+        return None
+
+
+async def _save_session_to_db(session: CollectiveSession):
+    """Save a collective session to the database."""
+    db = _get_db_session()
+    if not db:
+        return
+
+    try:
+        from common.db.models import CollectiveSessionRecord, CollectivePatternEnum, CollectiveStatusEnum
+
+        # Map status string to enum
+        status_map = {
+            "pending": CollectiveStatusEnum.pending,
+            "running": CollectiveStatusEnum.running,
+            "completed": CollectiveStatusEnum.completed,
+            "error": CollectiveStatusEnum.error,
+            "cancelled": CollectiveStatusEnum.cancelled,
+        }
+
+        # Map pattern string to enum
+        pattern_map = {
+            "council": CollectivePatternEnum.council,
+            "debate": CollectivePatternEnum.debate,
+            "pipeline": CollectivePatternEnum.pipeline,
+        }
+
+        # Check if session already exists
+        existing = db.query(CollectiveSessionRecord).filter(
+            CollectiveSessionRecord.id == session.session_id
+        ).first()
+
+        proposals_data = [
+            {
+                "role": p.get("role", ""),
+                "text": p.get("text", ""),
+                "model": p.get("model"),
+                "provider": p.get("provider"),
+                "temperature": p.get("temperature"),
+            }
+            for p in (session.proposals or [])
+        ]
+
+        if existing:
+            # Update existing record
+            existing.status = status_map.get(session.status, CollectiveStatusEnum.pending)
+            existing.proposals = proposals_data
+            existing.verdict = session.verdict
+            existing.error_message = session.error
+            existing.completed_at = session.completed_at
+            existing.started_at = session.started_at
+            existing.specialists_used = session.selected_specialists or []
+            existing.search_enabled = session.enable_search_phase
+        else:
+            # Create new record
+            record = CollectiveSessionRecord(
+                id=session.session_id,
+                user_id=session.user_id,
+                task=session.task,
+                pattern=pattern_map.get(session.pattern, CollectivePatternEnum.council),
+                k=session.k,
+                status=status_map.get(session.status, CollectiveStatusEnum.pending),
+                proposals=proposals_data,
+                verdict=session.verdict,
+                error_message=session.error,
+                specialists_used=session.selected_specialists or [],
+                search_enabled=session.enable_search_phase,
+                created_at=session.created_at,
+                started_at=session.started_at,
+                completed_at=session.completed_at,
+            )
+            db.add(record)
+
+        db.commit()
+        logger.debug(f"Saved session {session.session_id} to database")
+    except Exception as e:
+        logger.warning(f"Failed to save session to database: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _load_sessions_from_db(
+    user_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 20,
+) -> List[Dict]:
+    """Load collective sessions from the database."""
+    db = _get_db_session()
+    if not db:
+        return []
+
+    try:
+        from common.db.models import CollectiveSessionRecord
+
+        query = db.query(CollectiveSessionRecord)
+
+        if user_id:
+            query = query.filter(CollectiveSessionRecord.user_id == user_id)
+        if status:
+            from common.db.models import CollectiveStatusEnum
+            status_map = {
+                "pending": CollectiveStatusEnum.pending,
+                "running": CollectiveStatusEnum.running,
+                "completed": CollectiveStatusEnum.completed,
+                "error": CollectiveStatusEnum.error,
+                "cancelled": CollectiveStatusEnum.cancelled,
+            }
+            if status in status_map:
+                query = query.filter(CollectiveSessionRecord.status == status_map[status])
+
+        query = query.order_by(CollectiveSessionRecord.created_at.desc())
+        query = query.limit(limit)
+
+        records = query.all()
+
+        return [
+            {
+                "session_id": r.id,
+                "task": r.task,
+                "pattern": r.pattern.value if r.pattern else "council",
+                "k": r.k,
+                "status": r.status.value if r.status else "pending",
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "proposals_count": len(r.proposals or []),
+                "has_verdict": bool(r.verdict),
+                "user_id": r.user_id,
+            }
+            for r in records
+        ]
+    except Exception as e:
+        logger.warning(f"Failed to load sessions from database: {e}")
+        return []
+    finally:
+        db.close()
+
+
+async def _load_session_details_from_db(session_id: str) -> Optional[Dict]:
+    """Load full session details from the database."""
+    db = _get_db_session()
+    if not db:
+        return None
+
+    try:
+        from common.db.models import CollectiveSessionRecord
+
+        record = db.query(CollectiveSessionRecord).filter(
+            CollectiveSessionRecord.id == session_id
+        ).first()
+
+        if not record:
+            return None
+
+        return {
+            "session_id": record.id,
+            "task": record.task,
+            "pattern": record.pattern.value if record.pattern else "council",
+            "k": record.k,
+            "status": record.status.value if record.status else "pending",
+            "created_at": record.created_at.isoformat() if record.created_at else None,
+            "started_at": record.started_at.isoformat() if record.started_at else None,
+            "completed_at": record.completed_at.isoformat() if record.completed_at else None,
+            "proposals": record.proposals or [],
+            "verdict": record.verdict,
+            "error": record.error_message,
+            "user_id": record.user_id,
+            "specialists_used": record.specialists_used or [],
+            "search_enabled": record.search_enabled,
+        }
+    except Exception as e:
+        logger.warning(f"Failed to load session details from database: {e}")
+        return None
+    finally:
+        db.close()
 
 
 async def get_or_create_session(
@@ -351,8 +664,10 @@ async def get_or_create_session(
     pattern: str,
     k: int,
     user_id: Optional[str] = None,
+    enable_search_phase: bool = False,
+    selected_specialists: Optional[List[str]] = None,
 ) -> CollectiveSession:
-    """Create a new collective session."""
+    """Create a new collective session and persist to database."""
     session_id = str(uuid.uuid4())
     session = CollectiveSession(
         session_id=session_id,
@@ -360,9 +675,15 @@ async def get_or_create_session(
         pattern=pattern,
         k=k,
         user_id=user_id,
+        enable_search_phase=enable_search_phase,
+        selected_specialists=selected_specialists,
     )
     async with _sessions_lock:
         _sessions[session_id] = session
+
+    # Persist to database
+    await _save_session_to_db(session)
+
     return session
 
 
@@ -388,12 +709,29 @@ async def run_collective_streaming(session: CollectiveSession):
 
     try:
         session.status = "running"
+        session.started_at = datetime.now(timezone.utc)
+
+        # Include specialist info in started event
+        specialist_info = None
+        if session.specialist_configs:
+            specialist_info = [
+                {
+                    "id": s.id,
+                    "display_name": s.display_name,
+                    "provider": s.provider,
+                    "model": s.model,
+                }
+                for s in session.specialist_configs
+            ]
+
         await session.emit({
             "type": "started",
             "session_id": session.session_id,
             "pattern": session.pattern,
             "k": session.k,
             "task": session.task,
+            "enable_search_phase": session.enable_search_phase,
+            "specialists": specialist_info,
         })
 
         # Initialize state
@@ -404,7 +742,12 @@ async def run_collective_streaming(session: CollectiveSession):
             "proposals": [],
             "verdict": "",
             "logs": "",
+            "enable_search_phase": session.enable_search_phase,
         }
+
+        # Add specialist configs to state if provided
+        if session.specialist_configs:
+            state["specialist_configs"] = session.specialist_configs
 
         # Plan phase
         await session.emit({"type": "plan_start"})
@@ -419,32 +762,43 @@ async def run_collective_streaming(session: CollectiveSession):
             await session.emit({
                 "type": "proposals_start",
                 "count": session.k,
+                "two_phase": session.enable_search_phase,
             })
 
-            # Run proposals with individual progress
-            state = await _run_council_with_streaming(state, session)
+            if session.enable_search_phase:
+                # Run two-phase proposals with search integration
+                state = await _run_council_two_phase_streaming(state, session)
+            else:
+                # Run standard proposals
+                state = await _run_council_with_streaming(state, session)
 
         elif session.pattern == "debate":
             await session.emit({
                 "type": "proposals_start",
                 "count": 2,
+                "two_phase": session.enable_search_phase,
             })
-            state = await n_propose_debate(state)
 
-            # Emit debate results
-            proposals = state.get("proposals", [])
-            for i, prop in enumerate(proposals):
-                role = "pro" if i == 0 else "con"
-                await session.emit({
-                    "type": "proposal_complete",
-                    "index": i,
-                    "role": role,
-                    "text": prop if isinstance(prop, str) else prop.get("content", ""),
-                })
-                session.proposals.append({
-                    "role": role,
-                    "text": prop if isinstance(prop, str) else prop.get("content", ""),
-                })
+            if session.enable_search_phase:
+                # Run two-phase debate with search integration
+                state = await _run_debate_two_phase_streaming(state, session)
+            else:
+                state = await n_propose_debate(state)
+
+                # Emit debate results
+                proposals = state.get("proposals", [])
+                for i, prop in enumerate(proposals):
+                    role = "pro" if i == 0 else "con"
+                    await session.emit({
+                        "type": "proposal_complete",
+                        "index": i,
+                        "role": role,
+                        "text": prop if isinstance(prop, str) else prop.get("content", ""),
+                    })
+                    session.proposals.append({
+                        "role": role,
+                        "text": prop if isinstance(prop, str) else prop.get("content", ""),
+                    })
 
         # Judge phase
         await session.emit({"type": "judge_start"})
@@ -458,40 +812,61 @@ async def run_collective_streaming(session: CollectiveSession):
 
         session.verdict = verdict
         session.status = "completed"
+        session.completed_at = datetime.now(timezone.utc)
 
-        await session.emit({
+        # Include search metadata in completion
+        completion_data = {
             "type": "complete",
             "session_id": session.session_id,
             "proposals": session.proposals,
             "verdict": verdict,
-        })
+        }
+        if session.enable_search_phase:
+            completion_data["search_metadata"] = {
+                "phase1_outputs": session.phase1_outputs,
+                "search_results_count": len(session.search_results),
+            }
+
+        await session.emit(completion_data)
+
+        # Persist completed session to database
+        await _save_session_to_db(session)
 
     except Exception as e:
         session.status = "error"
         session.error = str(e)
+        session.completed_at = datetime.now(timezone.utc)
         logger.error(f"Collective streaming error: {e}")
         await session.emit({
             "type": "error",
             "message": str(e),
         })
 
+        # Persist error session to database
+        await _save_session_to_db(session)
+
 
 async def _run_council_with_streaming(
     state: CollectiveState,
     session: CollectiveSession,
 ) -> CollectiveState:
-    """Run council proposals with streaming progress."""
+    """Run council proposals with streaming progress.
+
+    Supports both:
+    - Legacy mode: Uses K local Q4 specialists
+    - Multi-provider mode: Uses selected specialist configs (local + cloud)
+    """
     from ..agents.collective.context_policy import fetch_domain_context
     from ..agents.collective.graph_async import (
         HALLUCINATION_PREVENTION,
         EVIDENCE_REQUIREMENTS,
         DECISION_FRAMEWORK,
         HINT_PROPOSER,
+        generate_proposal_for_specialist,
     )
     from brain.token_budgets import summarize_conversation
     from brain.llm_client import chat_async
 
-    k = int(state.get("k", 3))
     conversation_history = state.get("conversation_history", [])
     conv_summary = summarize_conversation(conversation_history, max_tokens=2000) if conversation_history else ""
 
@@ -501,6 +876,65 @@ async def _run_council_with_streaming(
         for_proposer=True,
         token_budget=10000
     )
+
+    # Check if multi-provider mode (specialist configs provided)
+    if session.specialist_configs:
+        # Multi-provider mode: use selected specialists
+        async def generate_and_emit_multi(i: int, spec: SpecialistConfig) -> str:
+            role = spec.display_name
+            await session.emit({
+                "type": "proposal_start",
+                "index": i,
+                "role": role,
+                "provider": spec.provider,
+                "model": spec.model,
+            })
+
+            result = await generate_proposal_for_specialist(
+                specialist=spec,
+                task=state["task"],
+                context=context,
+                conv_summary=conv_summary,
+                index=i,
+            )
+
+            await session.emit({
+                "type": "proposal_complete",
+                "index": i,
+                "role": role,
+                "text": result["text"],
+                "model": result["model"],
+                "provider": result["provider"],
+                "temperature": result.get("temperature"),
+                "cost_usd": result.get("cost_usd", 0),
+            })
+
+            session.proposals.append({
+                "role": role,
+                "text": result["text"],
+                "model": result["model"],
+                "provider": result["provider"],
+                "temperature": result.get("temperature"),
+                "cost_usd": result.get("cost_usd", 0),
+            })
+
+            return result["text"]
+
+        # Run all proposals in parallel
+        props = await asyncio.gather(*[
+            generate_and_emit_multi(i, spec)
+            for i, spec in enumerate(session.specialist_configs)
+        ])
+
+        # Calculate total cost
+        total_cost = sum(p.get("cost_usd", 0) for p in session.proposals)
+        if total_cost > 0:
+            logger.info(f"Multi-provider council total cost: ${total_cost:.4f}")
+
+        return {**state, "proposals": list(props)}
+
+    # Legacy mode: use K local Q4 specialists
+    k = int(state.get("k", 3))
 
     async def generate_and_emit(i: int) -> str:
         role = f"specialist_{i+1}"
@@ -567,6 +1001,366 @@ async def _run_council_with_streaming(
     return {**state, "proposals": list(props)}
 
 
+async def _run_council_two_phase_streaming(
+    state: CollectiveState,
+    session: CollectiveSession,
+) -> CollectiveState:
+    """Run two-phase council proposals with streaming progress.
+
+    Phase 1: Specialists generate search requests (fast, parallel)
+    Central: Execute deduplicated searches via MCP
+    Phase 2: Specialists generate full proposals with search results (parallel)
+    """
+    from ..agents.collective.graph_async import (
+        generate_phase1_search_requests,
+        execute_searches_centralized,
+        generate_phase2_proposal,
+    )
+    from ..agents.collective.search_dedup import (
+        deduplicate_search_requests,
+        assign_results_to_specialists,
+        get_dedup_stats,
+    )
+    from ..agents.collective.search_prompts import format_search_results_for_specialist
+    from ..agents.collective.schemas import Phase1Output
+
+    k = int(state.get("k", 3))
+    task = state["task"]
+
+    # =========================================================================
+    # PHASE 1: Collect search requests from all specialists
+    # =========================================================================
+    await session.emit({
+        "type": "search_phase_start",
+        "phase": 1,
+        "specialist_count": k,
+        "message": "Specialists identifying search needs...",
+    })
+
+    async def run_phase1(i: int) -> Phase1Output:
+        specialist_id = f"specialist_{i+1}"
+        await session.emit({
+            "type": "phase1_start",
+            "index": i,
+            "specialist_id": specialist_id,
+        })
+
+        output = await generate_phase1_search_requests(
+            task=task,
+            specialist_id=specialist_id,
+            kb_context=state.get("kb_context", ""),
+            conversation_history=state.get("conversation_history", []),
+        )
+
+        await session.emit({
+            "type": "phase1_complete",
+            "index": i,
+            "specialist_id": specialist_id,
+            "search_request_count": len(output.search_requests),
+            "confidence_without_search": output.confidence_without_search,
+        })
+
+        return output
+
+    # Run all Phase 1 in parallel
+    phase1_outputs = await asyncio.gather(*[run_phase1(i) for i in range(k)])
+    session.phase1_outputs = [o.model_dump() for o in phase1_outputs]
+
+    # =========================================================================
+    # DEDUPLICATION: Merge similar queries across specialists
+    # =========================================================================
+    dedup_searches, original_to_canonical = deduplicate_search_requests(
+        phase1_outputs,
+        max_total_searches=9,
+        similarity_threshold=0.7,
+    )
+
+    stats = get_dedup_stats(phase1_outputs, dedup_searches)
+
+    await session.emit({
+        "type": "search_requests_collected",
+        "total_requests": stats["total_requests"],
+        "unique_queries": stats["unique_queries"],
+        "duplicates_removed": stats["duplicates_removed"],
+        "queries": [s.query for s in dedup_searches],
+    })
+
+    # =========================================================================
+    # CENTRAL FETCH: Execute searches via MCP
+    # =========================================================================
+    if dedup_searches:
+        await session.emit({
+            "type": "search_execution_start",
+            "total": len(dedup_searches),
+        })
+
+        async def execute_and_emit(i: int, search):
+            await session.emit({
+                "type": "search_executing",
+                "index": i,
+                "total": len(dedup_searches),
+                "query": search.query,
+            })
+
+            result = await execute_searches_centralized([search])
+            success = search.query in result and result[search.query].success
+
+            await session.emit({
+                "type": "search_complete",
+                "index": i,
+                "query": search.query,
+                "success": success,
+                "result_count": result[search.query].result_count if success else 0,
+            })
+
+            return search.query, result.get(search.query)
+
+        # Execute searches (can be parallel or sequential based on rate limits)
+        search_results_list = await asyncio.gather(*[
+            execute_and_emit(i, s) for i, s in enumerate(dedup_searches)
+        ])
+        search_results = {q: r for q, r in search_results_list if r}
+        session.search_results = {q: r.results if r.success else [] for q, r in search_results.items()}
+
+        # Map results back to each specialist
+        specialist_results = assign_results_to_specialists(
+            search_results,
+            phase1_outputs,
+            original_to_canonical,
+        )
+
+        await session.emit({
+            "type": "search_phase_complete",
+            "total_results": sum(len(r.results) for r in search_results.values() if r.success),
+            "successful_queries": sum(1 for r in search_results.values() if r.success),
+        })
+    else:
+        specialist_results = {}
+        await session.emit({
+            "type": "search_phase_complete",
+            "total_results": 0,
+            "successful_queries": 0,
+            "message": "No searches requested by specialists",
+        })
+
+    # =========================================================================
+    # PHASE 2: Generate full proposals with search results
+    # =========================================================================
+    await session.emit({
+        "type": "proposal_phase_start",
+        "specialist_count": k,
+        "message": "Specialists generating proposals with search results...",
+    })
+
+    async def run_phase2(i: int) -> str:
+        specialist_id = f"specialist_{i+1}"
+        phase1_output = phase1_outputs[i]
+
+        await session.emit({
+            "type": "proposal_start",
+            "index": i,
+            "role": specialist_id,
+            "has_search_results": specialist_id in specialist_results and bool(specialist_results[specialist_id]),
+        })
+
+        # Format search results for this specialist
+        results_for_specialist = specialist_results.get(specialist_id, [])
+        formatted_results = format_search_results_for_specialist(results_for_specialist)
+
+        temperature = 0.7 + (i * 0.1)
+
+        response = await generate_phase2_proposal(
+            task=task,
+            specialist_id=specialist_id,
+            kb_context=state.get("kb_context", ""),
+            search_results_formatted=formatted_results,
+            phase1_assessment=phase1_output.initial_assessment,
+            conversation_history=state.get("conversation_history", []),
+            temperature=temperature,
+        )
+
+        await session.emit({
+            "type": "proposal_complete",
+            "index": i,
+            "role": specialist_id,
+            "text": response,
+            "model": "Q4",
+            "temperature": temperature,
+            "search_results_used": len(results_for_specialist),
+        })
+
+        session.proposals.append({
+            "role": specialist_id,
+            "text": response,
+            "model": "Q4",
+            "temperature": temperature,
+            "search_results_used": len(results_for_specialist),
+        })
+
+        return response
+
+    # Run all Phase 2 in parallel
+    props = await asyncio.gather(*[run_phase2(i) for i in range(k)])
+
+    return {
+        **state,
+        "proposals": list(props),
+        "phase1_outputs": session.phase1_outputs,
+        "search_results": session.search_results,
+    }
+
+
+async def _run_debate_two_phase_streaming(
+    state: CollectiveState,
+    session: CollectiveSession,
+) -> CollectiveState:
+    """Run two-phase debate with streaming progress.
+
+    Same as council but for PRO and CON positions.
+    """
+    from ..agents.collective.graph_async import (
+        generate_phase1_search_requests,
+        execute_searches_centralized,
+        generate_phase2_proposal,
+    )
+    from ..agents.collective.search_dedup import (
+        deduplicate_search_requests,
+        assign_results_to_specialists,
+    )
+    from ..agents.collective.search_prompts import format_search_results_for_specialist
+    from ..agents.collective.schemas import Phase1Output
+
+    task = state["task"]
+    roles = ["pro", "con"]
+
+    # =========================================================================
+    # PHASE 1: Collect search requests from both positions
+    # =========================================================================
+    await session.emit({
+        "type": "search_phase_start",
+        "phase": 1,
+        "specialist_count": 2,
+        "message": "Debate positions identifying search needs...",
+    })
+
+    async def run_phase1(i: int, role: str) -> Phase1Output:
+        specialist_id = role
+        await session.emit({
+            "type": "phase1_start",
+            "index": i,
+            "specialist_id": specialist_id,
+        })
+
+        output = await generate_phase1_search_requests(
+            task=f"Argue the {role.upper()} position for: {task}",
+            specialist_id=specialist_id,
+            kb_context=state.get("kb_context", ""),
+            conversation_history=state.get("conversation_history", []),
+        )
+
+        await session.emit({
+            "type": "phase1_complete",
+            "index": i,
+            "specialist_id": specialist_id,
+            "search_request_count": len(output.search_requests),
+        })
+
+        return output
+
+    # Run Phase 1 in parallel for both positions
+    phase1_outputs = await asyncio.gather(*[run_phase1(i, r) for i, r in enumerate(roles)])
+    session.phase1_outputs = [o.model_dump() for o in phase1_outputs]
+
+    # Deduplicate
+    dedup_searches, original_to_canonical = deduplicate_search_requests(
+        phase1_outputs,
+        max_total_searches=6,
+        similarity_threshold=0.7,
+    )
+
+    await session.emit({
+        "type": "search_requests_collected",
+        "total_requests": sum(len(o.search_requests) for o in phase1_outputs),
+        "unique_queries": len(dedup_searches),
+        "queries": [s.query for s in dedup_searches],
+    })
+
+    # Execute searches
+    if dedup_searches:
+        search_results = await execute_searches_centralized(dedup_searches)
+        session.search_results = {q: r.results if r.success else [] for q, r in search_results.items()}
+
+        specialist_results = assign_results_to_specialists(
+            search_results,
+            phase1_outputs,
+            original_to_canonical,
+        )
+
+        await session.emit({
+            "type": "search_phase_complete",
+            "total_results": sum(len(r.results) for r in search_results.values() if r.success),
+        })
+    else:
+        specialist_results = {}
+        await session.emit({
+            "type": "search_phase_complete",
+            "total_results": 0,
+        })
+
+    # =========================================================================
+    # PHASE 2: Generate debate arguments with search results
+    # =========================================================================
+    await session.emit({
+        "type": "proposal_phase_start",
+        "specialist_count": 2,
+    })
+
+    async def run_phase2(i: int, role: str) -> str:
+        phase1_output = phase1_outputs[i]
+
+        await session.emit({
+            "type": "proposal_start",
+            "index": i,
+            "role": role,
+        })
+
+        results_for_specialist = specialist_results.get(role, [])
+        formatted_results = format_search_results_for_specialist(results_for_specialist)
+
+        response = await generate_phase2_proposal(
+            task=f"Argue the {role.upper()} position for: {task}",
+            specialist_id=role,
+            kb_context=state.get("kb_context", ""),
+            search_results_formatted=formatted_results,
+            phase1_assessment=phase1_output.initial_assessment,
+            conversation_history=state.get("conversation_history", []),
+            temperature=0.7,
+        )
+
+        await session.emit({
+            "type": "proposal_complete",
+            "index": i,
+            "role": role,
+            "text": response,
+        })
+
+        session.proposals.append({
+            "role": role,
+            "text": response,
+        })
+
+        return response
+
+    props = await asyncio.gather(*[run_phase2(i, r) for i, r in enumerate(roles)])
+
+    return {
+        **state,
+        "proposals": list(props),
+        "phase1_outputs": session.phase1_outputs,
+        "search_results": session.search_results,
+    }
+
+
 # =============================================================================
 # Streaming API Endpoints
 # =============================================================================
@@ -577,8 +1371,19 @@ class StreamRunReq(BaseModel):
 
     task: str = Field(..., description="Natural language task")
     pattern: Literal["pipeline", "council", "debate"] = "council"
-    k: int = Field(3, ge=2, le=7, description="Council size")
+    k: int = Field(3, ge=2, le=7, description="Council size (fallback if no specialists selected)")
     user_id: Optional[str] = Field(default=None, alias="userId")
+    enable_search_phase: bool = Field(
+        default=False,
+        alias="enableSearchPhase",
+        description="Enable two-phase proposal with web search access for specialists",
+    )
+    selected_specialists: Optional[List[str]] = Field(
+        default=None,
+        alias="selectedSpecialists",
+        description="List of specialist IDs to use (e.g., ['local_q4', 'openai_gpt4o_mini']). "
+                    "If provided, overrides 'k' parameter.",
+    )
 
 
 class StreamRunRes(BaseModel):
@@ -594,7 +1399,7 @@ async def start_streaming_collective(req: StreamRunReq):
 
     Creates a session that can be monitored via WebSocket.
 
-    Example:
+    Example with k (legacy):
         POST /api/collective/stream/start
         {
             "task": "Compare PETG vs ABS for outdoor use",
@@ -602,14 +1407,55 @@ async def start_streaming_collective(req: StreamRunReq):
             "k": 3
         }
 
+    Example with selected specialists:
+        POST /api/collective/stream/start
+        {
+            "task": "Compare PETG vs ABS for outdoor use",
+            "pattern": "council",
+            "selectedSpecialists": ["local_q4", "local_coder", "openai_gpt4o_mini"]
+        }
+
     Returns:
         session_id to connect via WebSocket
     """
+    # Validate selected specialists if provided
+    if req.selected_specialists:
+        specialists = get_specialists_by_ids(req.selected_specialists)
+        if len(specialists) != len(req.selected_specialists):
+            found_ids = {s.id for s in specialists}
+            missing = [sid for sid in req.selected_specialists if sid not in found_ids]
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown specialist IDs: {missing}"
+            )
+
+        # Check availability
+        unavailable = [s.id for s in specialists if not s.is_available]
+        if unavailable:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Specialists not available (missing API keys): {unavailable}"
+            )
+
+        # Check minimum count
+        if len(specialists) < 2:
+            raise HTTPException(
+                status_code=400,
+                detail="Minimum 2 specialists required"
+            )
+        if len(specialists) > 7:
+            raise HTTPException(
+                status_code=400,
+                detail="Maximum 7 specialists allowed"
+            )
+
     session = await get_or_create_session(
         task=req.task,
         pattern=req.pattern,
         k=req.k,
         user_id=req.user_id,
+        enable_search_phase=req.enable_search_phase,
+        selected_specialists=req.selected_specialists,
     )
 
     # Start execution in background
@@ -741,56 +1587,81 @@ async def list_collective_sessions(
 ):
     """List recent collective sessions.
 
-    Returns recent sessions for viewing history.
+    Returns recent sessions from database, merged with active in-memory sessions.
     """
-    async with _sessions_lock:
-        sessions = list(_sessions.values())
+    # Get sessions from database
+    db_sessions = await _load_sessions_from_db(
+        user_id=user_id,
+        status=status,
+        limit=limit,
+    )
 
-    # Filter
+    # Get active in-memory sessions (may be more current than DB)
+    async with _sessions_lock:
+        active_sessions = list(_sessions.values())
+
+    # Filter in-memory sessions
     if user_id:
-        sessions = [s for s in sessions if s.user_id == user_id]
+        active_sessions = [s for s in active_sessions if s.user_id == user_id]
     if status:
-        sessions = [s for s in sessions if s.status == status]
+        active_sessions = [s for s in active_sessions if s.status == status]
+
+    # Convert active sessions to dict format
+    active_session_dicts = [
+        {
+            "session_id": s.session_id,
+            "task": s.task,
+            "pattern": s.pattern,
+            "k": s.k,
+            "status": s.status,
+            "created_at": s.created_at.isoformat(),
+            "proposals_count": len(s.proposals),
+            "has_verdict": s.verdict is not None,
+            "user_id": s.user_id,
+        }
+        for s in active_sessions
+    ]
+
+    # Merge: prefer in-memory sessions (more current) over DB sessions
+    active_ids = {s["session_id"] for s in active_session_dicts}
+    merged = active_session_dicts + [s for s in db_sessions if s["session_id"] not in active_ids]
 
     # Sort by created_at descending
-    sessions.sort(key=lambda s: s.created_at, reverse=True)
+    merged.sort(key=lambda s: s.get("created_at", ""), reverse=True)
 
     # Limit
-    sessions = sessions[:limit]
+    merged = merged[:limit]
 
     return {
-        "sessions": [
-            {
-                "session_id": s.session_id,
-                "task": s.task,
-                "pattern": s.pattern,
-                "k": s.k,
-                "status": s.status,
-                "created_at": s.created_at.isoformat(),
-                "proposals_count": len(s.proposals),
-                "has_verdict": s.verdict is not None,
-            }
-            for s in sessions
-        ],
-        "total": len(sessions),
+        "sessions": merged,
+        "total": len(merged),
     }
 
 
 @router.get("/sessions/{session_id}")
 async def get_collective_session(session_id: str):
-    """Get details for a specific collective session."""
-    session = await get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    """Get details for a specific collective session.
 
-    return {
-        "session_id": session.session_id,
-        "task": session.task,
-        "pattern": session.pattern,
-        "k": session.k,
-        "status": session.status,
-        "created_at": session.created_at.isoformat(),
-        "proposals": session.proposals,
-        "verdict": session.verdict,
-        "error": session.error,
-    }
+    Checks in-memory first (for active sessions), then falls back to database.
+    """
+    # Check in-memory first
+    session = await get_session(session_id)
+    if session:
+        return {
+            "session_id": session.session_id,
+            "task": session.task,
+            "pattern": session.pattern,
+            "k": session.k,
+            "status": session.status,
+            "created_at": session.created_at.isoformat(),
+            "proposals": session.proposals,
+            "verdict": session.verdict,
+            "error": session.error,
+        }
+
+    # Fall back to database
+    db_session = await _load_session_details_from_db(session_id)
+    if db_session:
+        return db_session
+
+    raise HTTPException(status_code=404, detail="Session not found")

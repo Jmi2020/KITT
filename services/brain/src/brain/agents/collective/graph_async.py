@@ -1,6 +1,6 @@
 
 from __future__ import annotations
-from typing import TypedDict, List, Dict, Any, Optional
+from typing import TypedDict, List, Dict, Any, Optional, TYPE_CHECKING
 import os
 import logging
 from langgraph.graph import StateGraph, END
@@ -8,6 +8,10 @@ from langgraph.graph import StateGraph, END
 # Import async chat interface
 from brain.llm_client import chat_async
 from .context_policy import fetch_domain_context
+from .providers import SpecialistConfig, get_specialists_by_ids
+
+if TYPE_CHECKING:
+    from .providers import SpecialistConfig
 
 # Import tool registry and MCP execution
 from brain.routing.tool_registry import TOOL_DEFINITIONS
@@ -137,6 +141,14 @@ class CollectiveState(TypedDict, total=False):
     proposals: List[str]
     verdict: str
     logs: str
+    # Two-phase search fields
+    enable_search_phase: bool
+    phase1_outputs: List[Dict[str, Any]]
+    search_results: Dict[str, Any]
+    search_execution_time_ms: float
+    conversation_history: List[Dict[str, str]]
+    # Multi-provider specialist selection
+    specialist_configs: List[SpecialistConfig]  # Optional: specific specialists to use
 
 async def n_plan(s: CollectiveState) -> CollectiveState:
     """Plan node - uses Q4 to create high-level plan.
@@ -284,6 +296,203 @@ async def n_propose_council(s: CollectiveState) -> CollectiveState:
 
     return {**s, "proposals": list(props)}
 
+# =============================================================================
+# Multi-Provider Proposal Generation
+# =============================================================================
+
+async def generate_proposal_for_specialist(
+    specialist: SpecialistConfig,
+    task: str,
+    context: str,
+    conv_summary: str,
+    index: int,
+    search_results_formatted: str = "",
+    phase1_assessment: str = "",
+) -> Dict[str, Any]:
+    """Generate a proposal using a specific specialist (local or cloud).
+
+    Routes to the appropriate provider based on specialist config:
+    - Local: Uses `which` param to select local model (Q4, CODER, Q4B)
+    - Cloud: Uses `provider` and `model` params for API routing
+
+    Args:
+        specialist: SpecialistConfig defining which provider/model to use
+        task: The task to address
+        context: KB context
+        conv_summary: Conversation summary
+        index: Specialist index (for temperature variation)
+        search_results_formatted: Optional search results (two-phase mode)
+        phase1_assessment: Optional phase 1 assessment (two-phase mode)
+
+    Returns:
+        Dict with proposal text, model info, and metadata
+    """
+    role = specialist.display_name or f"specialist_{index + 1}"
+
+    # Vary temperature slightly across specialists (0.7-0.9)
+    temperature = 0.7 + (index * 0.05)  # Smaller increments for more specialists
+    temperature = min(temperature, 0.95)  # Cap at 0.95
+
+    # Output budget varies by provider
+    max_tokens = 6000 if specialist.provider == "local" else 4000  # Cloud often has stricter limits
+
+    # Build system prompt with quality improvements
+    search_section = ""
+    if search_results_formatted:
+        search_section = """
+## Using Search Results
+- Reference specific sources when citing web search findings
+- Combine search results with KB context for comprehensive analysis
+"""
+
+    system_prompt = f"""You are {role}, an expert specialist providing independent analysis.
+
+## Your Role
+{HINT_PROPOSER}
+{HALLUCINATION_PREVENTION}
+{EVIDENCE_REQUIREMENTS}
+{DECISION_FRAMEWORK}
+{search_section}
+## Response Guidelines
+- Provide a detailed, well-justified proposal
+- Structure your response with clear sections (Analysis, Recommendation, Rationale)
+- Include confidence level for your recommendation (High/Medium/Low)
+- End with any caveats or limitations of your analysis"""
+
+    # Build user prompt
+    user_prompt_parts = []
+
+    if conv_summary:
+        user_prompt_parts.append(f"## Conversation Context\n{conv_summary}")
+
+    if phase1_assessment:
+        user_prompt_parts.append(f"## Initial Assessment\n{phase1_assessment}")
+
+    user_prompt_parts.append(f"## Task\n{task}")
+    user_prompt_parts.append(f"## Relevant Knowledge\n{context}")
+
+    if search_results_formatted:
+        user_prompt_parts.append(search_results_formatted)
+
+    user_prompt_parts.append(
+        "\n## Your Proposal\nProvide your expert analysis and recommendation. "
+        "Reference KB chunks using [KB#id] when citing evidence."
+    )
+
+    user_prompt = "\n\n".join(user_prompt_parts)
+
+    # Route to appropriate provider
+    try:
+        if specialist.provider == "local":
+            # Local model - use which parameter
+            response, metadata = await chat_async(
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                which=specialist.local_which or "Q4",
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        else:
+            # Cloud provider - use provider and model parameters
+            response, metadata = await chat_async(
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                provider=specialist.provider,
+                model=specialist.model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+
+        # Estimate cost for cloud providers
+        cost_usd = 0.0
+        if specialist.provider != "local":
+            # Rough token estimation (4 chars per token)
+            prompt_tokens = (len(system_prompt) + len(user_prompt)) // 4
+            completion_tokens = len(response) // 4
+            cost_usd = specialist.estimate_cost(prompt_tokens, completion_tokens)
+
+        return {
+            "text": response,
+            "role": role,
+            "model": specialist.model,
+            "provider": specialist.provider,
+            "temperature": temperature,
+            "specialist_id": specialist.id,
+            "cost_usd": cost_usd,
+            "metadata": metadata,
+        }
+
+    except Exception as e:
+        logger.error(f"Proposal generation failed for {specialist.id}: {e}")
+        return {
+            "text": f"[Error generating proposal: {str(e)}]",
+            "role": role,
+            "model": specialist.model,
+            "provider": specialist.provider,
+            "specialist_id": specialist.id,
+            "error": str(e),
+        }
+
+
+async def n_propose_council_multi_provider(s: CollectiveState) -> CollectiveState:
+    """Council node with multi-provider support.
+
+    Uses specialist_configs from state to generate proposals from
+    mixed local and cloud providers.
+    """
+    import asyncio
+
+    specialist_configs = s.get("specialist_configs", [])
+
+    if not specialist_configs:
+        # Fall back to standard council if no configs provided
+        return await n_propose_council(s)
+
+    # Get conversation summary
+    conversation_history = s.get("conversation_history", [])
+    conv_summary = summarize_conversation(conversation_history, max_tokens=2000) if conversation_history else ""
+
+    # Fetch context
+    context = fetch_domain_context(
+        s["task"],
+        limit=10,
+        for_proposer=True,
+        token_budget=10000
+    )
+
+    # Generate all proposals in parallel
+    async def generate_for_specialist(i: int, spec: SpecialistConfig):
+        return await generate_proposal_for_specialist(
+            specialist=spec,
+            task=s["task"],
+            context=context,
+            conv_summary=conv_summary,
+            index=i,
+        )
+
+    proposals = await asyncio.gather(*[
+        generate_for_specialist(i, spec)
+        for i, spec in enumerate(specialist_configs)
+    ])
+
+    # Extract text and preserve metadata
+    proposal_texts = [p["text"] for p in proposals]
+
+    # Log provider usage
+    providers_used = [f"{p['provider']}/{p['model']}" for p in proposals]
+    logger.info(f"Multi-provider council generated {len(proposals)} proposals from: {providers_used}")
+
+    return {
+        **s,
+        "proposals": proposal_texts,
+        "proposal_metadata": proposals,  # Full metadata for streaming
+    }
+
+
 async def n_propose_debate(s: CollectiveState) -> CollectiveState:
     """Debate node - generates PRO and CON arguments using Q4.
 
@@ -378,6 +587,566 @@ You must argue {stance_direction} the proposal with conviction, using evidence t
     con = results[1]
 
     return {**s, "proposals": [pro, con]}
+
+
+# =============================================================================
+# Two-Phase Proposal Functions (with Search Access)
+# =============================================================================
+
+async def generate_phase1_search_requests(
+    *,
+    task: str,
+    specialist_id: str,
+    kb_context: str = "",
+    conversation_history: List[Dict[str, Any]] | None = None,
+):
+    """Generate Phase 1 output with search requests for one specialist.
+
+    This is a lightweight call focused on identifying what searches would help.
+
+    Args:
+        task: The task/question to address
+        specialist_id: Identifier for this specialist (e.g., "specialist_1")
+        kb_context: Knowledge base context
+        conversation_history: Previous conversation messages
+
+    Returns:
+        Phase1Output with specialist_id, search_requests, initial_assessment, confidence
+    """
+    import json
+    from .search_prompts import build_phase1_system_prompt, build_phase1_user_prompt
+    from .schemas import Phase1Output, SearchRequest
+
+    # Build conversation summary from history
+    conv_summary = ""
+    if conversation_history:
+        recent = conversation_history[-5:]  # Last 5 messages
+        conv_summary = "\n".join(
+            f"{m.get('role', 'user')}: {m.get('content', '')[:200]}"
+            for m in recent
+        )
+
+    system_prompt = build_phase1_system_prompt(specialist_id)
+    user_prompt = build_phase1_user_prompt(
+        task=task,
+        kb_context=kb_context,
+        conversation_summary=conv_summary,
+    )
+
+    # Phase 1 is lightweight - lower token budget, more deterministic
+    response, metadata = await chat_async([
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ], which="Q4", temperature=0.5, max_tokens=1500)
+
+    # Parse JSON response
+    try:
+        # Clean response (handle markdown code blocks)
+        cleaned = response.strip()
+        if cleaned.startswith("```"):
+            # Remove markdown code block
+            lines = cleaned.split("\n")
+            cleaned = "\n".join(lines[1:-1]) if lines[-1] == "```" else "\n".join(lines[1:])
+            cleaned = cleaned.strip()
+
+        parsed = json.loads(cleaned)
+
+        # Convert raw search requests to SearchRequest objects
+        search_requests = []
+        for req in parsed.get("search_requests", [])[:3]:  # Max 3
+            if isinstance(req, dict):
+                search_requests.append(SearchRequest(
+                    query=req.get("query", ""),
+                    purpose=req.get("purpose", req.get("rationale", "")),
+                    priority=req.get("priority", 2),
+                ))
+            elif isinstance(req, str):
+                search_requests.append(SearchRequest(query=req, purpose="", priority=2))
+
+        return Phase1Output(
+            specialist_id=specialist_id,
+            search_requests=search_requests,
+            initial_assessment=parsed.get("initial_assessment", "")[:1000],
+            confidence_without_search=float(parsed.get("confidence_without_search", 0.5)),
+        )
+    except json.JSONDecodeError as e:
+        logger.warning(f"Phase 1 JSON parse failed for {specialist_id}: {e}")
+        # Return empty search requests on parse failure
+        return Phase1Output(
+            specialist_id=specialist_id,
+            search_requests=[],
+            initial_assessment=response[:500],  # Use raw response as assessment
+            confidence_without_search=0.5,
+        )
+
+
+async def execute_searches_centralized(
+    dedup_searches: List[Any],
+    max_concurrent: int = 3,
+    timeout_per_search: float = 10.0,
+) -> Dict[str, Any]:
+    """Execute deduplicated searches via MCPClient with rate limiting.
+
+    Args:
+        dedup_searches: List of DeduplicatedSearch objects
+        max_concurrent: Max concurrent search requests
+        timeout_per_search: Timeout per search in seconds
+
+    Returns:
+        Dict mapping canonical query to SearchResult
+    """
+    import asyncio
+    import time
+    from .schemas import SearchResult
+
+    mcp_client = _get_mcp_client()
+    results: Dict[str, SearchResult] = {}
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def execute_one(search) -> tuple:
+        query = search.query
+        start = time.time()
+
+        async with semaphore:
+            try:
+                # Execute web_search via MCP
+                result = await asyncio.wait_for(
+                    mcp_client.execute_tool("web_search", {"query": query}),
+                    timeout=timeout_per_search,
+                )
+
+                elapsed = (time.time() - start) * 1000
+
+                if result.get("success"):
+                    data = result.get("data", {})
+                    search_results = data.get("results", []) if isinstance(data, dict) else []
+                    return query, SearchResult(
+                        query=query,
+                        success=True,
+                        results=search_results,
+                        execution_time_ms=elapsed,
+                    )
+                else:
+                    return query, SearchResult(
+                        query=query,
+                        success=False,
+                        error=result.get("error", "Unknown error"),
+                        execution_time_ms=elapsed,
+                    )
+
+            except asyncio.TimeoutError:
+                return query, SearchResult(
+                    query=query,
+                    success=False,
+                    error=f"Search timed out after {timeout_per_search}s",
+                    execution_time_ms=timeout_per_search * 1000,
+                )
+            except Exception as e:
+                logger.error(f"Search execution failed for '{query}': {e}")
+                return query, SearchResult(
+                    query=query,
+                    success=False,
+                    error=str(e),
+                    execution_time_ms=(time.time() - start) * 1000,
+                )
+
+    # Execute all searches (limited by semaphore)
+    tasks = [execute_one(s) for s in dedup_searches]
+    search_results = await asyncio.gather(*tasks)
+
+    # Build results dict
+    for query, result in search_results:
+        results[query] = result
+
+    return results
+
+
+async def generate_phase2_proposal(
+    *,
+    task: str,
+    specialist_id: str,
+    kb_context: str = "",
+    search_results_formatted: str = "",
+    phase1_assessment: str = "",
+    conversation_history: List[Dict[str, Any]] | None = None,
+    temperature: float = 0.7,
+) -> str:
+    """Generate Phase 2 full proposal with search results.
+
+    Args:
+        task: The task/question to address
+        specialist_id: Identifier for this specialist
+        kb_context: Knowledge base context
+        search_results_formatted: Formatted search results for this specialist
+        phase1_assessment: Initial assessment from Phase 1
+        conversation_history: Previous conversation messages
+        temperature: Generation temperature
+
+    Returns:
+        Full proposal text
+    """
+    from .search_prompts import build_phase2_system_prompt, build_phase2_user_prompt
+
+    # Build conversation summary from history
+    conv_summary = ""
+    if conversation_history:
+        recent = conversation_history[-5:]  # Last 5 messages
+        conv_summary = "\n".join(
+            f"{m.get('role', 'user')}: {m.get('content', '')[:200]}"
+            for m in recent
+        )
+
+    has_search_results = bool(search_results_formatted.strip())
+
+    system_prompt = build_phase2_system_prompt(specialist_id, has_search_results)
+    user_prompt = build_phase2_user_prompt(
+        task=task,
+        kb_context=kb_context,
+        search_results_formatted=search_results_formatted,
+        phase1_assessment=phase1_assessment,
+        conversation_summary=conv_summary,
+    )
+
+    response, metadata = await chat_async([
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ], which="Q4", temperature=temperature, max_tokens=6000)
+
+    return response
+
+
+async def n_propose_council_two_phase(s: CollectiveState) -> CollectiveState:
+    """Two-phase council proposal generation with search access.
+
+    Phase 1: All specialists identify search needs (parallel, fast)
+    Central: Orchestrator executes deduplicated searches
+    Phase 2: All specialists generate full proposals with results (parallel)
+
+    This provides ~8s overhead but gives specialists access to web search.
+    """
+    import asyncio
+    import time
+    from .schemas import Phase1Output
+    from .search_dedup import deduplicate_search_requests, assign_results_to_specialists, get_dedup_stats
+    from .search_prompts import format_search_results_for_specialist
+
+    k = int(s.get("k", 3))
+
+    # Get conversation summary
+    conversation_history = s.get("conversation_history", [])
+    conv_summary = summarize_conversation(conversation_history, max_tokens=1500) if conversation_history else ""
+
+    # Fetch context (trimmed for Phase 1)
+    context = fetch_domain_context(
+        s["task"],
+        limit=8,
+        for_proposer=True,
+        token_budget=6000  # Smaller budget for Phase 1
+    )
+
+    # ========== PHASE 1: Collect search requests ==========
+    logger.info(f"Two-phase council: Starting Phase 1 with {k} specialists")
+    phase1_start = time.time()
+
+    phase1_tasks = [
+        generate_phase1_search_requests(
+            task=s["task"],
+            specialist_id=f"specialist_{i+1}",
+            kb_context=context,
+            conversation_history=conversation_history,
+        )
+        for i in range(k)
+    ]
+    phase1_outputs = await asyncio.gather(*phase1_tasks)
+
+    phase1_time = (time.time() - phase1_start) * 1000
+    logger.info(f"Phase 1 completed in {phase1_time:.0f}ms")
+
+    # Phase1Output objects are now returned directly
+    phase1_models = list(phase1_outputs)
+
+    # ========== DEDUPLICATION ==========
+    dedup_searches, original_to_canonical = deduplicate_search_requests(
+        phase1_models,
+        max_total_searches=9,
+        max_per_specialist=3,
+    )
+
+    stats = get_dedup_stats(phase1_models, dedup_searches)
+    logger.info(
+        f"Search deduplication: {stats['total_requests']} requests -> "
+        f"{stats['unique_queries']} unique queries"
+    )
+
+    # ========== CENTRAL FETCH ==========
+    search_results = {}
+    search_time = 0.0
+
+    if dedup_searches:
+        logger.info(f"Executing {len(dedup_searches)} unique searches")
+        search_start = time.time()
+
+        search_results = await execute_searches_centralized(
+            dedup_searches,
+            max_concurrent=3,
+            timeout_per_search=10.0,
+        )
+
+        search_time = (time.time() - search_start) * 1000
+        successful = sum(1 for r in search_results.values() if r.success)
+        logger.info(f"Search execution: {successful}/{len(search_results)} succeeded in {search_time:.0f}ms")
+
+    # Map results back to specialists
+    specialist_results = assign_results_to_specialists(
+        search_results,
+        phase1_models,
+        original_to_canonical,
+    )
+
+    # ========== PHASE 2: Generate full proposals ==========
+    # Re-fetch context with full budget for Phase 2
+    full_context = fetch_domain_context(
+        s["task"],
+        limit=10,
+        for_proposer=True,
+        token_budget=8000  # Reduced since we have search results too
+    )
+
+    logger.info(f"Two-phase council: Starting Phase 2 with {k} specialists")
+    phase2_start = time.time()
+
+    phase2_tasks = []
+    for i in range(k):
+        specialist_id = f"specialist_{i + 1}"
+        results_for_specialist = specialist_results.get(specialist_id, [])
+        formatted_results = format_search_results_for_specialist(results_for_specialist)
+        phase1_assessment = phase1_models[i].initial_assessment
+
+        phase2_tasks.append(
+            generate_phase2_proposal(
+                task=s["task"],
+                specialist_id=specialist_id,
+                kb_context=full_context,
+                search_results_formatted=formatted_results,
+                phase1_assessment=phase1_assessment,
+                conversation_history=conversation_history,
+                temperature=0.7 + (i * 0.1),
+            )
+        )
+
+    proposals = await asyncio.gather(*phase2_tasks)
+
+    phase2_time = (time.time() - phase2_start) * 1000
+    total_time = phase1_time + search_time + phase2_time
+    logger.info(
+        f"Two-phase council complete: Phase1={phase1_time:.0f}ms, "
+        f"Search={search_time:.0f}ms, Phase2={phase2_time:.0f}ms, "
+        f"Total={total_time:.0f}ms"
+    )
+
+    return {
+        **s,
+        "proposals": list(proposals),
+        "phase1_outputs": [p.model_dump() for p in phase1_models],
+        "search_results": {q: r.__dict__ for q, r in search_results.items()},
+        "search_execution_time_ms": search_time,
+    }
+
+
+async def n_propose_debate_two_phase(s: CollectiveState) -> CollectiveState:
+    """Two-phase debate proposal generation with search access.
+
+    Similar to council but with PRO/CON debaters instead of specialists.
+    """
+    import asyncio
+    import time
+    from .schemas import Phase1Output, SearchRequest
+    from .search_dedup import deduplicate_search_requests, assign_results_to_specialists, get_dedup_stats
+    from .search_prompts import format_search_results_for_specialist
+
+    # Get conversation summary
+    conversation_history = s.get("conversation_history", [])
+    conv_summary = summarize_conversation(conversation_history, max_tokens=1500) if conversation_history else ""
+
+    # Fetch context for Phase 1
+    context = fetch_domain_context(
+        s["task"],
+        limit=8,
+        for_proposer=True,
+        token_budget=6000,
+    )
+
+    # ========== PHASE 1: Collect search requests from PRO and CON ==========
+    logger.info("Two-phase debate: Starting Phase 1 with PRO and CON")
+
+    async def phase1_debater(stance: str, is_pro: bool) -> Dict[str, Any]:
+        """Generate Phase 1 for a debater."""
+        import json
+        specialist_id = f"debater_{stance}"
+
+        system_prompt = f"""You are the {stance} debater preparing to argue {'FOR' if is_pro else 'AGAINST'} the proposal.
+
+## Your Goal (Phase 1)
+Identify what web searches would help you build a stronger {'supporting' if is_pro else 'opposing'} argument.
+
+## Instructions
+1. Consider what evidence would strengthen your {stance} position
+2. Identify gaps in the knowledge base that search could fill
+3. Output a JSON object with search requests
+
+## Output Format (JSON only)
+{{
+  "search_requests": [
+    {{"query": "specific search query", "purpose": "why needed for {stance} argument", "priority": 1}}
+  ],
+  "initial_assessment": "Brief analysis of your {stance} position...",
+  "confidence_without_search": 0.7
+}}
+
+IMPORTANT: Output ONLY valid JSON."""
+
+        user_prompt = f"## Task\n{s['task']}\n\n## Knowledge Base\n{context}\n\nIdentify searches for your {stance} argument."
+
+        response, _ = await chat_async([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ], which="Q4", temperature=0.5, max_tokens=1500)
+
+        try:
+            cleaned = response.strip()
+            if cleaned.startswith("```"):
+                lines = cleaned.split("\n")
+                cleaned = "\n".join(lines[1:-1]) if lines[-1] == "```" else "\n".join(lines[1:])
+            parsed = json.loads(cleaned.strip())
+            return {
+                "specialist_id": specialist_id,
+                "search_requests": parsed.get("search_requests", []),
+                "initial_assessment": parsed.get("initial_assessment", ""),
+                "confidence_without_search": parsed.get("confidence_without_search", 0.5),
+            }
+        except json.JSONDecodeError:
+            return {
+                "specialist_id": specialist_id,
+                "search_requests": [],
+                "initial_assessment": response[:500],
+                "confidence_without_search": 0.5,
+            }
+
+    phase1_start = time.time()
+    phase1_results = await asyncio.gather(
+        phase1_debater("PRO", True),
+        phase1_debater("CON", False),
+    )
+    phase1_time = (time.time() - phase1_start) * 1000
+
+    # Convert to Phase1Output models
+    phase1_models = []
+    for output in phase1_results:
+        search_reqs = [
+            SearchRequest(
+                query=r.get("query", ""),
+                purpose=r.get("purpose", ""),
+                priority=r.get("priority", 2),
+            )
+            for r in output.get("search_requests", [])
+            if r.get("query")
+        ]
+        phase1_models.append(Phase1Output(
+            specialist_id=output["specialist_id"],
+            search_requests=search_reqs,
+            initial_assessment=output.get("initial_assessment", ""),
+            confidence_without_search=output.get("confidence_without_search", 0.5),
+        ))
+
+    # ========== DEDUPLICATION ==========
+    dedup_searches, original_to_canonical = deduplicate_search_requests(
+        phase1_models,
+        max_total_searches=6,  # Fewer for debate (only 2 debaters)
+        max_per_specialist=3,
+    )
+
+    # ========== CENTRAL FETCH ==========
+    search_results = {}
+    search_time = 0.0
+
+    if dedup_searches:
+        logger.info(f"Executing {len(dedup_searches)} unique searches for debate")
+        search_start = time.time()
+        search_results = await execute_searches_centralized(dedup_searches)
+        search_time = (time.time() - search_start) * 1000
+
+    # Map results back
+    specialist_results = assign_results_to_specialists(
+        search_results,
+        phase1_models,
+        original_to_canonical,
+    )
+
+    # ========== PHASE 2: Generate full debate arguments ==========
+    full_context = fetch_domain_context(s["task"], limit=10, for_proposer=True, token_budget=8000)
+
+    async def phase2_debater(stance: str, is_pro: bool, idx: int) -> str:
+        """Generate Phase 2 full argument for a debater."""
+        specialist_id = f"debater_{stance}"
+        results = specialist_results.get(specialist_id, [])
+        formatted_results = format_search_results_for_specialist(results)
+        phase1_assessment = phase1_models[idx].initial_assessment
+        has_results = bool(formatted_results.strip())
+
+        search_section = ""
+        if has_results:
+            search_section = """
+## Using Search Results
+- Reference specific sources when using search information
+- Combine search findings with KB context for stronger arguments
+"""
+
+        system_prompt = f"""You are the {stance} debater arguing {'FOR' if is_pro else 'AGAINST'} the proposal.
+
+## Your Role
+Present compelling arguments {'supporting' if is_pro else 'opposing'} the proposal using all available evidence.
+{HALLUCINATION_PREVENTION}
+{EVIDENCE_REQUIREMENTS}
+{search_section}
+## Argumentation Guidelines
+- Present your strongest arguments first
+- Support each argument with KB evidence [KB#id] and search citations
+- Anticipate counterarguments and address them
+- Be persuasive but factually accurate"""
+
+        user_parts = [f"## Task\n{s['task']}"]
+        if phase1_assessment:
+            user_parts.append(f"## Your Initial Assessment\n{phase1_assessment}")
+        user_parts.append(f"## Knowledge Base\n{full_context}")
+        if formatted_results:
+            user_parts.append(formatted_results)
+        user_parts.append(f"\n## Your {stance} Arguments\nPresent your {'supporting' if is_pro else 'opposing'} case.")
+
+        response, _ = await chat_async([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "\n\n".join(user_parts)}
+        ], which="Q4", max_tokens=6000)
+
+        return response
+
+    phase2_start = time.time()
+    proposals = await asyncio.gather(
+        phase2_debater("PRO", True, 0),
+        phase2_debater("CON", False, 1),
+    )
+    phase2_time = (time.time() - phase2_start) * 1000
+
+    total_time = phase1_time + search_time + phase2_time
+    logger.info(f"Two-phase debate complete: Total={total_time:.0f}ms")
+
+    return {
+        **s,
+        "proposals": list(proposals),
+        "phase1_outputs": [p.model_dump() for p in phase1_models],
+        "search_results": {q: r.__dict__ for q, r in search_results.items()},
+        "search_execution_time_ms": search_time,
+    }
+
 
 async def n_judge(s: CollectiveState) -> CollectiveState:
     """Judge node - uses F16 (GPT-OSS 120B) to synthesize proposals into final verdict.
@@ -479,7 +1248,7 @@ async def n_judge(s: CollectiveState) -> CollectiveState:
 
     return {**s, "verdict": verdict}
 
-def build_collective_graph_async() -> StateGraph:
+def build_collective_graph_async(enable_two_phase: bool = False) -> StateGraph:
     """Build async collective meta-agent LangGraph.
 
     This version uses async nodes with chat_async() for better performance:
@@ -488,9 +1257,17 @@ def build_collective_graph_async() -> StateGraph:
     - No ThreadPoolExecutor overhead
     - Clean async/await semantics
 
+    Args:
+        enable_two_phase: If True, use two-phase nodes with search access.
+                         If False, use standard single-phase nodes.
+
     Performance improvement over sync version:
     - Council k=3: ~50% faster (3 sequential → 3 parallel)
     - Debate: ~30% faster (2 sequential → 2 parallel)
+
+    Two-phase overhead (when enabled):
+    - Additional ~8s for search phase (Phase 1 + search execution)
+    - Specialists gain access to web search results
     """
     g = StateGraph(CollectiveState)
 
@@ -499,11 +1276,20 @@ def build_collective_graph_async() -> StateGraph:
     g.set_entry_point("plan")
 
     g.add_node("propose_pipeline", n_propose_pipeline)
-    g.add_node("propose_council", n_propose_council)
-    g.add_node("propose_debate", n_propose_debate)
+
+    if enable_two_phase:
+        # Two-phase nodes with search access
+        g.add_node("propose_council", n_propose_council_two_phase)
+        g.add_node("propose_debate", n_propose_debate_two_phase)
+        logger.info("Collective graph built with two-phase search access enabled")
+    else:
+        # Standard single-phase nodes
+        g.add_node("propose_council", n_propose_council)
+        g.add_node("propose_debate", n_propose_debate)
+
     g.add_node("judge", n_judge)
 
-    # Routing logic (same as sync version)
+    # Routing logic - can also check enable_search_phase at runtime
     def route(s: CollectiveState):
         pattern = (s.get("pattern","pipeline") or "pipeline").lower()
         if pattern not in ("pipeline","council","debate"):

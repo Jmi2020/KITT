@@ -498,7 +498,7 @@ export function VoiceAssistant({
           <div className="max-w-3xl mx-auto flex flex-col gap-6 pb-8">
               {processingSince && (
                 <div className="sticky top-0 z-20">
-                  <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border border-white/10 bg-black/60 backdrop-blur-xl shadow-lg">
+                  <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border border-white/10 bg-black/60 backdrop-blur-xl shadow-lg relative overflow-hidden">
                       <span className="h-3 w-3 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_12px_rgba(52,211,153,0.6)]" />
                       <div className="flex-1">
                         <div className="text-sm font-semibold text-white">Inference in progress</div>
@@ -511,6 +511,7 @@ export function VoiceAssistant({
                           Long run
                         </span>
                       )}
+                      <div className="absolute inset-x-3 bottom-2 h-0.5 rounded-full bg-gradient-to-r from-cyan-400 via-purple-400 to-emerald-400 opacity-60 blur-[1px] animate-pulse" />
                   </div>
                 </div>
               )}
@@ -575,10 +576,10 @@ export function VoiceAssistant({
                   <motion.div 
                     initial={{ opacity: 0, y: 20 }} 
                     animate={{ opacity: 1, y: 0 }}
-                    className="self-start max-w-[85%]"
+                    className="self-start w-full max-w-4xl"
                   >
-                      <div className="bg-gray-800/80 border border-white/10 text-gray-100 px-6 py-4 rounded-2xl rounded-tl-sm backdrop-blur-md shadow-xl">
-                          <div className="prose prose-invert prose-sm max-w-none markdown-content">
+                      <div className="bg-gray-800/80 border border-white/10 text-gray-100 px-6 py-5 rounded-2xl rounded-tl-sm backdrop-blur-md shadow-xl voice-response">
+                          <div className="prose prose-invert prose-base max-w-none markdown-content">
                             <Markdown
                               remarkPlugins={[remarkGfm]}
                               components={{
@@ -695,13 +696,13 @@ export function VoiceAssistant({
                                     <span className="icon">{isCapturing ? '🎙️' : '🎤'}</span>
                                 </Button>
                             </div>
-                            <div className="flex flex-wrap justify-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-gray-400">
-                                <span className="px-2 py-0.5 rounded-full border border-white/10 bg-white/5 text-white">
+                            <div className="voice-hint-row">
+                                <span className="voice-hint-chip">
                                   {isCapturing ? 'Listening live' : 'Tap to start'}
                                 </span>
-                                <span className="px-2 py-0.5 rounded-full border border-white/10 bg-white/5">{currentModeConfig?.name || 'Realtime'}</span>
-                                <span className="px-2 py-0.5 rounded-full border border-white/10 bg-white/5">{preferLocal ? 'Local' : (ttsProvider?.toUpperCase() || 'Cloud')}</span>
-                                <span className="px-2 py-0.5 rounded-full border border-white/10 bg-white/5">Auto-stop</span>
+                                <span className="voice-hint-chip">{currentModeConfig?.name || 'Realtime'}</span>
+                                <span className="voice-hint-chip">{preferLocal ? 'Local' : (ttsProvider?.toUpperCase() || 'Cloud')}</span>
+                                <span className="voice-hint-chip">Auto-stop</span>
                             </div>
                             {captureError && (
                               <div className="text-xs text-red-400 text-center mt-2 max-w-xs">

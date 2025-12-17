@@ -11,7 +11,21 @@ import type {
   CollectiveEvent,
   CollectiveProposal,
   StreamStartResponse,
+  SpecialistConfig,
+  SpecialistsListResponse,
+  CostEstimateResponse,
+  ProviderType,
 } from '../types/collective';
+
+export interface SearchPhaseInfo {
+  isActive: boolean;
+  currentPhase: 1 | 2 | null;
+  searchQueries: string[];
+  currentSearchIndex: number;
+  totalSearches: number;
+  completedSearches: number;
+  message?: string;
+}
 
 export interface UseCollectiveApiReturn {
   // State
@@ -24,13 +38,20 @@ export interface UseCollectiveApiReturn {
   currentSession: CollectiveSession | null;
   proposals: CollectiveProposal[];
   verdict: string | null;
-  phase: 'idle' | 'planning' | 'proposing' | 'judging' | 'complete' | 'error';
+  phase: 'idle' | 'planning' | 'searching' | 'proposing' | 'judging' | 'complete' | 'error';
   activeProposalIndex: number;
+  searchPhaseInfo: SearchPhaseInfo;
 
   // Sessions
   sessions: CollectiveSession[];
   loadSessions: (status?: string, limit?: number) => Promise<void>;
   loadSessionDetails: (sessionId: string) => Promise<CollectiveSession | null>;
+
+  // Specialists
+  specialists: SpecialistConfig[];
+  specialistsLoading: boolean;
+  fetchSpecialists: () => Promise<void>;
+  estimateCost: (specialistIds: string[]) => Promise<number>;
 
   // Streaming
   startStreaming: (params: StartStreamingParams) => Promise<string | null>;
@@ -45,6 +66,8 @@ interface StartStreamingParams {
   task: string;
   pattern: CollectivePattern;
   k: number;
+  enableSearchPhase?: boolean;
+  selectedSpecialists?: string[];  // List of specialist IDs (overrides k)
 }
 
 interface RunCollectiveParams {
@@ -64,8 +87,20 @@ export function useCollectiveApi(): UseCollectiveApiReturn {
   const [currentSession, setCurrentSession] = useState<CollectiveSession | null>(null);
   const [proposals, setProposals] = useState<CollectiveProposal[]>([]);
   const [verdict, setVerdict] = useState<string | null>(null);
-  const [phase, setPhase] = useState<'idle' | 'planning' | 'proposing' | 'judging' | 'complete' | 'error'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'planning' | 'searching' | 'proposing' | 'judging' | 'complete' | 'error'>('idle');
   const [activeProposalIndex, setActiveProposalIndex] = useState(-1);
+  const [searchPhaseInfo, setSearchPhaseInfo] = useState<SearchPhaseInfo>({
+    isActive: false,
+    currentPhase: null,
+    searchQueries: [],
+    currentSearchIndex: -1,
+    totalSearches: 0,
+    completedSearches: 0,
+  });
+
+  // Specialists state
+  const [specialists, setSpecialists] = useState<SpecialistConfig[]>([]);
+  const [specialistsLoading, setSpecialistsLoading] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -88,6 +123,63 @@ export function useCollectiveApi(): UseCollectiveApiReturn {
     setPhase('idle');
     setActiveProposalIndex(-1);
     setError(null);
+    setSearchPhaseInfo({
+      isActive: false,
+      currentPhase: null,
+      searchQueries: [],
+      currentSearchIndex: -1,
+      totalSearches: 0,
+      completedSearches: 0,
+    });
+  }, []);
+
+  // Fetch available specialists
+  const fetchSpecialists = useCallback(async () => {
+    setSpecialistsLoading(true);
+    try {
+      const response = await fetch('/api/collective/specialists');
+      if (!response.ok) throw new Error('Failed to fetch specialists');
+      const data: SpecialistsListResponse = await response.json();
+
+      // Convert snake_case to camelCase
+      const converted = data.specialists.map(s => ({
+        id: s.id,
+        displayName: (s as unknown as { display_name?: string }).display_name || s.displayName,
+        provider: s.provider,
+        model: s.model,
+        description: s.description,
+        costPer1mIn: (s as unknown as { cost_per_1m_in?: number }).cost_per_1m_in ?? s.costPer1mIn ?? 0,
+        costPer1mOut: (s as unknown as { cost_per_1m_out?: number }).cost_per_1m_out ?? s.costPer1mOut ?? 0,
+        isAvailable: (s as unknown as { is_available?: boolean }).is_available ?? s.isAvailable ?? false,
+      }));
+
+      setSpecialists(converted);
+    } catch (err) {
+      console.error('Error fetching specialists:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch specialists');
+    } finally {
+      setSpecialistsLoading(false);
+    }
+  }, []);
+
+  // Estimate cost for selected specialists
+  const estimateCost = useCallback(async (specialistIds: string[]): Promise<number> => {
+    try {
+      const response = await fetch('/api/collective/specialists/estimate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          specialist_ids: specialistIds,
+          tokens_per_proposal: 4000,
+        }),
+      });
+      if (!response.ok) throw new Error('Failed to estimate cost');
+      const data: CostEstimateResponse = await response.json();
+      return (data as unknown as { estimated_cost_usd?: number }).estimated_cost_usd ?? data.estimatedCostUsd ?? 0;
+    } catch (err) {
+      console.error('Error estimating cost:', err);
+      return 0;
+    }
   }, []);
 
   // Handle WebSocket events
@@ -151,6 +243,17 @@ export function useCollectiveApi(): UseCollectiveApiReturn {
 
       case 'verdict_complete':
         setVerdict(event.verdict || null);
+        // After receiving verdict, if we don't get 'complete' event within 2 seconds,
+        // transition to complete state anyway
+        setTimeout(() => {
+          setPhase((currentPhase) => {
+            if (currentPhase === 'judging') {
+              console.log('Timeout: transitioning to complete after verdict');
+              return 'complete';
+            }
+            return currentPhase;
+          });
+        }, 2000);
         break;
 
       case 'complete':
@@ -185,6 +288,79 @@ export function useCollectiveApi(): UseCollectiveApiReturn {
         setPhase('idle');
         setIsConnected(false);
         break;
+
+      // Search phase events (two-phase proposal generation)
+      case 'search_phase_start':
+        setPhase('searching');
+        setSearchPhaseInfo(prev => ({
+          ...prev,
+          isActive: true,
+          currentPhase: event.phase as 1 | 2 || 1,
+          message: event.message || 'Analyzing search needs...',
+        }));
+        break;
+
+      case 'phase1_start':
+        setSearchPhaseInfo(prev => ({
+          ...prev,
+          currentPhase: 1,
+          message: `Specialist ${(event.index ?? 0) + 1} analyzing search needs...`,
+        }));
+        break;
+
+      case 'phase1_complete':
+        // Phase 1 complete for a specialist
+        break;
+
+      case 'search_requests_collected':
+        setSearchPhaseInfo(prev => ({
+          ...prev,
+          searchQueries: event.queries || [],
+          totalSearches: event.unique_queries || 0,
+          message: `Collected ${event.unique_queries || 0} unique search queries (${event.duplicates_removed || 0} duplicates removed)`,
+        }));
+        break;
+
+      case 'search_execution_start':
+        setSearchPhaseInfo(prev => ({
+          ...prev,
+          currentSearchIndex: 0,
+          message: `Executing ${event.total || 0} searches...`,
+        }));
+        break;
+
+      case 'search_executing':
+        setSearchPhaseInfo(prev => ({
+          ...prev,
+          currentSearchIndex: event.index ?? 0,
+          message: `Searching: "${event.query}"`,
+        }));
+        break;
+
+      case 'search_complete':
+        setSearchPhaseInfo(prev => ({
+          ...prev,
+          completedSearches: (event.index ?? 0) + 1,
+          message: `Search ${(event.index ?? 0) + 1}/${prev.totalSearches}: ${event.success ? 'Found ' + (event.result_count || 0) + ' results' : 'Failed'}`,
+        }));
+        break;
+
+      case 'search_phase_complete':
+        setSearchPhaseInfo(prev => ({
+          ...prev,
+          isActive: false,
+          message: event.message || `Search complete: ${event.total_results || 0} results from ${event.successful_queries || 0} queries`,
+        }));
+        break;
+
+      case 'proposal_phase_start':
+        setPhase('proposing');
+        setSearchPhaseInfo(prev => ({
+          ...prev,
+          currentPhase: 2,
+          message: event.message || 'Generating proposals with search results...',
+        }));
+        break;
     }
   }, []);
 
@@ -202,8 +378,10 @@ export function useCollectiveApi(): UseCollectiveApiReturn {
         body: JSON.stringify({
           task: params.task,
           pattern: params.pattern,
-          k: params.k,
+          k: params.selectedSpecialists?.length || params.k,
           userId,
+          enableSearchPhase: params.enableSearchPhase ?? false,
+          selectedSpecialists: params.selectedSpecialists,
         }),
       });
 
@@ -215,13 +393,14 @@ export function useCollectiveApi(): UseCollectiveApiReturn {
       const data: StreamStartResponse = await response.json();
       const sessionId = data.session_id;
 
-      // Set initial session state
+      // Set initial session state and phase immediately for UI feedback
+      setPhase('planning');
       setCurrentSession({
         session_id: sessionId,
         task: params.task,
         pattern: params.pattern,
-        k: params.k,
-        status: 'pending',
+        k: params.selectedSpecialists?.length || params.k,
+        status: 'running',
         created_at: new Date().toISOString(),
         proposals: [],
         verdict: null,
@@ -261,6 +440,29 @@ export function useCollectiveApi(): UseCollectiveApiReturn {
       ws.onclose = () => {
         console.log('Collective WebSocket closed');
         setIsConnected(false);
+        // If we have a verdict but phase is still 'judging', transition to complete
+        // This handles the case where the 'complete' event wasn't processed before close
+        setPhase((currentPhase) => {
+          if (currentPhase === 'judging') {
+            setVerdict((currentVerdict) => {
+              if (currentVerdict) {
+                console.log('WebSocket closed with verdict - transitioning to complete');
+                return currentVerdict;
+              }
+              return currentVerdict;
+            });
+            // Check if we have verdict via a timeout to allow state to settle
+            setTimeout(() => {
+              setVerdict((v) => {
+                if (v) {
+                  setPhase('complete');
+                }
+                return v;
+              });
+            }, 100);
+          }
+          return currentPhase;
+        });
       };
 
       wsRef.current = ws;
@@ -370,7 +572,14 @@ export function useCollectiveApi(): UseCollectiveApiReturn {
     try {
       const response = await fetch(`/api/collective/sessions/${sessionId}`);
       if (!response.ok) throw new Error('Failed to load session details');
-      return await response.json();
+      const data = await response.json();
+      console.log('Loaded session details:', {
+        sessionId,
+        proposalsCount: data.proposals?.length ?? 0,
+        hasVerdict: !!data.verdict,
+        proposals: data.proposals,
+      });
+      return data;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       console.error('Error loading session details:', message);
@@ -388,9 +597,14 @@ export function useCollectiveApi(): UseCollectiveApiReturn {
     verdict,
     phase,
     activeProposalIndex,
+    searchPhaseInfo,
     sessions,
     loadSessions,
     loadSessionDetails,
+    specialists,
+    specialistsLoading,
+    fetchSpecialists,
+    estimateCost,
     startStreaming,
     cancelStreaming,
     isConnected,

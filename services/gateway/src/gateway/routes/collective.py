@@ -29,6 +29,8 @@ class StreamRunReq(BaseModel):
     pattern: Literal["pipeline", "council", "debate"] = "council"
     k: int = Field(3, ge=2, le=7)
     userId: Optional[str] = None
+    enableSearchPhase: Optional[bool] = False
+    selectedSpecialists: Optional[List[str]] = None
 
 
 @router.post("/run")
@@ -123,6 +125,31 @@ async def proxy_collective_stream(websocket: WebSocket, session_id: str):
     except Exception as e:
         logger.error("Collective WebSocket proxy error: %s", e)
         await websocket.close(code=1011, reason=f"Proxy error: {str(e)}")
+
+
+@router.get("/specialists")
+async def proxy_list_specialists():
+    """List available specialists for collective deliberation."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(f"{BASE}/specialists")
+    if r.status_code != 200:
+        raise HTTPException(status_code=r.status_code, detail=r.text)
+    return r.json()
+
+
+class CostEstimateReq(BaseModel):
+    specialist_ids: List[str]
+    tokens_per_proposal: int = 4000
+
+
+@router.post("/specialists/estimate")
+async def proxy_estimate_cost(req: CostEstimateReq):
+    """Estimate cost for selected specialists."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(f"{BASE}/specialists/estimate", json=req.dict())
+    if r.status_code != 200:
+        raise HTTPException(status_code=r.status_code, detail=r.text)
+    return r.json()
 
 
 @router.get("/sessions")

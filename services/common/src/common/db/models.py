@@ -924,6 +924,68 @@ class BudgetForecast(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
+class CollectivePatternEnum(enum.Enum):
+    """Collective deliberation patterns."""
+    council = "council"
+    debate = "debate"
+    pipeline = "pipeline"
+
+
+class CollectiveStatusEnum(enum.Enum):
+    """Collective session status."""
+    pending = "pending"
+    running = "running"
+    completed = "completed"
+    error = "error"
+    cancelled = "cancelled"
+
+
+class CollectiveSessionRecord(Base):
+    """Persistent storage for collective meta-agent sessions.
+
+    Stores the full history of deliberation sessions including proposals,
+    verdicts, and metadata for analysis and replay.
+    """
+
+    __tablename__ = "collective_sessions"
+    __table_args__ = (
+        Index("ix_collective_sessions_user_id", "user_id"),
+        Index("ix_collective_sessions_created_at", "created_at"),
+        Index("ix_collective_sessions_status", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # Task and pattern
+    task: Mapped[str] = mapped_column(Text, nullable=False)
+    pattern: Mapped[CollectivePatternEnum] = mapped_column(
+        Enum(CollectivePatternEnum), nullable=False
+    )
+    k: Mapped[int] = mapped_column(Integer, nullable=False)  # Number of specialists
+
+    # Status
+    status: Mapped[CollectiveStatusEnum] = mapped_column(
+        Enum(CollectiveStatusEnum), default=CollectiveStatusEnum.pending
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Results (stored as JSON)
+    proposals: Mapped[list] = mapped_column(JSONB, default=list)  # List of proposal dicts
+    verdict: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Metadata
+    specialists_used: Mapped[list] = mapped_column(JSONB, default=list)  # Specialist IDs
+    search_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    total_cost_usd: Mapped[Optional[float]] = mapped_column(Numeric(10, 6), nullable=True)
+    session_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)  # Extra data
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 __all__ = [
     "Base",
     # Enums
@@ -982,4 +1044,8 @@ __all__ = [
     "AutonomousSchedule",
     "JobExecutionHistory",
     "BudgetForecast",
+    # Collective meta-agent
+    "CollectivePatternEnum",
+    "CollectiveStatusEnum",
+    "CollectiveSessionRecord",
 ]

@@ -54,7 +54,11 @@ class ProviderRegistry:
         logger.debug("Initialized ProviderRegistry")
 
     def is_enabled(self, provider: str) -> bool:
-        """Check if provider is enabled via feature flags.
+        """Check if provider is enabled via feature flags or API key presence.
+
+        Provider is enabled if:
+        1. Feature flag is set (ENABLE_{PROVIDER}_COLLECTIVE=true), OR
+        2. API key is present in environment (auto-enable mode)
 
         Args:
             provider: Provider name (e.g., "openai", "anthropic")
@@ -62,6 +66,7 @@ class ProviderRegistry:
         Returns:
             True if provider is enabled, False otherwise
         """
+        # Check explicit feature flags first
         flags = {
             "openai": ENABLE_OPENAI_COLLECTIVE,
             "anthropic": ENABLE_ANTHROPIC_COLLECTIVE,
@@ -69,7 +74,23 @@ class ProviderRegistry:
             "perplexity": ENABLE_PERPLEXITY_COLLECTIVE,
             "gemini": ENABLE_GEMINI_COLLECTIVE,
         }
-        return flags.get(provider, False)
+        if flags.get(provider, False):
+            return True
+
+        # Auto-enable if API key is present (for specialist selection flow)
+        api_key_map = {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "mistral": "MISTRAL_API_KEY",
+            "perplexity": "PERPLEXITY_API_KEY",
+            "gemini": "GOOGLE_API_KEY",  # Google uses GOOGLE_API_KEY
+        }
+        env_var = api_key_map.get(provider)
+        if env_var and os.getenv(env_var):
+            logger.debug(f"Provider '{provider}' auto-enabled via API key presence")
+            return True
+
+        return False
 
     def get_provider(self, provider: str) -> Optional[Any]:
         """Get or initialize provider client (lazy).
@@ -107,40 +128,38 @@ class ProviderRegistry:
         return self._providers.get(provider)
 
     def _init_provider(self, provider: str) -> None:
-        """Initialize cloud provider using any-llm SDK.
+        """Initialize cloud provider using litellm SDK.
 
         Args:
             provider: Provider name (e.g., "openai", "anthropic")
         """
         try:
-            from any_llm import AnyLLM
+            import litellm
         except ImportError:
             logger.error(
-                "any-llm-sdk not installed. Install with: pip install any-llm-sdk"
+                "litellm not installed. Install with: pip install litellm"
             )
             raise
 
-        # Get API key from environment
+        # Get API key from environment and set it for litellm
         api_key_map = {
-            "openai": os.getenv("OPENAI_API_KEY"),
-            "anthropic": os.getenv("ANTHROPIC_API_KEY"),
-            "mistral": os.getenv("MISTRAL_API_KEY"),
-            "perplexity": os.getenv("PERPLEXITY_API_KEY"),
-            "gemini": os.getenv("GEMINI_API_KEY"),
+            "openai": ("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY")),
+            "anthropic": ("ANTHROPIC_API_KEY", os.getenv("ANTHROPIC_API_KEY")),
+            "mistral": ("MISTRAL_API_KEY", os.getenv("MISTRAL_API_KEY")),
+            "perplexity": ("PERPLEXITY_API_KEY", os.getenv("PERPLEXITY_API_KEY")),
+            "gemini": ("GOOGLE_API_KEY", os.getenv("GOOGLE_API_KEY")),
         }
 
-        api_key = api_key_map.get(provider)
+        env_var, api_key = api_key_map.get(provider, (None, None))
         if not api_key:
             raise ValueError(
                 f"No API key found for provider '{provider}'. "
-                f"Set {provider.upper()}_API_KEY in environment."
+                f"Set {env_var or provider.upper() + '_API_KEY'} in environment."
             )
 
-        # Create provider instance (with connection pooling!)
-        self._providers[provider] = AnyLLM.create(
-            provider=provider,
-            api_key=api_key,
-        )
+        # litellm reads API keys from environment automatically
+        # Just store a marker that the provider is initialized
+        self._providers[provider] = {"initialized": True, "api_key_env": env_var}
 
 
 def _get_local_client() -> MultiServerLlamaCppClient:
@@ -260,16 +279,25 @@ async def chat_async(
 
         if cloud_provider:
             try:
-                # Use any-llm SDK
-                from any_llm import acompletion
+                # Use litellm SDK for multi-provider support
+                import litellm
 
-                result = await acompletion(
-                    model=model,
-                    provider=provider,
+                # litellm model format: provider/model (e.g., anthropic/claude-3-5-haiku-latest)
+                # For OpenAI, just use the model name directly
+                litellm_model = model if provider == "openai" else f"{provider}/{model}"
+
+                # Perplexity uses a different format
+                if provider == "perplexity":
+                    litellm_model = f"perplexity/{model}"
+                elif provider == "gemini":
+                    litellm_model = f"gemini/{model}"
+
+                result = await litellm.acompletion(
+                    model=litellm_model,
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
-                    tools=tools,
+                    tools=tools if tools else None,
                 )
 
                 # Extract text content
@@ -287,14 +315,18 @@ async def chat_async(
                         output_tokens = getattr(result.usage, "completion_tokens", 0)
                         metadata["tokens_used"] = input_tokens + output_tokens
 
-                        # Estimate cost
-                        if provider in PROVIDER_COSTS:
-                            costs = PROVIDER_COSTS[provider]
-                            cost = (
-                                (input_tokens / 1_000_000) * costs["input"] +
-                                (output_tokens / 1_000_000) * costs["output"]
-                            )
-                            metadata["cost_usd"] = cost
+                        # Estimate cost using litellm's cost tracking
+                        try:
+                            metadata["cost_usd"] = litellm.completion_cost(result)
+                        except Exception:
+                            # Fallback to manual calculation
+                            if provider in PROVIDER_COSTS:
+                                costs = PROVIDER_COSTS[provider]
+                                cost = (
+                                    (input_tokens / 1_000_000) * costs["input"] +
+                                    (output_tokens / 1_000_000) * costs["output"]
+                                )
+                                metadata["cost_usd"] = cost
 
                     logger.info(
                         f"Collective used cloud provider: {provider}/{model} "

@@ -38,6 +38,8 @@ dependencies = [
   # LangGraph multi-agent dependencies
   "langgraph>=0.0.50",
   "langchain-core>=0.2.0",
+  # Multi-provider LLM SDK for collective specialists
+  "litellm>=1.40.0",
   # LangGraph PostgreSQL checkpointing
   "langgraph-checkpoint-postgres>=0.0.6",
   "psycopg[binary,pool]>=3.1",

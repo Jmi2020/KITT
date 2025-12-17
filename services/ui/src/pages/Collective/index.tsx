@@ -8,7 +8,7 @@ import { useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useCollectiveApi } from '../../hooks/useCollectiveApi';
-import type { CollectivePattern, CollectiveSession, CollectiveProposal } from '../../types/collective';
+import type { CollectivePattern, CollectiveSession, CollectiveProposal, SpecialistConfig } from '../../types/collective';
 import './Collective.css';
 
 type TabType = 'run' | 'history';
@@ -131,18 +131,28 @@ function PhaseIndicator({
   pattern,
   k,
   activeIndex,
+  hasSearchPhase,
 }: {
   phase: string;
   pattern: CollectivePattern;
   k: number;
   activeIndex: number;
+  hasSearchPhase?: boolean;
 }) {
-  const phases = [
-    { id: 'planning', label: 'Planning' },
-    { id: 'proposing', label: pattern === 'debate' ? 'Debating' : 'Proposing' },
-    { id: 'judging', label: 'Judging' },
-    { id: 'complete', label: 'Complete' },
-  ];
+  const phases = hasSearchPhase
+    ? [
+        { id: 'planning', label: 'Planning' },
+        { id: 'searching', label: 'Searching' },
+        { id: 'proposing', label: pattern === 'debate' ? 'Debating' : 'Proposing' },
+        { id: 'judging', label: 'Judging' },
+        { id: 'complete', label: 'Complete' },
+      ]
+    : [
+        { id: 'planning', label: 'Planning' },
+        { id: 'proposing', label: pattern === 'debate' ? 'Debating' : 'Proposing' },
+        { id: 'judging', label: 'Judging' },
+        { id: 'complete', label: 'Complete' },
+      ];
 
   const currentIndex = phases.findIndex(p => p.id === phase);
 
@@ -200,7 +210,11 @@ export default function Collective() {
   const [task, setTask] = useState('');
   const [pattern, setPattern] = useState<CollectivePattern>('council');
   const [k, setK] = useState(3);
+  const [enableSearchPhase, setEnableSearchPhase] = useState(false);
   const [selectedSession, setSelectedSession] = useState<CollectiveSession | null>(null);
+  const [selectedSpecialists, setSelectedSpecialists] = useState<string[]>(['local_q4']);
+  const [useCustomSpecialists, setUseCustomSpecialists] = useState(false);
+  const [estimatedCost, setEstimatedCost] = useState(0);
 
   const {
     loading,
@@ -211,20 +225,39 @@ export default function Collective() {
     verdict,
     phase,
     activeProposalIndex,
+    searchPhaseInfo,
     sessions,
     loadSessions,
     loadSessionDetails,
+    specialists,
+    specialistsLoading,
+    fetchSpecialists,
+    estimateCost,
     startStreaming,
     cancelStreaming,
     isConnected,
   } = useCollectiveApi();
 
-  // Load sessions on mount and tab change
+  // Load specialists on mount
+  useEffect(() => {
+    fetchSpecialists();
+  }, [fetchSpecialists]);
+
+  // Load sessions on tab change
   useEffect(() => {
     if (tab === 'history') {
       loadSessions();
     }
   }, [tab, loadSessions]);
+
+  // Update cost estimate when specialists change
+  useEffect(() => {
+    if (useCustomSpecialists && selectedSpecialists.length > 0) {
+      estimateCost(selectedSpecialists).then(setEstimatedCost);
+    } else {
+      setEstimatedCost(0);
+    }
+  }, [selectedSpecialists, useCustomSpecialists, estimateCost]);
 
   const setTab = useCallback((newTab: TabType) => {
     setSearchParams({ tab: newTab });
@@ -235,8 +268,29 @@ export default function Collective() {
     if (!task.trim()) return;
 
     clearError();
-    await startStreaming({ task: task.trim(), pattern, k });
+    await startStreaming({
+      task: task.trim(),
+      pattern,
+      k,
+      enableSearchPhase,
+      selectedSpecialists: useCustomSpecialists && selectedSpecialists.length >= 2
+        ? selectedSpecialists
+        : undefined,
+    });
   };
+
+  const handleSpecialistToggle = (specialistId: string) => {
+    setSelectedSpecialists(prev => {
+      if (prev.includes(specialistId)) {
+        return prev.filter(id => id !== specialistId);
+      } else {
+        return [...prev, specialistId];
+      }
+    });
+  };
+
+  const localSpecialists = specialists.filter(s => s.provider === 'local');
+  const cloudSpecialists = specialists.filter(s => s.provider !== 'local');
 
   const handleCancel = () => {
     cancelStreaming();
@@ -250,6 +304,7 @@ export default function Collective() {
   };
 
   const isRunning = phase !== 'idle' && phase !== 'complete' && phase !== 'error';
+  const isSearching = phase === 'searching' || (searchPhaseInfo.isActive && phase !== 'complete');
 
   return (
     <div className="collective-page">
@@ -308,27 +363,136 @@ export default function Collective() {
 
               {pattern === 'council' && (
                 <div className="form-group">
-                  <label htmlFor="k">Number of Specialists: {k}</label>
-                  <input
-                    type="range"
-                    id="k"
-                    min={2}
-                    max={7}
-                    value={k}
-                    onChange={(e) => setK(parseInt(e.target.value))}
-                    className="k-slider"
-                  />
-                  <div className="k-labels">
-                    <span>2</span>
-                    <span>7</span>
+                  <div className="specialist-mode-toggle">
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={useCustomSpecialists}
+                        onChange={(e) => setUseCustomSpecialists(e.target.checked)}
+                      />
+                      <span className="checkbox-text">
+                        Select specific specialists
+                        <span className="checkbox-hint">
+                          Mix local and cloud providers for diverse perspectives
+                        </span>
+                      </span>
+                    </label>
                   </div>
+
+                  {!useCustomSpecialists ? (
+                    <>
+                      <label htmlFor="k">Number of Specialists: {k}</label>
+                      <input
+                        type="range"
+                        id="k"
+                        min={2}
+                        max={7}
+                        value={k}
+                        onChange={(e) => setK(parseInt(e.target.value))}
+                        className="k-slider"
+                      />
+                      <div className="k-labels">
+                        <span>2</span>
+                        <span>7</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="specialist-selector">
+                      {specialistsLoading ? (
+                        <div className="loading-specialists">Loading specialists...</div>
+                      ) : (
+                        <>
+                          <div className="specialist-group">
+                            <h4>Local Models (Free)</h4>
+                            {localSpecialists.map(spec => (
+                              <label
+                                key={spec.id}
+                                className={`specialist-option ${!spec.isAvailable ? 'unavailable' : ''}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedSpecialists.includes(spec.id)}
+                                  onChange={() => handleSpecialistToggle(spec.id)}
+                                  disabled={!spec.isAvailable}
+                                />
+                                <span className="specialist-info">
+                                  <span className="specialist-name">{spec.displayName}</span>
+                                  <span className="specialist-desc">{spec.description}</span>
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+
+                          <div className="specialist-group">
+                            <h4>Cloud Providers</h4>
+                            {cloudSpecialists.map(spec => (
+                              <label
+                                key={spec.id}
+                                className={`specialist-option ${!spec.isAvailable ? 'unavailable' : ''}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedSpecialists.includes(spec.id)}
+                                  onChange={() => handleSpecialistToggle(spec.id)}
+                                  disabled={!spec.isAvailable}
+                                />
+                                <span className="specialist-info">
+                                  <span className="specialist-name">
+                                    {spec.displayName}
+                                    {spec.isAvailable ? (
+                                      <span className="api-key-badge available">API Key Set</span>
+                                    ) : (
+                                      <span className="api-key-badge missing">No API Key</span>
+                                    )}
+                                  </span>
+                                  <span className="specialist-desc">{spec.description}</span>
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+
+                          <div className="specialist-summary">
+                            <span>Selected: {selectedSpecialists.length} specialists</span>
+                            {estimatedCost > 0 && (
+                              <span className="cost-estimate">
+                                Est. cost: ${estimatedCost.toFixed(4)}
+                              </span>
+                            )}
+                            {selectedSpecialists.length < 2 && (
+                              <span className="min-warning">Minimum 2 required</span>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
+
+              <div className="form-group checkbox-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={enableSearchPhase}
+                    onChange={(e) => setEnableSearchPhase(e.target.checked)}
+                  />
+                  <span className="checkbox-text">
+                    Enable Web Search
+                    <span className="checkbox-hint">
+                      Specialists will search the web for information before generating proposals
+                    </span>
+                  </span>
+                </label>
+              </div>
 
               <button
                 type="submit"
                 className="submit-btn"
-                disabled={loading || !task.trim()}
+                disabled={
+                  loading ||
+                  !task.trim() ||
+                  (useCustomSpecialists && selectedSpecialists.length < 2)
+                }
               >
                 {loading ? 'Starting...' : 'Start Deliberation'}
               </button>
@@ -343,6 +507,7 @@ export default function Collective() {
                 pattern={pattern}
                 k={pattern === 'debate' ? 2 : k}
                 activeIndex={activeProposalIndex}
+                hasSearchPhase={enableSearchPhase || searchPhaseInfo.isActive}
               />
 
               <div className="progress-info">
@@ -351,6 +516,54 @@ export default function Collective() {
                   Cancel
                 </button>
               </div>
+
+              {/* Search Phase Progress */}
+              {isSearching && (
+                <div className="search-progress">
+                  <div className="search-progress-header">
+                    <span className="search-icon">🔍</span>
+                    <h4>
+                      {searchPhaseInfo.currentPhase === 1
+                        ? 'Phase 1: Analyzing Search Needs'
+                        : 'Executing Web Searches'}
+                    </h4>
+                  </div>
+                  <div className="search-progress-message">
+                    {searchPhaseInfo.message}
+                  </div>
+                  {searchPhaseInfo.totalSearches > 0 && (
+                    <div className="search-progress-bar-container">
+                      <div
+                        className="search-progress-bar"
+                        style={{
+                          width: `${(searchPhaseInfo.completedSearches / searchPhaseInfo.totalSearches) * 100}%`,
+                        }}
+                      />
+                      <span className="search-progress-count">
+                        {searchPhaseInfo.completedSearches}/{searchPhaseInfo.totalSearches}
+                      </span>
+                    </div>
+                  )}
+                  {searchPhaseInfo.searchQueries.length > 0 && (
+                    <div className="search-queries-list">
+                      <span className="queries-label">Queries:</span>
+                      <div className="queries-chips">
+                        {searchPhaseInfo.searchQueries.slice(0, 5).map((query, i) => (
+                          <span
+                            key={i}
+                            className={`query-chip ${i < searchPhaseInfo.completedSearches ? 'done' : i === searchPhaseInfo.currentSearchIndex ? 'active' : ''}`}
+                          >
+                            {query.length > 30 ? query.slice(0, 30) + '...' : query}
+                          </span>
+                        ))}
+                        {searchPhaseInfo.searchQueries.length > 5 && (
+                          <span className="query-chip more">+{searchPhaseInfo.searchQueries.length - 5} more</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {proposals.length > 0 && (
                 <div className="proposals-section">
@@ -458,9 +671,15 @@ export default function Collective() {
                     <span>Status: {selectedSession.status}</span>
                   </div>
 
+                  {/* Judge Verdict first - the final synthesized decision */}
+                  {selectedSession.verdict && (
+                    <VerdictPanel verdict={selectedSession.verdict} />
+                  )}
+
+                  {/* Specialist proposals below - supporting opinions */}
                   {selectedSession.proposals?.length > 0 && (
                     <div className="proposals-section">
-                      <h4>Proposals</h4>
+                      <h4>Specialist Opinions ({selectedSession.proposals.length})</h4>
                       {selectedSession.proposals.map((prop, i) => (
                         <ProposalCard
                           key={i}
@@ -470,10 +689,6 @@ export default function Collective() {
                         />
                       ))}
                     </div>
-                  )}
-
-                  {selectedSession.verdict && (
-                    <VerdictPanel verdict={selectedSession.verdict} />
                   )}
                 </div>
               )}
