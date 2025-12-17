@@ -229,6 +229,7 @@ export default function Collective() {
     sessions,
     loadSessions,
     loadSessionDetails,
+    deleteSession,
     specialists,
     specialistsLoading,
     fetchSpecialists,
@@ -663,7 +664,23 @@ export default function Collective() {
 
               {selectedSession && (
                 <div className="session-detail">
-                  <h3>Session Details</h3>
+                  <div className="session-detail-header">
+                    <h3>Session Details</h3>
+                    <button
+                      className="delete-session-btn"
+                      onClick={async () => {
+                        if (window.confirm('Delete this session from history?')) {
+                          const deleted = await deleteSession(selectedSession.session_id);
+                          if (deleted) {
+                            setSelectedSession(null);
+                          }
+                        }
+                      }}
+                      title="Delete session"
+                    >
+                      Delete
+                    </button>
+                  </div>
                   <div className="detail-task">{selectedSession.task}</div>
                   <div className="detail-meta">
                     <span>Pattern: {selectedSession.pattern}</span>

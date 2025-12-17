@@ -659,6 +659,37 @@ async def _load_session_details_from_db(session_id: str) -> Optional[Dict]:
         db.close()
 
 
+async def _delete_session_from_db(session_id: str) -> bool:
+    """Delete a collective session from the database.
+
+    Returns True if deleted, False if not found.
+    """
+    db = _get_db_session()
+    if not db:
+        return False
+
+    try:
+        from common.db.models import CollectiveSessionRecord
+
+        record = db.query(CollectiveSessionRecord).filter(
+            CollectiveSessionRecord.id == session_id
+        ).first()
+
+        if not record:
+            return False
+
+        db.delete(record)
+        db.commit()
+        logger.info(f"Deleted collective session {session_id} from database")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to delete session from database: {e}")
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
 async def get_or_create_session(
     task: str,
     pattern: str,
@@ -1007,15 +1038,21 @@ async def _run_council_two_phase_streaming(
 ) -> CollectiveState:
     """Run two-phase council proposals with streaming progress.
 
-    Phase 1: Specialists generate search requests (fast, parallel)
+    Supports both:
+    - Legacy mode: Uses K local Q4 specialists
+    - Multi-provider mode: Uses selected specialist configs (local + cloud)
+
+    Phase 1: Specialists generate search requests (fast, parallel, always local)
     Central: Execute deduplicated searches via MCP
-    Phase 2: Specialists generate full proposals with search results (parallel)
+    Phase 2: Specialists generate full proposals with search results (parallel, multi-provider)
     """
     from ..agents.collective.graph_async import (
         generate_phase1_search_requests,
         execute_searches_centralized,
         generate_phase2_proposal,
+        generate_proposal_for_specialist,
     )
+    from ..agents.collective.context_policy import fetch_domain_context
     from ..agents.collective.search_dedup import (
         deduplicate_search_requests,
         assign_results_to_specialists,
@@ -1023,8 +1060,11 @@ async def _run_council_two_phase_streaming(
     )
     from ..agents.collective.search_prompts import format_search_results_for_specialist
     from ..agents.collective.schemas import Phase1Output
+    from brain.token_budgets import summarize_conversation
 
-    k = int(state.get("k", 3))
+    # Determine specialist count from configs or K parameter
+    use_multi_provider = bool(session.specialist_configs)
+    k = len(session.specialist_configs) if use_multi_provider else int(state.get("k", 3))
     task = state["task"]
 
     # =========================================================================
@@ -1150,57 +1190,120 @@ async def _run_council_two_phase_streaming(
         "type": "proposal_phase_start",
         "specialist_count": k,
         "message": "Specialists generating proposals with search results...",
+        "multi_provider": use_multi_provider,
     })
+
+    # Prepare context for multi-provider mode
+    if use_multi_provider:
+        conversation_history = state.get("conversation_history", [])
+        conv_summary = summarize_conversation(conversation_history, max_tokens=2000) if conversation_history else ""
+        context = fetch_domain_context(task, limit=10, for_proposer=True, token_budget=10000)
 
     async def run_phase2(i: int) -> str:
         specialist_id = f"specialist_{i+1}"
         phase1_output = phase1_outputs[i]
 
-        await session.emit({
-            "type": "proposal_start",
-            "index": i,
-            "role": specialist_id,
-            "has_search_results": specialist_id in specialist_results and bool(specialist_results[specialist_id]),
-        })
-
         # Format search results for this specialist
         results_for_specialist = specialist_results.get(specialist_id, [])
         formatted_results = format_search_results_for_specialist(results_for_specialist)
 
-        temperature = 0.7 + (i * 0.1)
+        if use_multi_provider:
+            # Multi-provider mode: use specialist configs
+            spec = session.specialist_configs[i]
+            role = spec.display_name
 
-        response = await generate_phase2_proposal(
-            task=task,
-            specialist_id=specialist_id,
-            kb_context=state.get("kb_context", ""),
-            search_results_formatted=formatted_results,
-            phase1_assessment=phase1_output.initial_assessment,
-            conversation_history=state.get("conversation_history", []),
-            temperature=temperature,
-        )
+            await session.emit({
+                "type": "proposal_start",
+                "index": i,
+                "role": role,
+                "provider": spec.provider,
+                "model": spec.model,
+                "has_search_results": bool(results_for_specialist),
+            })
 
-        await session.emit({
-            "type": "proposal_complete",
-            "index": i,
-            "role": specialist_id,
-            "text": response,
-            "model": "Q4",
-            "temperature": temperature,
-            "search_results_used": len(results_for_specialist),
-        })
+            result = await generate_proposal_for_specialist(
+                specialist=spec,
+                task=task,
+                context=context,
+                conv_summary=conv_summary,
+                index=i,
+                search_results_formatted=formatted_results,
+                phase1_assessment=phase1_output.initial_assessment,
+            )
 
-        session.proposals.append({
-            "role": specialist_id,
-            "text": response,
-            "model": "Q4",
-            "temperature": temperature,
-            "search_results_used": len(results_for_specialist),
-        })
+            await session.emit({
+                "type": "proposal_complete",
+                "index": i,
+                "role": role,
+                "text": result["text"],
+                "model": result["model"],
+                "provider": result["provider"],
+                "temperature": result.get("temperature"),
+                "cost_usd": result.get("cost_usd", 0),
+                "search_results_used": len(results_for_specialist),
+            })
 
-        return response
+            session.proposals.append({
+                "role": role,
+                "text": result["text"],
+                "model": result["model"],
+                "provider": result["provider"],
+                "temperature": result.get("temperature"),
+                "cost_usd": result.get("cost_usd", 0),
+                "search_results_used": len(results_for_specialist),
+            })
+
+            return result["text"]
+
+        else:
+            # Legacy mode: use Q4 for all specialists
+            await session.emit({
+                "type": "proposal_start",
+                "index": i,
+                "role": specialist_id,
+                "has_search_results": bool(results_for_specialist),
+            })
+
+            temperature = 0.7 + (i * 0.1)
+
+            response = await generate_phase2_proposal(
+                task=task,
+                specialist_id=specialist_id,
+                kb_context=state.get("kb_context", ""),
+                search_results_formatted=formatted_results,
+                phase1_assessment=phase1_output.initial_assessment,
+                conversation_history=state.get("conversation_history", []),
+                temperature=temperature,
+            )
+
+            await session.emit({
+                "type": "proposal_complete",
+                "index": i,
+                "role": specialist_id,
+                "text": response,
+                "model": "Q4",
+                "temperature": temperature,
+                "search_results_used": len(results_for_specialist),
+            })
+
+            session.proposals.append({
+                "role": specialist_id,
+                "text": response,
+                "model": "Q4",
+                "temperature": temperature,
+                "search_results_used": len(results_for_specialist),
+            })
+
+            return response
 
     # Run all Phase 2 in parallel
     props = await asyncio.gather(*[run_phase2(i) for i in range(k)])
+
+    # Log total cost for multi-provider mode
+    if use_multi_provider:
+        total_cost = sum(p.get("cost_usd", 0) for p in session.proposals)
+        if total_cost > 0:
+            logger.info(f"Two-phase multi-provider council total cost: ${total_cost:.4f}")
 
     return {
         **state,
@@ -1664,4 +1767,26 @@ async def get_collective_session(session_id: str):
     if db_session:
         return db_session
 
+    raise HTTPException(status_code=404, detail="Session not found")
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_collective_session(session_id: str):
+    """Delete a collective session from history.
+
+    Removes the session from both in-memory storage and database.
+    """
+    # Remove from in-memory storage
+    async with _sessions_lock:
+        if session_id in _sessions:
+            del _sessions[session_id]
+            logger.info(f"Removed session {session_id} from in-memory storage")
+
+    # Delete from database
+    deleted = await _delete_session_from_db(session_id)
+
+    if deleted:
+        return {"status": "deleted", "session_id": session_id}
+
+    # Check if it was only in memory (already removed above)
     raise HTTPException(status_code=404, detail="Session not found")

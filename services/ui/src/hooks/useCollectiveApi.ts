@@ -46,6 +46,7 @@ export interface UseCollectiveApiReturn {
   sessions: CollectiveSession[];
   loadSessions: (status?: string, limit?: number) => Promise<void>;
   loadSessionDetails: (sessionId: string) => Promise<CollectiveSession | null>;
+  deleteSession: (sessionId: string) => Promise<boolean>;
 
   // Specialists
   specialists: SpecialistConfig[];
@@ -587,6 +588,27 @@ export function useCollectiveApi(): UseCollectiveApiReturn {
     }
   }, []);
 
+  // Delete session
+  const deleteSession = useCallback(async (sessionId: string): Promise<boolean> => {
+    try {
+      const response = await fetch(`/api/collective/sessions/${sessionId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to delete session');
+      }
+      // Remove from local sessions list
+      setSessions(prev => prev.filter(s => s.session_id !== sessionId));
+      return true;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      console.error('Error deleting session:', message);
+      setError(message);
+      return false;
+    }
+  }, []);
+
   return {
     userId,
     loading,
@@ -601,6 +623,7 @@ export function useCollectiveApi(): UseCollectiveApiReturn {
     sessions,
     loadSessions,
     loadSessionDetails,
+    deleteSession,
     specialists,
     specialistsLoading,
     fetchSpecialists,
