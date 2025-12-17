@@ -203,3 +203,47 @@ class ProfilesResponse(BaseModel):
     printers: list[PrinterProfile] = Field(default_factory=list)
     materials: list[MaterialProfile] = Field(default_factory=list)
     qualities: list[QualityProfile] = Field(default_factory=list)
+
+
+class ProfileType(str, Enum):
+    """Type of slicer profile."""
+
+    PRINTER = "printer"
+    MATERIAL = "material"
+    QUALITY = "quality"
+
+
+class CustomProfileUpload(BaseModel):
+    """Request to upload a custom profile."""
+
+    profile_type: ProfileType = Field(
+        ...,
+        description="Type of profile (printer, material, quality)",
+    )
+    profile_id: str = Field(
+        ...,
+        description="Unique ID for the profile (e.g., 'my_custom_pla')",
+        pattern=r"^[a-z][a-z0-9_]*$",
+        min_length=3,
+        max_length=50,
+    )
+    name: str = Field(
+        ...,
+        description="Display name for the profile",
+        min_length=1,
+        max_length=100,
+    )
+    data: dict = Field(
+        ...,
+        description="Profile data (varies by profile_type)",
+    )
+
+
+class CustomProfileResponse(BaseModel):
+    """Response from uploading a custom profile."""
+
+    success: bool
+    profile_type: ProfileType
+    profile_id: str
+    message: str
+    is_custom: bool = True

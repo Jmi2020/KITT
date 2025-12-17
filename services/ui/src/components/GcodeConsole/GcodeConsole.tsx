@@ -42,10 +42,24 @@ export default function GcodeConsole({ printerId = 'elegoo_giga' }: GcodeConsole
     setLoadingHistory(true);
     try {
       const response = await fetch(`/api/fabrication/elegoo/gcode_history?count=100`);
+
+      // Handle 404 gracefully - endpoint may not exist yet
+      if (response.status === 404) {
+        // No history endpoint available - start with empty history
+        setHistory([]);
+        return;
+      }
+
       if (!response.ok) {
         throw new Error('Failed to load history');
       }
       const data = await response.json();
+
+      // Handle case where history array doesn't exist
+      if (!data.history || !Array.isArray(data.history)) {
+        setHistory([]);
+        return;
+      }
 
       // Convert API response to our format (API returns newest first, we want oldest first)
       const entries: ConsoleEntry[] = data.history
@@ -58,8 +72,10 @@ export default function GcodeConsole({ printerId = 'elegoo_giga' }: GcodeConsole
 
       setHistory(entries);
     } catch (err) {
-      console.error('Failed to load gcode history:', err);
-      // Don't set error - just start with empty history
+      // Log error but don't disrupt user experience
+      console.warn('GCode history unavailable:', err);
+      // Start with empty history
+      setHistory([]);
     } finally {
       setLoadingHistory(false);
     }

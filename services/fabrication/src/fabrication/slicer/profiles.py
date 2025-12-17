@@ -197,3 +197,129 @@ class ProfileManager:
         self._material_cache.clear()
         self._quality_cache.clear()
         self._load_profiles()
+
+    def save_custom_profile(
+        self,
+        profile_type: str,
+        profile_id: str,
+        name: str,
+        data: dict,
+    ) -> Path:
+        """Save a custom profile to disk.
+
+        Custom profiles are stored in custom/ subdirectories under each profile type.
+
+        Args:
+            profile_type: Type of profile ("printer", "material", "quality")
+            profile_id: Unique identifier for the profile
+            name: Display name
+            data: Profile-specific settings
+
+        Returns:
+            Path to the saved profile file
+
+        Raises:
+            ValueError: If profile_type is invalid or required data is missing
+        """
+        # Determine target directory and validate
+        if profile_type == "printer":
+            target_dir = self.profiles_dir / "printers" / "custom"
+            required_fields = ["build_volume"]
+        elif profile_type == "material":
+            target_dir = self.profiles_dir / "filaments" / "custom"
+            required_fields = ["default_nozzle_temp", "default_bed_temp"]
+        elif profile_type == "quality":
+            target_dir = self.profiles_dir / "quality" / "custom"
+            required_fields = ["layer_height"]
+        else:
+            raise ValueError(f"Invalid profile type: {profile_type}")
+
+        # Check required fields
+        for field in required_fields:
+            if field not in data:
+                raise ValueError(f"Missing required field for {profile_type} profile: {field}")
+
+        # Create custom directory if needed
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        # Build profile data
+        profile_data = {"id": profile_id, "name": name, "is_custom": True, **data}
+
+        # Save to file
+        profile_path = target_dir / f"{profile_id}.json"
+        profile_path.write_text(json.dumps(profile_data, indent=2))
+
+        LOGGER.info(
+            "Saved custom profile",
+            profile_type=profile_type,
+            profile_id=profile_id,
+            path=str(profile_path),
+        )
+
+        # Reload to pick up the new profile
+        self.reload()
+
+        return profile_path
+
+    def delete_custom_profile(self, profile_type: str, profile_id: str) -> bool:
+        """Delete a custom profile.
+
+        Args:
+            profile_type: Type of profile ("printer", "material", "quality")
+            profile_id: Profile identifier
+
+        Returns:
+            True if deleted, False if not found
+        """
+        if profile_type == "printer":
+            target_dir = self.profiles_dir / "printers" / "custom"
+        elif profile_type == "material":
+            target_dir = self.profiles_dir / "filaments" / "custom"
+        elif profile_type == "quality":
+            target_dir = self.profiles_dir / "quality" / "custom"
+        else:
+            return False
+
+        profile_path = target_dir / f"{profile_id}.json"
+        if profile_path.exists():
+            profile_path.unlink()
+            LOGGER.info("Deleted custom profile", profile_type=profile_type, profile_id=profile_id)
+            self.reload()
+            return True
+
+        return False
+
+    def list_custom_profiles(self, profile_type: Optional[str] = None) -> list[dict]:
+        """List all custom profiles.
+
+        Args:
+            profile_type: Optional filter by type ("printer", "material", "quality")
+
+        Returns:
+            List of custom profile metadata
+        """
+        custom_profiles = []
+
+        type_dirs = {
+            "printer": self.profiles_dir / "printers" / "custom",
+            "material": self.profiles_dir / "filaments" / "custom",
+            "quality": self.profiles_dir / "quality" / "custom",
+        }
+
+        for ptype, pdir in type_dirs.items():
+            if profile_type and ptype != profile_type:
+                continue
+            if pdir.exists():
+                for profile_file in pdir.glob("*.json"):
+                    try:
+                        data = json.loads(profile_file.read_text())
+                        custom_profiles.append({
+                            "id": data.get("id", profile_file.stem),
+                            "name": data.get("name", profile_file.stem),
+                            "type": ptype,
+                            "is_custom": True,
+                        })
+                    except Exception:
+                        pass
+
+        return custom_profiles

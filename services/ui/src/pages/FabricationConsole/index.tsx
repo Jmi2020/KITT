@@ -1,0 +1,172 @@
+/**
+ * FabricationConsole - Progressive dashboard for 3D printing workflow
+ *
+ * Workflow: Generate → Segment → Slice → Print
+ *
+ * All steps are visible but unlock progressively as prerequisites complete.
+ * Integrates with KITTY voice automation for hands-free operation.
+ */
+
+import { useMemo } from 'react';
+import { WorkflowStepper } from '../../components/FabricationWorkflow';
+import { GenerateStep, SegmentStep, SliceStep, PrintStep } from './steps';
+import { useFabricationWorkflow, WorkflowStep } from './hooks/useFabricationWorkflow';
+import ThermalPanel from '../../components/ThermalPanel';
+import GcodeConsole from '../../components/GcodeConsole';
+import './FabricationConsole.css';
+
+export default function FabricationConsole() {
+  const [state, actions, printers] = useFabricationWorkflow();
+
+  // Calculate completed steps for stepper
+  const completedSteps = useMemo(() => {
+    const completed: WorkflowStep[] = [];
+    if (state.selectedArtifact) completed.push(1);
+    if (state.segmentationSkipped || state.segmentResult || (state.dimensionCheck && !state.dimensionCheck.needs_segmentation)) {
+      completed.push(2);
+    }
+    if (state.sliceResult?.status === 'completed') completed.push(3);
+    if (state.printJobId) completed.push(4);
+    return completed;
+  }, [state.selectedArtifact, state.segmentationSkipped, state.segmentResult, state.dimensionCheck, state.sliceResult, state.printJobId]);
+
+  // Check if step can be navigated to
+  const canNavigateTo = (step: WorkflowStep): boolean => {
+    switch (step) {
+      case 1: return true;
+      case 2: return state.selectedArtifact !== null;
+      case 3: return state.selectedArtifact !== null &&
+        (state.segmentationSkipped || !state.segmentationRequired || state.segmentResult !== null);
+      case 4: return state.sliceResult?.status === 'completed' && state.selectedPrinter !== null;
+      default: return false;
+    }
+  };
+
+  // Get selected printer info for Elegoo panel
+  const selectedPrinterInfo = printers.find(p => p.printer_id === state.selectedPrinter);
+
+  return (
+    <div className="fabrication-console-v2">
+      {/* Header */}
+      <header className="fabrication-console-v2__header">
+        <div className="fabrication-console-v2__title-group">
+          <h1 className="fabrication-console-v2__title">Fabrication Console</h1>
+          <span className="fabrication-console-v2__subtitle">Generate → Segment → Slice → Print</span>
+        </div>
+        <button
+          type="button"
+          className="fabrication-console-v2__reset-btn"
+          onClick={actions.reset}
+        >
+          New Session
+        </button>
+      </header>
+
+      {/* Workflow Stepper */}
+      <WorkflowStepper
+        currentStep={state.currentStep}
+        completedSteps={completedSteps}
+        onStepClick={actions.goToStep}
+        canNavigateTo={canNavigateTo}
+      />
+
+      {/* Step 1: Generate */}
+      <GenerateStep
+        provider={state.provider}
+        mode={state.mode}
+        prompt={state.prompt}
+        artifacts={state.artifacts}
+        selectedArtifact={state.selectedArtifact}
+        isLoading={state.generationLoading}
+        error={state.generationError}
+        isActive={state.currentStep === 1}
+        isCompleted={completedSteps.includes(1)}
+        uploadProgress={state.uploadProgress}
+        onProviderChange={actions.setProvider}
+        onModeChange={actions.setMode}
+        onPromptChange={actions.setPrompt}
+        onGenerate={actions.generateModel}
+        onImport={actions.importModel}
+        onSelectArtifact={actions.selectArtifact}
+      />
+
+      {/* Step 2: Segment */}
+      <SegmentStep
+        selectedArtifact={state.selectedArtifact}
+        dimensionCheck={state.dimensionCheck}
+        segmentationRequired={state.segmentationRequired}
+        segmentationSkipped={state.segmentationSkipped}
+        segmentResult={state.segmentResult}
+        isLoading={state.segmentationLoading}
+        error={state.segmentationError}
+        isActive={state.currentStep === 2}
+        isCompleted={completedSteps.includes(2)}
+        isLocked={!state.selectedArtifact}
+        selectedPrinter={state.selectedPrinter || undefined}
+        onCheckComplete={(result) => {
+          // The hook handles state updates internally via MeshSegmenter callbacks
+        }}
+        onSegmentComplete={(result) => {
+          // The hook handles state updates internally via MeshSegmenter callbacks
+        }}
+        onSkipSegmentation={actions.skipSegmentation}
+      />
+
+      {/* Step 3: Slice */}
+      <SliceStep
+        selectedArtifact={state.selectedArtifact}
+        segmentResult={state.segmentResult}
+        selectedPrinter={state.selectedPrinter}
+        printerRecommendations={state.printerRecommendations}
+        preset={state.preset}
+        advancedSettings={state.advancedSettings}
+        showAdvanced={state.showAdvanced}
+        sliceResult={state.sliceResult}
+        isLoading={state.slicingLoading}
+        error={state.slicingError}
+        isActive={state.currentStep === 3}
+        isCompleted={completedSteps.includes(3)}
+        isLocked={!canNavigateTo(3)}
+        onPrinterSelect={actions.selectPrinter}
+        onPresetChange={actions.setPreset}
+        onAdvancedSettingsChange={actions.setAdvancedSettings}
+        onToggleAdvanced={actions.toggleAdvanced}
+        onStartSlicing={actions.startSlicing}
+        onSliceComplete={(result) => {
+          // Update state with slice result
+        }}
+      />
+
+      {/* Step 4: Print */}
+      <PrintStep
+        sliceResult={state.sliceResult}
+        selectedPrinter={state.selectedPrinter}
+        printers={printers}
+        printJobId={state.printJobId}
+        printStatus={state.printStatus}
+        isLoading={state.printLoading}
+        isActive={state.currentStep === 4}
+        isCompleted={completedSteps.includes(4)}
+        isLocked={!canNavigateTo(4)}
+        onSendToPrinter={actions.sendToPrinter}
+        onAddToQueue={actions.addToQueue}
+      />
+
+      {/* Elegoo Control Panel - shown when Elegoo is selected and online */}
+      {state.selectedPrinter === 'elegoo_giga' && selectedPrinterInfo?.is_online && (
+        <section className="fabrication-console-v2__elegoo-panel">
+          <h3 className="fabrication-console-v2__elegoo-title">Elegoo Giga Control</h3>
+          <ThermalPanel
+            bedTemp={selectedPrinterInfo.bed_temp}
+            bedTarget={selectedPrinterInfo.bed_target}
+            nozzleTemp={selectedPrinterInfo.extruder_temp}
+            nozzleTarget={selectedPrinterInfo.extruder_target}
+            bedZones={selectedPrinterInfo.bed_zones}
+            onRefresh={actions.fetchPrinters}
+          />
+          <GcodeConsole printerId="elegoo_giga" />
+        </section>
+      )}
+    </div>
+  );
+}

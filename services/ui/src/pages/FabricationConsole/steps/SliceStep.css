@@ -1,0 +1,106 @@
+/* SliceStep.css - Step 3: G-code slicing */
+
+.slice-step {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Result Summary */
+.slice-step__result-summary {
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--color-success-bg, #1a3d2d);
+  border: 1px solid var(--color-success-muted, #166534);
+}
+
+.slice-step__result-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  color: var(--color-success, #22c55e);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.slice-step__result-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.slice-step__result-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 600px) {
+  .slice-step__result-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+.slice-step__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+}
+
+.slice-step__stat-label {
+  font-size: 11px;
+  color: var(--color-success-light, #86efac);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.slice-step__stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-success, #22c55e);
+}
+
+/* Re-slice button */
+.slice-step__reslice {
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border, #333);
+  text-align: center;
+}
+
+.slice-step__reslice-btn {
+  padding: 8px 16px;
+  border: 1px solid var(--color-border, #444);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary, #888);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.slice-step__reslice-btn:hover:not(:disabled) {
+  border-color: var(--color-primary, #3b82f6);
+  color: var(--color-primary, #3b82f6);
+}
+
+.slice-step__reslice-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Embedded SlicingPanel adjustments */
+.slice-step .slicing-panel {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.slice-step .slicing-panel .slicing-header {
+  display: none;
+}

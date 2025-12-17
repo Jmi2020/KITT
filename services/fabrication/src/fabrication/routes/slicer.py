@@ -19,7 +19,12 @@ from ..slicer import (
     SupportType,
     QualityPreset,
 )
-from ..slicer.schemas import ProfilesResponse
+from ..slicer.schemas import (
+    ProfilesResponse,
+    CustomProfileUpload,
+    CustomProfileResponse,
+    ProfileType,
+)
 
 LOGGER = get_logger(__name__)
 
@@ -321,3 +326,99 @@ async def reload_profiles() -> dict:
         "materials": len(engine.profiles.list_materials()),
         "qualities": len(engine.profiles.list_qualities()),
     }
+
+
+@router.post("/profiles/upload", response_model=CustomProfileResponse)
+async def upload_custom_profile(request: CustomProfileUpload) -> CustomProfileResponse:
+    """Upload a custom slicer profile.
+
+    Custom profiles are stored in the custom/ subdirectory of each profile type.
+    They will appear alongside built-in profiles after upload.
+
+    Example quality profile data:
+    {
+        "profile_type": "quality",
+        "profile_id": "my_ultra_fine",
+        "name": "My Ultra Fine Quality",
+        "data": {
+            "layer_height": 0.08,
+            "first_layer_height": 0.2,
+            "perimeters": 4,
+            "top_solid_layers": 6,
+            "bottom_solid_layers": 5,
+            "fill_density": 25,
+            "fill_pattern": "gyroid",
+            "print_speed": 40
+        }
+    }
+    """
+    engine = get_engine()
+
+    try:
+        engine.profiles.save_custom_profile(
+            profile_type=request.profile_type.value,
+            profile_id=request.profile_id,
+            name=request.name,
+            data=request.data,
+        )
+
+        LOGGER.info(
+            "Custom profile uploaded",
+            profile_type=request.profile_type.value,
+            profile_id=request.profile_id,
+        )
+
+        return CustomProfileResponse(
+            success=True,
+            profile_type=request.profile_type,
+            profile_id=request.profile_id,
+            message=f"Custom {request.profile_type.value} profile '{request.profile_id}' saved successfully",
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        LOGGER.error("Failed to save custom profile", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to save profile: {str(e)}")
+
+
+@router.delete("/profiles/custom/{profile_type}/{profile_id}")
+async def delete_custom_profile(profile_type: ProfileType, profile_id: str) -> dict:
+    """Delete a custom profile.
+
+    Only custom profiles can be deleted; built-in profiles cannot be removed.
+    """
+    engine = get_engine()
+
+    deleted = engine.profiles.delete_custom_profile(
+        profile_type=profile_type.value,
+        profile_id=profile_id,
+    )
+
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Custom profile not found: {profile_type.value}/{profile_id}",
+        )
+
+    return {
+        "success": True,
+        "message": f"Deleted custom profile: {profile_id}",
+    }
+
+
+@router.get("/profiles/custom")
+async def list_custom_profiles(
+    profile_type: Optional[ProfileType] = Query(
+        default=None,
+        description="Filter by profile type",
+    ),
+) -> list[dict]:
+    """List all custom profiles.
+
+    Optionally filter by profile type (printer, material, quality).
+    """
+    engine = get_engine()
+
+    type_filter = profile_type.value if profile_type else None
+    return engine.profiles.list_custom_profiles(type_filter)

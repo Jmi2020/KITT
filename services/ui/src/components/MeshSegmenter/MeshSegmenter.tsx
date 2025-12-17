@@ -50,7 +50,20 @@ interface SegmentJobStatus {
 interface MeshSegmenterProps {
   artifactPath?: string;
   onSegmentComplete?: (result: SegmentResult) => void;
+  onCheckComplete?: (result: CheckResult) => void;
+  /** Disable all interactions */
+  disabled?: boolean;
+  /** Show compact view (fewer options, minimal UI) */
+  compact?: boolean;
+  /** Automatically check dimensions when artifactPath changes */
+  autoCheck?: boolean;
+  /** Default printer ID to pre-select */
+  defaultPrinter?: string;
+  /** Hide the slicing panel that appears after segmentation */
+  hideSlicingPanel?: boolean;
 }
+
+export type { CheckResult, SegmentResult, SegmentPart };
 
 const JOINT_TYPES = [
   { value: 'integrated', label: 'Integrated Pins', description: 'Printed pins & holes (no hardware)' },
@@ -66,7 +79,16 @@ const QUALITY_PRESETS = [
   { value: 'high', label: 'High', resolution: 1000, description: 'Best quality (~1-2min)' },
 ];
 
-export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshSegmenterProps) {
+export default function MeshSegmenter({
+  artifactPath,
+  onSegmentComplete,
+  onCheckComplete,
+  disabled = false,
+  compact = false,
+  autoCheck = false,
+  defaultPrinter,
+  hideSlicingPanel = false,
+}: MeshSegmenterProps) {
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [selectedPrinter, setSelectedPrinter] = useState<string>('');
   const [filePath, setFilePath] = useState(artifactPath || '');
@@ -108,8 +130,13 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
         if (response.ok) {
           const data = await response.json();
           setPrinters(data);
+          // Use defaultPrinter prop if provided, otherwise first printer
           if (data.length > 0 && !selectedPrinter) {
-            setSelectedPrinter(data[0].printer_id);
+            if (defaultPrinter && data.some((p: Printer) => p.printer_id === defaultPrinter)) {
+              setSelectedPrinter(defaultPrinter);
+            } else {
+              setSelectedPrinter(data[0].printer_id);
+            }
           }
         }
       } catch (err) {
@@ -117,7 +144,7 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
       }
     };
     loadPrinters();
-  }, [selectedPrinter]);
+  }, [selectedPrinter, defaultPrinter]);
 
   // Update file path when artifactPath prop changes
   useEffect(() => {
@@ -127,6 +154,18 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
       setSegmentResult(null);
     }
   }, [artifactPath]);
+
+  // Auto-check dimensions when artifactPath changes and autoCheck is enabled
+  useEffect(() => {
+    if (autoCheck && artifactPath && selectedPrinter && !disabled) {
+      // Small delay to ensure file path is set
+      const timer = setTimeout(() => {
+        handleCheck();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoCheck, artifactPath, selectedPrinter, disabled]);
 
   // File upload handler with XMLHttpRequest for progress tracking
   const handleFileUpload = useCallback((file: File) => {
@@ -261,12 +300,13 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
 
       const data = await response.json();
       setCheckResult(data);
+      onCheckComplete?.(data);
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setChecking(false);
     }
-  }, [filePath, selectedPrinter, customBuildX, customBuildY, customBuildZ]);
+  }, [filePath, selectedPrinter, customBuildX, customBuildY, customBuildZ, onCheckComplete]);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -387,10 +427,10 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
   });
 
   return (
-    <div className="mesh-segmenter">
+    <div className={`mesh-segmenter ${disabled ? 'mesh-segmenter--disabled' : ''} ${compact ? 'mesh-segmenter--compact' : ''}`}>
       <div className="segmenter-header">
         <h3>Mesh Segmenter</h3>
-        <p className="text-muted">Split large models for multi-part printing</p>
+        {!compact && <p className="text-muted">Split large models for multi-part printing</p>}
       </div>
 
       <div className="segmenter-form">
@@ -597,7 +637,7 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
             type="button"
             className="btn-secondary"
             onClick={handleCheck}
-            disabled={checking || loading || !filePath.trim()}
+            disabled={disabled || checking || loading || !filePath.trim()}
           >
             {checking ? 'Checking...' : 'Check Dimensions'}
           </button>
@@ -605,7 +645,7 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
             type="button"
             className="btn-primary"
             onClick={handleSegment}
-            disabled={loading || !filePath.trim()}
+            disabled={disabled || loading || !filePath.trim()}
           >
             {loading ? 'Segmenting...' : 'Segment Model'}
           </button>
@@ -767,8 +807,8 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
         </div>
       )}
 
-      {/* Slicing Panel - shown after segmentation completes */}
-      {segmentResult && segmentResult.combined_3mf_path && (
+      {/* Slicing Panel - shown after segmentation completes (unless hidden) */}
+      {!hideSlicingPanel && segmentResult && segmentResult.combined_3mf_path && (
         <SlicingPanel
           inputPath={segmentResult.combined_3mf_path}
           defaultPrinter={selectedPrinter !== 'custom' ? selectedPrinter : undefined}

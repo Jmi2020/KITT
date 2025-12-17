@@ -38,11 +38,32 @@ interface SlicingResult {
   filament_used_grams: number;
 }
 
+interface PrinterRecommendation {
+  id: string;
+  name: string;
+  build_volume: [number, number, number];
+  recommended: boolean;
+  reason: string;
+  is_online?: boolean;
+  is_printing?: boolean;
+  progress_percent?: number;
+}
+
 interface SlicingPanelProps {
   inputPath: string; // 3MF file path from segmentation
   onSliceComplete?: (result: SlicingResult) => void;
   defaultPrinter?: string;
+  /** Disable all interactions */
+  disabled?: boolean;
+  /** Show compact preset-first UI */
+  presetMode?: boolean;
+  /** Printer recommendations with status */
+  printerRecommendations?: PrinterRecommendation[];
+  /** Callback when printer is selected */
+  onPrinterSelect?: (printerId: string) => void;
 }
+
+export type { SlicingResult, PrinterRecommendation };
 
 const SUPPORT_TYPES = [
   { value: 'tree', label: 'Tree Supports', description: 'Efficient, easy to remove' },
@@ -57,7 +78,46 @@ const INFILL_PATTERNS = [
   { value: 'honeycomb', label: 'Honeycomb', description: 'Strong, more material' },
 ];
 
-export default function SlicingPanel({ inputPath, onSliceComplete, defaultPrinter }: SlicingPanelProps) {
+// Quality presets for quick selection
+const QUALITY_PRESETS = [
+  {
+    id: 'quick',
+    label: 'Quick',
+    description: 'Fast prints, visible layers',
+    icon: '⚡',
+    quality: 'draft',
+    infill: 15,
+    support: 'tree',
+  },
+  {
+    id: 'standard',
+    label: 'Standard',
+    description: 'Balanced quality & speed',
+    icon: '⚖️',
+    quality: 'normal',
+    infill: 20,
+    support: 'tree',
+  },
+  {
+    id: 'quality',
+    label: 'Quality',
+    description: 'Best finish, slower print',
+    icon: '✨',
+    quality: 'fine',
+    infill: 25,
+    support: 'tree',
+  },
+];
+
+export default function SlicingPanel({
+  inputPath,
+  onSliceComplete,
+  defaultPrinter,
+  disabled = false,
+  presetMode = false,
+  printerRecommendations,
+  onPrinterSelect,
+}: SlicingPanelProps) {
   // Profile data
   const [printers, setPrinters] = useState<PrinterProfile[]>([]);
   const [materials, setMaterials] = useState<MaterialProfile[]>([]);
@@ -71,12 +131,24 @@ export default function SlicingPanel({ inputPath, onSliceComplete, defaultPrinte
   const [infillPercent, setInfillPercent] = useState(20);
   const [infillPattern, setInfillPattern] = useState('gyroid');
 
+  // Preset mode state
+  const [selectedPreset, setSelectedPreset] = useState('standard');
+  const [showAdvanced, setShowAdvanced] = useState(!presetMode);
+
   // Job state
   const [slicingJobId, setSlicingJobId] = useState<string | null>(null);
   const [slicingProgress, setSlicingProgress] = useState(0);
   const [slicingResult, setSlicingResult] = useState<SlicingResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Custom profile upload state
+  const [showProfileUpload, setShowProfileUpload] = useState(false);
+  const [customProfileName, setCustomProfileName] = useState('');
+  const [customLayerHeight, setCustomLayerHeight] = useState(0.2);
+  const [customPrintSpeed, setCustomPrintSpeed] = useState(80);
+  const [customInfillDensity, setCustomInfillDensity] = useState(20);
+  const [uploadingProfile, setUploadingProfile] = useState(false);
 
   // Polling
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
@@ -121,6 +193,23 @@ export default function SlicingPanel({ inputPath, onSliceComplete, defaultPrinte
       setSelectedPrinter(defaultPrinter);
     }
   }, [defaultPrinter]);
+
+  // Handle preset selection
+  const handlePresetSelect = useCallback((presetId: string) => {
+    setSelectedPreset(presetId);
+    const preset = QUALITY_PRESETS.find(p => p.id === presetId);
+    if (preset) {
+      setSelectedQuality(preset.quality);
+      setInfillPercent(preset.infill);
+      setSupportType(preset.support);
+    }
+  }, []);
+
+  // Handle printer selection with callback
+  const handlePrinterSelect = useCallback((printerId: string) => {
+    setSelectedPrinter(printerId);
+    onPrinterSelect?.(printerId);
+  }, [onPrinterSelect]);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -179,12 +268,13 @@ export default function SlicingPanel({ inputPath, onSliceComplete, defaultPrinte
     try {
       const requestBody = {
         input_path: inputPath,
-        printer_id: selectedPrinter,
-        material_id: selectedMaterial,
-        quality: selectedQuality,
-        support_type: supportType,
-        infill_percent: infillPercent,
-        infill_pattern: infillPattern,
+        config: {
+          printer_id: selectedPrinter,
+          material_id: selectedMaterial,
+          quality: selectedQuality,
+          support_type: supportType,
+          infill_percent: infillPercent,
+        },
       };
 
       const response = await fetch('/api/fabrication/slicer/slice', {
@@ -257,15 +347,88 @@ export default function SlicingPanel({ inputPath, onSliceComplete, defaultPrinte
     return `${grams.toFixed(1)}g`;
   };
 
+  // Handle custom profile upload
+  const handleUploadCustomProfile = useCallback(async () => {
+    if (!customProfileName.trim()) {
+      setError('Please enter a profile name');
+      return;
+    }
+
+    setUploadingProfile(true);
+    setError(null);
+
+    try {
+      // Generate profile ID from name (lowercase, underscores)
+      const profileId = customProfileName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+
+      if (profileId.length < 3) {
+        throw new Error('Profile name too short (minimum 3 characters)');
+      }
+
+      const response = await fetch('/api/fabrication/slicer/profiles/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profile_type: 'quality',
+          profile_id: `custom_${profileId}`,
+          name: customProfileName,
+          data: {
+            layer_height: customLayerHeight,
+            first_layer_height: customLayerHeight + 0.08,
+            perimeters: 3,
+            top_solid_layers: 5,
+            bottom_solid_layers: 4,
+            fill_density: customInfillDensity,
+            fill_pattern: 'gyroid',
+            print_speed: customPrintSpeed,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to upload profile');
+      }
+
+      // Reload profiles to include the new one
+      const qualitiesRes = await fetch('/api/fabrication/slicer/profiles/quality');
+      if (qualitiesRes.ok) {
+        const data = await qualitiesRes.json();
+        setQualities(data);
+        // Select the newly created profile
+        setSelectedQuality(`custom_${profileId}`);
+      }
+
+      // Reset form and close dialog
+      setShowProfileUpload(false);
+      setCustomProfileName('');
+
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setUploadingProfile(false);
+    }
+  }, [customProfileName, customLayerHeight, customPrintSpeed, customInfillDensity]);
+
   const selectedPrinterInfo = printers.find(p => p.id === selectedPrinter);
   const selectedMaterialInfo = materials.find(m => m.id === selectedMaterial);
   const selectedQualityInfo = qualities.find(q => q.id === selectedQuality);
 
+  // Get printer list (either from recommendations or profile data)
+  const displayPrinters = printerRecommendations || printers.map(p => ({
+    ...p,
+    recommended: false,
+    reason: '',
+  }));
+
   return (
-    <div className="slicing-panel">
+    <div className={`slicing-panel ${disabled ? 'slicing-panel--disabled' : ''} ${presetMode ? 'slicing-panel--preset-mode' : ''}`}>
       <div className="slicing-header">
         <h3>G-code Slicer</h3>
-        <p className="text-muted">Convert 3MF to printable G-code</p>
+        {!presetMode && <p className="text-muted">Convert 3MF to printable G-code</p>}
       </div>
 
       {inputPath && (
@@ -276,88 +439,302 @@ export default function SlicingPanel({ inputPath, onSliceComplete, defaultPrinte
       )}
 
       <div className="slicing-form">
-        {/* Printer & Material Selection */}
-        <div className="form-row two-col">
-          <label>
-            Target Printer
-            <select value={selectedPrinter} onChange={(e) => setSelectedPrinter(e.target.value)}>
-              <option value="">Select printer...</option>
-              {printers.map((printer) => (
-                <option key={printer.id} value={printer.id}>
-                  {printer.name}
-                </option>
+        {/* Printer Selection with Recommendations */}
+        {printerRecommendations && printerRecommendations.length > 0 && (
+          <div className="printer-recommendations">
+            <label className="section-label">Select Printer</label>
+            <div className="printer-cards">
+              {printerRecommendations.map((printer) => (
+                <button
+                  key={printer.id}
+                  type="button"
+                  className={`printer-card ${selectedPrinter === printer.id ? 'printer-card--selected' : ''} ${printer.recommended ? 'printer-card--recommended' : ''} ${!printer.is_online ? 'printer-card--offline' : ''}`}
+                  onClick={() => handlePrinterSelect(printer.id)}
+                  disabled={disabled}
+                >
+                  <div className="printer-card__header">
+                    <span className="printer-card__name">{printer.name}</span>
+                    {printer.recommended && <span className="printer-card__badge">Recommended</span>}
+                  </div>
+                  <div className="printer-card__status">
+                    {printer.is_online ? (
+                      printer.is_printing ? (
+                        <span className="printer-card__printing">
+                          Printing {printer.progress_percent || 0}%
+                        </span>
+                      ) : (
+                        <span className="printer-card__available">Available</span>
+                      )
+                    ) : (
+                      <span className="printer-card__offline">Offline</span>
+                    )}
+                  </div>
+                  {printer.reason && (
+                    <div className="printer-card__reason">{printer.reason}</div>
+                  )}
+                </button>
               ))}
-            </select>
-          </label>
-
-          <label>
-            Material
-            <select value={selectedMaterial} onChange={(e) => setSelectedMaterial(e.target.value)}>
-              {materials.map((material) => (
-                <option key={material.id} value={material.id}>
-                  {material.name} ({material.nozzle_temp}°C)
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {/* Quality & Support Selection */}
-        <div className="form-row two-col">
-          <label>
-            Print Quality
-            <select value={selectedQuality} onChange={(e) => setSelectedQuality(e.target.value)}>
-              {qualities.map((quality) => (
-                <option key={quality.id} value={quality.id}>
-                  {quality.name} ({quality.layer_height}mm)
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Support Type
-            <select value={supportType} onChange={(e) => setSupportType(e.target.value)}>
-              {SUPPORT_TYPES.map((st) => (
-                <option key={st.value} value={st.value}>
-                  {st.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {/* Infill Settings */}
-        <div className="form-row two-col">
-          <label>
-            Infill Density
-            <div className="slider-container">
-              <input
-                type="range"
-                min={5}
-                max={100}
-                step={5}
-                value={infillPercent}
-                onChange={(e) => setInfillPercent(parseInt(e.target.value, 10))}
-              />
-              <span className="slider-value">{infillPercent}%</span>
             </div>
-          </label>
+          </div>
+        )}
 
-          <label>
-            Infill Pattern
-            <select value={infillPattern} onChange={(e) => setInfillPattern(e.target.value)}>
-              {INFILL_PATTERNS.map((ip) => (
-                <option key={ip.value} value={ip.value}>
-                  {ip.label}
-                </option>
+        {/* Quality Presets (shown in preset mode) */}
+        {presetMode && (
+          <div className="quality-presets">
+            <label className="section-label">Quality</label>
+            <div className="preset-buttons">
+              {QUALITY_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={`preset-btn ${selectedPreset === preset.id ? 'preset-btn--selected' : ''}`}
+                  onClick={() => handlePresetSelect(preset.id)}
+                  disabled={disabled}
+                >
+                  <span className="preset-btn__icon">{preset.icon}</span>
+                  <span className="preset-btn__label">{preset.label}</span>
+                  <span className="preset-btn__desc">{preset.description}</span>
+                </button>
               ))}
-            </select>
-          </label>
-        </div>
+            </div>
+          </div>
+        )}
 
-        {/* Settings Summary */}
-        {selectedPrinterInfo && selectedMaterialInfo && selectedQualityInfo && (
+        {/* Advanced Settings Toggle */}
+        {presetMode && (
+          <button
+            type="button"
+            className="advanced-toggle"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            disabled={disabled}
+          >
+            <span className={`advanced-toggle__icon ${showAdvanced ? 'advanced-toggle__icon--open' : ''}`}>▶</span>
+            Advanced Settings
+          </button>
+        )}
+
+        {/* Traditional/Advanced Form Controls */}
+        {showAdvanced && (
+          <>
+            {/* Printer & Material Selection (non-recommendation mode) */}
+            {!printerRecommendations && (
+              <div className="form-row two-col">
+                <label>
+                  Target Printer
+                  <select
+                    value={selectedPrinter}
+                    onChange={(e) => handlePrinterSelect(e.target.value)}
+                    disabled={disabled}
+                  >
+                    <option value="">Select printer...</option>
+                    {printers.map((printer) => (
+                      <option key={printer.id} value={printer.id}>
+                        {printer.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  Material
+                  <select
+                    value={selectedMaterial}
+                    onChange={(e) => setSelectedMaterial(e.target.value)}
+                    disabled={disabled}
+                  >
+                    {materials.map((material) => (
+                      <option key={material.id} value={material.id}>
+                        {material.name} ({material.nozzle_temp}°C)
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
+
+            {/* Material (when using recommendations) */}
+            {printerRecommendations && (
+              <div className="form-row">
+                <label>
+                  Material
+                  <select
+                    value={selectedMaterial}
+                    onChange={(e) => setSelectedMaterial(e.target.value)}
+                    disabled={disabled}
+                  >
+                    {materials.map((material) => (
+                      <option key={material.id} value={material.id}>
+                        {material.name} ({material.nozzle_temp}°C)
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
+
+            {/* Quality & Support Selection */}
+            <div className="form-row two-col">
+              <label>
+                Print Quality
+                <select
+                  value={selectedQuality}
+                  onChange={(e) => setSelectedQuality(e.target.value)}
+                  disabled={disabled}
+                >
+                  {qualities.map((quality) => (
+                    <option key={quality.id} value={quality.id}>
+                      {quality.name} ({quality.layer_height}mm)
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                Support Type
+                <select
+                  value={supportType}
+                  onChange={(e) => setSupportType(e.target.value)}
+                  disabled={disabled}
+                >
+                  {SUPPORT_TYPES.map((st) => (
+                    <option key={st.value} value={st.value}>
+                      {st.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {/* Infill Settings */}
+            <div className="form-row two-col">
+              <label>
+                Infill Density
+                <div className="slider-container">
+                  <input
+                    type="range"
+                    min={5}
+                    max={100}
+                    step={5}
+                    value={infillPercent}
+                    onChange={(e) => setInfillPercent(parseInt(e.target.value, 10))}
+                    disabled={disabled}
+                  />
+                  <span className="slider-value">{infillPercent}%</span>
+                </div>
+              </label>
+
+              <label>
+                Infill Pattern
+                <select
+                  value={infillPattern}
+                  onChange={(e) => setInfillPattern(e.target.value)}
+                  disabled={disabled}
+                >
+                  {INFILL_PATTERNS.map((ip) => (
+                    <option key={ip.value} value={ip.value}>
+                      {ip.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {/* Custom Profile Upload Section */}
+            <div className="custom-profile-section">
+              <button
+                type="button"
+                className="custom-profile-toggle"
+                onClick={() => setShowProfileUpload(!showProfileUpload)}
+                disabled={disabled}
+              >
+                <span className={`custom-profile-toggle__icon ${showProfileUpload ? 'custom-profile-toggle__icon--open' : ''}`}>+</span>
+                Create Custom Quality Profile
+              </button>
+
+              {showProfileUpload && (
+                <div className="custom-profile-form">
+                  <p className="custom-profile-hint">
+                    Create a custom quality profile with your preferred settings.
+                  </p>
+
+                  <label>
+                    Profile Name
+                    <input
+                      type="text"
+                      value={customProfileName}
+                      onChange={(e) => setCustomProfileName(e.target.value)}
+                      placeholder="e.g., Ultra Fine, Speed Print"
+                      disabled={disabled || uploadingProfile}
+                    />
+                  </label>
+
+                  <div className="form-row two-col">
+                    <label>
+                      Layer Height (mm)
+                      <input
+                        type="number"
+                        min={0.05}
+                        max={0.5}
+                        step={0.01}
+                        value={customLayerHeight}
+                        onChange={(e) => setCustomLayerHeight(parseFloat(e.target.value))}
+                        disabled={disabled || uploadingProfile}
+                      />
+                    </label>
+
+                    <label>
+                      Print Speed (mm/s)
+                      <input
+                        type="number"
+                        min={20}
+                        max={200}
+                        step={5}
+                        value={customPrintSpeed}
+                        onChange={(e) => setCustomPrintSpeed(parseInt(e.target.value, 10))}
+                        disabled={disabled || uploadingProfile}
+                      />
+                    </label>
+                  </div>
+
+                  <label>
+                    Default Infill (%)
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={5}
+                      value={customInfillDensity}
+                      onChange={(e) => setCustomInfillDensity(parseInt(e.target.value, 10))}
+                      disabled={disabled || uploadingProfile}
+                    />
+                  </label>
+
+                  <div className="custom-profile-actions">
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => setShowProfileUpload(false)}
+                      disabled={uploadingProfile}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={handleUploadCustomProfile}
+                      disabled={disabled || uploadingProfile || !customProfileName.trim()}
+                    >
+                      {uploadingProfile ? 'Saving...' : 'Save Profile'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Settings Summary (non-preset mode) */}
+        {!presetMode && selectedPrinterInfo && selectedMaterialInfo && selectedQualityInfo && (
           <div className="settings-summary">
             <div className="summary-item">
               <span className="summary-label">Printer:</span>
@@ -386,7 +763,7 @@ export default function SlicingPanel({ inputPath, onSliceComplete, defaultPrinte
             type="button"
             className="btn-primary"
             onClick={handleSlice}
-            disabled={loading || !inputPath || !selectedPrinter}
+            disabled={disabled || loading || !inputPath || !selectedPrinter}
           >
             {loading ? 'Slicing...' : 'Generate G-code'}
           </button>
