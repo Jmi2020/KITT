@@ -45,6 +45,35 @@ HINT_PROPOSER = os.getenv("COLLECTIVE_HINT_PROPOSER",
 HINT_JUDGE = os.getenv("COLLECTIVE_HINT_JUDGE",
                        "You are the judge; prefer safety, clarity, testability.")
 
+# Quality improvement: Hallucination prevention constraints (from unified.py)
+HALLUCINATION_PREVENTION = """
+## Core Constraints (CRITICAL)
+- **NEVER** fabricate information, citations, or KB chunk IDs
+- **ALWAYS** cite KB chunk IDs (e.g., [KB#123]) when referencing knowledge base content
+- **ALWAYS** distinguish between: knowledge from KB context vs. your training data
+- If uncertain about a fact → clearly state "I'm not certain" rather than guessing
+- If KB context doesn't cover a topic → acknowledge "The provided context doesn't address this"
+"""
+
+# Quality improvement: Evidence requirements
+EVIDENCE_REQUIREMENTS = """
+## Evidence & Citation Requirements
+- Support claims with specific KB references using [KB#id] format
+- When making recommendations, explain the reasoning with evidence
+- If multiple KB sources conflict, acknowledge the disagreement
+- Prefer citing KB context over training data for domain-specific claims
+"""
+
+# Quality improvement: Decision framework for proposals
+DECISION_FRAMEWORK = """
+## Analysis Framework
+Before providing your proposal:
+1. **Identify** the core question or problem to solve
+2. **Assess** relevant KB context - what does the evidence say?
+3. **Evaluate** confidence: High (clear KB support), Medium (partial support), Low (limited evidence)
+4. **Recommend** with appropriate confidence qualifiers
+"""
+
 
 async def _execute_tool_calls(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Execute tool calls via MCP and return results.
@@ -199,12 +228,20 @@ async def n_propose_council(s: CollectiveState) -> CollectiveState:
         # Output budget: 6-8k tokens
         max_tokens = 6000 + (i * 500)  # Vary slightly (6k-7.5k)
 
-        # Build system prompt
-        system_prompt = (
-            f"You are {role}, an expert specialist on this task. {HINT_PROPOSER}\n\n"
-            f"When referencing knowledge base context, cite the KB chunk ID (e.g., [KB#123]).\n"
-            f"Provide a detailed, well-justified proposal."
-        )
+        # Build system prompt with quality improvements
+        system_prompt = f"""You are {role}, an expert specialist providing independent analysis.
+
+## Your Role
+{HINT_PROPOSER}
+{HALLUCINATION_PREVENTION}
+{EVIDENCE_REQUIREMENTS}
+{DECISION_FRAMEWORK}
+
+## Response Guidelines
+- Provide a detailed, well-justified proposal
+- Structure your response with clear sections (Analysis, Recommendation, Rationale)
+- Include confidence level for your recommendation (High/Medium/Low)
+- End with any caveats or limitations of your analysis"""
 
         # Build user prompt with budget-aware components
         user_prompt_parts = []
@@ -276,12 +313,23 @@ async def n_propose_debate(s: CollectiveState) -> CollectiveState:
 
     # Helper to generate debate argument with budget awareness
     async def generate_argument(stance: str, is_pro: bool) -> str:
-        # Build system prompt
-        system_prompt = (
-            f"You are {stance}. {HINT_PROPOSER} Argue {'FOR' if is_pro else 'AGAINST'} the proposal.\n\n"
-            f"When referencing knowledge base context, cite the KB chunk ID (e.g., [KB#123]).\n"
-            f"Provide strong, well-justified arguments with evidence."
-        )
+        stance_direction = "FOR" if is_pro else "AGAINST"
+        # Build system prompt with quality improvements
+        system_prompt = f"""You are the {stance} debater, arguing {stance_direction} the proposal.
+
+## Your Role
+{HINT_PROPOSER}
+You must argue {stance_direction} the proposal with conviction, using evidence to support your position.
+{HALLUCINATION_PREVENTION}
+{EVIDENCE_REQUIREMENTS}
+
+## Argumentation Guidelines
+- Present your strongest arguments first
+- Support each argument with KB evidence where available [KB#id]
+- Anticipate counterarguments and address them
+- Be persuasive but factually accurate
+- Conclude with a summary of your key points
+- Include confidence level for your strongest arguments (High/Medium/Low)"""
 
         # Build user prompt
         user_prompt_parts = []

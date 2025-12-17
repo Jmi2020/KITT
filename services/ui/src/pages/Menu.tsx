@@ -55,6 +55,12 @@ const menuItems: MenuItem[] = [
     icon: '🔬',
   },
   {
+    id: 'collective',
+    title: 'Collective',
+    description: 'Multi-agent deliberation for better decisions',
+    icon: '👥',
+  },
+  {
     id: 'intelligence',
     title: 'Intelligence',
     description: 'Analytics and insights dashboard',

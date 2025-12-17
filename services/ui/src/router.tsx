@@ -24,6 +24,7 @@ const ResearchHub = lazy(() => import('./pages/ResearchHub'));
 const PrintIntelligence = lazy(() => import('./pages/PrintIntelligence'));
 const Voice = lazy(() => import('./pages/Voice'));
 const Settings = lazy(() => import('./pages/Settings/index'));
+const Collective = lazy(() => import('./pages/Collective'));
 
 // Loading component for suspense
 function PageLoader() {
@@ -66,6 +67,7 @@ function LegacyViewRedirect() {
     images: '/media?tab=generate',
     research: '/research',
     results: '/research?tab=results',
+    collective: '/collective',
     iocontrol: '/settings?tab=system',
     inventory: '/dashboard?tab=materials',
     intelligence: '/intelligence',
@@ -221,6 +223,16 @@ export const router = createBrowserRouter([
       {
         path: 'calendar',
         element: <Navigate to="/research?tab=schedule" replace />,
+      },
+
+      // Collective (Multi-agent deliberation)
+      {
+        path: 'collective',
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <Collective />
+          </Suspense>
+        ),
       },
 
       // Monitoring - cameras and inventory are now redirects to Dashboard tabs
