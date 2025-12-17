@@ -41,7 +41,7 @@ KITTY is a **technical AI habitat** - a maker space purpose-built for AI models 
 | **Vision Model** | Image understanding, multimodal | llama.cpp (Gemma 3 27B Q4_K_M) @ port 8086 |
 | **Summary Model** | Response compression | llama.cpp (Hermes 3 8B Q4_K_M) @ port 8084 |
 | **Coder Model** | Code generation specialist | llama.cpp (Qwen2.5 Coder 32B Q8) @ port 8087 |
-| **Cloud Fallbacks** | Complex queries, verification | OpenAI GPT-5, Claude Sonnet 4.5, Perplexity |
+| **Cloud Providers** | Shell/Collective model selection | OpenAI GPT-5.2, Claude Sonnet 4.5, Perplexity Sonar, Gemini 2.5 |
 
 ### Backend Services (Python 3.11 + FastAPI)
 
@@ -63,7 +63,7 @@ KITTY is a **technical AI habitat** - a maker space purpose-built for AI models 
 |-----------|---------|
 | **Menu** | Landing page with navigation cards to all sections |
 | **Voice** | Real-time voice assistant with Local/Cloud toggle |
-| **Shell** | Text chat with function calling and streaming |
+| **Shell** | Text chat with function calling, streaming, and cloud model selection |
 | **Projects** | CAD project management with artifact browser |
 | **Fabrication Console** | Printer status, queue management, mesh segmentation, job tracking |
 | **Settings** | Bambu Labs login, preferences, API configuration |
@@ -761,9 +761,29 @@ OPENAI_TTS_MODEL=tts-1
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 PERPLEXITY_API_KEY=pplx-...
+GOOGLE_API_KEY=AIza...               # For Gemini models
 ZOO_API_KEY=your-zoo-key
 TRIPO_API_KEY=your-tripo-key
 ```
+
+### Cloud Model Selection (Shell & Collective)
+
+The Shell page and Collective Intelligence system support direct cloud model selection. When an API key is present, the corresponding cloud model becomes available in the model selector.
+
+**Supported Cloud Models (December 2025):**
+
+| UI ID | Provider | Model | Cost (per query) |
+|-------|----------|-------|------------------|
+| `gpt5` | OpenAI | GPT-5.2 | ~$0.01-0.06 |
+| `claude` | Anthropic | Claude Sonnet 4.5 | ~$0.01-0.08 |
+| `perplexity` | Perplexity | Sonar (web-connected) | ~$0.001-0.005 |
+| `gemini` | Google | Gemini 2.5 Flash | ~$0.0075-0.03 |
+
+**Features:**
+- Models auto-enable when API key is detected
+- Fallback to local Q4 if cloud provider fails
+- Cost tracking in response metadata
+- Streaming support (non-blocking for cloud)
 
 ### Integrations
 

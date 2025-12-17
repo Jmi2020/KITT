@@ -127,6 +127,8 @@ class BrainOrchestrator:
         use_agent: bool = False,
         tool_mode: str = "auto",
         allow_paid: bool = False,  # Explicit allow_paid from UI/voice mode
+        cloud_provider: str | None = None,  # Cloud provider for shell page
+        cloud_model: str | None = None,     # Cloud model for shell page
     ) -> RoutingResult:
         # Get or create conversation state
         conv_state = self._state_manager.get_or_create(conversation_id, user_id or "unknown")
@@ -252,6 +254,8 @@ class BrainOrchestrator:
             tool_mode=tool_mode,
             allow_paid=allow_paid,
             vision_targets=vision_plan.targets if vision_plan.should_suggest else None,
+            cloud_provider=cloud_provider,
+            cloud_model=cloud_model,
         )
 
         # Check if parallel agent orchestration should be used (complex multi-step goals)
@@ -331,6 +335,8 @@ class BrainOrchestrator:
         use_agent: bool = False,
         tool_mode: str = "auto",
         allow_paid: bool = False,  # Explicit allow_paid from UI/voice mode
+        cloud_provider: str | None = None,  # Cloud provider for shell page
+        cloud_model: str | None = None,     # Cloud model for shell page
     ):
         """Generate streaming response with real-time thinking traces.
 
@@ -512,6 +518,8 @@ class BrainOrchestrator:
             tool_mode=tool_mode,
             allow_paid=allow_paid,
             vision_targets=vision_plan.targets if vision_plan.should_suggest else None,
+            cloud_provider=cloud_provider,
+            cloud_model=cloud_model,
         )
 
         # Accumulate full response for memory storage

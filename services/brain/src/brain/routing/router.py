@@ -33,6 +33,7 @@ from .tool_registry import get_tools_for_prompt, get_tools_for_prompt_semantic, 
 from .summarizer import HermesSummarizer
 from ..tools.model_config import detect_model_format
 from ..usage_stats import UsageStats
+from ..llm_client import chat_async as cloud_chat_async
 
 # Import ReAct agent and tool MCP client
 from ..agents import ReActAgent
@@ -55,6 +56,9 @@ class RoutingRequest(BaseModel):
     tool_mode: str = "auto"  # Tool calling mode: "auto", "on", "off"
     allow_paid: bool = False  # Whether paid providers/tools are authorized by user
     vision_targets: Optional[List[str]] = None
+    # Cloud provider routing (from Shell page model selector)
+    cloud_provider: Optional[str] = None  # "openai", "anthropic", "perplexity", "gemini"
+    cloud_model: Optional[str] = None     # Actual model name for litellm
 
 
 @dataclass
@@ -206,6 +210,15 @@ class BrainRouter:
                 )
                 return result
 
+        # Check for explicit cloud provider selection (from Shell page)
+        if request.cloud_provider and request.cloud_model:
+            logger.info(f"Cloud provider explicitly selected: {request.cloud_provider}/{request.cloud_model}")
+            cloud_result = await self._invoke_cloud(request)
+            if cloud_result:
+                return await self._finalize_result(request, cloud_result, cache_key=cache_key)
+            # If cloud failed, fall through to local routing
+            logger.warning("Cloud routing failed, falling back to local")
+
         # Check for agentic routing first - agent can decide to use vision or CAD tools
         if request.use_agent:
             result = await self._invoke_agent(request)
@@ -311,7 +324,24 @@ class BrainRouter:
         }
 
         Note: Streaming only supports local tier routing (no escalation or caching).
+        Cloud providers fall back to non-streaming mode.
         """
+        # Check for explicit cloud provider selection (non-streaming)
+        if request.cloud_provider and request.cloud_model:
+            logger.info(f"Cloud streaming: {request.cloud_provider}/{request.cloud_model} (non-streaming fallback)")
+            cloud_result = await self._invoke_cloud(request)
+            if cloud_result:
+                # Yield complete response as single chunk
+                yield {
+                    "delta": cloud_result.output,
+                    "delta_thinking": None,
+                    "done": True,
+                    "routing_result": cloud_result,
+                }
+                return
+            # If cloud failed, fall through to local streaming
+            logger.warning("Cloud routing failed in stream, falling back to local")
+
         # Streaming doesn't support caching or escalation
         # Only use local tier for streaming
 
@@ -635,6 +665,86 @@ class BrainRouter:
             latency_ms=latency,
             metadata=metadata,
         )
+
+    async def _invoke_cloud(self, request: RoutingRequest) -> Optional[RoutingResult]:
+        """Route request to cloud provider using chat_async from llm_client.
+
+        This is used when a cloud model is explicitly selected in the Shell page.
+
+        Args:
+            request: RoutingRequest with cloud_provider and cloud_model set
+
+        Returns:
+            RoutingResult with cloud response, or None if cloud unavailable
+        """
+        if not request.cloud_provider or not request.cloud_model:
+            return None
+
+        start = time.perf_counter()
+
+        # Build messages in OpenAI format
+        messages = [
+            {"role": "user", "content": request.prompt}
+        ]
+
+        try:
+            # Use chat_async from llm_client for cloud routing
+            response_text, metadata = await cloud_chat_async(
+                messages=messages,
+                which="Q4",  # Fallback if cloud fails
+                model=request.cloud_model,
+                provider=request.cloud_provider,
+                fallback_to_local=True,
+            )
+
+            latency = int((time.perf_counter() - start) * 1000)
+
+            # Check if fallback occurred
+            provider_used = metadata.get("provider_used", "local")
+            model_used = metadata.get("model_used", request.cloud_model)
+            fallback = metadata.get("fallback_occurred", False)
+
+            # Determine tier based on actual provider used
+            tier = RoutingTier.local if provider_used == "local" else RoutingTier.frontier
+
+            result_metadata = {
+                "provider": provider_used,
+                "model": model_used,
+                "cloud_provider_requested": request.cloud_provider,
+                "cloud_model_requested": request.cloud_model,
+                "fallback_occurred": fallback,
+                "tokens_used": metadata.get("tokens_used", 0),
+                "cost_usd": metadata.get("cost_usd", 0.0),
+            }
+
+            # Log routing decision
+            log_routing_decision(
+                logger=logger,
+                tier=tier.value,
+                model=model_used,
+                confidence=0.85 if not fallback else 0.7,
+                cost=metadata.get("cost_usd", 0.0),
+                prompt=request.prompt,
+                response=response_text,
+                metadata=result_metadata,
+            )
+
+            logger.info(
+                f"Cloud routing: {request.cloud_provider}/{request.cloud_model} -> "
+                f"{provider_used}/{model_used} ({latency}ms, ${metadata.get('cost_usd', 0):.6f})"
+            )
+
+            return RoutingResult(
+                output=response_text,
+                tier=tier,
+                confidence=0.85 if not fallback else 0.7,
+                latency_ms=latency,
+                metadata=result_metadata,
+            )
+
+        except Exception as exc:
+            logger.error(f"Cloud routing failed: {exc}")
+            return None
 
     async def _execute_tools(
         self,

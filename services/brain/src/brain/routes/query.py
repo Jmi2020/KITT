@@ -27,6 +27,41 @@ logger = logging.getLogger(__name__)
 # Vision model configuration
 LLAMACPP_VISION_HOST = os.getenv("LLAMACPP_VISION_HOST", "http://localhost:8086")
 
+# Cloud model ID to provider+model mapping
+# Maps UI model IDs (from /api/providers/models) to actual cloud provider and model names
+# Uses December 2025 model names - must match collective providers.py
+CLOUD_MODEL_MAP = {
+    # OpenAI models (December 2025)
+    "openai_gpt5": ("openai", "gpt-5"),              # GPT-5 - full reasoning
+    "openai_gpt52": ("openai", "gpt-5.2"),           # GPT-5.2 - 400K context
+    "openai_gpt5_mini": ("openai", "gpt-5-mini"),    # GPT-5-mini - cost-effective
+    "openai_gpt4o_mini": ("openai", "gpt-4o-mini"),  # GPT-4o-mini - fast/affordable
+    # Legacy aliases for backward compatibility
+    "gpt5": ("openai", "gpt-5.2"),
+    "gpt4": ("openai", "gpt-4o-mini"),
+    # Anthropic models (December 2025)
+    "anthropic_sonnet_45": ("anthropic", "claude-sonnet-4-5"),  # Sonnet 4.5 - best coding
+    "anthropic_opus_45": ("anthropic", "claude-opus-4-5"),      # Opus 4.5 - difficult reasoning
+    "anthropic_haiku_45": ("anthropic", "claude-haiku-4-5"),    # Haiku 4.5 - fast/cheap
+    # Legacy aliases
+    "claude": ("anthropic", "claude-sonnet-4-5"),
+    "claude_haiku": ("anthropic", "claude-haiku-4-5"),
+    "claude_opus": ("anthropic", "claude-opus-4-5"),
+    # Perplexity models
+    "perplexity_sonar": ("perplexity", "sonar"),        # Sonar - search-augmented
+    "perplexity_sonar_pro": ("perplexity", "sonar-pro"),  # Sonar Pro - deeper analysis
+    # Legacy aliases
+    "perplexity": ("perplexity", "sonar"),
+    "perplexity_pro": ("perplexity", "sonar-pro"),
+    # Google Gemini models (December 2025)
+    "gemini_3_pro": ("gemini", "gemini-3-pro-preview"),  # Gemini 3 Pro - 1M context
+    "gemini_25_pro": ("gemini", "gemini-2.5-pro"),       # Gemini 2.5 Pro - thinking model
+    "gemini_25_flash": ("gemini", "gemini-2.5-flash"),   # Gemini 2.5 Flash - fast
+    # Legacy aliases
+    "gemini": ("gemini", "gemini-2.5-flash"),
+    "gemini_pro": ("gemini", "gemini-2.5-pro"),
+}
+
 router = APIRouter(prefix="/api", tags=["query"])
 
 
@@ -310,15 +345,23 @@ async def post_query(
 
     # Use model from UI (body.model) or legacy model_alias for routing
     effective_model_hint = body.model or body.model_alias
-    # Map UI model IDs to internal aliases if needed
-    model_id_to_alias = {
-        "athene-q4": "kitty-q4",
-        "gpt-oss": "kitty-f16",
-        "gemma-vision": "kitty-vision",
-        "hermes-summary": "kitty-summary",
-    }
-    if effective_model_hint:
-        effective_model_hint = model_id_to_alias.get(effective_model_hint, effective_model_hint)
+
+    # Check if selected model is a cloud provider
+    cloud_provider = None
+    cloud_model = None
+    if effective_model_hint and effective_model_hint in CLOUD_MODEL_MAP:
+        cloud_provider, cloud_model = CLOUD_MODEL_MAP[effective_model_hint]
+        logger.info(f"Cloud model selected: {effective_model_hint} -> {cloud_provider}/{cloud_model}")
+    else:
+        # Map UI model IDs to internal aliases for local models
+        model_id_to_alias = {
+            "athene-q4": "kitty-q4",
+            "gpt-oss": "kitty-f16",
+            "gemma-vision": "kitty-vision",
+            "hermes-summary": "kitty-summary",
+        }
+        if effective_model_hint:
+            effective_model_hint = model_id_to_alias.get(effective_model_hint, effective_model_hint)
 
     # Load conversation history for context continuity
     conversation_history = _build_conversation_history(body.conversation_id)
@@ -338,6 +381,8 @@ async def post_query(
         model_hint=effective_model_hint,
         use_agent=body.use_agent,
         tool_mode=body.tool_mode,
+        cloud_provider=cloud_provider,
+        cloud_model=cloud_model,
     )
     try:
         record_conversation_message(
@@ -446,16 +491,25 @@ async def post_query_stream(
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to record user message: %s", exc)
 
-    # Map UI model IDs to internal aliases
+    # Use model from UI or legacy model_alias for routing
     stream_model_hint = body.model or body.model_alias
-    model_id_to_alias = {
-        "athene-q4": "kitty-q4",
-        "gpt-oss": "kitty-f16",
-        "gemma-vision": "kitty-vision",
-        "hermes-summary": "kitty-summary",
-    }
-    if stream_model_hint:
-        stream_model_hint = model_id_to_alias.get(stream_model_hint, stream_model_hint)
+
+    # Check if selected model is a cloud provider
+    stream_cloud_provider = None
+    stream_cloud_model = None
+    if stream_model_hint and stream_model_hint in CLOUD_MODEL_MAP:
+        stream_cloud_provider, stream_cloud_model = CLOUD_MODEL_MAP[stream_model_hint]
+        logger.info(f"Stream cloud model selected: {stream_model_hint} -> {stream_cloud_provider}/{stream_cloud_model}")
+    else:
+        # Map UI model IDs to internal aliases for local models
+        model_id_to_alias = {
+            "athene-q4": "kitty-q4",
+            "gpt-oss": "kitty-f16",
+            "gemma-vision": "kitty-vision",
+            "hermes-summary": "kitty-summary",
+        }
+        if stream_model_hint:
+            stream_model_hint = model_id_to_alias.get(stream_model_hint, stream_model_hint)
 
     # Load conversation history for context continuity
     conversation_history = _build_conversation_history(body.conversation_id)
@@ -482,6 +536,8 @@ async def post_query_stream(
                 model_hint=stream_model_hint,
                 use_agent=body.use_agent,
                 tool_mode=body.tool_mode,
+                cloud_provider=stream_cloud_provider,
+                cloud_model=stream_cloud_model,
             ):
                 # Accumulate for final storage
                 if chunk.get("delta"):
