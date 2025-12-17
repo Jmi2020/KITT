@@ -1,0 +1,41 @@
+{
+  "name": "Snapmaker Artisan",
+  "build_volume": [400, 400, 400],
+  "nozzle_diameter": 0.4,
+  "max_bed_temp": 100,
+  "max_nozzle_temp": 275,
+  "heated_bed": true,
+  "supported_materials": ["PLA", "PETG", "ABS", "TPU"],
+  "default_filament_profile": "pla_generic",
+  "printer_notes": "Snapmaker Artisan 3-in-1 with dual extruder support. 400x400x400mm build volume.",
+  "orcaslicer_settings": {
+    "printer_technology": "FFF",
+    "bed_shape": "0x0,400x0,400x400,0x400",
+    "max_print_height": 400,
+    "default_print_profile": "normal",
+    "gcode_flavor": "marlin",
+    "use_relative_e_distances": false,
+    "start_gcode": "G28 ; Home all axes\\nG1 Z5 F3000 ; Lift nozzle\\nM104 S[first_layer_temperature] ; Set nozzle temp\\nM140 S[first_layer_bed_temperature] ; Set bed temp\\nM190 S[first_layer_bed_temperature] ; Wait for bed\\nM109 S[first_layer_temperature] ; Wait for nozzle\\nG92 E0 ; Reset extruder",
+    "end_gcode": "G91 ; Relative positioning\\nG1 E-2 F2700 ; Retract\\nG1 Z10 F3000 ; Lift\\nG90 ; Absolute positioning\\nG28 X Y ; Home X and Y\\nM104 S0 ; Turn off hotend\\nM140 S0 ; Turn off bed\\nM84 ; Disable motors"
+  },
+  "curaengine_settings": {
+    "machine_name": "Snapmaker Artisan",
+    "machine_width": 400,
+    "machine_depth": 400,
+    "machine_height": 400,
+    "machine_heated_bed": true,
+    "machine_nozzle_size": 0.4,
+    "machine_center_is_zero": false,
+    "machine_gcode_flavor": "Marlin",
+    "machine_max_feedrate_x": 200,
+    "machine_max_feedrate_y": 200,
+    "machine_max_feedrate_z": 20,
+    "machine_max_acceleration_x": 3000,
+    "machine_max_acceleration_y": 3000,
+    "machine_max_acceleration_z": 100,
+    "retraction_amount": 1.0,
+    "retraction_speed": 45,
+    "machine_start_gcode": "G28\\nG1 Z5 F3000\\nM104 S{material_print_temperature}\\nM140 S{material_bed_temperature}\\nM190 S{material_bed_temperature}\\nM109 S{material_print_temperature}\\nG92 E0",
+    "machine_end_gcode": "G91\\nG1 E-2 F2700\\nG1 Z10 F3000\\nG90\\nG28 X Y\\nM104 S0\\nM140 S0\\nM84"
+  }
+}

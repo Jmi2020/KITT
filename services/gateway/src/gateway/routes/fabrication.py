@@ -479,3 +479,142 @@ async def serve_artifact(file_path: str):
         raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
     except httpx.HTTPError as e:
         raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+# === OrcaSlicer G-code Generation Endpoints ===
+
+
+@router.get("/slicer/profiles/printers")
+async def list_slicer_printers() -> list[dict[str, Any]]:
+    """List available printer profiles for slicing."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{FABRICATION_BASE}/api/slicer/profiles/printers")
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.get("/slicer/profiles/materials")
+async def list_slicer_materials() -> list[dict[str, Any]]:
+    """List available material profiles for slicing."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{FABRICATION_BASE}/api/slicer/profiles/materials")
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.get("/slicer/profiles/quality")
+async def list_slicer_quality() -> list[dict[str, Any]]:
+    """List available quality presets for slicing."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{FABRICATION_BASE}/api/slicer/profiles/quality")
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.post("/slicer/slice")
+async def start_slicing_job(request: Request) -> dict[str, Any]:
+    """
+    Start an async slicing job to convert 3MF to G-code.
+
+    Request body:
+    {
+        "input_path": "/app/artifacts/3mf/model.3mf",
+        "printer_id": "elegoo_giga",
+        "material_id": "pla_generic",
+        "quality": "normal",
+        "support_type": "tree",
+        "infill_percent": 20
+    }
+
+    Returns job_id for status polling.
+    """
+    try:
+        data = await request.json()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{FABRICATION_BASE}/api/slicer/slice",
+                json=data
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.get("/slicer/jobs/{job_id}")
+async def get_slicing_job_status(job_id: str) -> dict[str, Any]:
+    """Get status of an async slicing job."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{FABRICATION_BASE}/api/slicer/jobs/{job_id}")
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.get("/slicer/jobs/{job_id}/download")
+async def download_gcode(job_id: str):
+    """Download the generated G-code file."""
+    from fastapi.responses import StreamingResponse
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(
+                f"{FABRICATION_BASE}/api/slicer/jobs/{job_id}/download",
+            )
+            response.raise_for_status()
+
+            return StreamingResponse(
+                iter([response.content]),
+                media_type="text/x-gcode",
+                headers=dict(response.headers),
+            )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.post("/slicer/jobs/{job_id}/upload")
+async def upload_gcode_to_printer(job_id: str, request: Request) -> dict[str, Any]:
+    """
+    Upload sliced G-code to the target printer.
+
+    Request body:
+    {
+        "printer_id": "elegoo_giga"
+    }
+    """
+    try:
+        data = await request.json()
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{FABRICATION_BASE}/api/slicer/jobs/{job_id}/upload",
+                json=data
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")

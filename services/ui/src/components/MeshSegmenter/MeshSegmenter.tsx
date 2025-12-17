@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import './MeshSegmenter.css';
+import SlicingPanel from '../SlicingPanel';
 
 interface Printer {
   printer_id: string;
@@ -764,6 +765,17 @@ export default function MeshSegmenter({ artifactPath, onSegmentComplete }: MeshS
             </>
           )}
         </div>
+      )}
+
+      {/* Slicing Panel - shown after segmentation completes */}
+      {segmentResult && segmentResult.combined_3mf_path && (
+        <SlicingPanel
+          inputPath={segmentResult.combined_3mf_path}
+          defaultPrinter={selectedPrinter !== 'custom' ? selectedPrinter : undefined}
+          onSliceComplete={(result) => {
+            console.log('Slicing complete:', result);
+          }}
+        />
       )}
     </div>
   );

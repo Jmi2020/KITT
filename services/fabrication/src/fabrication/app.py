@@ -40,6 +40,8 @@ from .coordinator.scheduler import ParallelJobScheduler
 from .coordinator.distributor import JobDistributor
 from .routes.bambu import router as bambu_router
 from .routes.segmentation import router as segmentation_router
+from .routes.slicer import router as slicer_router, set_slicer_engine
+from .slicer import SlicerEngine
 
 # Configure logging
 configure_logging()
@@ -220,6 +222,29 @@ async def lifespan(app: FastAPI):
         job_distributor = None
         mq_client = None
 
+    # Initialize slicer engine (CuraEngine CLI wrapper)
+    try:
+        slicer_bin_path = getattr(settings, 'CURAENGINE_BIN_PATH', '/usr/bin/CuraEngine')
+        slicer_profiles_dir = getattr(settings, 'SLICER_PROFILES_DIR', '/app/config/slicer_profiles')
+        slicer_output_dir = getattr(settings, 'SLICER_OUTPUT_DIR', '/app/artifacts/gcode')
+
+        slicer_engine = SlicerEngine(
+            bin_path=slicer_bin_path,
+            profiles_dir=slicer_profiles_dir,
+            output_base_dir=slicer_output_dir,
+        )
+        set_slicer_engine(slicer_engine)
+        LOGGER.info(
+            "Slicer engine initialized",
+            bin_path=slicer_bin_path,
+            profiles=slicer_profiles_dir,
+        )
+    except Exception as e:
+        LOGGER.warning(
+            "Failed to initialize slicer engine (slicing will be unavailable)",
+            error=str(e),
+        )
+
     yield
 
     # Cleanup
@@ -265,6 +290,9 @@ app.include_router(bambu_router)
 
 # Include mesh segmentation routes
 app.include_router(segmentation_router)
+
+# Include G-code slicing routes
+app.include_router(slicer_router)
 
 
 # ============================================================================

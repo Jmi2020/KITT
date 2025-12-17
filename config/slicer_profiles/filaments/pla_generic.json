@@ -1,0 +1,41 @@
+{
+  "name": "Generic PLA",
+  "type": "PLA",
+  "default_nozzle_temp": 210,
+  "default_bed_temp": 55,
+  "nozzle_temp_range": [190, 230],
+  "bed_temp_range": [50, 65],
+  "cooling_fan_speed": 100,
+  "first_layer_fan_speed": 0,
+  "density": 1.24,
+  "cost_per_kg": 25.0,
+  "compatible_printers": ["elegoo_giga", "bambu_h2d", "snapmaker_artisan"],
+  "orcaslicer_settings": {
+    "filament_type": "PLA",
+    "filament_density": 1.24,
+    "filament_cost": 25,
+    "temperature": 210,
+    "first_layer_temperature": 215,
+    "bed_temperature": 55,
+    "first_layer_bed_temperature": 60,
+    "fan_below_layer_time": 60,
+    "slowdown_below_layer_time": 15,
+    "min_print_speed": 10,
+    "bridge_fan_speed": 100,
+    "overhang_fan_speed": 100
+  },
+  "curaengine_settings": {
+    "material_print_temperature": 210,
+    "material_print_temperature_layer_0": 215,
+    "material_bed_temperature": 55,
+    "material_bed_temperature_layer_0": 60,
+    "cool_fan_enabled": true,
+    "cool_fan_speed": 100,
+    "cool_fan_speed_0": 0,
+    "cool_fan_full_at_height": 0.6,
+    "cool_min_layer_time": 10,
+    "cool_min_speed": 10,
+    "material_flow": 100,
+    "retraction_enable": true
+  }
+}

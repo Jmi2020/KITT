@@ -165,6 +165,10 @@ services:
       SNAPMAKER_IP: ${SNAPMAKER_IP:-192.168.1.150}
       SNAPMAKER_PORT: ${SNAPMAKER_PORT:-8888}
       SNAPMAKER_TOKEN: ${SNAPMAKER_TOKEN:-}
+      # CuraEngine configuration
+      CURAENGINE_BIN_PATH: ${CURAENGINE_BIN_PATH:-/usr/bin/CuraEngine}
+      SLICER_PROFILES_DIR: /app/config/slicer_profiles
+      SLICER_OUTPUT_DIR: /app/artifacts/gcode
     depends_on:
       - mosquitto
       - redis
@@ -173,6 +177,7 @@ services:
       - ../../services/fabrication:/app/services/fabrication:ro
       - ${KITTY_ARTIFACTS_DIR:-/Users/Shared/KITTY/artifacts}:/app/storage
       - ${KITTY_ARTIFACTS_DIR:-/Users/Shared/KITTY/artifacts}:/app/artifacts
+      - ../../config/slicer_profiles:/app/config/slicer_profiles:ro
     ports:
       - "8300:8300"
     networks:
