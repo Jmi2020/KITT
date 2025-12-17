@@ -9,6 +9,7 @@ import { useTypingActivity } from '../../hooks/useTypingActivity';
 import { useVoiceStore } from './store/voiceStore';
 import { generateId } from '../../utils/user';
 import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // Layout
 import { VoiceLayout } from './layout/VoiceLayout';
@@ -48,6 +49,7 @@ export function VoiceAssistant({
   const [textInput, setTextInput] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [controlsOpen, setControlsOpen] = useState(true); // Collapsible Status Column
+  const [pendingMicStart, setPendingMicStart] = useState(false);
 
   // Hooks
   const { typingLevel, trigger: triggerTyping } = useTypingActivity(300);
@@ -65,12 +67,21 @@ export function VoiceAssistant({
   const audioCapture = useAudioCapture({ sampleRate: 16000, onAudioChunk: sendAudio });
   const { isCapturing, startCapture, stopCapture, stream, inputLevel } = audioCapture;
   const { fftData, audioLevel } = useAudioAnalyzer(stream);
+  const [captureError, setCaptureError] = useState<string | null>(null);
+  const lastSpeechRef = useRef<number>(0);
+  const silenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoStopEnabled = settings?.voice?.auto_stop_enabled ?? true;
+  const autoStopMs = settings?.voice?.auto_stop_silence_ms ?? 1400;
+  const autoStopLevel = settings?.voice?.auto_stop_level ?? 0.08;
+  const [processingSince, setProcessingSince] = useState<number | null>(null);
+  const [processingElapsedMs, setProcessingElapsedMs] = useState<number>(0);
 
   // Conversation Logic
   const { messages, clearMessages, createConversation, loadMessages, addUserMessage, addAssistantMessage } = useConversations();
   const { 
     conversations: savedConversations, 
     isLoading: isLoadingConversations,
+    error: conversationsError,
     fetchConversations, 
     fetchMessages,
     renameConversation,
@@ -146,6 +157,28 @@ export function VoiceAssistant({
     onStatusChange?.(status);
   }, [status, onStatusChange]);
 
+  // Track processing timer when responding
+  useEffect(() => {
+    const shouldProcess =
+      status === 'responding' ||
+      (status === 'listening' && !isCapturing);
+
+    if (shouldProcess) {
+      setProcessingSince((prev) => prev ?? Date.now());
+    } else if (status === 'connected' || status === 'disconnected' || status === 'error') {
+      setProcessingSince(null);
+      setProcessingElapsedMs(0);
+    }
+  }, [status, isCapturing]);
+
+  useEffect(() => {
+    if (!processingSince) return;
+    const interval = setInterval(() => {
+      setProcessingElapsedMs(Date.now() - processingSince);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [processingSince]);
+
   // Handlers
   const handleNewConversation = useCallback(() => {
     const newId = generateId();
@@ -192,6 +225,86 @@ export function VoiceAssistant({
   };
 
   const currentModeConfig = getModeById(mode);
+  const formatDuration = useCallback((ms: number) => {
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }, []);
+  const isLongInference = processingElapsedMs > 60000;
+
+  // --- Voice Controls ---
+  const startListening = useCallback(async () => {
+    lastSpeechRef.current = Date.now();
+    try {
+      await startCapture();
+      setCaptureError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to start microphone';
+      setCaptureError(message);
+      console.error('Unable to start capture', err);
+    }
+  }, [startCapture]);
+
+  const stopListening = useCallback(() => {
+    stopCapture();
+    endAudio();
+  }, [stopCapture, endAudio]);
+
+  const handleMicToggle = useCallback(() => {
+    if (isCapturing) {
+      stopListening();
+      return;
+    }
+    // If socket is down, connect first and start after connected
+    if (status === 'disconnected' || status === 'error') {
+      setPendingMicStart(true);
+      connect({
+        conversationId,
+        userId,
+        voice: settings?.voice?.voice || 'bf_emma',
+        speed: settings?.voice?.speed || 1.1,
+      });
+      return;
+    }
+    startListening();
+  }, [isCapturing, startListening, stopListening, status, connect, conversationId, userId, settings?.voice?.voice, settings?.voice?.speed]);
+
+  // If we tried to start while disconnected, start capture once socket connects
+  useEffect(() => {
+    if (pendingMicStart && status === 'connected' && !isCapturing) {
+      setPendingMicStart(false);
+      startListening();
+    }
+    if (status === 'error') {
+      setPendingMicStart(false);
+    }
+  }, [pendingMicStart, status, isCapturing, startListening]);
+
+  // Auto-stop when silence is detected after speech
+  useEffect(() => {
+    if (!autoStopEnabled || !isCapturing) {
+      if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+      return;
+    }
+
+    // Refresh last speech timestamp on voice energy
+    if (inputLevel > autoStopLevel) {
+      lastSpeechRef.current = Date.now();
+    }
+
+    if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+    silenceTimeoutRef.current = setTimeout(() => {
+      const silenceDuration = Date.now() - lastSpeechRef.current;
+      if (isCapturing && silenceDuration >= autoStopMs) {
+        stopListening();
+      }
+    }, autoStopMs + 100);
+
+    return () => {
+      if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+    };
+  }, [inputLevel, isCapturing, stopListening, autoStopEnabled, autoStopMs, autoStopLevel]);
 
   // --- UI SECTIONS ---
 
@@ -254,6 +367,8 @@ export function VoiceAssistant({
           onRename={renameConversation}
           onClose={() => setSidebarOpen(false)}
           isLoading={isLoadingConversations}
+          error={conversationsError}
+          onRetry={fetchConversations}
         />
     </div>
   ) : null;
@@ -373,6 +488,25 @@ export function VoiceAssistant({
           style={{ scrollBehavior: 'smooth' }}
        >
           <div className="max-w-3xl mx-auto flex flex-col gap-6 pb-8">
+              {processingSince && (
+                <div className="sticky top-0 z-20">
+                  <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border border-white/10 bg-black/60 backdrop-blur-xl shadow-lg">
+                      <span className="h-3 w-3 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_12px_rgba(52,211,153,0.6)]" />
+                      <div className="flex-1">
+                        <div className="text-sm font-semibold text-white">Inference in progress</div>
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-gray-400">
+                          {formatDuration(processingElapsedMs)} elapsed • long responses can take up to 20 minutes
+                        </div>
+                      </div>
+                      {isLongInference && (
+                        <span className="px-2 py-1 rounded-md text-[11px] border border-amber-400/40 text-amber-200 bg-amber-500/10">
+                          Long run
+                        </span>
+                      )}
+                  </div>
+                </div>
+              )}
+
               {/* Empty State / Visualizer Placeholder */}
               {messages.length === 0 && (
                 <div className="h-[40vh] flex items-center justify-center">
@@ -422,8 +556,49 @@ export function VoiceAssistant({
                     className="self-start max-w-[85%]"
                   >
                       <div className="bg-gray-800/80 border border-white/10 text-gray-100 px-6 py-4 rounded-2xl rounded-tl-sm backdrop-blur-md shadow-xl">
-                          <div className="prose prose-invert prose-sm max-w-none">
-                            <Markdown>{response}</Markdown>
+                          <div className="prose prose-invert prose-sm max-w-none markdown-content">
+                            <Markdown
+                              remarkPlugins={[remarkGfm]}
+                              components={{
+                                img: ({ node, ...props }) => (
+                                  <div className="my-2 rounded-lg overflow-hidden border border-gray-700 bg-black/50">
+                                    <img {...props} className="max-w-full h-auto" loading="lazy" />
+                                  </div>
+                                ),
+                                p: ({ node, ...props }) => <p {...props} className="mb-2 last:mb-0" />,
+                                a: ({ node, ...props }) => (
+                                  <a
+                                    {...props}
+                                    className="text-cyan-400 hover:text-cyan-300 underline decoration-cyan-500/30"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  />
+                                ),
+                                code: ({ node, ...props }) => (
+                                  <code {...props} className="bg-black/30 px-1 py-0.5 rounded text-xs font-mono text-cyan-200" />
+                                ),
+                                pre: ({ node, ...props }) => (
+                                  <pre
+                                    {...props}
+                                    className="bg-black/50 p-2 rounded-lg text-xs font-mono overflow-x-auto my-2 border border-gray-800"
+                                  />
+                                ),
+                                table: ({ node, ...props }) => (
+                                  <div className="my-3 overflow-x-auto rounded-lg border border-gray-700">
+                                    <table {...props} className="min-w-full text-xs" />
+                                  </div>
+                                ),
+                                thead: ({ node, ...props }) => <thead {...props} className="bg-gray-800/80" />,
+                                tbody: ({ node, ...props }) => <tbody {...props} className="divide-y divide-gray-700/50" />,
+                                tr: ({ node, ...props }) => <tr {...props} className="hover:bg-gray-800/30 transition-colors" />,
+                                th: ({ node, ...props }) => (
+                                  <th {...props} className="px-3 py-2 text-left font-semibold text-cyan-300 border-b border-gray-600" />
+                                ),
+                                td: ({ node, ...props }) => <td {...props} className="px-3 py-2 text-gray-300" />,
+                              }}
+                            >
+                              {response}
+                            </Markdown>
                           </div>
                       </div>
                       <div className="text-left mt-1 flex items-center gap-2">
@@ -457,16 +632,18 @@ export function VoiceAssistant({
     <div className="bg-gradient-to-t from-black via-black/95 to-transparent pb-6 pt-12 px-4">
         <div className="max-w-2xl mx-auto flex flex-col items-center gap-4">
             {/* Mode Switcher */}
-            <div className="flex gap-1 p-1 bg-white/5 rounded-full border border-white/5 backdrop-blur-md">
+            <div className="voice-mode-toggle">
                 <button 
+                    type="button"
                     onClick={() => setInputType('voice')}
-                    className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${inputType === 'voice' ? 'bg-white/10 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}
+                    className={`voice-mode-option ${inputType === 'voice' ? 'active' : ''}`}
                 >
                     Voice
                 </button>
                 <button 
+                    type="button"
                     onClick={() => setInputType('text')}
-                    className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${inputType === 'text' ? 'bg-white/10 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}
+                    className={`voice-mode-option ${inputType === 'text' ? 'active' : ''}`}
                 >
                     Terminal
                 </button>
@@ -484,25 +661,29 @@ export function VoiceAssistant({
                             transition={{ duration: 0.2 }}
                             className="flex flex-col items-center gap-3"
                         >
-                            <Button
-                                size="lg"
-                                glow={isCapturing}
-                                color={isCapturing ? 'error' : 'primary'}
-                                onMouseDown={startCapture}
-                                onMouseUp={() => { stopCapture(); endAudio(); }}
-                                onTouchStart={startCapture}
-                                onTouchEnd={() => { stopCapture(); endAudio(); }}
-                                className={`
-                                    h-16 w-16 rounded-full flex items-center justify-center transition-all duration-300
-                                    ${isCapturing ? 'scale-110 shadow-[0_0_40px_rgba(239,68,68,0.5)] bg-red-500 text-white' : 'shadow-[0_0_20px_rgba(6,182,212,0.3)] hover:scale-105 bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'}
-                                `}
-                                disabled={status === 'disconnected'}
-                            >
-                                <span className="text-2xl">{isCapturing ? '🎙️' : '🎤'}</span>
-                            </Button>
-                            <span className="text-[9px] text-gray-500 font-mono uppercase tracking-[0.2em] animate-pulse">
-                                {isCapturing ? 'LISTENING...' : 'HOLD TO SPEAK'}
-                            </span>
+                            <div className="voice-mic-wrap">
+                                <div className={`voice-mic-ring ${isCapturing ? 'active' : ''}`} />
+                                <Button
+                                    size="lg"
+                                    glow={isCapturing}
+                                    color={isCapturing ? 'error' : 'primary'}
+                                    onClick={handleMicToggle}
+                                    className={`voice-mic-button ${isCapturing ? 'active' : ''}`}
+                                >
+                                    <span className="icon">{isCapturing ? '🎙️' : '🎤'}</span>
+                                </Button>
+                            </div>
+                            <div className="voice-button-hint">
+                                <span>{isCapturing ? 'Listening live' : 'Tap to start'}</span>
+                                <span className="voice-chip">{currentModeConfig?.name || 'Realtime'}</span>
+                                <span className="voice-chip">{preferLocal ? 'Local' : (ttsProvider?.toUpperCase() || 'Cloud')}</span>
+                                <span className="voice-chip">Auto-stop on silence</span>
+                            </div>
+                            {captureError && (
+                              <div className="text-xs text-red-400 text-center mt-2 max-w-xs">
+                                {captureError}
+                              </div>
+                            )}
                         </motion.div>
                     ) : (
                         <motion.div
@@ -513,20 +694,21 @@ export function VoiceAssistant({
                             className="w-full"
                         >
                             <form onSubmit={handleTextSubmit} className="relative group">
-                                <div className="absolute inset-0 bg-cyan-500/5 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity" />
-                                <div className="relative flex items-center bg-black/40 backdrop-blur-xl rounded-2xl border border-white/10 group-hover:border-white/20 transition-colors p-1">
-                                    <Input
-                                        value={textInput}
-                                        onChange={handleInputChange}
-                                        placeholder="Command input..." 
-                                        fullWidth 
-                                        className="bg-transparent border-none text-lg h-14 focus:ring-0 px-6 font-mono text-cyan-100 placeholder:text-gray-700"
-                                        disabled={status === 'disconnected'}
-                                        autoFocus
-                                    />
-                                    <Button type="submit" variant="ghost" className="h-12 w-12 rounded-xl text-cyan-500 hover:bg-cyan-500/10 hover:text-cyan-400">
-                                        ↵
-                                    </Button>
+                                <div className="voice-terminal-bar">
+                                    <div className="voice-terminal-inner">
+                                        <Input
+                                            value={textInput}
+                                            onChange={handleInputChange}
+                                            placeholder="Command input..." 
+                                            fullWidth 
+                                            className="voice-terminal-input"
+                                            disabled={status === 'disconnected'}
+                                            autoFocus
+                                        />
+                                        <Button type="submit" variant="ghost" className="voice-terminal-send">
+                                            ↵
+                                        </Button>
+                                    </div>
                                 </div>
                             </form>
                         </motion.div>

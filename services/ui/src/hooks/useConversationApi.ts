@@ -61,6 +61,8 @@ export function useConversationApi(): UseConversationApiReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const cacheKey = 'kitty_conversations_cache';
+
   const fetchConversations = useCallback(async (): Promise<ConversationSummary[]> => {
     setIsLoading(true);
     setError(null);
@@ -86,10 +88,27 @@ export function useConversationApi(): UseConversationApiReturn {
       summaries.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
 
       setConversations(summaries);
+      // Cache for offline/fallback
+      localStorage.setItem(cacheKey, JSON.stringify(summaries));
       return summaries;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch conversations';
       setError(message);
+      // Try cached copy if available
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        try {
+          const parsed: ConversationSummary[] = JSON.parse(cached).map((conv: any) => ({
+            ...conv,
+            createdAt: new Date(conv.createdAt),
+            updatedAt: new Date(conv.updatedAt),
+          }));
+          setConversations(parsed);
+          return parsed;
+        } catch {
+          // ignore cache parse errors
+        }
+      }
       return [];
     } finally {
       setIsLoading(false);

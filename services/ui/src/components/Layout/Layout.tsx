@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useTheme } from '../../contexts/ThemeContext';
 import { KittyBadge } from '../KittyBadge';
@@ -32,6 +32,18 @@ export function Layout() {
   const location = useLocation();
   const isVoicePage = location.pathname === '/voice';
   const [moreOpen, setMoreOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleClickAway = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setMoreOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickAway);
+    return () => document.removeEventListener('mousedown', handleClickAway);
+  }, []);
 
   return (
     <div className="kitty-app">
@@ -53,16 +65,19 @@ export function Layout() {
               {item.icon} {item.label}
             </NavLink>
           ))}
-          <div className="nav-dropdown-wrapper" onMouseLeave={() => setMoreOpen(false)}>
+          <div className="nav-dropdown-wrapper" ref={dropdownRef}>
             <button
+              type="button"
               className="nav-button nav-dropdown-trigger"
               onClick={() => setMoreOpen(!moreOpen)}
               onMouseEnter={() => setMoreOpen(true)}
+              aria-expanded={moreOpen}
+              aria-haspopup="menu"
             >
               More ▾
             </button>
             {moreOpen && (
-              <div className="nav-dropdown-menu">
+              <div className="nav-dropdown-menu" role="menu" onMouseEnter={() => setMoreOpen(true)}>
                 {moreItems.map((item) => (
                   <NavLink
                     key={item.path}

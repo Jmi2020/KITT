@@ -23,9 +23,13 @@ export function SettingsDrawer({
   onModeChange,
   isConnected,
 }: SettingsDrawerProps) {
-  const { settings, updateSettings } = useSettings();
+  const { settings, updateSettings, updateSection } = useSettings();
   const [isCreating, setIsCreating] = useState(false);
   const [newMode, setNewMode] = useState<VoiceMode>(createEmptyMode());
+  const [autoStopMs, setAutoStopMs] = useState<number>(settings?.voice?.auto_stop_silence_ms ?? 1400);
+  const [autoStopLevel, setAutoStopLevel] = useState<number>(settings?.voice?.auto_stop_level ?? 0.08);
+  const [autoStopEnabled, setAutoStopEnabled] = useState<boolean>(settings?.voice?.auto_stop_enabled ?? true);
+  const [speechSpeed, setSpeechSpeed] = useState<number>(settings?.voice?.speed ?? 1.1);
 
   const allModes = getAllModes(settings?.custom_voice_modes || []);
 
@@ -48,6 +52,40 @@ export function SettingsDrawer({
   const handleCancelCreate = () => {
     setIsCreating(false);
     setNewMode(createEmptyMode());
+  };
+
+  // Sync local sliders when settings change externally
+  useEffect(() => {
+    if (settings?.voice) {
+      setAutoStopMs(settings.voice.auto_stop_silence_ms ?? 1400);
+      setAutoStopLevel(settings.voice.auto_stop_level ?? 0.08);
+      setAutoStopEnabled(settings.voice.auto_stop_enabled ?? true);
+      setSpeechSpeed(settings.voice.speed ?? 1.1);
+    }
+  }, [settings?.voice]);
+
+  const handleAutoStopToggle = async () => {
+    const next = !autoStopEnabled;
+    setAutoStopEnabled(next);
+    await updateSection('voice', { auto_stop_enabled: next });
+  };
+
+  const handleAutoStopMs = async (value: number) => {
+    const clamped = Math.max(400, Math.min(4000, value));
+    setAutoStopMs(clamped);
+    await updateSection('voice', { auto_stop_silence_ms: clamped });
+  };
+
+  const handleAutoStopLevel = async (value: number) => {
+    const clamped = Math.max(0.02, Math.min(0.3, value));
+    setAutoStopLevel(clamped);
+    await updateSection('voice', { auto_stop_level: Number(clamped.toFixed(2)) });
+  };
+
+  const handleSpeed = async (value: number) => {
+    const clamped = Math.max(0.8, Math.min(1.4, value));
+    setSpeechSpeed(clamped);
+    await updateSection('voice', { speed: Number(clamped.toFixed(2)) });
   };
 
   // Handle escape key to close
@@ -255,6 +293,73 @@ export function SettingsDrawer({
                   <span className="text-lg group-hover:scale-110 transition-transform">+</span>
                   <span className="font-medium">Create Custom Mode</span>
                 </button>
+
+                {/* Voice Interaction Settings */}
+                <div className="space-y-3 p-4 rounded-xl border border-white/10 bg-white/5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-white font-semibold">Auto-stop on silence</p>
+                      <p className="text-xs text-gray-400">Stop listening after silence without holding the mic.</p>
+                    </div>
+                    <button
+                      onClick={handleAutoStopToggle}
+                      className={`w-12 h-6 rounded-full p-1 flex items-center ${autoStopEnabled ? 'bg-emerald-500/70' : 'bg-gray-700'}`}
+                      aria-pressed={autoStopEnabled}
+                    >
+                      <span
+                        className={`w-4 h-4 rounded-full bg-white shadow-sm transform transition-transform duration-200 ${autoStopEnabled ? 'translate-x-6' : 'translate-x-0'}`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs text-gray-400">
+                      <span>Silence window</span>
+                      <span className="text-white">{autoStopMs} ms</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={400}
+                      max={4000}
+                      step={100}
+                      value={autoStopMs}
+                      onChange={(e) => handleAutoStopMs(Number(e.target.value))}
+                      className="w-full accent-cyan-400"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs text-gray-400">
+                      <span>Input sensitivity</span>
+                      <span className="text-white">{autoStopLevel.toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.02}
+                      max={0.3}
+                      step={0.01}
+                      value={autoStopLevel}
+                      onChange={(e) => handleAutoStopLevel(Number(e.target.value))}
+                      className="w-full accent-purple-400"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs text-gray-400">
+                      <span>Speech speed</span>
+                      <span className="text-white">{speechSpeed.toFixed(2)}x</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.8}
+                      max={1.4}
+                      step={0.05}
+                      value={speechSpeed}
+                      onChange={(e) => handleSpeed(Number(e.target.value))}
+                      className="w-full accent-emerald-400"
+                    />
+                  </div>
+                </div>
 
                 {/* System Modes */}
                 {VOICE_MODES.map((mode) => {

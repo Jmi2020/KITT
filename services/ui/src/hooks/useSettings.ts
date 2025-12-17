@@ -9,6 +9,9 @@ export interface VoiceSettings {
   sample_rate: number;
   push_to_talk: boolean;
   speed: number;  // TTS speed multiplier (0.5-2.0)
+  auto_stop_enabled: boolean;
+  auto_stop_silence_ms: number;
+  auto_stop_level: number;
 }
 
 interface FabricationSettings {
@@ -68,6 +71,9 @@ const DEFAULT_SETTINGS: AppSettings = {
     sample_rate: 16000,
     push_to_talk: true,
     speed: 1.1,  // Default speech speed
+    auto_stop_enabled: true,
+    auto_stop_silence_ms: 1400,
+    auto_stop_level: 0.08,
   },
   fabrication: {
     default_material: 'pla_black_esun',

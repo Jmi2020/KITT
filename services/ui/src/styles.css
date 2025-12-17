@@ -880,7 +880,7 @@ details[open] summary {
   min-height: 100vh;
   width: 100vw;
   overflow: hidden;
-  background-color: #000;
+  background: transparent;
   color: #fff;
 }
 
@@ -901,12 +901,13 @@ details[open] summary {
   display: none; /* Hidden by default on mobile */
   flex-direction: column;
   flex-shrink: 0;
-  width: 260px;
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
-  background-color: rgba(20, 20, 20, 0.6);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  width: 280px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(5, 12, 24, 0.75), rgba(8, 13, 26, 0.6));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   z-index: 40;
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.03);
 }
 
 .voice-main {
@@ -935,12 +936,13 @@ details[open] summary {
   display: none; /* Hidden by default on mobile/tablet */
   flex-direction: column;
   flex-shrink: 0;
-  width: 280px;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
-  background-color: rgba(20, 20, 20, 0.6);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  width: 320px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(6, 12, 22, 0.78), rgba(5, 10, 20, 0.64));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   z-index: 40;
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.03);
 }
 
 /* Tablet Breakpoint (Sidebar Visible) */

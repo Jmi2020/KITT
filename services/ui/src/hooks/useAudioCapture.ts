@@ -70,16 +70,35 @@ export function useAudioCapture(options: UseAudioCaptureOptions = {}): UseAudioC
     try {
       setError(null);
 
+      const navAny = navigator as any;
+      const mediaDevices = navigator.mediaDevices;
+
+      // Browser support guard
+      const legacyGetUserMedia = navAny.getUserMedia || navAny.webkitGetUserMedia || navAny.mozGetUserMedia;
+      if (!mediaDevices?.getUserMedia && !legacyGetUserMedia) {
+        setError('Microphone not available: getUserMedia is not supported in this browser/context.');
+        return;
+      }
+
+      const requestUserMedia = async () => {
+        if (mediaDevices?.getUserMedia) {
+          return mediaDevices.getUserMedia({
+            audio: {
+              channelCount: 1,
+              sampleRate,
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          });
+        }
+        return new Promise<MediaStream>((resolve, reject) => {
+          legacyGetUserMedia.call(navigator, { audio: true }, resolve, reject);
+        });
+      };
+
       // Request microphone access
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      const mediaStream = await requestUserMedia();
 
       streamRef.current = mediaStream;
       setStream(mediaStream);
@@ -129,8 +148,15 @@ export function useAudioCapture(options: UseAudioCaptureOptions = {}): UseAudioC
       sourceRef.current?.connect(workletNode);
 
       setIsCapturing(true);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to access microphone';
+    } catch (err: any) {
+      let message = 'Failed to access microphone';
+      if (err?.name === 'NotAllowedError' || err?.name === 'SecurityError') {
+        message = 'Microphone permission denied. Please allow mic access in your browser.';
+      } else if (err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError') {
+        message = 'No microphone found. Please plug in a mic and try again.';
+      } else if (err instanceof Error && err.message) {
+        message = err.message;
+      }
       setError(message);
       console.error('Audio capture error:', err);
     }

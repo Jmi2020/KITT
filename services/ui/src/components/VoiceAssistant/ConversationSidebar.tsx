@@ -10,6 +10,8 @@ interface ConversationSidebarProps {
   onRename?: (id: string, title: string) => void;
   onClose?: () => void;
   isLoading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 }
 
 /**
@@ -25,6 +27,8 @@ export const ConversationSidebar = memo(function ConversationSidebar({
   onRename,
   onClose,
   isLoading = false,
+  error = null,
+  onRetry,
 }: ConversationSidebarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -78,10 +82,18 @@ export const ConversationSidebar = memo(function ConversationSidebar({
   };
 
   return (
-    <div className="flex flex-col bg-gray-900/50" style={{ height: 'calc(100vh - 64px - 64px)', maxHeight: 'calc(100vh - 64px - 64px)', overflow: 'hidden' }}>
+    <div
+      className="flex flex-col"
+      style={{ height: 'calc(100vh - 64px - 64px)', maxHeight: 'calc(100vh - 64px - 64px)', overflow: 'hidden' }}
+    >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
-        <h2 className="text-sm font-medium text-gray-300 tracking-wide uppercase">History</h2>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-white/[0.02] backdrop-blur">
+        <div className="flex items-center gap-2">
+          <span className="text-xs uppercase tracking-[0.2em] text-gray-400 font-semibold">History</span>
+          <span className="px-2 py-0.5 text-[10px] rounded-full border border-white/10 text-gray-500 bg-white/5">
+            {conversations.length || 0}
+          </span>
+        </div>
         {onClose && (
           <button
             onClick={onClose}
@@ -96,10 +108,10 @@ export const ConversationSidebar = memo(function ConversationSidebar({
       </div>
 
       {/* New Conversation Button */}
-      <div className="p-3 border-b border-white/5">
+      <div className="px-3 pt-3 pb-2 border-b border-white/10 bg-white/[0.015]">
         <button
           onClick={onNew}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 rounded-lg transition-colors text-sm font-medium"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[13px] font-semibold tracking-wide text-cyan-200 border border-white/10 bg-gradient-to-r from-cyan-500/15 via-sky-400/10 to-purple-500/15 hover:border-white/20 hover:from-cyan-500/25 hover:to-purple-500/25 transition-all shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -110,19 +122,30 @@ export const ConversationSidebar = memo(function ConversationSidebar({
 
       {/* Conversation List */}
       <div className="flex-1" style={{ minHeight: 0, overflowY: 'auto' }}>
+        {error && (
+          <div className="m-3 px-3 py-2 rounded-lg border border-red-500/40 bg-red-500/10 text-red-200 text-xs flex items-center justify-between gap-2">
+            <span className="truncate">History unavailable: {error}</span>
+            {onRetry && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onRetry(); }}
+                className="px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-white text-[11px] border border-white/10"
+              >
+                Retry
+              </button>
+            )}
+          </div>
+        )}
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-400" />
           </div>
         ) : conversations.length === 0 ? (
-          <div className="px-4 py-8 text-center text-gray-500 text-sm">
-            No conversations yet
-          </div>
+          <div className="px-4 py-8 text-center text-gray-500 text-sm">No conversations yet</div>
         ) : (
           Object.entries(groupedConversations).map(([group, convs]) => (
             <div key={group} className="py-1">
               {/* Group Header */}
-              <div className="px-4 py-2 text-xs text-gray-600 uppercase tracking-wider font-medium">
+              <div className="px-4 py-2 text-[10px] text-gray-500 uppercase tracking-[0.2em] font-semibold">
                 {group}
               </div>
 
@@ -131,11 +154,14 @@ export const ConversationSidebar = memo(function ConversationSidebar({
                 <div
                   key={conv.id}
                   onClick={() => onSelect(conv.id)}
-                  className={`group mx-2 px-3 py-2.5 rounded-lg cursor-pointer transition-all ${
-                    conv.id === currentId
-                      ? 'bg-cyan-500/20 border-l-2 border-cyan-400 ml-0 pl-4'
-                      : 'hover:bg-white/5'
+                  className={`group mx-2 px-3 py-2 rounded-lg cursor-pointer transition-all border ${
+                    conv.id === currentId ? 'border-white/20 shadow-[0_15px_40px_rgba(0,0,0,0.35)]' : 'border-transparent hover:border-white/10'
                   }`}
+                  style={
+                    conv.id === currentId
+                      ? { background: 'rgba(255,255,255,0.08)' }
+                      : { background: 'rgba(255,255,255,0.03)' }
+                  }
                 >
                   {editingId === conv.id ? (
                     <input
@@ -146,7 +172,7 @@ export const ConversationSidebar = memo(function ConversationSidebar({
                       onBlur={() => handleSaveEdit(conv.id)}
                       onKeyDown={(e) => handleKeyDown(conv.id, e)}
                       onClick={(e) => e.stopPropagation()}
-                      className="w-full px-2 py-1 bg-gray-900 border border-cyan-500 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                      className="w-full px-2 py-1 bg-white/5 border border-cyan-500/60 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500/60 backdrop-blur"
                     />
                   ) : (
                     <div className="flex items-start justify-between gap-2">
@@ -162,11 +188,11 @@ export const ConversationSidebar = memo(function ConversationSidebar({
                       </div>
 
                       {/* Actions */}
-                      <div className="flex items-center gap-1 shrink-0 ml-2">
+                      <div className="flex items-center gap-1.5 shrink-0 ml-2">
                         {onRename && (
                           <button
                             onClick={(e) => handleStartEdit(conv, e)}
-                            className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-200/50 dark:bg-gray-700/50 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 transition-all text-base"
+                            className="w-7 h-7 flex items-center justify-center rounded-md bg-white/5 hover:bg-cyan-500/20 text-sm text-gray-200 transition-all border border-white/10"
                             title="Rename conversation"
                             aria-label="Rename conversation"
                           >
@@ -176,7 +202,7 @@ export const ConversationSidebar = memo(function ConversationSidebar({
                         {onDelete && (
                           <button
                             onClick={(e) => handleDelete(conv.id, e)}
-                            className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-200/50 dark:bg-gray-700/50 hover:bg-red-100 dark:hover:bg-red-900/50 transition-all text-base"
+                            className="w-7 h-7 flex items-center justify-center rounded-md bg-white/5 hover:bg-red-500/20 text-sm text-gray-200 transition-all border border-white/10"
                             title="Delete conversation"
                             aria-label="Delete conversation"
                           >
