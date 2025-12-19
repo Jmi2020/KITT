@@ -1,38 +1,37 @@
-# KITTY: Your Workshop's AI Sidekick 🚀
+# KITTY: Technical AI Habitat for Fabrication
 
 > **K**nowledgeable **I**ntelligent **T**ool-using **T**abletop **Y**oda
 >
-> An offline-first, voice-enabled fabrication lab orchestrator running on Mac Studio M3 Ultra. Think "JARVIS for your workshop" - but it actually works, runs locally, and won't spy on you. 🔒
+> An offline-first, voice-enabled fabrication lab orchestrator running on Mac Studio M3 Ultra. Think "JARVIS for your workshop" - but it actually works, runs locally, and won't spy on you.
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+"/>
   <img src="https://img.shields.io/badge/typescript-5.x-blue.svg" alt="TypeScript 5.x"/>
   <img src="https://img.shields.io/badge/platform-macOS_14+-lightgrey.svg" alt="macOS 14+"/>
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"/>
-  <img src="https://img.shields.io/badge/status-🚧_Building_the_future-brightgreen.svg" alt="Building the future"/>
 </p>
 
 ---
 
-## 🌟 Vision: A Maker Space for Technical AI
+## Vision: A Maker Space for Technical AI
 
 KITTY is a **technical AI habitat** - a maker space purpose-built for AI models like Claude, GPT-5, Llama, Qwen, and Mistral to come "live," run research, and directly control fabrication hardware. Built on the energy-efficient Mac Studio M3 Ultra, it provides a secure network interface to 3D printers, CNC machines, test rigs, and sensing equipment.
 
 **What makes KITTY different:**
 
-- **🏠 AI Residency Model**: Models can spin up for a single query or remain active for deep, after-hours projects
-- **🤖 Bounded Autonomy**: One KITTY-owned project per week with controlled access to printers, inventory, and research
-- **♻️ Sustainable Manufacturing**: Prioritizes ethically sourced materials with robotic procurement workflows
-- **🚀 Idea → Prototype Pipeline**: Investigate materials, estimate costs, run simulations, then orchestrate fabrication
-- **⚡ Energy Efficient**: Mac Studio runs indefinitely with minimal power draw
+- **AI Residency Model**: Models can spin up for a single query or remain active for deep, after-hours projects
+- **Bounded Autonomy**: One KITTY-owned project per week with controlled access to printers, inventory, and research
+- **Sustainable Manufacturing**: Prioritizes ethically sourced materials with robotic procurement workflows
+- **Idea → Prototype Pipeline**: Investigate materials, estimate costs, run simulations, then orchestrate fabrication
+- **Energy Efficient**: Mac Studio runs indefinitely with minimal power draw
 
-> **📖 Full Vision & Roadmap**: See [NorthStar/ProjectVision.md](NorthStar/ProjectVision.md) for the complete multi-phase implementation plan.
+> **Full Vision & Roadmap**: See [NorthStar/ProjectVision.md](NorthStar/ProjectVision.md) for the complete multi-phase implementation plan.
 
 ---
 
-## 🛠️ Complete Tech Stack
+## Complete Tech Stack
 
-### 🧠 AI/ML Infrastructure
+### AI/ML Infrastructure
 
 | Component | Purpose | Technology |
 |-----------|---------|------------|
@@ -44,7 +43,7 @@ KITTY is a **technical AI habitat** - a maker space purpose-built for AI models 
 | **Coder Model** | Code generation specialist | llama.cpp (Qwen2.5 Coder 32B Q8) @ port 8087 |
 | **Cloud Providers** | Shell/Collective model selection | OpenAI GPT-5.2, Claude Sonnet 4.5, Perplexity Sonar, Gemini 2.5 |
 
-### 🐍 Backend Services (Python 3.11 + FastAPI)
+### Backend Services (Python 3.11 + FastAPI)
 
 | Service | Port | Purpose |
 |---------|------|---------|
@@ -52,13 +51,13 @@ KITTY is a **technical AI habitat** - a maker space purpose-built for AI models 
 | **Gateway** | 8080 | REST API (HAProxy load-balanced, 3 replicas) |
 | **CAD** | 8200 | 3D model generation (Zoo, Tripo, local CadQuery) |
 | **Fabrication** | 8300 | Printer control, queue management, mesh segmentation, Bambu Labs integration |
-| **Voice** | 8400 | Real-time STT/TTS with local Whisper + Kokoro/Piper |
+| **Voice** | 8400 | Real-time STT/TTS with local Whisper + Piper |
 | **Discovery** | 8500 | Network device scanning (mDNS, SSDP, Bamboo/Snapmaker UDP) |
 | **Broker** | 8777 | Command execution with allow-list safety |
 | **Images** | 8600 | Stable Diffusion generation with RQ workers |
 | **Mem0 MCP** | 8765 | Semantic memory with vector embeddings |
 
-### 🎨 Frontend (React 18 + TypeScript + Vite)
+### Frontend (React 18 + TypeScript + Vite)
 
 | Component | Purpose |
 |-----------|---------|
@@ -74,10 +73,8 @@ KITTY is a **technical AI habitat** - a maker space purpose-built for AI models 
 | **Image Generator** | Stable Diffusion generation interface |
 | **Material Inventory** | Filament catalog and stock management |
 | **Print Intelligence** | Success prediction and recommendations dashboard |
-| **Collective** | Multi-agent deliberation for better decisions |
-| **Wall Terminal** | Full-screen display mode |
 
-### 🐳 Infrastructure (Docker Compose)
+### Infrastructure (Docker Compose)
 
 | Service | Technology | Purpose |
 |---------|------------|---------|
@@ -96,15 +93,15 @@ KITTY is a **technical AI habitat** - a maker space purpose-built for AI models 
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
-### 📋 Prerequisites
+### Prerequisites
 
 - **Hardware**: Mac Studio M3 Ultra recommended (256GB+ RAM for large models)
 - **OS**: macOS 14+ with Xcode command line tools
 - **Software**: Docker Desktop, Python 3.11, Node 20, Homebrew
 
-### 🛠️ Installation (5 minutes)
+### Installation (5 minutes)
 
 ```bash
 # Clone the repository
@@ -126,7 +123,7 @@ cp .env.example .env
 ./ops/scripts/start-all.sh
 ```
 
-### 🌐 Accessing KITTY
+### Accessing KITTY
 
 After startup, open your browser to:
 
@@ -139,11 +136,11 @@ After startup, open your browser to:
 
 ---
 
-## 🎤 Voice Service
+## Voice Service
 
 KITTY includes a **hybrid voice system** with local-first processing, wake word detection, and cloud fallback:
 
-### 🏗️ Architecture
+### Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -175,12 +172,12 @@ KITTY includes a **hybrid voice system** with local-first processing, wake word 
 │                                                                               │
 │  ┌─────────────────────────────────────────────────────────────────────────┐ │
 │  │                        WebSocket Handler                                 │ │
-│  Real-time streaming • PTT or Always-Listening • Adaptive chunking     │ │
+│  │   Real-time streaming • PTT or Always-Listening • Adaptive chunking     │ │
 │  └─────────────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 🎭 Local Voice Models
+### Local Voice Models
 
 **Wake Word Detection (Porcupine)**
 - Engine: Picovoice Porcupine v4.0
@@ -196,7 +193,7 @@ KITTY includes a **hybrid voice system** with local-first processing, wake word 
 **Text-to-Speech (Kokoro ONNX)** - Primary
 - Model: Kokoro v1.0 ONNX (~82MB, optimized for Apple Silicon)
 - Location: `~/.local/share/kitty/models/kokoro-v1.0.onnx`
-- Voices: `am_michael` (male cowboy), `af` (female), plus 20+ additional voices
+- Voices: `am_michael` (male cowboy), `af` (female)
 - Sample rate: 24000 Hz
 - Features: Adaptive text chunking, CoreML acceleration, streaming
 
@@ -209,7 +206,7 @@ KITTY includes a **hybrid voice system** with local-first processing, wake word 
 - alloy, nova, shimmer → af/amy (female)
 - echo, fable, onyx → am_michael/ryan (male)
 
-### 🎛️ Voice Configuration
+### Voice Configuration
 
 ```bash
 # Voice service
@@ -244,7 +241,7 @@ PIPER_MODEL_DIR=/Users/Shared/Coding/models/Piper
 OPENAI_TTS_MODEL=tts-1
 ```
 
-### 🚀 Starting Voice Service
+### Starting Voice Service
 
 ```bash
 # Start voice service standalone
@@ -257,7 +254,7 @@ OPENAI_TTS_MODEL=tts-1
 curl http://localhost:8080/api/voice/status | jq .
 ```
 
-### 📡 Voice API Endpoints
+### Voice API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -267,7 +264,7 @@ curl http://localhost:8080/api/voice/status | jq .
 | `/api/voice/ws` | WebSocket | Real-time bidirectional streaming |
 | `/api/voice/chat` | POST | Full voice chat (STT → LLM → TTS) |
 
-### 🔌 WebSocket Events
+### WebSocket Events
 
 | Event | Direction | Description |
 |-------|-----------|-------------|
@@ -284,27 +281,30 @@ curl http://localhost:8080/api/voice/status | jq .
 
 ---
 
-## 🎨 Web UI
+## Web UI
 
-### 📱 Menu Landing Page
+### Menu Landing Page
 
 The UI starts with a **Menu page** showing all available sections:
 
 | Section | Icon | Description |
 |---------|------|-------------|
-| **Voice** | 🎙️ | Real-time voice assistant with STT/TTS |
-| **Chat Shell** | 💬 | Text chat with function calling |
-| **Fabrication Console** | 🎨 | Text-to-3D model generation |
-| **Projects** | 📁 | CAD project management |
-| **Dashboard** | 🖨️ | Printers, cameras, and material inventory |
-| **Media Hub** | 🖼️ | Vision gallery and image generation |
-| **Research Hub** | 🔬 | Research, results, and scheduling |
-| **Collective** | 👥 | Multi-agent deliberation for better decisions |
-| **Intelligence** | 📈 | Analytics and insights dashboard |
-| **Wall Terminal** | 🖥️ | Full-screen display mode |
-| **Settings** | ⚙️ | Bambu Labs, preferences, API config |
+| **Voice** | Microphone | Real-time voice assistant with STT/TTS |
+| **Chat Shell** | Terminal | Text chat with function calling |
+| **Projects** | Folder | CAD project management |
+| **Fabrication** | Printer | Printer control and queue |
+| **Vision Gallery** | Images | Reference image search |
+| **Image Generator** | Palette | Stable Diffusion generation |
+| **Research** | Magnifier | Autonomous research pipeline |
+| **I/O Control** | Toggle | Feature and provider toggles |
+| **Material Inventory** | Cube | Filament stock management |
+| **Print Intelligence** | Chart | Success prediction dashboard |
+| **Cameras** | Camera | Print monitoring feeds |
+| **Autonomy** | Calendar | Weekly autonomous project scheduling |
+| **Wall Terminal** | Display | Ambient status display |
+| **Settings** | Gear | Bambu Labs, preferences, API config |
 
-### 🏃 Running the UI
+### Running the UI
 
 ```bash
 cd services/ui
@@ -317,7 +317,7 @@ npm run build
 npm run preview
 ```
 
-### 🎛️ UI Configuration
+### UI Configuration
 
 ```env
 KITTY_UI_BASE=http://localhost:4173      # UI base URL
@@ -326,9 +326,9 @@ VITE_API_BASE=http://localhost:8080      # Gateway API URL
 
 ---
 
-## ⚡ Command Reference
+## Command Reference
 
-### 🚀 Start/Stop KITTY
+### Start/Stop KITTY
 
 ```bash
 # Start everything (llama.cpp + Docker + Voice)
@@ -347,7 +347,7 @@ VITE_API_BASE=http://localhost:8080      # Gateway API URL
 docker compose -f infra/compose/docker-compose.yml ps
 ```
 
-### 💻 CLI Interface
+### CLI Interface
 
 ```bash
 # Install CLI (one-time)
@@ -374,7 +374,7 @@ kitty-cli say "What printers are online?"
 kitty-cli say "Turn on bench lights"
 ```
 
-### 🚀 Unified Launcher TUI
+### Unified Launcher TUI
 
 ```bash
 # Install launcher (one-time)
@@ -396,9 +396,9 @@ kitty
 
 ---
 
-## 🎯 Core Features
+## Core Features
 
-### 🧭 Intelligent Routing
+### Intelligent Routing
 
 ```
 Query arrives → Local model (free, instant) → Confidence check
@@ -408,7 +408,7 @@ Query arrives → Local model (free, instant) → Confidence check
                           Low confidence? ──→ Escalate to cloud (budget gated)
 ```
 
-### 🤖 ReAct Agent with Tool Use
+### ReAct Agent with Tool Use
 
 KITTY uses a **ReAct (Reasoning + Acting) agent** that can:
 - **Reason** about complex multi-step tasks
@@ -416,14 +416,14 @@ KITTY uses a **ReAct (Reasoning + Acting) agent** that can:
 - **Observe** results and adapt strategy
 - **Iterate** until task completion
 
-### 🛡️ Safety-First Design
+### Safety-First Design
 
 - **Hazard workflows**: Two-step confirmation for dangerous operations
 - **Command allow-lists**: Only pre-approved system commands execute
 - **Audit logging**: Every tool use logged to PostgreSQL
 - **Budget gates**: Cloud API calls require password confirmation
 
-### 🏗️ CAD Generation
+### CAD Generation
 
 Generate 3D models from natural language:
 
@@ -437,7 +437,7 @@ kitty-cli cad "Create a phone stand with 45° angle and cable management"
 3. Local CadQuery (offline)
 4. Local FreeCAD (offline)
 
-### 🖨️ Print Queue
+### Print Queue
 
 Multi-printer coordination with intelligent scheduling:
 
@@ -458,7 +458,7 @@ Multi-printer coordination with intelligent scheduling:
 - Snapmaker Artisan (UDP)
 - Any OctoPrint/Moonraker instance
 
-### 🔪 Mesh Segmentation
+### Mesh Segmentation
 
 Split oversized 3D models into printable parts (supports 3MF and STL):
 
@@ -499,7 +499,7 @@ curl -X POST http://localhost:8300/api/segmentation/segment \
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -567,9 +567,9 @@ curl -X POST http://localhost:8300/api/segmentation/segment \
 
 ---
 
-## 🎛️ Configuration
+## Configuration
 
-### 📝 Core Settings (.env)
+### Core Settings (.env)
 
 ```bash
 # User & Safety
@@ -583,7 +583,7 @@ BUDGET_PER_TASK_USD=0.50
 CONFIDENCE_THRESHOLD=0.80
 ```
 
-### 🧠 AI Models
+### AI Models
 
 ```bash
 # Ollama (Primary Reasoner)
@@ -608,7 +608,7 @@ LLAMACPP_VISION_MMPROJ=gemma3_27b_mmproj/mmproj-model-f16.gguf
 LLAMACPP_VISION_PORT=8086
 ```
 
-### 🧭 Semantic Tool Selection
+### Semantic Tool Selection
 
 KITTY uses **embedding-based semantic search** to intelligently select relevant tools for each query, reducing context usage by ~90% when many tools are available.
 
@@ -634,7 +634,7 @@ TOOL_SEARCH_THRESHOLD=0.3
 
 **Disabling**: Set `USE_SEMANTIC_TOOL_SELECTION=false` to fall back to keyword-based selection.
 
-### 🤖 Parallel Agent Orchestration (Experimental)
+### Parallel Agent Orchestration (Experimental)
 
 KITTY supports **parallel multi-agent orchestration** for complex, multi-step goals. When enabled, complex queries are decomposed into parallelizable tasks executed concurrently across multiple specialized agents.
 
@@ -721,7 +721,7 @@ PARALLEL_AGENT_ROLLOUT_PERCENT=100
 ./ops/scripts/llama/restart.sh
 ```
 
-### 🎤 Voice Settings
+### Voice Settings
 
 ```bash
 # Voice service
@@ -755,7 +755,7 @@ PIPER_MODEL_DIR=/Users/Shared/Coding/models/Piper
 OPENAI_TTS_MODEL=tts-1
 ```
 
-### ☁️ Cloud APIs (Optional)
+### Cloud APIs (Optional)
 
 ```bash
 OPENAI_API_KEY=sk-...
@@ -766,7 +766,7 @@ ZOO_API_KEY=your-zoo-key
 TRIPO_API_KEY=your-tripo-key
 ```
 
-### ☁️ Cloud Model Selection (Shell & Collective)
+### Cloud Model Selection (Shell & Collective)
 
 The Shell page and Collective Intelligence system support direct cloud model selection. When an API key is present, the corresponding cloud model becomes available in the model selector.
 
@@ -785,7 +785,7 @@ The Shell page and Collective Intelligence system support direct cloud model sel
 - Cost tracking in response metadata
 - Streaming support (non-blocking for cloud)
 
-### 🔌 Integrations
+### Integrations
 
 ```bash
 # Home Assistant
@@ -801,9 +801,9 @@ REDIS_URL=redis://127.0.0.1:6379/0
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
-### 🎤 Voice Service Issues
+### Voice Service Issues
 
 **Local STT not available:**
 ```bash
@@ -864,7 +864,7 @@ curl http://localhost:8080/api/voice/status | jq .
 #   capabilities.wake_word: true (if configured)
 ```
 
-### 🐳 Services Not Starting
+### Services Not Starting
 
 ```bash
 # Check Docker
@@ -878,7 +878,7 @@ tail -f .logs/llamacpp-q4.log
 docker compose -f infra/compose/docker-compose.yml restart gateway
 ```
 
-### 🎨 UI Not Loading
+### UI Not Loading
 
 ```bash
 # Rebuild and restart UI
@@ -892,9 +892,9 @@ curl http://localhost:8080/api/voice/status
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
-### 📊 Current Status (December 2025)
+### Current Status (November 2025)
 
 | Phase | Status | Description |
 |-------|--------|-------------|
@@ -905,21 +905,19 @@ curl http://localhost:8080/api/voice/status
 | Phase 4: Fabrication Intelligence | 🚧 90% | Voice service, dashboards, ML in progress |
 | Phase 5: Safety & Access | 📋 Planned | UniFi Access, zone presence |
 
-### 🆕 Recent Additions (Phase 4.5)
+### Recent Additions (Phase 4.5)
 
 - **Voice Service**: Local Whisper STT + Kokoro/Piper TTS with cloud fallback
-- **Wake Word Detection**: Hands-free activation with Porcupine ("Hey Kitty")
+- **Wake Word Detection**: Hands-free activation with Porcupine ("Hey Howdy")
 - **Kokoro TTS**: High-quality Apple Silicon-optimized local speech synthesis
 - **Menu Landing Page**: Card-based navigation to all sections
 - **Bambu Labs Integration**: Login/status via Settings page
 - **Gateway Voice Proxy**: Full voice API proxying through gateway
 - **Markdown Support**: UI renders formatted responses, TTS speaks clean text
-- **Collective Intelligence**: Multi-agent deliberation for better decisions
-- **Print Intelligence**: Success prediction and recommendations dashboard
 
 ---
 
-## 📊 Project Stats
+## Project Stats
 
 | Metric | Value |
 |--------|-------|
@@ -935,7 +933,7 @@ curl http://localhost:8080/api/voice/status
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
@@ -954,13 +952,13 @@ ruff format services/
 
 ---
 
-## 📄 License
+## License
 
 MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 KITTY stands on the shoulders of giants:
 
@@ -982,8 +980,4 @@ KITTY stands on the shoulders of giants:
 
 <p align="center">
   <sub>KITTY: Because your workshop deserves an AI assistant that actually understands "turn that thing on over there"</sub>
-</p>
-
-<p align="center">
-  <sub>🚀 Powered by Mac Studio M3 Ultra, llama.cpp, and a whole lot of caffeine</sub>
 </p>
