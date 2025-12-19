@@ -83,14 +83,14 @@
 
 body {
   margin: 0;
-  min-min-height: 100vh;
+  min-height: 100vh;
   background: var(--gradient-radial-1), var(--gradient-radial-2), var(--bg-primary);
   color: var(--text-primary);
   transition: background 0.3s ease, color 0.3s ease;
 }
 
 #root {
-  min-min-height: 100vh;
+  min-height: 100vh;
 }
 
 /* Typography */
@@ -127,11 +127,9 @@ a:hover {
 
 /* App Layout */
 .kitty-app {
-  min-min-height: 100vh;
-  max-min-min-height: 100vh;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
-  
 }
 
 .kitty-app header {
@@ -195,14 +193,12 @@ a:hover {
   align-items: center;
 }
 
-.kitty-app main { overflow-y: auto; overflow-x: hidden;
+.kitty-app main {
   flex: 1;
-  min-height: 0;
   padding: 2rem 1.5rem;
   max-width: 1600px;
   width: 100%;
   margin: 0 auto;
-  overflow-y: auto; overflow-x: hidden;
 }
 
 /* Buttons */

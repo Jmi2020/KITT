@@ -1,0 +1,78 @@
+/**
+ * Type definitions for the Projects/Artifact Library page
+ */
+
+export interface LocalArtifact {
+  filename: string;
+  artifactType: string;
+  category: string;
+  sizeBytes: number;
+  modifiedAt: string;
+  downloadUrl: string;
+  parentDir?: string; // For gcode: the job UUID
+}
+
+export interface ArtifactStats {
+  totalCount: number;
+  totalSizeBytes: number;
+  byType: Record<string, number>;
+  byCategory: Record<string, number>;
+  mostRecent?: string;
+}
+
+export interface ProjectArtifact {
+  provider: string;
+  artifactType: string;
+  location: string;
+  metadata: Record<string, string>;
+}
+
+export interface ProjectModel {
+  projectId: string;
+  conversationId: string;
+  title?: string | null;
+  summary?: string | null;
+  artifacts: ProjectArtifact[];
+  metadata: Record<string, string>;
+  updatedAt: string;
+}
+
+export interface UnifiedArtifact {
+  id: string;
+  source: 'filesystem' | 'database';
+  filename: string;
+  artifactType: string;
+  category: string;
+  sizeBytes?: number;
+  modifiedAt: string;
+  downloadUrl: string;
+  parentDir?: string;
+  projectTitle?: string;
+  conversationId?: string;
+  provider?: string;
+  metadata?: Record<string, string>;
+}
+
+export type ArtifactTab = 'all' | 'database' | 'local';
+export type SortField = 'date' | 'name' | 'size' | 'type';
+export type SortOrder = 'asc' | 'desc';
+export type ArtifactTypeFilter = 'all' | 'stl' | 'glb' | '3mf' | 'gcode' | 'step' | 'png' | 'jpg';
+
+export const ARTIFACT_TYPE_INFO: Record<string, { icon: string; color: string; label: string }> = {
+  stl: { icon: '📐', color: '#3b82f6', label: 'STL' },
+  glb: { icon: '🎨', color: '#8b5cf6', label: 'GLB' },
+  gltf: { icon: '🎨', color: '#8b5cf6', label: 'GLTF' },
+  '3mf': { icon: '🖨️', color: '#10b981', label: '3MF' },
+  step: { icon: '🔧', color: '#f59e0b', label: 'STEP' },
+  gcode: { icon: '⚙️', color: '#ef4444', label: 'G-Code' },
+  png: { icon: '🖼️', color: '#ec4899', label: 'PNG' },
+  jpg: { icon: '🖼️', color: '#ec4899', label: 'JPG' },
+};
+
+export const CATEGORY_INFO: Record<string, { label: string; color: string }> = {
+  mesh: { label: 'Mesh', color: '#3b82f6' },
+  printable: { label: 'Printable', color: '#10b981' },
+  cad: { label: 'CAD', color: '#f59e0b' },
+  instruction: { label: 'Instruction', color: '#ef4444' },
+  image: { label: 'Image', color: '#ec4899' },
+};
