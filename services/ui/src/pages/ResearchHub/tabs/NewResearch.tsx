@@ -1,11 +1,34 @@
 /**
  * New Research Tab - Query Form
  * Creates new research sessions with configurable options
+ *
+ * Enhanced with search provider selection following the
+ * Collective Intelligence specialist pattern.
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { UseResearchApiReturn } from '../../../hooks/useResearchApi';
 import type { ResearchSession } from '../../../types/research';
+
+interface SearchProvider {
+  id: string;
+  name: string;
+  provider_type: string;
+  cost_per_query: number;
+  description: string;
+  icon: string;
+  is_available: boolean;
+  is_free: boolean;
+  max_results_per_query: number;
+}
+
+interface CostEstimate {
+  total_queries: number;
+  total_cost_usd: number;
+  breakdown: Record<string, { name: string; queries: number; cost_usd: number }>;
+  is_valid: boolean;
+  validation_error?: string;
+}
 
 interface NewResearchProps {
   api: UseResearchApiReturn;
@@ -21,6 +44,72 @@ const NewResearch = ({ api, onSessionCreated }: NewResearchProps) => {
   const [enablePaidTools, setEnablePaidTools] = useState(false);
   const [enableHierarchical, setEnableHierarchical] = useState(false);
   const [maxSubQuestions, setMaxSubQuestions] = useState(5);
+
+  // Search provider selection state
+  const [providers, setProviders] = useState<SearchProvider[]>([]);
+  const [selectedProviders, setSelectedProviders] = useState<string[]>(['duckduckgo']);
+  const [costEstimate, setCostEstimate] = useState<CostEstimate | null>(null);
+  const [showAdvancedProviders, setShowAdvancedProviders] = useState(false);
+
+  // Fetch available providers on mount
+  useEffect(() => {
+    const fetchProviders = async () => {
+      try {
+        const response = await fetch('/api/research/providers');
+        if (response.ok) {
+          const data = await response.json();
+          setProviders(data.providers || []);
+          // Default to free providers
+          setSelectedProviders(data.default || ['duckduckgo']);
+        }
+      } catch (err) {
+        console.error('Failed to fetch search providers:', err);
+      }
+    };
+    fetchProviders();
+  }, []);
+
+  // Update cost estimate when selection changes
+  const updateCostEstimate = useCallback(async () => {
+    if (selectedProviders.length === 0) {
+      setCostEstimate(null);
+      return;
+    }
+    try {
+      const response = await fetch('/api/research/estimate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_ids: selectedProviders,
+          max_iterations: maxIterations,
+          queries_per_iteration: 5,
+        }),
+      });
+      if (response.ok) {
+        const estimate = await response.json();
+        setCostEstimate(estimate);
+      }
+    } catch (err) {
+      console.error('Failed to estimate cost:', err);
+    }
+  }, [selectedProviders, maxIterations]);
+
+  useEffect(() => {
+    updateCostEstimate();
+  }, [updateCostEstimate]);
+
+  // Toggle provider selection
+  const toggleProvider = (providerId: string) => {
+    setSelectedProviders((prev) => {
+      if (prev.includes(providerId)) {
+        // Don't allow deselecting the last provider
+        if (prev.length === 1) return prev;
+        return prev.filter((p) => p !== providerId);
+      } else {
+        return [...prev, providerId];
+      }
+    });
+  };
 
   const handleTemplateChange = (templateType: string) => {
     setSelectedTemplate(templateType);
@@ -135,6 +224,130 @@ const NewResearch = ({ api, onSessionCreated }: NewResearchProps) => {
         </div>
       </div>
 
+      {/* Search Provider Selection */}
+      <div className="form-group provider-selection">
+        <div className="provider-header">
+          <label>Search Providers</label>
+          <button
+            type="button"
+            className="btn-link"
+            onClick={() => setShowAdvancedProviders(!showAdvancedProviders)}
+          >
+            {showAdvancedProviders ? 'Simple' : 'Advanced'}
+          </button>
+        </div>
+
+        {!showAdvancedProviders ? (
+          // Simple mode - just show free vs paid toggle
+          <div className="provider-simple">
+            <div className="provider-chips">
+              {providers.filter(p => p.is_free).map((provider) => (
+                <button
+                  key={provider.id}
+                  type="button"
+                  className={`provider-chip ${selectedProviders.includes(provider.id) ? 'selected' : ''}`}
+                  onClick={() => toggleProvider(provider.id)}
+                  disabled={api.loading}
+                  title={provider.description}
+                >
+                  <span className="provider-icon">{provider.icon}</span>
+                  <span className="provider-name">{provider.name}</span>
+                  <span className="provider-badge free">Free</span>
+                </button>
+              ))}
+            </div>
+            <small>
+              Selected: {selectedProviders.length} provider(s).
+              {costEstimate && costEstimate.total_cost_usd > 0
+                ? ` Estimated cost: $${costEstimate.total_cost_usd.toFixed(4)}`
+                : ' Free'}
+            </small>
+          </div>
+        ) : (
+          // Advanced mode - show all providers with checkboxes
+          <div className="provider-advanced">
+            <div className="provider-group">
+              <h4>Free Providers</h4>
+              <div className="provider-list">
+                {providers.filter(p => p.is_free).map((provider) => (
+                  <label
+                    key={provider.id}
+                    className={`provider-option ${!provider.is_available ? 'unavailable' : ''}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedProviders.includes(provider.id)}
+                      onChange={() => toggleProvider(provider.id)}
+                      disabled={api.loading || !provider.is_available}
+                    />
+                    <span className="provider-icon">{provider.icon}</span>
+                    <span className="provider-info">
+                      <span className="provider-name">{provider.name}</span>
+                      <span className="provider-desc">{provider.description}</span>
+                    </span>
+                    {provider.is_available ? (
+                      <span className="provider-status available">Available</span>
+                    ) : (
+                      <span className="provider-status unavailable">Not configured</span>
+                    )}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="provider-group">
+              <h4>Paid Providers</h4>
+              <div className="provider-list">
+                {providers.filter(p => !p.is_free).map((provider) => (
+                  <label
+                    key={provider.id}
+                    className={`provider-option ${!provider.is_available ? 'unavailable' : ''}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedProviders.includes(provider.id)}
+                      onChange={() => toggleProvider(provider.id)}
+                      disabled={api.loading || !provider.is_available}
+                    />
+                    <span className="provider-icon">{provider.icon}</span>
+                    <span className="provider-info">
+                      <span className="provider-name">{provider.name}</span>
+                      <span className="provider-desc">{provider.description}</span>
+                      <span className="provider-cost">
+                        ${(provider.cost_per_query * 1000).toFixed(2)}/1K queries
+                      </span>
+                    </span>
+                    {provider.is_available ? (
+                      <span className="provider-status available">API Key Set</span>
+                    ) : (
+                      <span className="provider-status unavailable">Missing API Key</span>
+                    )}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Cost Estimate */}
+            {costEstimate && costEstimate.is_valid && (
+              <div className="cost-estimate">
+                <strong>Estimated Cost:</strong>
+                <span className="estimate-value">
+                  ~${costEstimate.total_cost_usd.toFixed(4)}
+                </span>
+                <span className="estimate-queries">
+                  ({costEstimate.total_queries} queries)
+                </span>
+              </div>
+            )}
+            {costEstimate && !costEstimate.is_valid && (
+              <div className="cost-estimate error">
+                {costEstimate.validation_error}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="form-group checkbox-group">
         <label htmlFor="enablePaidTools">
           <input
@@ -144,12 +357,12 @@ const NewResearch = ({ api, onSessionCreated }: NewResearchProps) => {
             onChange={(e) => setEnablePaidTools(e.target.checked)}
             disabled={api.loading}
           />
-          <span>Enable paid tools (Perplexity for deep research)</span>
+          <span>Enable paid LLM tools (Perplexity for deep research)</span>
         </label>
         <small>
           {enablePaidTools
             ? 'Research will use Perplexity API when beneficial (higher cost but better quality)'
-            : 'Using free tools only (Brave Search, SearXNG, Jina Reader)'}
+            : 'Using local LLM models only for analysis'}
         </small>
       </div>
 

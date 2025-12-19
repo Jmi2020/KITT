@@ -1,0 +1,286 @@
+/**
+ * PhaseIndicator Styles
+ * Visual progress indicator for research phases
+ */
+
+.phase-indicator {
+  background: var(--card-bg, #1a1a2e);
+  border: 1px solid var(--border-color, #2d2d44);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+/* Iteration Counter */
+.phase-iteration {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-color, #2d2d44);
+}
+
+.iteration-label {
+  color: var(--text-muted, #888);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.iteration-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+}
+
+/* Phase Pipeline */
+.phase-pipeline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  position: relative;
+}
+
+.phase-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  flex: 1;
+}
+
+.phase-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  z-index: 1;
+}
+
+.phase-step.pending .phase-icon {
+  background: var(--bg-tertiary, #252535);
+  color: var(--text-muted, #888);
+  border: 2px solid var(--border-color, #2d2d44);
+}
+
+.phase-step.active .phase-icon {
+  background: var(--accent-primary, #4f46e5);
+  color: white;
+  border: 2px solid var(--accent-primary, #4f46e5);
+  box-shadow: 0 0 12px rgba(79, 70, 229, 0.5);
+  animation: pulse-active 2s ease-in-out infinite;
+}
+
+.phase-step.completed .phase-icon {
+  background: var(--success-color, #10b981);
+  color: white;
+  border: 2px solid var(--success-color, #10b981);
+}
+
+@keyframes pulse-active {
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(79, 70, 229, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(79, 70, 229, 0.6);
+  }
+}
+
+.phase-label {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: color 0.3s ease;
+}
+
+.phase-step.active .phase-label {
+  color: var(--accent-primary, #4f46e5);
+  font-weight: 600;
+}
+
+.phase-step.completed .phase-label {
+  color: var(--success-color, #10b981);
+}
+
+.phase-connector {
+  position: absolute;
+  top: 16px;
+  left: calc(50% + 20px);
+  width: calc(100% - 40px);
+  height: 2px;
+  background: var(--border-color, #2d2d44);
+  z-index: 0;
+}
+
+.phase-step.completed .phase-connector {
+  background: var(--success-color, #10b981);
+}
+
+.phase-step.active .phase-connector {
+  background: linear-gradient(
+    90deg,
+    var(--accent-primary, #4f46e5) 0%,
+    var(--border-color, #2d2d44) 100%
+  );
+}
+
+/* Progress Bar */
+.phase-progress-bar {
+  height: 4px;
+  background: var(--bg-tertiary, #252535);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.phase-progress-fill {
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    var(--accent-primary, #4f46e5),
+    var(--accent-secondary, #7c3aed)
+  );
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+
+/* Phase Stats */
+.phase-stats {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.phase-stat {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #aaa);
+  background: var(--bg-tertiary, #252535);
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+}
+
+.phase-stat.synthesizing {
+  color: var(--accent-primary, #4f46e5);
+  animation: pulse-text 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-text {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* Event Log */
+.phase-log-section {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border-color, #2d2d44);
+  padding-top: 0.75rem;
+}
+
+.phase-log-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted, #888);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0.25rem 0;
+  transition: color 0.2s ease;
+}
+
+.phase-log-toggle:hover {
+  color: var(--text-primary, #fff);
+}
+
+.phase-log {
+  margin-top: 0.5rem;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg-tertiary, #252535);
+  border-radius: 4px;
+  padding: 0.5rem;
+}
+
+.phase-log-entry {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--border-color, #2d2d44);
+}
+
+.phase-log-entry:last-child {
+  border-bottom: none;
+}
+
+.log-time {
+  color: var(--text-muted, #666);
+  font-family: monospace;
+  white-space: nowrap;
+}
+
+.log-message {
+  color: var(--text-secondary, #aaa);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Event type specific colors */
+.phase-log-entry.session_started .log-message,
+.phase-log-entry.session_complete .log-message {
+  color: var(--success-color, #10b981);
+}
+
+.phase-log-entry.session_error .log-message {
+  color: var(--error-color, #ef4444);
+}
+
+.phase-log-entry.search_query_start .log-message,
+.phase-log-entry.search_query_complete .log-message {
+  color: var(--info-color, #3b82f6);
+}
+
+.phase-log-entry.finding_extracted .log-message {
+  color: var(--warning-color, #f59e0b);
+}
+
+.phase-log-entry.synthesis_start .log-message,
+.phase-log-entry.synthesis_complete .log-message {
+  color: var(--accent-primary, #4f46e5);
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .phase-pipeline {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .phase-connector {
+    display: none;
+  }
+
+  .phase-step {
+    flex: 0 0 auto;
+    min-width: 60px;
+  }
+
+  .phase-label {
+    font-size: 0.65rem;
+  }
+}

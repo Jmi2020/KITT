@@ -8,6 +8,12 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { UseResearchApiReturn } from '../../../hooks/useResearchApi';
 import type { SessionResults, Finding } from '../../../types/research';
+import {
+  exportMarkdown,
+  exportJSON,
+  exportPDF,
+  copyToClipboard,
+} from '../utils/export';
 
 interface ResultsProps {
   api: UseResearchApiReturn;
@@ -19,6 +25,8 @@ const Results = ({ api, initialSessionId }: ResultsProps) => {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(initialSessionId || null);
   const [showModal, setShowModal] = useState(false);
   const [generatingSynthesis, setGeneratingSynthesis] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [exportingPDF, setExportingPDF] = useState(false);
 
   // Load completed sessions on mount
   useEffect(() => {
@@ -72,6 +80,24 @@ const Results = ({ api, initialSessionId }: ResultsProps) => {
     if (confidence >= 0.7) return 'var(--color-success)';
     if (confidence >= 0.5) return 'var(--color-warning)';
     return 'var(--color-error)';
+  };
+
+  const handleCopy = async () => {
+    if (!results) return;
+    const success = await copyToClipboard(results);
+    setCopyFeedback(success ? 'Copied!' : 'Failed to copy');
+    setTimeout(() => setCopyFeedback(null), 2000);
+  };
+
+  const handleExportPDF = async () => {
+    if (!results) return;
+    setExportingPDF(true);
+    try {
+      await exportPDF(results);
+    } catch (error) {
+      console.error('PDF export failed:', error);
+    }
+    setExportingPDF(false);
   };
 
   const completedSessions = api.sessions.filter((s) => s.status === 'completed');
@@ -151,6 +177,40 @@ const Results = ({ api, initialSessionId }: ResultsProps) => {
                   <span className="stat-label">Cost</span>
                   <span className="stat-value">${results.total_cost_usd.toFixed(2)}</span>
                 </div>
+              </div>
+
+              {/* Export Actions */}
+              <div className="export-actions">
+                <span className="export-label">Export:</span>
+                <button
+                  className="btn-export"
+                  onClick={handleCopy}
+                  title="Copy as Markdown to clipboard"
+                >
+                  {copyFeedback || '📋 Copy'}
+                </button>
+                <button
+                  className="btn-export"
+                  onClick={() => results && exportMarkdown(results)}
+                  title="Download as Markdown file"
+                >
+                  📝 Markdown
+                </button>
+                <button
+                  className="btn-export"
+                  onClick={() => results && exportJSON(results)}
+                  title="Download as JSON file"
+                >
+                  📦 JSON
+                </button>
+                <button
+                  className="btn-export"
+                  onClick={handleExportPDF}
+                  disabled={exportingPDF}
+                  title="Download as PDF file"
+                >
+                  {exportingPDF ? '⏳ Generating...' : '📄 PDF'}
+                </button>
               </div>
 
               {/* Synthesis */}

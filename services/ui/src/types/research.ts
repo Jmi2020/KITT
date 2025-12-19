@@ -49,13 +49,148 @@ export interface ResearchTemplate {
   use_debate: boolean;
 }
 
-export interface ProgressUpdate {
-  type: 'connection' | 'progress' | 'complete' | 'error';
-  node?: string;
+// Research event types matching backend events.py
+export type ResearchEventType =
+  // Session lifecycle
+  | 'connection'
+  | 'session_started'
+  | 'session_complete'
+  | 'session_error'
+  | 'session_paused'
+  | 'session_resumed'
+  // Iteration lifecycle
+  | 'iteration_start'
+  | 'iteration_complete'
+  // Search events (fine-grained)
+  | 'search_phase_start'
+  | 'search_query_start'
+  | 'search_query_complete'
+  | 'search_cache_hit'
+  | 'search_phase_complete'
+  // Finding extraction events
+  | 'extraction_start'
+  | 'finding_extracted'
+  | 'extraction_complete'
+  // Validation events
+  | 'validation_start'
+  | 'validation_complete'
+  // Quality/stopping events
+  | 'quality_check'
+  | 'saturation_check'
+  | 'stopping_decision'
+  // Synthesis events
+  | 'synthesis_start'
+  | 'synthesis_chunk'
+  | 'synthesis_complete'
+  // Legacy events for backward compatibility
+  | 'progress'
+  | 'complete'
+  | 'error'
+  | 'heartbeat';
+
+export interface ResearchEvent {
+  type: ResearchEventType;
+  session_id: string;
+  timestamp?: string;
+
+  // Session events
+  query?: string;
+  config?: ResearchConfig;
+  max_iterations?: number;
+  max_cost_usd?: number;
+  total_iterations?: number;
+  total_findings?: number;
+  total_sources?: number;
+  total_cost_usd?: number;
+  completeness_score?: number;
+  confidence_score?: number;
+  has_synthesis?: boolean;
+
+  // Error events
+  error?: string;
+  error_type?: string;
+  recoverable?: boolean;
+
+  // Iteration events
   iteration?: number;
-  status?: string;
+  strategy?: string;
+  pending_queries?: string[];
+  new_findings?: number;
+  new_sources?: number;
+  cost_this_iteration?: number;
+  cumulative_findings?: number;
+  cumulative_sources?: number;
+  cumulative_cost?: number;
+
+  // Search events
+  query_count?: number;
+  providers?: string[];
+  query_index?: number;
+  total_queries?: number;
+  search_query?: string;
+  provider?: string;
+  results_count?: number;
+  success?: boolean;
+  cached?: boolean;
+  latency_ms?: number;
+  cache_age_seconds?: number;
+  successful_queries?: number;
+  cached_queries?: number;
+  total_results?: number;
+  dedup_saved?: number;
+
+  // Finding extraction events
+  sources_to_process?: number;
+  finding_index?: number;
+  finding_type?: string;
+  content_preview?: string;
+  confidence?: number;
+  source_url?: string;
+  source_title?: string;
+  findings_extracted?: number;
+  sources_processed?: number;
+
+  // Validation events
+  claims_to_validate?: number;
+  claims_validated?: number;
+  claims_rejected?: number;
+  avg_confidence?: number;
+
+  // Quality events
+  ragas_score?: number;
+  meets_threshold?: boolean;
+
+  // Saturation events
+  novel_findings_last_n?: number;
+  saturation_threshold?: number;
+  threshold_met?: boolean;
+  novelty_rate?: number;
+
+  // Stopping decision events
+  should_stop?: boolean;
+  reason?: string;
+  criteria_met?: string[];
+  criteria_not_met?: string[];
+
+  // Synthesis events
   findings_count?: number;
   sources_count?: number;
+  model?: string;
+  chunk?: string;
+  chunk_index?: number;
+  synthesis_length?: number;
+  model_used?: string;
+  cost_usd?: number;
+
+  // Connection events
+  message?: string;
+
+  // Heartbeat events
+  status?: string;
+  uptime_seconds?: number;
+
+  // Legacy fields for backward compatibility
+  node?: string;
   budget_remaining?: number;
   saturation?: {
     threshold_met?: boolean;
@@ -65,10 +200,10 @@ export interface ProgressUpdate {
     should_stop?: boolean;
     reason?: string;
   };
-  error?: string;
-  message?: string;
-  timestamp?: string;
 }
+
+// Alias for backward compatibility
+export type ProgressUpdate = ResearchEvent;
 
 export interface SessionResults {
   session_id: string;

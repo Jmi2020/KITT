@@ -912,6 +912,46 @@
   text-decoration: underline;
 }
 
+/* Export Actions */
+.export-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+  margin-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.export-label {
+  font-size: 0.875rem;
+  color: var(--text-secondary, #b0b0b0);
+  margin-right: 8px;
+}
+
+.btn-export {
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: var(--text-primary, #e0e0e0);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-export:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.btn-export:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Schedule Tab */
 .filters-row {
   display: flex;

@@ -7,6 +7,7 @@ Provides REST API for:
 - Streaming real-time progress via WebSocket
 """
 
+import asyncio
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -28,6 +29,12 @@ from brain.research.extraction import extract_claims_from_content
 from brain.research.types import Claim, EvidenceSpan
 from brain.research.template_selector import TemplateSelector
 from brain.research.graph.nodes import invoke_model
+from brain.research.providers import (
+    SEARCH_PROVIDERS,
+    get_available_providers,
+    estimate_search_cost,
+    validate_provider_selection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -580,12 +587,13 @@ async def stream_research_progress(
     """
     Stream real-time research progress via WebSocket.
 
-    Sends JSON messages with progress updates:
-    - iteration: Current iteration number
-    - status: Current status
-    - findings: New findings discovered
-    - quality_scores: Updated quality metrics
-    - events: Research events (tool calls, decisions, etc.)
+    Uses callback-based event streaming (pattern from Collective Intelligence).
+    Events are typed and include fine-grained progress updates:
+    - session_started, session_complete, session_error
+    - iteration_start, iteration_complete
+    - search_query_start, search_query_complete
+    - finding_extracted
+    - synthesis_start, synthesis_chunk, synthesis_complete
 
     Args:
         websocket: WebSocket connection
@@ -597,7 +605,7 @@ async def stream_research_progress(
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            console.log('Progress:', data);
+            console.log('Event:', data.type, data);
         };
         ```
     """
@@ -607,8 +615,12 @@ async def stream_research_progress(
     await websocket.send_json({
         "type": "connection",
         "session_id": session_id,
-        "message": "Connected to research session stream"
+        "message": "Connected to research session stream",
+        "timestamp": datetime.utcnow().isoformat()
     })
+
+    # Event for signaling completion
+    completion_event = asyncio.Event()
 
     try:
         # Get session manager
@@ -633,37 +645,50 @@ async def stream_research_progress(
             await websocket.close()
             return
 
-        # Stream research progress from graph
-        async for state_update in manager.stream_research(
-            session_id=session_id,
-            user_id=session.user_id,
-            query=session.query,
-            config=session.config
-        ):
-            # Extract node name and state from update
-            if isinstance(state_update, dict):
-                for node_name, node_state in state_update.items():
-                    # Send progress update
+        # Define callback to send events to WebSocket
+        async def send_event(event: Dict[str, Any]):
+            """Send event to WebSocket and check for completion."""
+            try:
+                await websocket.send_json(event)
+
+                # Check for terminal events
+                event_type = event.get("type", "")
+                if event_type in ("session_complete", "session_error"):
+                    completion_event.set()
+
+            except Exception as e:
+                logger.warning(f"WebSocket send error: {e}")
+                completion_event.set()  # Unblock on error
+
+        # Register callback with session manager
+        manager.add_callback(session_id, send_event)
+
+        try:
+            # If session is already completed, send final state immediately
+            if session.status.value in ("completed", "failed"):
+                await websocket.send_json({
+                    "type": "session_complete" if session.status.value == "completed" else "session_error",
+                    "session_id": session_id,
+                    "total_iterations": session.total_iterations,
+                    "total_findings": session.total_findings,
+                    "total_sources": session.total_sources,
+                    "total_cost_usd": session.total_cost_usd,
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+            else:
+                # Wait for completion or timeout (10 minutes max)
+                try:
+                    await asyncio.wait_for(completion_event.wait(), timeout=600)
+                except asyncio.TimeoutError:
                     await websocket.send_json({
-                        "type": "progress",
-                        "node": node_name,
-                        "iteration": node_state.get("current_iteration", 0),
-                        "status": node_state.get("status", "active"),
-                        "findings_count": len(node_state.get("findings", [])),
-                        "sources_count": len(node_state.get("sources", [])),
-                        "budget_remaining": float(node_state.get("budget_remaining", 0.0)),
-                        "saturation": node_state.get("saturation_status", {}),
-                        "stopping_decision": node_state.get("stopping_decision", {}),
+                        "type": "error",
+                        "error": "Session timed out",
                         "timestamp": datetime.utcnow().isoformat()
                     })
 
-        # Send completion message
-        await websocket.send_json({
-            "type": "complete",
-            "session_id": session_id,
-            "message": "Research completed",
-            "timestamp": datetime.utcnow().isoformat()
-        })
+        finally:
+            # Always remove callback
+            manager.remove_callback(session_id, send_event)
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for session {session_id}")
@@ -724,6 +749,97 @@ async def list_research_templates():
             for template_type, template in TEMPLATES.items()
         ]
     }
+
+
+# ============================================================================
+# Search Providers
+# ============================================================================
+
+@router.get("/providers")
+async def list_search_providers():
+    """
+    List all available search providers.
+
+    Returns providers with availability status based on API key configuration.
+    Similar to Collective's /specialists endpoint.
+
+    Returns:
+        List of search providers with availability and cost info
+    """
+    return {
+        "providers": [p.to_dict() for p in SEARCH_PROVIDERS],
+        "available": [p.to_dict() for p in get_available_providers()],
+        "default": ["duckduckgo"],  # Default to free provider
+    }
+
+
+class CostEstimateRequest(BaseModel):
+    """Request for cost estimation."""
+    provider_ids: List[str] = Field(
+        default=["duckduckgo"],
+        description="List of search provider IDs to use"
+    )
+    max_iterations: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Maximum research iterations"
+    )
+    queries_per_iteration: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Expected queries per iteration"
+    )
+
+
+class CostEstimateResponse(BaseModel):
+    """Response with cost estimation."""
+    total_queries: int
+    total_cost_usd: float
+    breakdown: Dict[str, Any]
+    is_valid: bool
+    validation_error: Optional[str] = None
+
+
+@router.post("/estimate", response_model=CostEstimateResponse)
+async def estimate_research_cost(request: CostEstimateRequest):
+    """
+    Estimate cost for a research session.
+
+    Similar to Collective's cost estimation for selected specialists.
+
+    Args:
+        request: Cost estimation request with provider selection
+
+    Returns:
+        Cost breakdown by provider
+    """
+    # Validate provider selection
+    is_valid, error = validate_provider_selection(request.provider_ids)
+
+    if not is_valid:
+        return CostEstimateResponse(
+            total_queries=0,
+            total_cost_usd=0.0,
+            breakdown={},
+            is_valid=False,
+            validation_error=error,
+        )
+
+    # Calculate estimate
+    estimate = estimate_search_cost(
+        provider_ids=request.provider_ids,
+        queries_per_iteration=request.queries_per_iteration,
+        max_iterations=request.max_iterations,
+    )
+
+    return CostEstimateResponse(
+        total_queries=estimate["total_queries"],
+        total_cost_usd=estimate["total_cost_usd"],
+        breakdown=estimate["breakdown"],
+        is_valid=True,
+    )
 
 
 @router.get("/sessions/{session_id}/results", response_model=SessionResults)

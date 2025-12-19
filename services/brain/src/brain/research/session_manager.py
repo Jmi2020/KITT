@@ -23,8 +23,17 @@ from psycopg_pool import AsyncConnectionPool
 
 from brain.research.checkpoint import CheckpointManager
 from brain.research.types import Claim, EvidenceSpan
+from brain.research.events import (
+    ResearchEventType,
+    create_event,
+)
 
 logger = logging.getLogger(__name__)
+
+
+# Type alias for callback functions
+from typing import Callable, Awaitable
+EventCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
 
 class SessionStatus(str, Enum):
@@ -106,7 +115,70 @@ class ResearchSessionManager:
         self._shutdown_event = asyncio.Event()
         self._write_queue: List[asyncio.Task] = []
 
+        # Callback system for streaming events (per-session callbacks)
+        self._session_callbacks: Dict[str, List[EventCallback]] = {}
+
         logger.info("ResearchSessionManager initialized")
+
+    def add_callback(self, session_id: str, callback: EventCallback) -> None:
+        """
+        Register a callback for progress events on a specific session.
+
+        Args:
+            session_id: Session to listen to
+            callback: Async function to call with event dict
+        """
+        if session_id not in self._session_callbacks:
+            self._session_callbacks[session_id] = []
+        self._session_callbacks[session_id].append(callback)
+        logger.debug(f"Added callback for session {session_id}, total: {len(self._session_callbacks[session_id])}")
+
+    def remove_callback(self, session_id: str, callback: EventCallback) -> None:
+        """
+        Remove a callback for a session.
+
+        Args:
+            session_id: Session ID
+            callback: Callback to remove
+        """
+        if session_id in self._session_callbacks:
+            if callback in self._session_callbacks[session_id]:
+                self._session_callbacks[session_id].remove(callback)
+                logger.debug(f"Removed callback for session {session_id}")
+            if not self._session_callbacks[session_id]:
+                del self._session_callbacks[session_id]
+
+    async def emit(self, session_id: str, event: Dict[str, Any]) -> None:
+        """
+        Emit an event to all registered callbacks for a session.
+
+        Args:
+            session_id: Session ID
+            event: Event dictionary to emit
+        """
+        callbacks = self._session_callbacks.get(session_id, [])
+        for callback in callbacks:
+            try:
+                await callback(event)
+            except Exception as e:
+                logger.warning(f"Callback error for session {session_id}: {e}")
+
+    async def emit_event(
+        self,
+        session_id: str,
+        event_type: ResearchEventType,
+        **kwargs
+    ) -> None:
+        """
+        Helper to emit a typed event.
+
+        Args:
+            session_id: Session ID
+            event_type: Event type enum
+            **kwargs: Event-specific fields
+        """
+        event = create_event(event_type, session_id, **kwargs)
+        await self.emit(session_id, event)
 
     async def create_session(
         self,
@@ -465,6 +537,18 @@ class ResearchSessionManager:
         try:
             logger.info(f"Running research graph for session {session_id}")
 
+            # Emit session started event
+            max_iterations = (config or {}).get("max_iterations", 15)
+            max_cost = (config or {}).get("max_cost_usd", 2.0)
+            await self.emit_event(
+                session_id,
+                ResearchEventType.SESSION_STARTED,
+                query=query,
+                config=config or {},
+                max_iterations=max_iterations,
+                max_cost_usd=max_cost,
+            )
+
             # Execute graph
             logger.info(f"⏳ About to call graph.run() for session {session_id}")
             final_state = await self.graph.run(
@@ -476,7 +560,9 @@ class ResearchSessionManager:
             logger.info(f"✅ graph.run() completed for session {session_id}")
 
             # Determine success/failure from final state
-            success = final_state.get("status") == ResearchStatus.COMPLETED
+            # Import ResearchStatus from graph state module
+            from brain.research.graph.state import ResearchStatus as GraphResearchStatus
+            success = final_state.get("status") == GraphResearchStatus.COMPLETED
             last_error = final_state.get("last_error")
             metadata_update = final_state.get("metadata") or {}
             if last_error:
@@ -530,6 +616,20 @@ class ResearchSessionManager:
                 logger.info(
                     f"✅ Research {'completed' if success else 'failed'} for session {session_id}"
                 )
+
+                # Emit session complete event
+                await self.emit_event(
+                    session_id,
+                    ResearchEventType.SESSION_COMPLETE,
+                    total_iterations=final_state.get("current_iteration", 0),
+                    total_findings=len(final_state.get("findings", [])),
+                    total_sources=len(final_state.get("sources", [])),
+                    total_cost_usd=float(final_state.get("total_cost_usd", 0.0)),
+                    completeness_score=final_state.get("completeness_score"),
+                    confidence_score=final_state.get("confidence_score"),
+                    has_synthesis=bool(final_state.get("final_answer")),
+                )
+
             except Exception as e:
                 logger.error(f"🚨 CRITICAL: Failed to mark session {session_id} as completed: {e}")
                 # Session stuck in ACTIVE state - will need manual intervention or recovery
@@ -537,6 +637,16 @@ class ResearchSessionManager:
 
         except Exception as e:
             logger.error(f"🚨 Research failed for session {session_id}: {e}", exc_info=True)
+
+            # Emit error event
+            await self.emit_event(
+                session_id,
+                ResearchEventType.SESSION_ERROR,
+                error=str(e),
+                error_type=type(e).__name__,
+                iteration=0,  # Unknown at this point
+                recoverable=False,
+            )
 
             # Mark as failed (CRITICAL - must succeed)
             try:
@@ -561,6 +671,9 @@ class ResearchSessionManager:
             # Remove from active sessions
             if session_id in self.active_sessions:
                 del self.active_sessions[session_id]
+            # Clean up callbacks
+            if session_id in self._session_callbacks:
+                del self._session_callbacks[session_id]
 
     async def stream_research(
         self,

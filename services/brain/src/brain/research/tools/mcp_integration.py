@@ -5,12 +5,17 @@ Integrates existing MCP tools (web_search, Perplexity, memory) with research sys
 Uses UnifiedPermissionGate for streamlined permission checks.
 """
 
+import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from decimal import Decimal
 from enum import Enum
 from collections import defaultdict, deque
+
+from brain.research.search_cache import search_cache
+from brain.research.search_dedup import deduplicate_queries, DeduplicationResult
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +207,7 @@ class ResearchToolExecutor:
     ) -> ToolExecutionResult:
         """Execute free web search (DuckDuckGo) with guardrails for duplication and budget."""
         query = (arguments or {}).get("query", "") or ""
+        provider = (arguments or {}).get("provider", "duckduckgo") or "duckduckgo"
         session_id = context.session_id
 
         # Hard stop if we've already spent too many steps; force synthesis
@@ -251,7 +257,43 @@ class ResearchToolExecutor:
                 "Approaching reasoning budget; prefer synthesis or a single diversified query."
             )
 
+        # Check cache first (24h TTL)
+        start_time = time.time()
+        cached = await search_cache.get(query, provider)
+        if cached:
+            results = cached.get("results", [])
+            cache_age = cached.get("cache_age", 0)
+            logger.info(
+                f"Cache HIT for '{query[:50]}...' (age={cache_age:.0f}s, results={len(results)})"
+            )
+            # Record query to prevent duplicates
+            if normalized_query:
+                recent.append(normalized_query)
+
+            return ToolExecutionResult(
+                success=True,
+                tool_name="web_search",
+                data={"results": results},
+                cost_usd=Decimal("0.0"),
+                is_external=False,
+                metadata={
+                    **metadata,
+                    "cached": True,
+                    "cache_age_seconds": cache_age,
+                    "latency_ms": (time.time() - start_time) * 1000,
+                }
+            )
+
+        # Execute search
         result = await self.research_server.execute_tool("web_search", arguments)
+        latency_ms = (time.time() - start_time) * 1000
+
+        # Cache successful results
+        if result.success and result.data:
+            results_to_cache = result.data.get("results", [])
+            if results_to_cache:
+                await search_cache.set(query, provider, results_to_cache)
+                logger.debug(f"Cached {len(results_to_cache)} results for '{query[:50]}...'")
 
         # Record query on success (or even on attempt if we reach here)
         if normalized_query:
@@ -264,7 +306,12 @@ class ResearchToolExecutor:
             error=result.error if not result.success else None,
             cost_usd=Decimal("0.0"),  # Free
             is_external=False,
-            metadata={**metadata, **(result.metadata or {})}
+            metadata={
+                **metadata,
+                **(result.metadata or {}),
+                "cached": False,
+                "latency_ms": latency_ms,
+            }
         )
 
     async def _execute_research_deep(
@@ -429,3 +476,116 @@ class ResearchToolExecutor:
             is_external=False,
             metadata=result.metadata or {}
         )
+
+    # ============ Two-Phase Search with Deduplication ============
+
+    async def execute_searches_with_dedup(
+        self,
+        queries: List[str],
+        context: ToolExecutionContext,
+        provider: str = "duckduckgo",
+        max_concurrent: int = 5,
+        similarity_threshold: float = 0.7,
+    ) -> Tuple[Dict[str, ToolExecutionResult], Dict[str, Any]]:
+        """
+        Execute multiple searches with deduplication and parallel execution.
+
+        Two-phase approach:
+        1. Collect and deduplicate queries using Jaccard similarity
+        2. Execute unique queries in parallel with semaphore
+
+        Args:
+            queries: List of search queries
+            context: Execution context
+            provider: Search provider ID
+            max_concurrent: Max concurrent requests
+            similarity_threshold: Jaccard threshold for dedup
+
+        Returns:
+            Tuple of:
+            - Dict mapping original query -> ToolExecutionResult
+            - Dict with stats (dedup_saved, cached_count, etc.)
+        """
+        if not queries:
+            return {}, {"dedup_saved": 0, "total_queries": 0}
+
+        start_time = time.time()
+
+        # Phase 1: Deduplicate queries
+        dedup_result = deduplicate_queries(
+            queries,
+            similarity_threshold=similarity_threshold,
+            max_queries=15,
+        )
+
+        unique_queries = dedup_result.unique_queries
+        logger.info(
+            f"Search dedup: {len(queries)} -> {len(unique_queries)} unique "
+            f"(saved {dedup_result.duplicates_removed})"
+        )
+
+        # Phase 2: Execute unique queries in parallel
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def execute_one(query: str) -> Tuple[str, ToolExecutionResult]:
+            """Execute a single search with semaphore."""
+            async with semaphore:
+                result = await self._execute_web_search(
+                    {"query": query, "provider": provider},
+                    context,
+                )
+                return query, result
+
+        # Execute all unique queries in parallel
+        tasks = [execute_one(q) for q in unique_queries]
+        results_list = await asyncio.gather(*tasks)
+
+        # Build results dict for unique queries
+        unique_results: Dict[str, ToolExecutionResult] = dict(results_list)
+
+        # Map results back to original queries
+        original_results: Dict[str, ToolExecutionResult] = {}
+        cached_count = 0
+        success_count = 0
+
+        for original_query in queries:
+            original_query = original_query.strip()
+            if not original_query:
+                continue
+
+            canonical = dedup_result.get_canonical(original_query)
+
+            if canonical in unique_results:
+                result = unique_results[canonical]
+                original_results[original_query] = result
+
+                if result.success:
+                    success_count += 1
+                if result.metadata.get("cached"):
+                    cached_count += 1
+            else:
+                # Should not happen, but handle gracefully
+                original_results[original_query] = ToolExecutionResult(
+                    success=False,
+                    tool_name="web_search",
+                    error="Query not in dedup result",
+                )
+
+        total_time_ms = (time.time() - start_time) * 1000
+
+        stats = {
+            "total_queries": len(queries),
+            "unique_queries": len(unique_queries),
+            "dedup_saved": dedup_result.duplicates_removed,
+            "successful_queries": success_count,
+            "cached_queries": cached_count,
+            "total_time_ms": total_time_ms,
+            "similarity_threshold": similarity_threshold,
+        }
+
+        logger.info(
+            f"Parallel search complete: {success_count}/{len(unique_queries)} successful, "
+            f"{cached_count} cached, {total_time_ms:.0f}ms total"
+        )
+
+        return original_results, stats

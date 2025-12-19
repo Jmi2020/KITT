@@ -1,15 +1,20 @@
 /**
  * Active Sessions Tab - WebSocket Streaming Progress
  * Displays real-time progress for active research sessions
+ *
+ * Enhanced with PhaseIndicator and fine-grained event handling
+ * following the Collective Intelligence streaming pattern.
  */
 
+import { useState, useMemo } from 'react';
 import type { UseResearchApiReturn } from '../../../hooks/useResearchApi';
-import type { ResearchSession, ProgressUpdate } from '../../../types/research';
+import type { ResearchSession, ResearchEvent } from '../../../types/research';
+import PhaseIndicator, { getPhaseFromEvent, type PhaseId } from '../components/PhaseIndicator';
 
 interface ActiveSessionsProps {
   api: UseResearchApiReturn;
   activeSession: ResearchSession | null;
-  progressLogs: ProgressUpdate[];
+  progressLogs: ResearchEvent[];
   currentProgress: {
     iteration: number;
     findingsCount: number;
@@ -18,7 +23,7 @@ interface ActiveSessionsProps {
     saturation: { threshold_met?: boolean; novel_findings_last_n?: number } | null;
   };
   onClearSession: () => void;
-  onProgressUpdate: (update: ProgressUpdate) => void;
+  onProgressUpdate: (update: ResearchEvent) => void;
 }
 
 const ActiveSessions = ({
@@ -28,6 +33,51 @@ const ActiveSessions = ({
   currentProgress,
   onClearSession,
 }: ActiveSessionsProps) => {
+  const [showEventLog, setShowEventLog] = useState(false);
+
+  // Derive current phase and search stats from events
+  const { currentPhase, searchesCompleted, totalSearches, findingsExtracted, synthesizing } =
+    useMemo(() => {
+      let phase: PhaseId = 'initialize';
+      let searchesComplete = 0;
+      let totalSearch = 0;
+      let findings = 0;
+      let isSynthesizing = false;
+
+      // Process events to determine current state
+      for (const event of progressLogs) {
+        phase = getPhaseFromEvent(event);
+
+        if (event.type === 'search_phase_start') {
+          totalSearch = event.query_count || 0;
+          searchesComplete = 0;
+        }
+        if (event.type === 'search_query_complete') {
+          searchesComplete++;
+        }
+        if (event.type === 'finding_extracted') {
+          findings++;
+        }
+        if (event.type === 'extraction_complete') {
+          findings = event.findings_extracted || findings;
+        }
+        if (event.type === 'synthesis_start') {
+          isSynthesizing = true;
+        }
+        if (event.type === 'synthesis_complete') {
+          isSynthesizing = false;
+        }
+      }
+
+      return {
+        currentPhase: phase,
+        searchesCompleted: searchesComplete,
+        totalSearches: totalSearch,
+        findingsExtracted: findings || currentProgress.findingsCount,
+        synthesizing: isSynthesizing,
+      };
+    }, [progressLogs, currentProgress.findingsCount]);
+
   const handlePause = async () => {
     if (!activeSession) return;
     const success = await api.pauseSession(activeSession.session_id);
@@ -126,6 +176,20 @@ const ActiveSessions = ({
           Live Streaming
         </div>
       )}
+
+      {/* Phase Indicator */}
+      <PhaseIndicator
+        currentPhase={currentPhase}
+        iteration={currentProgress.iteration}
+        maxIterations={maxIterations}
+        searchesCompleted={searchesCompleted}
+        totalSearches={totalSearches}
+        findingsExtracted={findingsExtracted}
+        synthesizing={synthesizing}
+        recentEvents={progressLogs}
+        showLog={showEventLog}
+        onToggleLog={() => setShowEventLog(!showEventLog)}
+      />
 
       <div className="progress-stats">
         <div className="stat-card">
@@ -231,31 +295,7 @@ const ActiveSessions = ({
         </div>
       </div>
 
-      {/* Progress Logs */}
-      {progressLogs.length > 0 && (
-        <div className="progress-logs">
-          <h3>Progress Log</h3>
-          <div className="log-container">
-            {progressLogs
-              .slice()
-              .reverse()
-              .map((log, idx) => (
-                <div key={idx} className={`log-entry log-${log.type}`}>
-                  <span className="log-time">
-                    {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : ''}
-                  </span>
-                  <span className="log-type">[{log.type}]</span>
-                  {log.node && <span className="log-node">{log.node}</span>}
-                  {log.message && <span className="log-message">{log.message}</span>}
-                  {log.error && <span className="log-error">{log.error}</span>}
-                  {log.stopping_decision?.should_stop && (
-                    <span className="log-stop">Stop: {log.stopping_decision.reason}</span>
-                  )}
-                </div>
-              ))}
-          </div>
-        </div>
-      )}
+      {/* Note: Event log is now integrated into PhaseIndicator above */}
     </div>
   );
 };
