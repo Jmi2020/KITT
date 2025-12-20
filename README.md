@@ -381,8 +381,16 @@ LLAMACPP_CODER_TEMPERATURE=0.2
 
 ### MCP Integration
 
-kitty-code auto-discovers KITTY services as MCP servers:
+kitty-code supports the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) for extensible tool access. Add external MCP servers via the TUI:
 
+```bash
+# In kitty-code TUI
+/mcp                                    # List all servers
+/mcp add perplexity -- docker run -i mcp/perplexity-ask  # Add server
+/mcp remove perplexity                  # Remove server
+```
+
+**Auto-discovered KITTY services:**
 ```
 kitty_brain  → http://localhost:8000/mcp  (Query routing, research)
 kitty_cad    → http://localhost:8200/mcp  (3D model generation)
@@ -390,7 +398,9 @@ kitty_fab    → http://localhost:8300/mcp  (Printer control)
 kitty_discovery → http://localhost:8500/mcp  (Device scanning)
 ```
 
-See [services/kitty-code/README.md](services/kitty-code/README.md) for full documentation.
+**Semantic tool selection** automatically filters tools based on query context to reduce token usage.
+
+See [services/kitty-code/docs/MCP_SERVERS.md](services/kitty-code/docs/MCP_SERVERS.md) for complete configuration guide.
 
 ---
 

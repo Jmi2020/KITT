@@ -204,8 +204,11 @@ class ToolManager:
             logger.warning("MCP stdio server '%s' has invalid/empty command", srv.name)
             return 0
 
+        # Get environment variables (resolves ${VAR} references)
+        env = srv.get_env() if hasattr(srv, 'get_env') else None
+
         try:
-            tools: list[RemoteTool] = await list_tools_stdio(cmd)
+            tools: list[RemoteTool] = await list_tools_stdio(cmd, env=env)
         except Exception as exc:
             logger.warning("MCP stdio discovery failed for %r: %s", cmd, exc)
             return 0
@@ -214,7 +217,7 @@ class ToolManager:
         for remote in tools:
             try:
                 proxy_cls = create_mcp_stdio_proxy_tool_class(
-                    command=cmd, remote=remote, alias=srv.name, server_hint=srv.prompt
+                    command=cmd, remote=remote, alias=srv.name, server_hint=srv.prompt, env=env
                 )
                 self._available[proxy_cls.get_name()] = proxy_cls
                 added += 1

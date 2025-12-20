@@ -79,6 +79,28 @@ prompt = "GitHub API access"
 
 ## MCP Server Integration
 
+kitty-code supports the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) for extending capabilities with external tools.
+
+### Managing MCP Servers
+
+Use the `/mcp` command in the TUI:
+
+```bash
+# List all servers
+/mcp
+
+# Add HTTP server
+/mcp add my-server http://localhost:3000/mcp
+
+# Add STDIO server
+/mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem ~/Desktop
+
+# Remove server
+/mcp remove my-server
+```
+
+### Auto-Discovery
+
 kitty-code auto-discovers KITTY services when running in the KITTY environment:
 
 | Server | URL | Capabilities |
@@ -88,10 +110,14 @@ kitty-code auto-discovers KITTY services when running in the KITTY environment:
 | `kitty_fab` | http://localhost:8300/mcp | Printer control, slicing |
 | `kitty_discovery` | http://localhost:8500/mcp | Network device scanning |
 
-Test discovery:
-```bash
-python3 -c "from kitty_code.integrations import get_kitty_mcp_servers; print(get_kitty_mcp_servers())"
-```
+### Semantic Tool Selection
+
+kitty-code intelligently selects tools based on your query to reduce context usage:
+- Search queries use Perplexity/research tools (bash excluded)
+- Code queries include bash and file tools
+- Browser queries use chrome-devtools
+
+**See [docs/MCP_SERVERS.md](docs/MCP_SERVERS.md) for complete configuration guide.**
 
 ## Model Setup
 

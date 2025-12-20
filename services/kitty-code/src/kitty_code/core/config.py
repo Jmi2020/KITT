@@ -42,7 +42,11 @@ def load_api_keys_from_env() -> None:
     if kitty_env.is_file():
         env_vars = dotenv_values(kitty_env)
         for key, value in env_vars.items():
-            if value and key.startswith(("OLLAMA_", "MISTRAL_", "OPENAI_", "ANTHROPIC_")):
+            # Load API keys for known providers and services
+            if value and key.startswith((
+                "OLLAMA_", "MISTRAL_", "OPENAI_", "ANTHROPIC_",
+                "PERPLEXITY_", "GOOGLE_",  # Additional providers
+            )):
                 os.environ.setdefault(key, value)
 
 

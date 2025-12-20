@@ -4,9 +4,12 @@ import asyncio
 from collections import OrderedDict
 from collections.abc import AsyncGenerator, Callable
 from enum import StrEnum, auto
+from logging import getLogger
 import time
 from typing import Any, cast
 from uuid import uuid4
+
+logger = getLogger("kitty_code")
 
 from pydantic import BaseModel
 
@@ -14,7 +17,7 @@ from kitty_code.core.config import VibeConfig
 from kitty_code.core.interaction_logger import InteractionLogger
 from kitty_code.core.llm.backend.factory import BACKEND_FACTORY
 from kitty_code.core.llm.format import APIToolFormatHandler, ResolvedMessage
-from kitty_code.core.llm.types import BackendLike
+from kitty_code.core.llm.types import AvailableTool, BackendLike
 from kitty_code.core.middleware import (
     AutoCompactMiddleware,
     ContextWarningMiddleware,
@@ -574,6 +577,32 @@ class Agent:
                 )
                 continue
 
+    def _get_last_user_query(self) -> str:
+        """Get the most recent user message for tool selection."""
+        for msg in reversed(self.messages):
+            if msg.role == Role.user and msg.content:
+                return msg.content
+        return ""
+
+    def _select_tools(
+        self, available_tools: list[AvailableTool]
+    ) -> list[AvailableTool]:
+        """Select relevant tools based on the current query."""
+        from kitty_code.core.tools.selector import select_tools_for_query
+
+        query = self._get_last_user_query()
+        if not query:
+            return available_tools
+
+        selected = select_tools_for_query(query, available_tools)
+        logger.debug(
+            "Tool selection: %d/%d tools for query: %s...",
+            len(selected),
+            len(available_tools),
+            query[:50],
+        )
+        return selected
+
     async def _chat(self, max_tokens: int | None = None) -> LLMChunk:
         active_model = self.config.get_active_model()
         provider = self.config.get_provider_for_model(active_model)
@@ -581,6 +610,8 @@ class Agent:
         available_tools = self.format_handler.get_available_tools(
             self.tool_manager, self.config
         )
+        # Apply semantic tool selection to reduce context usage
+        available_tools = self._select_tools(available_tools)
         tool_choice = self.format_handler.get_tool_choice()
 
         try:
@@ -639,6 +670,8 @@ class Agent:
         available_tools = self.format_handler.get_available_tools(
             self.tool_manager, self.config
         )
+        # Apply semantic tool selection to reduce context usage
+        available_tools = self._select_tools(available_tools)
         tool_choice = self.format_handler.get_tool_choice()
         try:
             start_time = time.perf_counter()
