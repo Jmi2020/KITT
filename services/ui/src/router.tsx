@@ -25,6 +25,7 @@ const PrintIntelligence = lazy(() => import('./pages/PrintIntelligence'));
 const Voice = lazy(() => import('./pages/Voice'));
 const Settings = lazy(() => import('./pages/Settings/index'));
 const Collective = lazy(() => import('./pages/Collective'));
+const Coding = lazy(() => import('./pages/Coding'));
 
 // Loading component for suspense
 function PageLoader() {
@@ -231,6 +232,16 @@ export const router = createBrowserRouter([
         element: (
           <Suspense fallback={<PageLoader />}>
             <Collective />
+          </Suspense>
+        ),
+      },
+
+      // Coding (kitty-code Web UI)
+      {
+        path: 'coding',
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <Coding />
           </Suspense>
         ),
       },

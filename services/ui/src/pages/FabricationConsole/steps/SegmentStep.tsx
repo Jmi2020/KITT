@@ -71,7 +71,7 @@ export function SegmentStep({
 
   return (
     <StepContainer
-      stepNumber={2}
+      stepNumber={3}
       title="Segment (Optional)"
       subtitle={getSubtitle()}
       isActive={isActive}

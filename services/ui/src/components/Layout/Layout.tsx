@@ -20,6 +20,7 @@ const navItems: NavItem[] = [
 
 const moreItems: NavItem[] = [
   { path: '/dashboard', icon: '📊', label: 'Dashboard' },
+  { path: '/coding', icon: '💻', label: 'Coding' },
   { path: '/media', icon: '🖼️', label: 'Media Hub' },
   { path: '/collective', icon: '👥', label: 'Collective' },
   { path: '/projects', icon: '📁', label: 'Projects' },

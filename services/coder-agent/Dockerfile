@@ -9,10 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
-COPY requirements.txt .
+COPY services/coder-agent/requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --user -r requirements.txt
+# Install Python dependencies to /install
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 
 # Production image
@@ -26,13 +26,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python packages from builder
-COPY --from=builder /root/.local /root/.local
-
-# Add local bin to PATH
-ENV PATH=/root/.local/bin:$PATH
+COPY --from=builder /install /usr/local
 
 # Copy source code
-COPY src/coder_agent /app/coder_agent
+COPY services/coder-agent/src/coder_agent /app/coder_agent
+
+# Set PYTHONPATH for the app
+ENV PYTHONPATH=/app
 
 # Create non-root user for sandbox security
 RUN useradd -m -u 1000 coder && \

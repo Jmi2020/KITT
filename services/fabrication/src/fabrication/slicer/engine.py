@@ -343,9 +343,14 @@ class SlicerEngine:
 
         # Override key settings that the definition file doesn't handle well
         # These are mesh-level settings that need explicit values
+
+        # Use rotation matrix from config if provided, otherwise identity
+        rotation_matrix = job.config.rotation_matrix or [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+        rotation_str = str(rotation_matrix).replace(" ", "")
+
         essential_overrides = [
-            # Mesh transformation - identity matrix (model as-is)
-            "mesh_rotation_matrix=[[1,0,0],[0,1,0],[0,0,1]]",
+            # Mesh transformation - use provided rotation or identity
+            f"mesh_rotation_matrix={rotation_str}",
             # Center the object on build plate
             "center_object=true",
             # Use 1.75mm filament (definition defaults to 2.85mm)

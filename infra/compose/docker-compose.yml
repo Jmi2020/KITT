@@ -76,7 +76,7 @@ services:
       FABRICATION_BASE: http://fabrication:8300
       DISCOVERY_BASE: http://discovery:8500
       CAD_BASE: http://cad:8200
-      # CODER_AGENT_BASE: http://coder-agent:8092  # Service disabled - not yet implemented
+      CODER_AGENT_BASE: http://coder-agent:8092
       SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://searxng:8080}
       INTERNAL_SEARXNG_BASE_URL: http://searxng:8080
       IMAGE_SEARCH_PROVIDER: ${IMAGE_SEARCH_PROVIDER:-auto}
@@ -247,8 +247,7 @@ services:
       start_period: 10s
 
   coder-agent:
-    profiles:
-      - disabled  # Service not yet implemented
+    # Local-first AI coding with Devstral 2 via llama.cpp
     build:
       context: ../..
       dockerfile: services/coder-agent/Dockerfile
@@ -260,9 +259,13 @@ services:
       CODER_PORT: ${CODER_PORT:-8092}
       CODER_MAX_REFINEMENTS: ${CODER_MAX_REFINEMENTS:-2}
       CODER_TIMEOUT_SECONDS: ${CODER_TIMEOUT_SECONDS:-20}
+      # Primary: Devstral 2 123B via llama.cpp (handles sharded GGUF)
+      # llama.cpp serves OpenAI-compatible API at /v1/chat/completions
+      OLLAMA_CODER_BASE: http://host.docker.internal:8087
+      OLLAMA_CODER_MODEL: kitty-coder
+      # Fallback: Q4 and F16 servers
       LLAMACPP_Q4_BASE: ${LLAMACPP_Q4_BASE:-http://host.docker.internal:8083}
       LLAMACPP_F16_BASE: ${LLAMACPP_F16_BASE:-http://host.docker.internal:8082}
-      LLAMACPP_CODER_BASE: ${LLAMACPP_CODER_BASE:-}
     volumes:
       - ../../services/common:/app/services/common:ro
       - ../../services/coder-agent:/app/services/coder-agent:ro

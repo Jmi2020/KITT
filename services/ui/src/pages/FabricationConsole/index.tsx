@@ -1,7 +1,7 @@
 /**
  * FabricationConsole - Progressive dashboard for 3D printing workflow
  *
- * Workflow: Generate → Segment → Slice → Print
+ * Workflow: Generate → Orient → Segment → Slice → Print
  *
  * All steps are visible but unlock progressively as prerequisites complete.
  * Integrates with KITTY voice automation for hands-free operation.
@@ -9,7 +9,7 @@
 
 import { useMemo } from 'react';
 import { WorkflowStepper } from '../../components/FabricationWorkflow';
-import { GenerateStep, SegmentStep, SliceStep, PrintStep } from './steps';
+import { GenerateStep, OrientStep, SegmentStep, SliceStep, PrintStep } from './steps';
 import { useFabricationWorkflow, WorkflowStep } from './hooks/useFabricationWorkflow';
 import ThermalPanel from '../../components/ThermalPanel';
 import GcodeConsole from '../../components/GcodeConsole';
@@ -22,13 +22,14 @@ export default function FabricationConsole() {
   const completedSteps = useMemo(() => {
     const completed: WorkflowStep[] = [];
     if (state.selectedArtifact) completed.push(1);
+    if (state.orientationSkipped || state.orientedMeshPath) completed.push(2);
     if (state.segmentationSkipped || state.segmentResult || (state.dimensionCheck && !state.dimensionCheck.needs_segmentation)) {
-      completed.push(2);
+      completed.push(3);
     }
-    if (state.sliceResult?.status === 'completed') completed.push(3);
-    if (state.printJobId) completed.push(4);
+    if (state.sliceResult?.status === 'completed') completed.push(4);
+    if (state.printJobId) completed.push(5);
     return completed;
-  }, [state.selectedArtifact, state.segmentationSkipped, state.segmentResult, state.dimensionCheck, state.sliceResult, state.printJobId]);
+  }, [state.selectedArtifact, state.orientationSkipped, state.orientedMeshPath, state.segmentationSkipped, state.segmentResult, state.dimensionCheck, state.sliceResult, state.printJobId]);
 
   // Check if step can be navigated to
   const canNavigateTo = (step: WorkflowStep): boolean => {
@@ -36,8 +37,11 @@ export default function FabricationConsole() {
       case 1: return true;
       case 2: return state.selectedArtifact !== null;
       case 3: return state.selectedArtifact !== null &&
+        (state.orientationSkipped || state.orientedMeshPath !== null);
+      case 4: return state.selectedArtifact !== null &&
+        (state.orientationSkipped || state.orientedMeshPath !== null) &&
         (state.segmentationSkipped || !state.segmentationRequired || state.segmentResult !== null);
-      case 4: return state.sliceResult?.status === 'completed' && state.selectedPrinter !== null;
+      case 5: return state.sliceResult?.status === 'completed' && state.selectedPrinter !== null;
       default: return false;
     }
   };
@@ -51,7 +55,7 @@ export default function FabricationConsole() {
       <header className="fabrication-console-v2__header">
         <div className="fabrication-console-v2__title-group">
           <h1 className="fabrication-console-v2__title">Fabrication Console</h1>
-          <span className="fabrication-console-v2__subtitle">Generate → Segment → Slice → Print</span>
+          <span className="fabrication-console-v2__subtitle">Generate → Orient → Segment → Slice → Print</span>
         </div>
         <button
           type="button"
@@ -90,7 +94,24 @@ export default function FabricationConsole() {
         onSelectArtifact={actions.selectArtifact}
       />
 
-      {/* Step 2: Segment */}
+      {/* Step 2: Orient */}
+      <OrientStep
+        selectedArtifact={state.selectedArtifact}
+        orientationAnalysis={state.orientationAnalysis}
+        selectedOrientation={state.selectedOrientation}
+        orientedMeshPath={state.orientedMeshPath}
+        isLoading={state.orientationLoading}
+        error={state.orientationError}
+        isActive={state.currentStep === 2}
+        isCompleted={completedSteps.includes(2)}
+        isLocked={!state.selectedArtifact}
+        onAnalyze={actions.analyzeOrientation}
+        onSelectOrientation={actions.selectOrientation}
+        onApplyOrientation={actions.applyOrientation}
+        onSkipOrientation={actions.skipOrientation}
+      />
+
+      {/* Step 3: Segment */}
       <SegmentStep
         selectedArtifact={state.selectedArtifact}
         dimensionCheck={state.dimensionCheck}
@@ -99,9 +120,9 @@ export default function FabricationConsole() {
         segmentResult={state.segmentResult}
         isLoading={state.segmentationLoading}
         error={state.segmentationError}
-        isActive={state.currentStep === 2}
-        isCompleted={completedSteps.includes(2)}
-        isLocked={!state.selectedArtifact}
+        isActive={state.currentStep === 3}
+        isCompleted={completedSteps.includes(3)}
+        isLocked={!canNavigateTo(3)}
         selectedPrinter={state.selectedPrinter || undefined}
         onCheckComplete={(result) => {
           // The hook handles state updates internally via MeshSegmenter callbacks
@@ -112,7 +133,7 @@ export default function FabricationConsole() {
         onSkipSegmentation={actions.skipSegmentation}
       />
 
-      {/* Step 3: Slice */}
+      {/* Step 4: Slice */}
       <SliceStep
         selectedArtifact={state.selectedArtifact}
         segmentResult={state.segmentResult}
@@ -124,9 +145,9 @@ export default function FabricationConsole() {
         sliceResult={state.sliceResult}
         isLoading={state.slicingLoading}
         error={state.slicingError}
-        isActive={state.currentStep === 3}
-        isCompleted={completedSteps.includes(3)}
-        isLocked={!canNavigateTo(3)}
+        isActive={state.currentStep === 4}
+        isCompleted={completedSteps.includes(4)}
+        isLocked={!canNavigateTo(4)}
         onPrinterSelect={actions.selectPrinter}
         onPresetChange={actions.setPreset}
         onAdvancedSettingsChange={actions.setAdvancedSettings}
@@ -137,7 +158,7 @@ export default function FabricationConsole() {
         }}
       />
 
-      {/* Step 4: Print */}
+      {/* Step 5: Print */}
       <PrintStep
         sliceResult={state.sliceResult}
         selectedPrinter={state.selectedPrinter}
@@ -145,9 +166,9 @@ export default function FabricationConsole() {
         printJobId={state.printJobId}
         printStatus={state.printStatus}
         isLoading={state.printLoading}
-        isActive={state.currentStep === 4}
-        isCompleted={completedSteps.includes(4)}
-        isLocked={!canNavigateTo(4)}
+        isActive={state.currentStep === 5}
+        isCompleted={completedSteps.includes(5)}
+        isLocked={!canNavigateTo(5)}
         onSendToPrinter={actions.sendToPrinter}
         onAddToQueue={actions.addToQueue}
       />

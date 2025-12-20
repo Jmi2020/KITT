@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -79,6 +79,10 @@ class SlicingConfig(BaseModel):
         description="Override bed temperature (C)",
         ge=0,
         le=120,
+    )
+    rotation_matrix: Optional[List[List[float]]] = Field(
+        default=None,
+        description="3x3 rotation matrix to apply to mesh before slicing",
     )
 
 

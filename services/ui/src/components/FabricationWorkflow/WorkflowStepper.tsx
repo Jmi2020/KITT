@@ -1,7 +1,7 @@
 /**
- * WorkflowStepper - Visual indicator for the 4-step fabrication workflow
+ * WorkflowStepper - Visual indicator for the 5-step fabrication workflow
  *
- * Displays: [1] GENERATE → [2] SEGMENT → [3] SLICE → [4] PRINT
+ * Displays: [1] GENERATE → [2] ORIENT → [3] SEGMENT → [4] SLICE → [5] PRINT
  * Shows current step, completed steps, and locked future steps
  */
 
@@ -16,9 +16,10 @@ interface StepConfig {
 
 const STEPS: StepConfig[] = [
   { number: 1, label: 'Generate', shortLabel: 'GEN' },
-  { number: 2, label: 'Segment', shortLabel: 'SEG' },
-  { number: 3, label: 'Slice', shortLabel: 'SLC' },
-  { number: 4, label: 'Print', shortLabel: 'PRT' },
+  { number: 2, label: 'Orient', shortLabel: 'ORI' },
+  { number: 3, label: 'Segment', shortLabel: 'SEG' },
+  { number: 4, label: 'Slice', shortLabel: 'SLC' },
+  { number: 5, label: 'Print', shortLabel: 'PRT' },
 ];
 
 interface WorkflowStepperProps {

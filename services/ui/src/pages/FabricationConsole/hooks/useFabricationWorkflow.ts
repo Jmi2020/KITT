@@ -71,7 +71,28 @@ export interface SliceResult {
   error?: string;
 }
 
-export type WorkflowStep = 1 | 2 | 3 | 4;
+// Orientation types
+export interface OrientationOption {
+  id: string;
+  label: string;
+  rotation_matrix: number[][];
+  up_vector: [number, number, number];
+  overhang_ratio: number;
+  support_estimate: 'none' | 'minimal' | 'moderate' | 'significant';
+  is_recommended: boolean;
+}
+
+export interface OrientationAnalysis {
+  success: boolean;
+  original_dimensions: [number, number, number];
+  face_count: number;
+  orientations: OrientationOption[];
+  best_orientation_id: string;
+  analysis_time_ms: number;
+  error?: string;
+}
+
+export type WorkflowStep = 1 | 2 | 3 | 4 | 5;
 export type GenerationProvider = 'tripo' | 'zoo' | null;
 export type GenerationMode = 'generate' | 'import';
 export type QualityPreset = 'quick' | 'standard' | 'quality';
@@ -89,7 +110,15 @@ export interface WorkflowState {
   generationError: string | null;
   uploadProgress: number; // 0-100 for file upload progress
 
-  // Step 2: Segment
+  // Step 2: Orient
+  orientationAnalysis: OrientationAnalysis | null;
+  selectedOrientation: OrientationOption | null;
+  orientedMeshPath: string | null;
+  orientationSkipped: boolean;
+  orientationLoading: boolean;
+  orientationError: string | null;
+
+  // Step 3: Segment
   dimensionCheck: DimensionCheckResult | null;
   segmentationRequired: boolean;
   segmentationSkipped: boolean;
@@ -97,7 +126,7 @@ export interface WorkflowState {
   segmentationLoading: boolean;
   segmentationError: string | null;
 
-  // Step 3: Slice
+  // Step 4: Slice
   selectedPrinter: string | null;
   printerRecommendations: PrinterRecommendation[];
   preset: QualityPreset;
@@ -107,7 +136,7 @@ export interface WorkflowState {
   slicingLoading: boolean;
   slicingError: string | null;
 
-  // Step 4: Print
+  // Step 5: Print
   printJobId: string | null;
   printStatus: string;
   printLoading: boolean;
@@ -161,7 +190,15 @@ const initialState: WorkflowState = {
   generationError: null,
   uploadProgress: 0,
 
-  // Step 2
+  // Step 2: Orient
+  orientationAnalysis: null,
+  selectedOrientation: null,
+  orientedMeshPath: null,
+  orientationSkipped: false,
+  orientationLoading: false,
+  orientationError: null,
+
+  // Step 3: Segment
   dimensionCheck: null,
   segmentationRequired: false,
   segmentationSkipped: false,
@@ -169,7 +206,7 @@ const initialState: WorkflowState = {
   segmentationLoading: false,
   segmentationError: null,
 
-  // Step 3
+  // Step 4: Slice
   selectedPrinter: null,
   printerRecommendations: [],
   preset: 'standard',
@@ -179,7 +216,7 @@ const initialState: WorkflowState = {
   slicingLoading: false,
   slicingError: null,
 
-  // Step 4
+  // Step 5: Print
   printJobId: null,
   printStatus: '',
   printLoading: false,
@@ -198,12 +235,18 @@ export interface WorkflowActions {
   importModel: (file: File) => Promise<void>;
   selectArtifact: (artifact: Artifact) => void;
 
-  // Step 2 actions
+  // Step 2 actions (Orient)
+  analyzeOrientation: () => Promise<void>;
+  selectOrientation: (orientation: OrientationOption) => void;
+  applyOrientation: () => Promise<void>;
+  skipOrientation: () => void;
+
+  // Step 3 actions (Segment)
   checkDimensions: (printerId?: string) => Promise<void>;
   runSegmentation: (options?: Record<string, unknown>) => Promise<void>;
   skipSegmentation: () => void;
 
-  // Step 3 actions
+  // Step 4 actions (Slice)
   selectPrinter: (printerId: string) => void;
   setPreset: (preset: QualityPreset) => void;
   setAdvancedSettings: (settings: Partial<SlicerSettings>) => void;
@@ -211,7 +254,7 @@ export interface WorkflowActions {
   startSlicing: () => Promise<void>;
   pollSlicingStatus: (jobId: string) => Promise<SliceResult>;
 
-  // Step 4 actions
+  // Step 5 actions (Print)
   sendToPrinter: (startPrint: boolean) => Promise<void>;
   addToQueue: () => Promise<void>;
 
@@ -311,12 +354,16 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
         case 1: return true;
         case 2: return state.selectedArtifact !== null;
         case 3: return state.selectedArtifact !== null &&
+          (state.orientationSkipped || state.orientedMeshPath !== null);
+        case 4: return state.selectedArtifact !== null &&
+          (state.orientationSkipped || state.orientedMeshPath !== null) &&
           (state.segmentationSkipped || !state.segmentationRequired || state.segmentResult !== null);
-        case 4: return state.sliceResult?.status === 'completed' && state.selectedPrinter !== null;
+        case 5: return state.sliceResult?.status === 'completed' && state.selectedPrinter !== null;
         default: return false;
       }
-    }, [state.selectedArtifact, state.segmentationSkipped, state.segmentationRequired,
-        state.segmentResult, state.sliceResult, state.selectedPrinter]),
+    }, [state.selectedArtifact, state.orientationSkipped, state.orientedMeshPath,
+        state.segmentationSkipped, state.segmentationRequired, state.segmentResult,
+        state.sliceResult, state.selectedPrinter]),
 
     // Step 1
     setProvider: useCallback((provider: GenerationProvider) => {
@@ -450,13 +497,118 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
       setState(prev => ({
         ...prev,
         selectedArtifact: artifact,
+        // Reset downstream state
+        orientationAnalysis: null,
+        selectedOrientation: null,
+        orientedMeshPath: null,
+        orientationSkipped: false,
         dimensionCheck: null,
         segmentResult: null,
         sliceResult: null,
       }));
     }, []),
 
-    // Step 2
+    // Step 2: Orientation
+    analyzeOrientation: useCallback(async () => {
+      if (!state.selectedArtifact) return;
+
+      setState(prev => ({ ...prev, orientationLoading: true, orientationError: null }));
+
+      try {
+        const meshPath = state.selectedArtifact.metadata?.stl_location ||
+          state.selectedArtifact.location;
+
+        const response = await fetch('/api/fabrication/orientation/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mesh_path: meshPath,
+            threshold_angle: 45.0,
+            include_intermediate: false,
+          }),
+        });
+
+        if (!response.ok) throw new Error('Orientation analysis failed');
+
+        const result = await response.json() as OrientationAnalysis;
+
+        if (!result.success) {
+          throw new Error(result.error || 'Orientation analysis failed');
+        }
+
+        // Auto-select recommended orientation
+        const recommended = result.orientations.find(o => o.is_recommended) || result.orientations[0];
+
+        setState(prev => ({
+          ...prev,
+          orientationAnalysis: result,
+          selectedOrientation: recommended,
+          orientationLoading: false,
+        }));
+      } catch (error) {
+        setState(prev => ({
+          ...prev,
+          orientationLoading: false,
+          orientationError: (error as Error).message,
+        }));
+      }
+    }, [state.selectedArtifact]),
+
+    selectOrientation: useCallback((orientation: OrientationOption) => {
+      setState(prev => ({ ...prev, selectedOrientation: orientation }));
+    }, []),
+
+    applyOrientation: useCallback(async () => {
+      if (!state.selectedArtifact || !state.selectedOrientation) return;
+
+      setState(prev => ({ ...prev, orientationLoading: true, orientationError: null }));
+
+      try {
+        const meshPath = state.selectedArtifact.metadata?.stl_location ||
+          state.selectedArtifact.location;
+
+        const response = await fetch('/api/fabrication/orientation/apply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mesh_path: meshPath,
+            orientation_id: state.selectedOrientation.id,
+            rotation_matrix: state.selectedOrientation.rotation_matrix,
+          }),
+        });
+
+        if (!response.ok) throw new Error('Failed to apply orientation');
+
+        const result = await response.json();
+
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to apply orientation');
+        }
+
+        setState(prev => ({
+          ...prev,
+          orientedMeshPath: result.oriented_mesh_path,
+          orientationLoading: false,
+          currentStep: 3,
+        }));
+      } catch (error) {
+        setState(prev => ({
+          ...prev,
+          orientationLoading: false,
+          orientationError: (error as Error).message,
+        }));
+      }
+    }, [state.selectedArtifact, state.selectedOrientation]),
+
+    skipOrientation: useCallback(() => {
+      setState(prev => ({
+        ...prev,
+        orientationSkipped: true,
+        currentStep: 3,
+      }));
+    }, []),
+
+    // Step 3: Segmentation
     checkDimensions: useCallback(async (printerId?: string) => {
       if (!state.selectedArtifact) return;
 
@@ -541,7 +693,7 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
           ...prev,
           segmentResult: result,
           segmentationLoading: false,
-          currentStep: 3,
+          currentStep: 4,
         }));
       } catch (error) {
         setState(prev => ({
@@ -556,11 +708,11 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
       setState(prev => ({
         ...prev,
         segmentationSkipped: true,
-        currentStep: 3,
+        currentStep: 4,
       }));
     }, []),
 
-    // Step 3
+    // Step 4: Slicing
     selectPrinter: useCallback((printerId: string) => {
       setState(prev => ({ ...prev, selectedPrinter: printerId }));
     }, []),
@@ -593,10 +745,14 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
       setState(prev => ({ ...prev, slicingLoading: true, slicingError: null }));
 
       try {
-        // Use segmented output if available, otherwise original artifact
+        // Priority: segmented output > oriented mesh > original artifact
         const inputPath = state.segmentResult?.combined_3mf_path ||
+          state.orientedMeshPath ||
           state.selectedArtifact.metadata?.stl_location ||
           state.selectedArtifact.location;
+
+        // Include rotation matrix if orientation was applied
+        const rotationMatrix = state.selectedOrientation?.rotation_matrix;
 
         const response = await fetch('/api/fabrication/slicer/slice', {
           method: 'POST',
@@ -609,6 +765,7 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
               quality: state.preset,
               support_type: state.advancedSettings.support_type,
               infill_percent: state.advancedSettings.infill_percent,
+              rotation_matrix: rotationMatrix,
             },
           }),
         });
@@ -640,7 +797,7 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
           ...prev,
           sliceResult: result,
           slicingLoading: false,
-          currentStep: 4,
+          currentStep: 5,
         }));
       } catch (error) {
         setState(prev => ({
@@ -650,14 +807,14 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
         }));
       }
     }, [state.selectedArtifact, state.selectedPrinter, state.segmentResult,
-        state.advancedSettings, state.preset]),
+        state.orientedMeshPath, state.selectedOrientation, state.advancedSettings, state.preset]),
 
     pollSlicingStatus: useCallback(async (jobId: string): Promise<SliceResult> => {
       const response = await fetch(`/api/fabrication/slicer/jobs/${jobId}`);
       return response.json();
     }, []),
 
-    // Step 4
+    // Step 5: Print
     sendToPrinter: useCallback(async (startPrint: boolean) => {
       if (!state.sliceResult?.job_id || !state.selectedPrinter) return;
 

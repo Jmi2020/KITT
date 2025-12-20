@@ -111,7 +111,7 @@ export function SliceStep({
 
   return (
     <StepContainer
-      stepNumber={3}
+      stepNumber={4}
       title="Slice"
       subtitle={getSubtitle()}
       isActive={isActive}

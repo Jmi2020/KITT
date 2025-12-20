@@ -1,0 +1,112 @@
+/**
+ * OrientationPreview styles
+ */
+
+.orientation-preview {
+  position: relative;
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-surface, #1a1a2e);
+}
+
+.orientation-preview__canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.orientation-preview__canvas canvas {
+  display: block;
+  border-radius: 8px;
+}
+
+/* Loading state */
+.orientation-preview__loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(26, 26, 46, 0.9);
+  gap: 0.75rem;
+}
+
+.orientation-preview__loading p {
+  color: var(--color-text-muted, #888);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.orientation-preview__spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--color-border, #333);
+  border-top-color: var(--color-accent, #7c5cff);
+  border-radius: 50%;
+  animation: orientation-spin 0.8s linear infinite;
+}
+
+@keyframes orientation-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Error state */
+.orientation-preview__error {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(26, 26, 46, 0.9);
+}
+
+.orientation-preview__error p {
+  color: var(--color-error, #ef4444);
+  font-size: 0.875rem;
+  margin: 0;
+  padding: 1rem;
+  text-align: center;
+}
+
+/* Overhang indicator */
+.orientation-preview__overhang-indicator {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.orientation-preview__overhang-label {
+  color: var(--color-text-muted, #888);
+}
+
+.orientation-preview__overhang-value {
+  font-weight: 600;
+}
+
+.orientation-preview__overhang-value--good {
+  color: var(--color-success, #10b981);
+}
+
+.orientation-preview__overhang-value--moderate {
+  color: var(--color-warning, #f59e0b);
+}
+
+.orientation-preview__overhang-value--significant {
+  color: var(--color-error, #ef4444);
+}

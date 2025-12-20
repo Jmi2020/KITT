@@ -1,0 +1,441 @@
+/* Coding Page - kitty-code Web UI */
+
+.coding-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 80px);
+  padding: 1rem;
+  gap: 1rem;
+  background: var(--bg-primary, #0d0d0d);
+  color: var(--text-primary, #e0e0e0);
+}
+
+/* Phase Indicator */
+.phase-indicator {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--bg-secondary, #1a1a1a);
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #333);
+  flex-wrap: wrap;
+}
+
+.phase-step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  background: var(--bg-tertiary, #252525);
+  opacity: 0.5;
+  transition: all 0.3s ease;
+}
+
+.phase-step.active {
+  opacity: 1;
+  background: var(--accent-color, #3b82f6);
+  color: white;
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+}
+
+.phase-step.done {
+  opacity: 0.7;
+  background: var(--success-color, #22c55e);
+  color: white;
+}
+
+.phase-dot {
+  font-size: 1rem;
+}
+
+.phase-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* 3-Panel Layout */
+.coding-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+}
+
+@media (max-width: 1200px) {
+  .coding-panels {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 800px) {
+  .coding-panels {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Panel Base Styles */
+.terminal-panel,
+.code-panel,
+.test-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary, #1a1a1a);
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #333);
+  overflow: hidden;
+}
+
+/* Panel Header */
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-tertiary, #252525);
+  border-bottom: 1px solid var(--border-color, #333);
+  min-height: 40px;
+}
+
+.terminal-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.terminal-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.terminal-dot.red {
+  background: #ff5f57;
+}
+
+.terminal-dot.yellow {
+  background: #febc2e;
+}
+
+.terminal-dot.green {
+  background: #28c840;
+}
+
+.panel-title {
+  flex: 1;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary, #a0a0a0);
+}
+
+.panel-status {
+  font-size: 0.75rem;
+  color: var(--text-tertiary, #808080);
+}
+
+.panel-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.panel-btn {
+  padding: 0.25rem 0.5rem;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  opacity: 0.7;
+  transition: opacity 0.2s, background 0.2s;
+}
+
+.panel-btn:hover:not(:disabled) {
+  opacity: 1;
+  background: var(--bg-hover, #333);
+}
+
+.panel-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Terminal Panel */
+.terminal-output {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  background: #0d0d0d;
+}
+
+.terminal-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 0.25rem;
+}
+
+.terminal-line.input {
+  color: #60a5fa;
+  font-weight: 500;
+}
+
+.terminal-line.output {
+  color: #e0e0e0;
+}
+
+.terminal-line.phase {
+  color: #a78bfa;
+  font-style: italic;
+}
+
+.terminal-line.error {
+  color: #f87171;
+}
+
+.terminal-line.success {
+  color: #4ade80;
+}
+
+.terminal-line.streaming {
+  color: #fbbf24;
+}
+
+.cursor {
+  animation: blink 1s infinite;
+  color: #fbbf24;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+/* Terminal Input */
+.terminal-input-container {
+  display: flex;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: #0d0d0d;
+  border-top: 1px solid var(--border-color, #333);
+}
+
+.terminal-prompt {
+  color: #22c55e;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-weight: bold;
+  margin-right: 0.5rem;
+}
+
+.terminal-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #e0e0e0;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.terminal-input::placeholder {
+  color: #666;
+}
+
+.terminal-input:disabled {
+  opacity: 0.5;
+}
+
+/* Code Panel */
+.code-content {
+  flex: 1;
+  overflow: auto;
+  padding: 1rem;
+  background: #0d0d0d;
+}
+
+.code-content pre {
+  margin: 0;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.code-content code {
+  color: #a5f3fc;
+}
+
+.code-placeholder {
+  color: #666;
+  font-style: italic;
+  text-align: center;
+  padding: 2rem;
+}
+
+/* Test Panel */
+.test-panel.passed {
+  border-color: #22c55e;
+}
+
+.test-panel.failed {
+  border-color: #ef4444;
+}
+
+.test-status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+
+.test-status.pass {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
+.test-status.fail {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.test-content {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.test-code {
+  flex: 1;
+  padding: 1rem;
+  background: #0d0d0d;
+  overflow: auto;
+}
+
+.test-code pre {
+  margin: 0;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.test-code code {
+  color: #fde68a;
+}
+
+.test-output {
+  padding: 1rem;
+  background: #141414;
+  border-top: 1px solid var(--border-color, #333);
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.test-output-header {
+  font-size: 0.75rem;
+  color: #808080;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+}
+
+.test-output pre {
+  margin: 0;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.75rem;
+  color: #a0a0a0;
+  white-space: pre-wrap;
+}
+
+.test-placeholder {
+  color: #666;
+  font-style: italic;
+  text-align: center;
+  padding: 2rem;
+}
+
+/* Panel Toggle Buttons */
+.panel-toggles {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.toggle-btn {
+  padding: 0.5rem 1rem;
+  background: var(--bg-secondary, #1a1a1a);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 4px;
+  color: var(--text-secondary, #a0a0a0);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.toggle-btn:hover {
+  background: var(--bg-tertiary, #252525);
+  color: var(--text-primary, #e0e0e0);
+}
+
+/* Summary Panel */
+.summary-panel {
+  background: var(--bg-secondary, #1a1a1a);
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #333);
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+
+.summary-content {
+  padding: 1rem;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.summary-content pre {
+  margin: 0;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  color: #a0a0a0;
+}
+
+/* Scrollbar Styling */
+.terminal-output::-webkit-scrollbar,
+.code-content::-webkit-scrollbar,
+.test-content::-webkit-scrollbar,
+.test-output::-webkit-scrollbar,
+.summary-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.terminal-output::-webkit-scrollbar-track,
+.code-content::-webkit-scrollbar-track,
+.test-content::-webkit-scrollbar-track,
+.test-output::-webkit-scrollbar-track,
+.summary-content::-webkit-scrollbar-track {
+  background: #0d0d0d;
+}
+
+.terminal-output::-webkit-scrollbar-thumb,
+.code-content::-webkit-scrollbar-thumb,
+.test-content::-webkit-scrollbar-thumb,
+.test-output::-webkit-scrollbar-thumb,
+.summary-content::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 4px;
+}
+
+.terminal-output::-webkit-scrollbar-thumb:hover,
+.code-content::-webkit-scrollbar-thumb:hover,
+.test-content::-webkit-scrollbar-thumb:hover,
+.test-output::-webkit-scrollbar-thumb:hover,
+.summary-content::-webkit-scrollbar-thumb:hover {
+  background: #444;
+}

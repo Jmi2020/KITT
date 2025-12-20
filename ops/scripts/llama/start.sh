@@ -77,19 +77,25 @@ VISION_ALIAS="${LLAMACPP_VISION_ALIAS:-kitty-vision}"
 VISION_LOG="$LOG_DIR/llamacpp-vision.log"
 VISION_PID="$LOG_DIR/llamacpp-vision.pid"
 
-# Coder Server (Code Generation - Qwen 32B)
-# Added for parallel agent orchestration
-CODER_ENABLED="${LLAMACPP_CODER_ENABLED:-true}"
-CODER_MODEL="${LLAMACPP_CODER_MODEL:-Qwen2.5-Coder-32B-Instruct-GGUF/qwen2.5-coder-32b-instruct-q8_0.gguf}"
-CODER_PORT="${LLAMACPP_CODER_PORT:-8087}"
-CODER_ALIAS="${LLAMACPP_CODER_ALIAS:-kitty-coder}"
-CODER_CTX_SIZE="${LLAMACPP_CODER_CTX:-32768}"
-CODER_N_PARALLEL="${LLAMACPP_CODER_PARALLEL:-4}"
-CODER_LOG="$LOG_DIR/llamacpp-coder.log"
-CODER_PID="$LOG_DIR/llamacpp-coder.pid"
-
 # Model base directory
 MODEL_BASE="${MODEL_BASE:-/Users/Shared/Coding/models}"
+
+# Coder Server (Code Generation - Devstral 2 123B)
+# Supports sharded GGUF files; llama.cpp auto-loads all parts
+CODER_ENABLED="${LLAMACPP_CODER_ENABLED:-true}"
+CODER_MODEL_RAW="${LLAMACPP_CODER_MODEL:-Qwen2.5-Coder-32B-Instruct-GGUF/qwen2.5-coder-32b-instruct-q8_0.gguf}"
+# Support absolute paths (for models outside MODEL_BASE)
+if [[ "$CODER_MODEL_RAW" = /* ]]; then
+    CODER_MODEL_PATH="$CODER_MODEL_RAW"
+else
+    CODER_MODEL_PATH="$MODEL_BASE/$CODER_MODEL_RAW"
+fi
+CODER_PORT="${LLAMACPP_CODER_PORT:-8087}"
+CODER_ALIAS="${LLAMACPP_CODER_ALIAS:-kitty-coder}"
+CODER_CTX_SIZE="${LLAMACPP_CODER_CTX:-16384}"
+CODER_N_PARALLEL="${LLAMACPP_CODER_PARALLEL:-2}"
+CODER_LOG="$LOG_DIR/llamacpp-coder.log"
+CODER_PID="$LOG_DIR/llamacpp-coder.pid"
 
 # ========================================
 # Check if already running
@@ -210,22 +216,23 @@ else
     log "  Logs: $VISION_LOG"
 fi
 
-# Coder Server (for parallel agent orchestration)
+# Coder Server (Devstral 2 123B for code generation)
 if [ "$CODER_ENABLED" == "true" ]; then
     if check_running $CODER_PORT; then
         log "Coder server already running on port $CODER_PORT"
     else
-        log "Starting Coder server (Qwen 32B) on port $CODER_PORT"
+        log "Starting Coder server (Devstral 2 123B) on port $CODER_PORT"
+        log "  Model: $CODER_MODEL_PATH"
 
         llama-server \
-            --model "$MODEL_BASE/$CODER_MODEL" \
+            --model "$CODER_MODEL_PATH" \
             --host 0.0.0.0 \
             --port $CODER_PORT \
             --n-gpu-layers 999 \
             --ctx-size $CODER_CTX_SIZE \
             -np $CODER_N_PARALLEL \
             --batch-size 2048 \
-            --threads 8 \
+            --threads 12 \
             --alias "$CODER_ALIAS" \
             --jinja \
             --flash-attn on \

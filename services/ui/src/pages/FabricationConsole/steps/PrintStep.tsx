@@ -80,7 +80,7 @@ export function PrintStep({
 
   return (
     <StepContainer
-      stepNumber={4}
+      stepNumber={5}
       title="Print"
       subtitle={getSubtitle()}
       isActive={isActive}

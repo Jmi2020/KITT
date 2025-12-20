@@ -243,42 +243,75 @@ class CoderLLMClient:
     """
     High-level LLM client for coding tasks with model routing.
 
-    Routes requests to appropriate llama.cpp servers:
+    Local-first: Uses Ollama with Devstral 2 as primary.
+    Fallback to llama.cpp servers if Ollama unavailable:
     - Q4 (fast, 8083): Quick planning, test generation
     - F16 (precise, 8082): Code generation, refinement
-    - Coder (optional, dedicated): Specialized code model
     """
 
     def __init__(self) -> None:
-        """Initialize coder LLM client with multiple backends."""
-        # Q4 server for fast operations (planning, tests)
+        """Initialize coder LLM client with Ollama-first routing."""
+        # Local-first: Ollama with Devstral 2 (primary)
+        ollama_base = os.getenv("OLLAMA_CODER_BASE", "http://localhost:11434")
+        self.ollama_model = os.getenv("OLLAMA_CODER_MODEL", "devstral:123b")
+        self.ollama_client = LlamaCppClient(
+            base_url=ollama_base,
+            timeout=180,  # Longer timeout for large model
+        )
+
+        # Fallback: Q4 server for fast operations
         self.q4_client = LlamaCppClient(
             base_url=os.getenv("LLAMACPP_Q4_BASE", "http://localhost:8083"),
             timeout=60,
         )
 
-        # F16 server for precise operations (code, refinement)
+        # Fallback: F16 server for precise operations
         self.f16_client = LlamaCppClient(
             base_url=os.getenv("LLAMACPP_F16_BASE", "http://localhost:8082"),
             timeout=120,
         )
 
-        # Optional dedicated coder model
-        coder_base = os.getenv("LLAMACPP_CODER_BASE")
-        self.coder_client = (
-            LlamaCppClient(base_url=coder_base, timeout=120)
-            if coder_base
-            else None
-        )
+        # Track which backend to use
+        self._use_ollama = True
+        self._ollama_checked = False
 
-        logger.info("Initialized CoderLLMClient with Q4/F16/Coder routing")
+        logger.info(
+            f"Initialized CoderLLMClient: ollama={ollama_base}, "
+            f"model={self.ollama_model}, fallback=Q4/F16"
+        )
 
     async def close(self) -> None:
         """Close all HTTP clients."""
+        await self.ollama_client.close()
         await self.q4_client.close()
         await self.f16_client.close()
-        if self.coder_client:
-            await self.coder_client.close()
+
+    async def _get_client(self, prefer_fast: bool = False) -> LlamaCppClient:
+        """
+        Get the best available client.
+
+        Local-first: Try Ollama first, fall back to llama.cpp servers.
+
+        Args:
+            prefer_fast: If True and Ollama unavailable, use Q4 over F16
+
+        Returns:
+            Best available LLM client
+        """
+        # Check Ollama health once per session
+        if not self._ollama_checked:
+            self._use_ollama = await self.ollama_client.health_check()
+            self._ollama_checked = True
+            if self._use_ollama:
+                logger.info("Using Ollama with Devstral 2")
+            else:
+                logger.warning("Ollama unavailable, falling back to llama.cpp")
+
+        if self._use_ollama:
+            return self.ollama_client
+
+        # Fallback to llama.cpp servers
+        return self.q4_client if prefer_fast else self.f16_client
 
     async def plan(
         self,
@@ -287,7 +320,9 @@ class CoderLLMClient:
         max_tokens: int = 2048,
     ) -> str:
         """
-        Generate implementation plan (fast Q4 model).
+        Generate implementation plan.
+
+        Local-first: Uses Ollama with Devstral 2, falls back to Q4.
 
         Args:
             user_request: User's coding request
@@ -297,8 +332,9 @@ class CoderLLMClient:
         Returns:
             Implementation plan text
         """
-        logger.info("Generating plan with Q4 model")
-        return await self.q4_client.generate(
+        client = await self._get_client(prefer_fast=True)
+        logger.info(f"Generating plan with {'Ollama' if self._use_ollama else 'Q4'}")
+        return await client.generate(
             prompt=user_request,
             system_prompt=system_prompt,
             max_tokens=max_tokens,
@@ -312,7 +348,9 @@ class CoderLLMClient:
         max_tokens: int = 6144,
     ) -> str:
         """
-        Generate code (precise F16 or dedicated coder model).
+        Generate code.
+
+        Local-first: Uses Ollama with Devstral 2, falls back to F16.
 
         Args:
             prompt: Code generation prompt with plan context
@@ -322,11 +360,8 @@ class CoderLLMClient:
         Returns:
             Generated Python code
         """
-        # Use dedicated coder model if available, otherwise F16
-        client = self.coder_client if self.coder_client else self.f16_client
-        model_name = "coder" if self.coder_client else "F16"
-
-        logger.info(f"Generating code with {model_name} model")
+        client = await self._get_client(prefer_fast=False)
+        logger.info(f"Generating code with {'Ollama' if self._use_ollama else 'F16'}")
         return await client.generate(
             prompt=prompt,
             system_prompt=system_prompt,
@@ -341,7 +376,9 @@ class CoderLLMClient:
         max_tokens: int = 4096,
     ) -> str:
         """
-        Generate pytest tests (fast Q4 model).
+        Generate pytest tests.
+
+        Local-first: Uses Ollama with Devstral 2, falls back to Q4.
 
         Args:
             prompt: Test generation prompt with code context
@@ -351,8 +388,9 @@ class CoderLLMClient:
         Returns:
             Generated pytest test code
         """
-        logger.info("Generating tests with Q4 model")
-        return await self.q4_client.generate(
+        client = await self._get_client(prefer_fast=True)
+        logger.info(f"Generating tests with {'Ollama' if self._use_ollama else 'Q4'}")
+        return await client.generate(
             prompt=prompt,
             system_prompt=system_prompt,
             max_tokens=max_tokens,
@@ -366,7 +404,9 @@ class CoderLLMClient:
         max_tokens: int = 6144,
     ) -> str:
         """
-        Refine code based on test failures (precise F16 or coder).
+        Refine code based on test failures.
+
+        Local-first: Uses Ollama with Devstral 2, falls back to F16.
 
         Args:
             prompt: Refinement prompt with error context
@@ -376,11 +416,8 @@ class CoderLLMClient:
         Returns:
             Refined Python code
         """
-        # Use dedicated coder model if available, otherwise F16
-        client = self.coder_client if self.coder_client else self.f16_client
-        model_name = "coder" if self.coder_client else "F16"
-
-        logger.info(f"Refining code with {model_name} model")
+        client = await self._get_client(prefer_fast=False)
+        logger.info(f"Refining code with {'Ollama' if self._use_ollama else 'F16'}")
         return await client.generate(
             prompt=prompt,
             system_prompt=system_prompt,
@@ -395,7 +432,9 @@ class CoderLLMClient:
         max_tokens: int = 2048,
     ) -> str:
         """
-        Generate summary with usage examples (fast Q4 model).
+        Generate summary with usage examples.
+
+        Local-first: Uses Ollama with Devstral 2, falls back to Q4.
 
         Args:
             prompt: Summary prompt with results context
@@ -405,8 +444,9 @@ class CoderLLMClient:
         Returns:
             Markdown summary with usage examples
         """
-        logger.info("Generating summary with Q4 model")
-        return await self.q4_client.generate(
+        client = await self._get_client(prefer_fast=True)
+        logger.info(f"Generating summary with {'Ollama' if self._use_ollama else 'Q4'}")
+        return await client.generate(
             prompt=prompt,
             system_prompt=system_prompt,
             max_tokens=max_tokens,
@@ -415,17 +455,15 @@ class CoderLLMClient:
 
     async def health_check(self) -> Dict[str, bool]:
         """
-        Check health of all llama.cpp servers.
+        Check health of all LLM servers.
 
         Returns:
             Dictionary of server health status
         """
         health = {
+            "ollama": await self.ollama_client.health_check(),
             "q4": await self.q4_client.health_check(),
             "f16": await self.f16_client.health_check(),
         }
-
-        if self.coder_client:
-            health["coder"] = await self.coder_client.health_check()
 
         return health

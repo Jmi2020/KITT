@@ -41,7 +41,7 @@ KITTY is a **technical AI habitat** - a maker space purpose-built for AI models 
 | **Fallback Reasoner** | *(DEPRECATED)* Legacy fallback only | llama.cpp (Llama 3.3 70B F16) @ port 8082 |
 | **Vision Model** | Image understanding, multimodal | llama.cpp (Gemma 3 27B Q4_K_M) @ port 8086 |
 | **Summary Model** | Response compression | llama.cpp (Hermes 3 8B Q4_K_M) @ port 8084 |
-| **Coder Model** | Code generation specialist | llama.cpp (Qwen2.5 Coder 32B Q8) @ port 8087 |
+| **Coder Model** | Code generation specialist | llama.cpp (Devstral 2 123B Q5_K_M) @ port 8087 |
 | **Cloud Providers** | Shell/Collective model selection | OpenAI GPT-5.2, Claude Sonnet 4.5, Perplexity Sonar, Gemini 2.5 |
 
 ### 🐍 Backend Services (Python 3.11 + FastAPI)
@@ -323,6 +323,74 @@ npm run preview
 KITTY_UI_BASE=http://localhost:4173      # UI base URL
 VITE_API_BASE=http://localhost:8080      # Gateway API URL
 ```
+
+---
+
+## 💻 AI Coding Assistant
+
+KITTY includes a local-first AI coding assistant powered by **Devstral 2 123B**, Mistral's agentic coding model.
+
+### Components
+
+| Component | Description |
+|-----------|-------------|
+| **kitty-code** | Textual TUI for interactive coding sessions |
+| **coder-agent** | Backend service with Plan→Code→Test workflow |
+| **Web UI** | Coding page at `/coding` with SSE streaming |
+
+### Quick Start
+
+```bash
+# Install kitty-code CLI
+cd services/kitty-code
+pip install -e .
+
+# Run interactive session
+kitty-code "Write a REST API with FastAPI"
+
+# Or use the web UI at http://localhost:4173/coding
+```
+
+### Model: Devstral 2 123B
+
+- **Parameters**: 125 billion
+- **Quantization**: Q5_K_M (~82GB sharded GGUF)
+- **Context**: 16,384 tokens
+- **Backend**: llama.cpp (natively handles sharded files)
+- **Speed**: ~5 tokens/second on Mac Studio M3 Ultra
+
+### Model Download
+
+```bash
+# Download via huggingface-cli (~82GB)
+huggingface-cli download bartowski/mistralai_Devstral-2-123B-Instruct-2512-GGUF \
+  --include "mistralai_Devstral-2-123B-Instruct-2512-Q5_K_M/*" \
+  --local-dir ~/models/devstral2/Q5_K_M
+```
+
+### Configuration
+
+```env
+# Enable Devstral 2 via llama.cpp
+LLAMACPP_CODER_ENABLED=true
+LLAMACPP_CODER_MODEL=/path/to/devstral2/Q5_K_M/.../00001-of-00003.gguf
+LLAMACPP_CODER_CTX=16384
+LLAMACPP_CODER_PARALLEL=2
+LLAMACPP_CODER_TEMPERATURE=0.2
+```
+
+### MCP Integration
+
+kitty-code auto-discovers KITTY services as MCP servers:
+
+```
+kitty_brain  → http://localhost:8000/mcp  (Query routing, research)
+kitty_cad    → http://localhost:8200/mcp  (3D model generation)
+kitty_fab    → http://localhost:8300/mcp  (Printer control)
+kitty_discovery → http://localhost:8500/mcp  (Device scanning)
+```
+
+See [services/kitty-code/README.md](services/kitty-code/README.md) for full documentation.
 
 ---
 
@@ -661,7 +729,7 @@ User Goal → Decompose (Q4) → Dependency Graph → Parallel Execute → Synth
 | reasoner | GPTOSS 120B | Deep analysis, chain-of-thought | (none - pure reasoning) |
 | cad_designer | Q4 (Athene V2) | 3D model generation | generate_cad_model, image_search |
 | fabricator | Q4 (Athene V2) | Print preparation, segmentation | fabrication.* |
-| coder | Qwen 32B | Code generation, analysis | (all code tools) |
+| coder | Devstral 2 123B | Code generation, analysis | (all code tools) |
 | vision_analyst | Gemma 27B | Image understanding | vision.*, camera.* |
 | analyst | Q4 (Athene V2) | Memory search, data analysis | memory.* |
 | summarizer | Hermes 8B | Response compression | (none - compression only) |
@@ -673,7 +741,7 @@ User Goal → Decompose (Q4) → Dependency Graph → Parallel Execute → Synth
 | Q4 | 8083 | Athene V2 Q4 | 6 | 128K |
 | GPTOSS | 11434 | GPT-OSS 120B | 2 | 65K |
 | Vision | 8086 | Gemma 27B | 4 | 4K |
-| Coder | 8087 | Qwen 32B | 4 | 32K |
+| Coder | 8087 | Devstral 2 123B | 2 | 16K |
 | Summary | 8084 | Hermes 8B | 4 | 4K |
 
 **Configuration:**
@@ -686,12 +754,13 @@ PARALLEL_AGENT_MAX_TASKS=6             # Max tasks per execution
 PARALLEL_AGENT_MAX_CONCURRENT=8        # Max concurrent slot usage
 PARALLEL_AGENT_COMPLEXITY_THRESHOLD=0.6 # Query complexity threshold (0.0-1.0)
 
-# Coder Server (for parallel agents)
+# Coder Server (Devstral 2 123B via llama.cpp)
 LLAMACPP_CODER_ENABLED=true
+LLAMACPP_CODER_MODEL=/path/to/devstral2/Q5_K_M/mistralai_Devstral-2-123B-Instruct-2512-Q5_K_M-00001-of-00003.gguf
 LLAMACPP_CODER_HOST=http://localhost:8087
 LLAMACPP_CODER_PORT=8087
-LLAMACPP_CODER_CTX=32768
-LLAMACPP_CODER_PARALLEL=4
+LLAMACPP_CODER_CTX=16384
+LLAMACPP_CODER_PARALLEL=2
 ```
 
 **Performance Benefits:**

@@ -121,9 +121,9 @@ class HealthCheckResponse(BaseModel):
         {
             "status": "ok",
             "llm_servers": {
+                "ollama": true,
                 "q4": true,
-                "f16": true,
-                "coder": false
+                "f16": true
             }
         }
     """
@@ -135,5 +135,39 @@ class HealthCheckResponse(BaseModel):
 
     llm_servers: Optional[dict[str, bool]] = Field(
         None,
-        description="Health status of llama.cpp servers",
+        description="Health status of LLM servers (ollama, q4, f16)",
+    )
+
+
+class StreamRequest(BaseModel):
+    """
+    Request for streaming code generation.
+
+    Example:
+        {
+            "request": "Write a function to calculate fibonacci numbers",
+            "max_refinements": 2,
+            "timeout_seconds": 20
+        }
+    """
+
+    request: str = Field(
+        ...,
+        description="Natural language coding request",
+        min_length=5,
+        max_length=5000,
+    )
+
+    max_refinements: int = Field(
+        default=2,
+        description="Maximum refinement iterations if tests fail",
+        ge=0,
+        le=5,
+    )
+
+    timeout_seconds: int = Field(
+        default=20,
+        description="Sandbox execution timeout",
+        ge=5,
+        le=120,
     )

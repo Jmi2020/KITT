@@ -41,6 +41,7 @@ from .coordinator.distributor import JobDistributor
 from .routes.bambu import router as bambu_router
 from .routes.segmentation import router as segmentation_router
 from .routes.slicer import router as slicer_router, set_slicer_engine
+from .routes.orientation import router as orientation_router
 from .slicer import SlicerEngine
 
 # Configure logging
@@ -293,6 +294,9 @@ app.include_router(segmentation_router)
 
 # Include G-code slicing routes
 app.include_router(slicer_router)
+
+# Include orientation optimization routes
+app.include_router(orientation_router)
 
 
 # ============================================================================
