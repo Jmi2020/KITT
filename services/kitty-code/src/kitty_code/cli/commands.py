@@ -67,6 +67,11 @@ class CommandRegistry:
                 description="Change working directory (e.g., /cd ~/projects)",
                 handler="_change_directory",
             ),
+            "mcp": Command(
+                aliases=frozenset(["/mcp"]),
+                description="Manage MCP servers (list, add, remove)",
+                handler="_mcp_command",
+            ),
         }
 
         for command in excluded_commands:

@@ -211,6 +211,7 @@ class MCPStdio(_MCPBase):
     transport: Literal["stdio"]
     command: str | list[str]
     args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
 
     def argv(self) -> list[str]:
         base = (
@@ -219,6 +220,18 @@ class MCPStdio(_MCPBase):
             else list(self.command or [])
         )
         return [*base, *self.args] if self.args else base
+
+    def get_env(self) -> dict[str, str]:
+        """Get environment variables, resolving any ${VAR} references."""
+        import os
+        result = {}
+        for key, value in self.env.items():
+            if value.startswith("${") and value.endswith("}"):
+                env_var = value[2:-1]
+                result[key] = os.getenv(env_var, "")
+            else:
+                result[key] = value
+        return result
 
 
 MCPServer = Annotated[

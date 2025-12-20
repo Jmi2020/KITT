@@ -868,6 +868,310 @@ class VibeApp(App):
     async def _exit_app(self) -> None:
         self.exit(result=self._get_session_resume_info())
 
+    async def _mcp_command(self, args: str) -> None:
+        """Manage MCP servers: list, add, remove."""
+        import shlex
+        from pathlib import Path
+
+        parts = args.split(None, 1) if args else []
+        subcommand = parts[0].lower() if parts else "list"
+        sub_args = parts[1] if len(parts) > 1 else ""
+
+        if subcommand == "list" or not args:
+            await self._mcp_list()
+        elif subcommand == "add":
+            await self._mcp_add(sub_args)
+        elif subcommand == "remove":
+            await self._mcp_remove(sub_args)
+        else:
+            await self._mount_and_scroll(
+                ErrorMessage(
+                    f"Unknown subcommand: {subcommand}\n\n"
+                    "Usage:\n"
+                    "  `/mcp` or `/mcp list` - List all MCP servers\n"
+                    "  `/mcp add <name> [--scope user|project] <url>` - Add HTTP server\n"
+                    "  `/mcp add <name> [--scope user|project] -- <cmd> [args...]` - Add STDIO server\n"
+                    "  `/mcp remove <name>` - Remove an MCP server",
+                    collapsed=self._tools_collapsed,
+                )
+            )
+
+    async def _mcp_list(self) -> None:
+        """List all configured MCP servers."""
+        servers = self.config.mcp_servers
+        if not servers:
+            await self._mount_and_scroll(
+                UserCommandMessage("No MCP servers configured.")
+            )
+            return
+
+        lines = ["## MCP Servers\n"]
+        for srv in servers:
+            transport = getattr(srv, "transport", "unknown")
+            if transport == "http":
+                url = getattr(srv, "url", "")
+                lines.append(f"- **{srv.name}** (http): `{url}`")
+            elif transport == "stdio":
+                cmd = getattr(srv, "command", "")
+                cmd_args = getattr(srv, "args", [])
+                full_cmd = f"{cmd} {' '.join(cmd_args)}".strip()
+                lines.append(f"- **{srv.name}** (stdio): `{full_cmd}`")
+            else:
+                lines.append(f"- **{srv.name}** ({transport})")
+
+            if srv.prompt:
+                lines.append(f"  {srv.prompt}")
+
+        await self._mount_and_scroll(UserCommandMessage("\n".join(lines)))
+
+    async def _mcp_add(self, args: str) -> None:
+        """Add an MCP server.
+
+        Syntax:
+          /mcp add <name> [--scope user|project] <url>           # HTTP
+          /mcp add <name> [--scope user|project] -- <cmd> [args] # STDIO
+        """
+        import shlex
+        from pathlib import Path
+        from kitty_code.core.config import MCPHttp, MCPStdio, VibeConfig
+
+        if not args:
+            await self._mount_and_scroll(
+                ErrorMessage(
+                    "Usage:\n"
+                    "  `/mcp add <name> [--scope user|project] <url>`\n"
+                    "  `/mcp add <name> [--scope user|project] -- <cmd> [args...]`\n\n"
+                    "Examples:\n"
+                    "  `/mcp add github https://localhost:3000/mcp`\n"
+                    "  `/mcp add filesystem --scope project -- npx -y @anthropic/mcp-filesystem /tmp`",
+                    collapsed=self._tools_collapsed,
+                )
+            )
+            return
+
+        # Check for STDIO (has -- separator)
+        is_stdio = " -- " in args
+
+        if is_stdio:
+            # Parse: <name> [--scope X] -- <command> [args...]
+            before_sep, after_sep = args.split(" -- ", 1)
+            parts = shlex.split(before_sep)
+        else:
+            parts = shlex.split(args)
+
+        if len(parts) < 1:
+            await self._mount_and_scroll(
+                ErrorMessage("Missing server name.", collapsed=self._tools_collapsed)
+            )
+            return
+
+        name = parts[0]
+        scope = "user"  # default
+
+        # Parse --scope option
+        remaining = parts[1:]
+        i = 0
+        while i < len(remaining):
+            if remaining[i] == "--scope" and i + 1 < len(remaining):
+                scope = remaining[i + 1]
+                remaining = remaining[:i] + remaining[i + 2:]
+            else:
+                i += 1
+
+        if scope not in ("user", "project"):
+            await self._mount_and_scroll(
+                ErrorMessage(
+                    f"Invalid scope: {scope}. Must be 'user' or 'project'.",
+                    collapsed=self._tools_collapsed,
+                )
+            )
+            return
+
+        if is_stdio:
+            # STDIO server
+            cmd_parts = shlex.split(after_sep)
+            if not cmd_parts:
+                await self._mount_and_scroll(
+                    ErrorMessage(
+                        "Missing command after '--'.",
+                        collapsed=self._tools_collapsed,
+                    )
+                )
+                return
+
+            command = cmd_parts[0]
+            cmd_args = cmd_parts[1:] if len(cmd_parts) > 1 else []
+
+            server = MCPStdio(
+                name=name,
+                transport="stdio",
+                command=command,
+                args=cmd_args,
+            )
+            server_dict = {
+                "name": name,
+                "transport": "stdio",
+                "command": command,
+                "args": cmd_args,
+            }
+        else:
+            # HTTP server
+            if not remaining:
+                await self._mount_and_scroll(
+                    ErrorMessage(
+                        "Missing URL for HTTP server.",
+                        collapsed=self._tools_collapsed,
+                    )
+                )
+                return
+
+            url = remaining[0]
+            if not url.startswith(("http://", "https://")):
+                await self._mount_and_scroll(
+                    ErrorMessage(
+                        f"Invalid URL: {url}. Must start with http:// or https://",
+                        collapsed=self._tools_collapsed,
+                    )
+                )
+                return
+
+            server = MCPHttp(
+                name=name,
+                transport="http",
+                url=url,
+            )
+            server_dict = {
+                "name": name,
+                "transport": "http",
+                "url": url,
+            }
+
+        # Save to config file
+        if scope == "user":
+            config_path = Path.home() / ".kitty-code" / "config.toml"
+        else:
+            config_path = self.config.effective_workdir / ".kitty-code" / "config.toml"
+
+        try:
+            self._save_mcp_server_to_config(config_path, server_dict)
+        except Exception as e:
+            await self._mount_and_scroll(
+                ErrorMessage(
+                    f"Failed to save config: {e}",
+                    collapsed=self._tools_collapsed,
+                )
+            )
+            return
+
+        # Add to current session
+        self.config.mcp_servers.append(server)
+
+        scope_label = "user (~/.kitty-code/config.toml)" if scope == "user" else f"project ({config_path})"
+        await self._mount_and_scroll(
+            UserCommandMessage(
+                f"Added MCP server **{name}** ({server.transport}) to {scope_label}\n\n"
+                "Note: Reload config with `/reload` to connect to the new server."
+            )
+        )
+
+    def _save_mcp_server_to_config(self, config_path: Path, server: dict) -> None:
+        """Save an MCP server to a TOML config file."""
+        import tomllib
+        import tomli_w
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load existing config
+        if config_path.exists():
+            with open(config_path, "rb") as f:
+                config = tomllib.load(f)
+        else:
+            config = {}
+
+        # Get or create mcp_servers list
+        if "mcp_servers" not in config:
+            config["mcp_servers"] = []
+
+        # Check for duplicate name
+        existing_names = {s.get("name") for s in config["mcp_servers"]}
+        if server["name"] in existing_names:
+            # Update existing
+            for i, s in enumerate(config["mcp_servers"]):
+                if s.get("name") == server["name"]:
+                    config["mcp_servers"][i] = server
+                    break
+        else:
+            config["mcp_servers"].append(server)
+
+        # Write back
+        with open(config_path, "wb") as f:
+            tomli_w.dump(config, f)
+
+    async def _mcp_remove(self, args: str) -> None:
+        """Remove an MCP server by name."""
+        import tomllib
+        import tomli_w
+        from pathlib import Path
+
+        name = args.strip()
+        if not name:
+            await self._mount_and_scroll(
+                ErrorMessage(
+                    "Usage: `/mcp remove <name>`",
+                    collapsed=self._tools_collapsed,
+                )
+            )
+            return
+
+        # Try to find and remove from both user and project config
+        user_config = Path.home() / ".kitty-code" / "config.toml"
+        project_config = self.config.effective_workdir / ".kitty-code" / "config.toml"
+
+        removed_from = []
+
+        for config_path, label in [(user_config, "user"), (project_config, "project")]:
+            if config_path.exists():
+                try:
+                    with open(config_path, "rb") as f:
+                        config = tomllib.load(f)
+
+                    if "mcp_servers" in config:
+                        original_len = len(config["mcp_servers"])
+                        config["mcp_servers"] = [
+                            s for s in config["mcp_servers"]
+                            if s.get("name") != name
+                        ]
+                        if len(config["mcp_servers"]) < original_len:
+                            with open(config_path, "wb") as f:
+                                tomli_w.dump(config, f)
+                            removed_from.append(label)
+                except Exception:
+                    pass
+
+        # Remove from current session
+        original_count = len(self.config.mcp_servers)
+        self.config.mcp_servers = [
+            s for s in self.config.mcp_servers if s.name != name
+        ]
+        session_removed = len(self.config.mcp_servers) < original_count
+
+        if removed_from or session_removed:
+            locations = []
+            if removed_from:
+                locations.append(f"config ({', '.join(removed_from)})")
+            if session_removed:
+                locations.append("session")
+            await self._mount_and_scroll(
+                UserCommandMessage(f"Removed MCP server **{name}** from {', '.join(locations)}.")
+            )
+        else:
+            await self._mount_and_scroll(
+                ErrorMessage(
+                    f"MCP server '{name}' not found.",
+                    collapsed=self._tools_collapsed,
+                )
+            )
+
     async def _change_directory(self, path_arg: str) -> None:
         """Change the working directory."""
         if not path_arg:
