@@ -325,15 +325,26 @@ class VibeApp(App):
             VibeConfig.save_updates(updates)
 
     async def _handle_command(self, user_input: str) -> bool:
-        if command := self.commands.find_command(user_input):
-            await self._mount_and_scroll(UserMessage(user_input))
-            handler = getattr(self, command.handler)
-            if asyncio.iscoroutinefunction(handler):
+        result = self.commands.find_command(user_input)
+        if result is None:
+            return False
+
+        command, args = result
+        await self._mount_and_scroll(UserMessage(user_input))
+        handler = getattr(self, command.handler)
+
+        # Call handler with args if it accepts them
+        if asyncio.iscoroutinefunction(handler):
+            try:
+                await handler(args)
+            except TypeError:
                 await handler()
-            else:
+        else:
+            try:
+                handler(args)
+            except TypeError:
                 handler()
-            return True
-        return False
+        return True
 
     async def _handle_bash_command(self, command: str) -> None:
         if not command:
@@ -856,6 +867,65 @@ class VibeApp(App):
 
     async def _exit_app(self) -> None:
         self.exit(result=self._get_session_resume_info())
+
+    async def _change_directory(self, path_arg: str) -> None:
+        """Change the working directory."""
+        if not path_arg:
+            await self._mount_and_scroll(
+                ErrorMessage(
+                    "Usage: /cd <path>\n\nExample: /cd ~/projects",
+                    collapsed=self._tools_collapsed,
+                )
+            )
+            return
+
+        from pathlib import Path
+        import os
+
+        # Expand ~ and resolve the path
+        try:
+            target_path = Path(os.path.expanduser(path_arg)).resolve()
+        except Exception as e:
+            await self._mount_and_scroll(
+                ErrorMessage(
+                    f"Invalid path: {e}",
+                    collapsed=self._tools_collapsed,
+                )
+            )
+            return
+
+        # Check if directory exists
+        if not target_path.exists():
+            await self._mount_and_scroll(
+                ErrorMessage(
+                    f"Directory not found: {target_path}",
+                    collapsed=self._tools_collapsed,
+                )
+            )
+            return
+
+        if not target_path.is_dir():
+            await self._mount_and_scroll(
+                ErrorMessage(
+                    f"Not a directory: {target_path}",
+                    collapsed=self._tools_collapsed,
+                )
+            )
+            return
+
+        # Update the config workdir
+        self.config.workdir = target_path
+
+        # Update the PathDisplay widget
+        try:
+            path_display = self.query_one(PathDisplay)
+            path_display.set_path(target_path)
+        except Exception:
+            pass
+
+        await self._mount_and_scroll(
+            UserCommandMessage(f"Changed directory to: `{target_path}`")
+        )
 
     async def _setup_terminal(self) -> None:
         result = setup_terminal()

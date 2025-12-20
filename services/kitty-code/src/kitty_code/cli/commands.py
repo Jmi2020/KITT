@@ -62,6 +62,11 @@ class CommandRegistry:
                 description="Display agent statistics",
                 handler="_show_status",
             ),
+            "cd": Command(
+                aliases=frozenset(["/cd"]),
+                description="Change working directory (e.g., /cd ~/projects)",
+                handler="_change_directory",
+            ),
         }
 
         for command in excluded_commands:
@@ -72,9 +77,27 @@ class CommandRegistry:
             for alias in cmd.aliases:
                 self._alias_map[alias] = cmd_name
 
-    def find_command(self, user_input: str) -> Command | None:
-        cmd_name = self._alias_map.get(user_input.lower().strip())
-        return self.commands.get(cmd_name) if cmd_name else None
+    def find_command(self, user_input: str) -> tuple[Command, str] | None:
+        """Find a command matching the user input.
+
+        Returns a tuple of (Command, args) where args is any text after the command,
+        or None if no command matches.
+        """
+        normalized = user_input.strip()
+        lower_input = normalized.lower()
+
+        # First try exact match
+        cmd_name = self._alias_map.get(lower_input)
+        if cmd_name:
+            return (self.commands[cmd_name], "")
+
+        # Then try prefix match for commands with arguments
+        for alias, cmd_name in self._alias_map.items():
+            if lower_input.startswith(alias + " "):
+                args = normalized[len(alias):].strip()
+                return (self.commands[cmd_name], args)
+
+        return None
 
     def get_help_text(self) -> str:
         lines: list[str] = [
