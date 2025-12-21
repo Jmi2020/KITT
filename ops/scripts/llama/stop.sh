@@ -82,6 +82,7 @@ stop_server "q4"
 stop_server "f16"
 stop_server "summary"
 stop_server "vision"
+stop_server "coder"
 
 # ========================================
 # Fallback: Kill any remaining llama-server processes

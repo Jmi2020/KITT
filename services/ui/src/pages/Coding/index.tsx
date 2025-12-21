@@ -77,6 +77,14 @@ export default function Coding() {
   const [newProjectDir, setNewProjectDir] = useState('');
   const [createProjectError, setCreateProjectError] = useState<string | null>(null);
 
+  // Quick-start session state (can save to project later)
+  const [isQuickStartSession, setIsQuickStartSession] = useState(false);
+  const [showSaveToProjectModal, setShowSaveToProjectModal] = useState(false);
+  const [saveProjectTitle, setSaveProjectTitle] = useState('');
+  const [saveProjectDir, setSaveProjectDir] = useState('');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
   const [state, setState] = useState<CodingState>({
     sessionId: '',
     phase: 'idle',
@@ -196,7 +204,61 @@ export default function Coding() {
 
   // Continue without project (standalone session)
   const handleContinueWithoutProject = () => {
+    setIsQuickStartSession(true);
     setShowProjectSelector(false);
+  };
+
+  // Save quick-start session to a new project
+  const handleSaveToProject = async () => {
+    if (!saveProjectTitle.trim()) {
+      setSaveError('Please enter a project title');
+      return;
+    }
+
+    setSaving(true);
+    setSaveError(null);
+
+    try {
+      // Create the project
+      const response = await fetch('/api/coding/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: saveProjectTitle.trim(),
+          working_dir: saveProjectDir.trim() || undefined,
+          init_git: true,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error || 'Failed to create project');
+      }
+
+      const newProject = await response.json();
+
+      // If we have a session, attach it to the project
+      if (state.sessionId) {
+        await fetch(`/api/coding/projects/${newProject.id}/sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: state.sessionId }),
+        });
+      }
+
+      // Navigate to the project
+      setIsQuickStartSession(false);
+      setShowSaveToProjectModal(false);
+      navigate(`/coding?project=${newProject.id}`);
+      setProject(newProject);
+
+      // Add confirmation to terminal
+      addTerminalLine('success', `Saved to project: ${newProject.title}`);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Fetch project details if project ID is present
@@ -544,44 +606,59 @@ export default function Coding() {
             <h2 className="selector-title">Start Coding</h2>
             <p className="selector-subtitle">Choose how you want to begin</p>
 
-            {/* Create New Project */}
-            <div className="selector-section">
-              <h3 className="section-header">Create New Project</h3>
-              <div className="new-project-form">
-                <input
-                  type="text"
-                  className="project-input"
-                  placeholder="Project title (e.g., API Server, CLI Tool)"
-                  value={newProjectTitle}
-                  onChange={(e) => setNewProjectTitle(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
-                />
-                <input
-                  type="text"
-                  className="project-input"
-                  placeholder="Working directory (optional, e.g., ~/projects/myapp)"
-                  value={newProjectDir}
-                  onChange={(e) => setNewProjectDir(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
-                />
-                {createProjectError && (
-                  <div className="project-error">{createProjectError}</div>
-                )}
-                <button className="create-btn" onClick={handleCreateProject}>
-                  Create Project
+            {/* Three-column option cards */}
+            <div className="selector-options">
+              {/* Quick Start */}
+              <div className="selector-card quick-start-card">
+                <div className="card-icon">⚡</div>
+                <h3 className="card-title">Quick Start</h3>
+                <p className="card-description">
+                  Start coding immediately. You can save your work to a project later.
+                </p>
+                <button className="card-btn primary" onClick={handleContinueWithoutProject}>
+                  Start Now
                 </button>
               </div>
-            </div>
 
-            {/* Load Existing Project */}
-            {existingProjects.length > 0 && (
-              <div className="selector-section">
-                <h3 className="section-header">Load Existing Project</h3>
+              {/* New Project */}
+              <div className="selector-card new-project-card">
+                <div className="card-icon">✨</div>
+                <h3 className="card-title">New Project</h3>
+                <div className="new-project-form">
+                  <input
+                    type="text"
+                    className="project-input"
+                    placeholder="Project title"
+                    value={newProjectTitle}
+                    onChange={(e) => setNewProjectTitle(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
+                  />
+                  <input
+                    type="text"
+                    className="project-input"
+                    placeholder="Working directory (optional)"
+                    value={newProjectDir}
+                    onChange={(e) => setNewProjectDir(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
+                  />
+                  {createProjectError && (
+                    <div className="project-error">{createProjectError}</div>
+                  )}
+                  <button className="card-btn" onClick={handleCreateProject}>
+                    Create Project
+                  </button>
+                </div>
+              </div>
+
+              {/* Open Existing */}
+              <div className="selector-card open-project-card">
+                <div className="card-icon">📂</div>
+                <h3 className="card-title">Open Project</h3>
                 <div className="existing-projects-list">
                   {projectsLoading ? (
-                    <div className="projects-loading">Loading projects...</div>
-                  ) : (
-                    existingProjects.map((proj) => (
+                    <div className="projects-loading">Loading...</div>
+                  ) : existingProjects.length > 0 ? (
+                    existingProjects.slice(0, 5).map((proj) => (
                       <button
                         key={proj.id}
                         className="project-item"
@@ -596,24 +673,72 @@ export default function Coding() {
                             <span className="project-item-path">{proj.workingDir}</span>
                           )}
                         </div>
-                        <span className="project-item-date">
-                          {new Date(proj.createdAt).toLocaleDateString()}
-                        </span>
                       </button>
                     ))
+                  ) : (
+                    <div className="no-projects">
+                      <span className="no-projects-icon">📭</span>
+                      <span>No projects yet</span>
+                    </div>
+                  )}
+                  {existingProjects.length > 5 && (
+                    <button
+                      className="view-all-btn"
+                      onClick={() => navigate('/projects')}
+                    >
+                      View all projects →
+                    </button>
                   )}
                 </div>
               </div>
-            )}
+            </div>
+          </div>
+        </div>
+      )}
 
-            {/* Quick Start (no project) */}
-            <div className="selector-section quick-start">
-              <button className="quick-start-btn" onClick={handleContinueWithoutProject}>
-                Quick Start (no project)
-              </button>
-              <span className="quick-start-hint">
-                Start coding immediately without project tracking
-              </span>
+      {/* Save to Project Modal */}
+      {showSaveToProjectModal && (
+        <div className="project-selector-overlay">
+          <div className="project-selector-modal save-modal">
+            <h2 className="selector-title">Save to Project</h2>
+            <p className="selector-subtitle">Create a new project to save your work</p>
+            <div className="new-project-form">
+              <input
+                type="text"
+                className="project-input"
+                placeholder="Project title"
+                value={saveProjectTitle}
+                onChange={(e) => setSaveProjectTitle(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSaveToProject()}
+                autoFocus
+              />
+              <input
+                type="text"
+                className="project-input"
+                placeholder="Working directory (optional)"
+                value={saveProjectDir}
+                onChange={(e) => setSaveProjectDir(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSaveToProject()}
+              />
+              {saveError && (
+                <div className="project-error">{saveError}</div>
+              )}
+              <div className="modal-actions">
+                <button
+                  className="cancel-btn"
+                  onClick={() => setShowSaveToProjectModal(false)}
+                  disabled={saving}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="card-btn primary"
+                  onClick={handleSaveToProject}
+                  disabled={saving}
+                >
+                  {saving ? 'Saving...' : 'Save Project'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -634,6 +759,25 @@ export default function Coding() {
           {project.metadata?.gitRepo && (
             <span className="git-badge">Git</span>
           )}
+        </div>
+      )}
+
+      {/* Quick Start Header (no project, but can save) */}
+      {isQuickStartSession && !project && !showProjectSelector && (
+        <div className="project-header quick-start-header">
+          <div className="project-info">
+            <span className="project-icon">⚡</span>
+            <div className="project-details">
+              <h2 className="project-title">Quick Start Session</h2>
+              <span className="project-path">No project tracking</span>
+            </div>
+          </div>
+          <button
+            className="save-project-btn"
+            onClick={() => setShowSaveToProjectModal(true)}
+          >
+            Save to Project
+          </button>
         </div>
       )}
 

@@ -701,3 +701,225 @@
   font-size: 0.75rem;
   color: var(--text-tertiary, #666);
 }
+
+/* Card-based Project Selector */
+.selector-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+@media (max-width: 900px) {
+  .selector-options {
+    grid-template-columns: 1fr;
+  }
+}
+
+.project-selector-modal:has(.selector-options) {
+  max-width: 900px;
+}
+
+.selector-card {
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem;
+  background: var(--bg-tertiary, #252525);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 12px;
+  transition: border-color 0.2s, transform 0.2s;
+}
+
+.selector-card:hover {
+  border-color: var(--border-hover, #444);
+}
+
+.quick-start-card {
+  border-color: rgba(250, 204, 21, 0.3);
+  background: linear-gradient(135deg, rgba(250, 204, 21, 0.08), transparent);
+}
+
+.quick-start-card:hover {
+  border-color: rgba(250, 204, 21, 0.5);
+}
+
+.card-icon {
+  font-size: 2rem;
+  margin-bottom: 0.75rem;
+}
+
+.card-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary, #e0e0e0);
+}
+
+.card-description {
+  margin: 0 0 1rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary, #888);
+  line-height: 1.5;
+  flex: 1;
+}
+
+.card-btn {
+  padding: 0.75rem 1rem;
+  background: var(--bg-secondary, #1a1a1a);
+  border: 1px solid var(--border-color, #444);
+  border-radius: 6px;
+  color: var(--text-primary, #e0e0e0);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  width: 100%;
+}
+
+.card-btn:hover:not(:disabled) {
+  background: var(--bg-hover, #333);
+  border-color: var(--text-tertiary, #666);
+}
+
+.card-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.card-btn.primary {
+  background: var(--accent-color, #3b82f6);
+  border-color: var(--accent-color, #3b82f6);
+  color: white;
+}
+
+.card-btn.primary:hover:not(:disabled) {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+/* Open project card adjustments */
+.open-project-card .existing-projects-list {
+  flex: 1;
+  max-height: 180px;
+  margin-bottom: 0;
+}
+
+.open-project-card .project-item {
+  padding: 0.5rem 0.75rem;
+}
+
+.open-project-card .project-item-icon {
+  font-size: 1rem;
+}
+
+.open-project-card .project-item-title {
+  font-size: 0.8rem;
+}
+
+.open-project-card .project-item-path {
+  font-size: 0.7rem;
+}
+
+.no-projects {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  color: var(--text-tertiary, #666);
+  font-size: 0.875rem;
+  text-align: center;
+  gap: 0.5rem;
+}
+
+.no-projects-icon {
+  font-size: 2rem;
+  opacity: 0.5;
+}
+
+.view-all-btn {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: transparent;
+  border: none;
+  color: var(--accent-color, #3b82f6);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.view-all-btn:hover {
+  color: #60a5fa;
+}
+
+/* New project form in card */
+.new-project-card .new-project-form {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.new-project-card .project-input {
+  padding: 0.625rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+/* Quick Start Header */
+.quick-start-header {
+  background: linear-gradient(135deg, rgba(250, 204, 21, 0.12), rgba(250, 204, 21, 0.04));
+  border-color: rgba(250, 204, 21, 0.25);
+}
+
+.save-project-btn {
+  padding: 0.5rem 1rem;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 6px;
+  color: #60a5fa;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.save-project-btn:hover {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: rgba(59, 130, 246, 0.5);
+}
+
+/* Save Modal */
+.save-modal {
+  max-width: 400px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.cancel-btn {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  background: transparent;
+  border: 1px solid var(--border-color, #444);
+  border-radius: 6px;
+  color: var(--text-secondary, #a0a0a0);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.cancel-btn:hover:not(:disabled) {
+  border-color: var(--text-tertiary, #666);
+  color: var(--text-primary, #e0e0e0);
+}
+
+.cancel-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modal-actions .card-btn {
+  flex: 1;
+}

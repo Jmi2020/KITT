@@ -255,10 +255,12 @@ class CoderLLMClient:
         self.primary_backend = os.getenv("CODER_PRIMARY_BACKEND", "llamacpp")
 
         # Primary: llama.cpp with Devstral 2 123B (port 8087)
+        # Timeout of 1200s (20 mins) for large 123B model inference
         llamacpp_coder_base = os.getenv("LLAMACPP_CODER_HOST", "http://localhost:8087")
+        coder_timeout = int(os.getenv("CODER_LLM_TIMEOUT", "1200"))
         self.llamacpp_coder_client = LlamaCppClient(
             base_url=llamacpp_coder_base,
-            timeout=180,  # Allow time for large generations
+            timeout=coder_timeout,
         )
 
         # Fallback: Ollama with Devstral 2
@@ -266,7 +268,7 @@ class CoderLLMClient:
         self.ollama_model = os.getenv("OLLAMA_CODER_MODEL", "devstral:123b")
         self.ollama_client = LlamaCppClient(
             base_url=ollama_base,
-            timeout=180,
+            timeout=coder_timeout,
         )
 
         # Track which backend is available
