@@ -946,21 +946,31 @@ export default function Coding() {
         </div>
       )}
 
-      {/* Summary (shown at bottom when complete) */}
-      {state.summary && (
+      {/* Summary (shown during summarizing phase and after complete) */}
+      {(state.summary || state.phase === 'summarizing') && (
         <div className="summary-panel">
           <div className="panel-header">
             <span className="panel-title">Summary</span>
+            {state.phase === 'summarizing' && (
+              <span className="panel-status streaming-indicator">Generating...</span>
+            )}
             <button
               className="panel-btn"
               onClick={() => copyToClipboard(state.summary)}
+              disabled={!state.summary}
               title="Copy summary"
             >
               📋
             </button>
           </div>
           <div className="summary-content">
-            <pre>{state.summary}</pre>
+            {state.summary ? (
+              <pre>{state.summary}</pre>
+            ) : state.phase === 'summarizing' && state.streamingContent ? (
+              <pre>{state.streamingContent}<span className="cursor">▊</span></pre>
+            ) : (
+              <div className="summary-placeholder">Summary generating...</div>
+            )}
           </div>
         </div>
       )}

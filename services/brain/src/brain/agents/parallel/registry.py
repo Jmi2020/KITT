@@ -208,10 +208,10 @@ def _load_endpoints_from_env() -> Dict[ModelTier, ModelEndpoint]:
             port=_extract_port(vision_url, 8086),
         ),
         ModelTier.CODER: ModelEndpoint(
-            name="Qwen 32B Coder",
+            name="Devstral 2 123B Coder",
             base_url=coder_url,
-            max_slots=int(os.getenv("LLAMACPP_CODER_PARALLEL", "4")),
-            context_length=int(os.getenv("LLAMACPP_CODER_CTX", "32768")),
+            max_slots=int(os.getenv("LLAMACPP_CODER_PARALLEL", "2")),
+            context_length=int(os.getenv("LLAMACPP_CODER_CTX", "16384")),
             model_id=os.getenv("LLAMACPP_CODER_ALIAS", "kitty-coder"),
             idle_shutdown_seconds=int(os.getenv("LLAMACPP_CODER_IDLE_SHUTDOWN_SECONDS", "900")),
             port=_extract_port(coder_url, 8087),
@@ -321,7 +321,7 @@ Challenge assumptions. Identify logical gaps. Provide nuanced conclusions.""",
             name="coder",
             role="Software Engineer",
             expertise="Python, TypeScript, CadQuery, OpenSCAD, algorithm implementation",
-            system_prompt="""You are KITTY's coding agent using Qwen 32B Coder.
+            system_prompt="""You are KITTY's coding agent using Devstral 2 123B.
 Write clean, documented, tested code. Follow these principles:
 1. Type hints in Python, TypeScript types
 2. Docstrings with examples

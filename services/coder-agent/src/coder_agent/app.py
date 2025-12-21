@@ -248,7 +248,7 @@ async def stream_generate_code(request: StreamRequest) -> StreamingResponse:
     logger.info(f"[{session_id}] Starting streaming code generation: {request.request[:100]}...")
 
     async def event_generator():
-        """Generate SSE events for each workflow phase."""
+        """Generate SSE events for each workflow phase with token streaming."""
         try:
             # Emit session started
             yield f"data: {json.dumps({'type': 'started', 'sessionId': session_id})}\n\n"
@@ -267,32 +267,41 @@ async def stream_generate_code(request: StreamRequest) -> StreamingResponse:
                 "max_refinements": request.max_refinements,
             }
 
-            # Phase 1: Plan
+            # Phase 1: Plan (with token streaming)
             yield f"data: {json.dumps({'type': 'plan_start'})}\n\n"
-            plan = await graph.llm_client.plan(
+            plan_buffer = ""
+            async for token in graph.llm_client.plan_streaming(
                 user_request=request.request,
                 system_prompt="You are an expert Python developer. Generate a detailed implementation plan.",
-            )
-            state["plan"] = plan
-            yield f"data: {json.dumps({'type': 'plan_complete', 'plan': plan})}\n\n"
+            ):
+                plan_buffer += token
+                yield f"data: {json.dumps({'type': 'plan_chunk', 'delta': token})}\n\n"
+            state["plan"] = plan_buffer
+            yield f"data: {json.dumps({'type': 'plan_complete', 'plan': plan_buffer})}\n\n"
 
-            # Phase 2: Code
+            # Phase 2: Code (with token streaming)
             yield f"data: {json.dumps({'type': 'code_start'})}\n\n"
-            code = await graph.llm_client.code(
-                prompt=f"User request: {request.request}\n\nPlan:\n{plan}\n\nGenerate complete Python code:",
+            code_buffer = ""
+            async for token in graph.llm_client.code_streaming(
+                prompt=f"User request: {request.request}\n\nPlan:\n{state['plan']}\n\nGenerate complete Python code:",
                 system_prompt="You are an expert Python developer. Generate clean, tested code.",
-            )
-            code = graph._clean_code_output(code)
+            ):
+                code_buffer += token
+                yield f"data: {json.dumps({'type': 'code_chunk', 'delta': token})}\n\n"
+            code = graph._clean_code_output(code_buffer)
             state["code"] = code
             yield f"data: {json.dumps({'type': 'code_complete', 'code': code})}\n\n"
 
-            # Phase 3: Tests
+            # Phase 3: Tests (with token streaming)
             yield f"data: {json.dumps({'type': 'test_start'})}\n\n"
-            test_code = await graph.llm_client.tests(
+            test_buffer = ""
+            async for token in graph.llm_client.tests_streaming(
                 prompt=f"Code:\n{code}\n\nGenerate pytest tests for the above code.",
                 system_prompt="You are an expert Python developer. Generate comprehensive pytest tests.",
-            )
-            test_code = graph._clean_code_output(test_code)
+            ):
+                test_buffer += token
+                yield f"data: {json.dumps({'type': 'test_chunk', 'delta': token})}\n\n"
+            test_code = graph._clean_code_output(test_buffer)
             state["test_code"] = test_code
             yield f"data: {json.dumps({'type': 'test_complete', 'testCode': test_code})}\n\n"
 
@@ -323,30 +332,36 @@ async def stream_generate_code(request: StreamRequest) -> StreamingResponse:
                 if result.success:
                     break  # Tests passed, move to summary
 
-                # Need to refine?
+                # Need to refine? (with token streaming)
                 if iteration < request.max_refinements:
                     state["refinement_count"] = iteration + 1
                     refinement_counter.inc()
 
                     yield f"data: {json.dumps({'type': 'refine_start', 'iteration': iteration + 1})}\n\n"
 
-                    refined_code = await graph.llm_client.refine(
+                    refine_buffer = ""
+                    async for token in graph.llm_client.refine_streaming(
                         prompt=f"Original request: {request.request}\n\nCode that failed tests:\n{state['code']}\n\nError output:\n{result.stdout}\n{result.stderr}\n\nFix the code:",
                         system_prompt="You are an expert Python developer. Fix the code to pass tests.",
-                    )
-                    refined_code = graph._clean_code_output(refined_code)
-                    state["code"] = refined_code
+                    ):
+                        refine_buffer += token
+                        yield f"data: {json.dumps({'type': 'refine_chunk', 'delta': token})}\n\n"
 
+                    refined_code = graph._clean_code_output(refine_buffer)
+                    state["code"] = refined_code
                     yield f"data: {json.dumps({'type': 'refine_complete', 'code': refined_code})}\n\n"
 
-            # Phase 5: Summarize
+            # Phase 5: Summarize (with token streaming)
             yield f"data: {json.dumps({'type': 'summary_start'})}\n\n"
-            summary = await graph.llm_client.summarize(
+            summary_buffer = ""
+            async for token in graph.llm_client.summarize_streaming(
                 prompt=f"Request: {request.request}\nPlan: {state['plan']}\nTests passed: {state.get('run_success', False)}\n\nGenerate a markdown summary:",
                 system_prompt="You are an expert technical writer. Create a clear summary with usage examples.",
-            )
-            state["summary"] = summary
-            yield f"data: {json.dumps({'type': 'summary_complete', 'summary': summary})}\n\n"
+            ):
+                summary_buffer += token
+                yield f"data: {json.dumps({'type': 'summary_chunk', 'delta': token})}\n\n"
+            state["summary"] = summary_buffer
+            yield f"data: {json.dumps({'type': 'summary_complete', 'summary': summary_buffer})}\n\n"
 
             # Complete
             yield f"data: {json.dumps({'type': 'complete', 'success': True, 'testsPassed': state.get('run_success', False), 'refinementCount': state.get('refinement_count', 0)})}\n\n"

@@ -459,6 +459,23 @@
   color: #a0a0a0;
 }
 
+.summary-placeholder {
+  color: #666;
+  font-style: italic;
+  text-align: center;
+  padding: 1rem;
+}
+
+.streaming-indicator {
+  color: #fbbf24;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 /* Scrollbar Styling */
 .terminal-output::-webkit-scrollbar,
 .code-content::-webkit-scrollbar,

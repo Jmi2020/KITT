@@ -180,6 +180,19 @@ _DEFAULT_SERVICES: List[ServiceDefinition] = [
         startup_timeout_seconds=30.0,
         auto_start_enabled=_get_env_bool("MEM0_AUTO_START", True),
     ),
+    # Coder Agent Service - Docker container (LLM-powered code generation)
+    # NOTE: The llama.cpp coder server (port 8087) is managed by IdleReaper, not here
+    ServiceDefinition(
+        name="coder-agent",
+        display_name="Coder Agent",
+        service_type=ServiceType.DOCKER_SERVICE,
+        port=8092,
+        host=_get_host_for_service(ServiceType.DOCKER_SERVICE, "coder-agent"),
+        health_endpoint="/healthz",
+        docker_service_name="coder-agent",
+        startup_timeout_seconds=30.0,
+        auto_start_enabled=_get_env_bool("CODER_AGENT_AUTO_START", True),
+    ),
     # Infrastructure services - Docker containers (don't auto-start, just monitor)
     ServiceDefinition(
         name="postgres",

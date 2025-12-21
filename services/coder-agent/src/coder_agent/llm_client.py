@@ -7,9 +7,10 @@ Designed for offline-first operation with local llama.cpp instances.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -204,6 +205,73 @@ class LlamaCppClient:
 
         logger.debug(f"Native response: {len(content)} chars")
         return content.strip()
+
+    async def generate_streaming(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        stop: Optional[List[str]] = None,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Generate text with streaming, yielding tokens as they arrive.
+
+        Uses OpenAI-compatible streaming endpoint for real-time token output.
+
+        Args:
+            prompt: User prompt/instruction
+            system_prompt: Optional system prompt
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature (0.0 = deterministic)
+            stop: Optional stop sequences
+
+        Yields:
+            Individual tokens/chunks as they're generated
+        """
+        messages: List[Dict[str, str]] = []
+
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+
+        messages.append({"role": "user", "content": prompt})
+
+        payload = {
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": True,
+        }
+
+        if stop:
+            payload["stop"] = stop
+
+        url = f"{self.base_url}/v1/chat/completions"
+
+        logger.debug(f"Streaming request to {url}")
+
+        async with self.client.stream("POST", url, json=payload) as response:
+            response.raise_for_status()
+
+            async for line in response.aiter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+
+                data_str = line[6:]  # Remove "data: " prefix
+
+                if data_str == "[DONE]":
+                    break
+
+                try:
+                    data = json.loads(data_str)
+                    delta = data.get("choices", [{}])[0].get("delta", {})
+                    content = delta.get("content")
+
+                    if content:
+                        yield content
+
+                except json.JSONDecodeError:
+                    continue
 
     async def health_check(self) -> bool:
         """
@@ -461,6 +529,115 @@ class CoderLLMClient:
             max_tokens=max_tokens,
             temperature=0.5,  # Moderate temp for readable summaries
         )
+
+    # =========================================================================
+    # Streaming Methods - Token-by-token generation
+    # =========================================================================
+
+    async def plan_streaming(
+        self,
+        user_request: str,
+        system_prompt: str,
+        max_tokens: int = 2048,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Generate implementation plan with streaming.
+
+        Yields tokens as they're generated for real-time display.
+        """
+        client = await self._get_client(prefer_fast=True)
+        logger.info(f"Streaming plan with {'llama.cpp' if self._use_llamacpp else 'Ollama'}")
+        async for token in client.generate_streaming(
+            prompt=user_request,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=0.3,
+        ):
+            yield token
+
+    async def code_streaming(
+        self,
+        prompt: str,
+        system_prompt: str,
+        max_tokens: int = 6144,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Generate code with streaming.
+
+        Yields tokens as they're generated for real-time display.
+        """
+        client = await self._get_client(prefer_fast=False)
+        logger.info(f"Streaming code with {'llama.cpp' if self._use_llamacpp else 'Ollama'}")
+        async for token in client.generate_streaming(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=0.2,
+        ):
+            yield token
+
+    async def tests_streaming(
+        self,
+        prompt: str,
+        system_prompt: str,
+        max_tokens: int = 4096,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Generate tests with streaming.
+
+        Yields tokens as they're generated for real-time display.
+        """
+        client = await self._get_client(prefer_fast=True)
+        logger.info(f"Streaming tests with {'llama.cpp' if self._use_llamacpp else 'Ollama'}")
+        async for token in client.generate_streaming(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=0.3,
+        ):
+            yield token
+
+    async def refine_streaming(
+        self,
+        prompt: str,
+        system_prompt: str,
+        max_tokens: int = 6144,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Refine code with streaming.
+
+        Yields tokens as they're generated for real-time display.
+        """
+        client = await self._get_client(prefer_fast=False)
+        logger.info(f"Streaming refinement with {'llama.cpp' if self._use_llamacpp else 'Ollama'}")
+        async for token in client.generate_streaming(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=0.2,
+        ):
+            yield token
+
+    async def summarize_streaming(
+        self,
+        prompt: str,
+        system_prompt: str,
+        max_tokens: int = 2048,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Generate summary with streaming.
+
+        Yields tokens as they're generated for real-time display.
+        """
+        client = await self._get_client(prefer_fast=True)
+        logger.info(f"Streaming summary with {'llama.cpp' if self._use_llamacpp else 'Ollama'}")
+        async for token in client.generate_streaming(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=0.5,
+        ):
+            yield token
 
     async def health_check(self) -> Dict[str, bool]:
         """
