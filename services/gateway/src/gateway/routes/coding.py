@@ -138,10 +138,14 @@ async def stream_generate_code(request: Request) -> StreamingResponse:
 
     Proxies SSE stream from coder-agent /api/coding/stream
     """
+    # IMPORTANT: Read request body BEFORE creating the generator
+    # The generator doesn't start until response streaming begins,
+    # by which point the request body may no longer be available
+    data = await request.json()
+
     async def stream_proxy() -> AsyncGenerator[bytes, None]:
         """Proxy SSE stream from coder-agent."""
         try:
-            data = await request.json()
             async with httpx.AsyncClient(timeout=None) as client:
                 async with client.stream(
                     "POST",
