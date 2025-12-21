@@ -128,6 +128,54 @@ export default function Coding() {
   const inputRef = useRef<HTMLInputElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
+  // Streaming buffer for chunky visualization (like kitty-code TUI)
+  // Accumulates tokens and flushes to state at controlled intervals
+  const streamBufferRef = useRef<string>('');
+  const flushIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const STREAM_FLUSH_INTERVAL_MS = 80; // Flush every 80ms for smooth chunks
+  const MIN_CHUNK_SIZE = 3; // Minimum characters before flushing
+
+  // Flush accumulated stream buffer to state
+  const flushStreamBuffer = useCallback(() => {
+    if (streamBufferRef.current.length > 0) {
+      const chunk = streamBufferRef.current;
+      streamBufferRef.current = '';
+      setState(prev => ({
+        ...prev,
+        streamingContent: prev.streamingContent + chunk,
+      }));
+    }
+  }, []);
+
+  // Start the flush interval when streaming begins
+  const startStreamFlush = useCallback(() => {
+    if (flushIntervalRef.current) return;
+    flushIntervalRef.current = setInterval(() => {
+      if (streamBufferRef.current.length >= MIN_CHUNK_SIZE) {
+        flushStreamBuffer();
+      }
+    }, STREAM_FLUSH_INTERVAL_MS);
+  }, [flushStreamBuffer]);
+
+  // Stop the flush interval and flush remaining content
+  const stopStreamFlush = useCallback(() => {
+    if (flushIntervalRef.current) {
+      clearInterval(flushIntervalRef.current);
+      flushIntervalRef.current = null;
+    }
+    // Flush any remaining buffered content
+    flushStreamBuffer();
+  }, [flushStreamBuffer]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (flushIntervalRef.current) {
+        clearInterval(flushIntervalRef.current);
+      }
+    };
+  }, []);
+
   // Auto-scroll terminal
   useEffect(() => {
     if (terminalRef.current) {
@@ -402,18 +450,19 @@ export default function Coding() {
         break;
 
       case 'plan_start':
-        setState(prev => ({ ...prev, phase: 'planning' }));
+        setState(prev => ({ ...prev, phase: 'planning', streamingContent: '' }));
+        streamBufferRef.current = '';
+        startStreamFlush();
         addTerminalLine('phase', `${PHASE_ICONS.planning} ${PHASE_LABELS.planning}`);
         break;
 
       case 'plan_chunk':
-        setState(prev => ({
-          ...prev,
-          streamingContent: prev.streamingContent + (event.delta || ''),
-        }));
+        // Buffer tokens for chunky visualization
+        streamBufferRef.current += event.delta || '';
         break;
 
       case 'plan_complete':
+        stopStreamFlush();
         setState(prev => ({
           ...prev,
           plan: event.plan || prev.streamingContent,
@@ -424,17 +473,17 @@ export default function Coding() {
 
       case 'code_start':
         setState(prev => ({ ...prev, phase: 'coding', streamingContent: '' }));
+        streamBufferRef.current = '';
+        startStreamFlush();
         addTerminalLine('phase', `${PHASE_ICONS.coding} ${PHASE_LABELS.coding}`);
         break;
 
       case 'code_chunk':
-        setState(prev => ({
-          ...prev,
-          streamingContent: prev.streamingContent + (event.delta || ''),
-        }));
+        streamBufferRef.current += event.delta || '';
         break;
 
       case 'code_complete':
+        stopStreamFlush();
         setState(prev => ({
           ...prev,
           code: event.code || prev.streamingContent,
@@ -445,17 +494,17 @@ export default function Coding() {
 
       case 'test_start':
         setState(prev => ({ ...prev, phase: 'testing', streamingContent: '' }));
+        streamBufferRef.current = '';
+        startStreamFlush();
         addTerminalLine('phase', `${PHASE_ICONS.testing} ${PHASE_LABELS.testing}`);
         break;
 
       case 'test_chunk':
-        setState(prev => ({
-          ...prev,
-          streamingContent: prev.streamingContent + (event.delta || ''),
-        }));
+        streamBufferRef.current += event.delta || '';
         break;
 
       case 'test_complete':
+        stopStreamFlush();
         setState(prev => ({
           ...prev,
           testCode: event.testCode || prev.streamingContent,
@@ -498,17 +547,17 @@ export default function Coding() {
           refinementCount: prev.refinementCount + 1,
           streamingContent: '',
         }));
+        streamBufferRef.current = '';
+        startStreamFlush();
         addTerminalLine('phase', `${PHASE_ICONS.refining} Refining code (iteration ${state.refinementCount + 1})...`);
         break;
 
       case 'refine_chunk':
-        setState(prev => ({
-          ...prev,
-          streamingContent: prev.streamingContent + (event.delta || ''),
-        }));
+        streamBufferRef.current += event.delta || '';
         break;
 
       case 'refine_complete':
+        stopStreamFlush();
         setState(prev => ({
           ...prev,
           code: event.code || prev.streamingContent,
@@ -519,17 +568,17 @@ export default function Coding() {
 
       case 'summary_start':
         setState(prev => ({ ...prev, phase: 'summarizing', streamingContent: '' }));
+        streamBufferRef.current = '';
+        startStreamFlush();
         addTerminalLine('phase', `${PHASE_ICONS.summarizing} ${PHASE_LABELS.summarizing}`);
         break;
 
       case 'summary_chunk':
-        setState(prev => ({
-          ...prev,
-          streamingContent: prev.streamingContent + (event.delta || ''),
-        }));
+        streamBufferRef.current += event.delta || '';
         break;
 
       case 'summary_complete':
+        stopStreamFlush();
         setState(prev => ({
           ...prev,
           summary: event.summary || prev.streamingContent,
@@ -539,16 +588,18 @@ export default function Coding() {
         break;
 
       case 'complete':
+        stopStreamFlush();
         setState(prev => ({ ...prev, phase: 'complete' }));
         addTerminalLine('success', `${PHASE_ICONS.complete} Code generation complete!`);
         break;
 
       case 'error':
+        stopStreamFlush();
         setState(prev => ({ ...prev, phase: 'error', error: event.error || 'Unknown error' }));
         addTerminalLine('error', `Error: ${event.error || 'Unknown error'}`);
         break;
     }
-  }, [addTerminalLine, state.refinementCount]);
+  }, [addTerminalLine, state.refinementCount, startStreamFlush, stopStreamFlush]);
 
   // Handle non-streaming result (fallback)
   const handleNonStreamingResult = useCallback((result: any) => {
