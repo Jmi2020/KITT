@@ -492,3 +492,212 @@
 .summary-content::-webkit-scrollbar-thumb:hover {
   background: #444;
 }
+
+/* Project Selector Overlay */
+.project-selector-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+
+.project-selector-modal {
+  background: var(--bg-secondary, #1a1a1a);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 12px;
+  padding: 2rem;
+  max-width: 500px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.selector-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-primary, #e0e0e0);
+  text-align: center;
+}
+
+.selector-subtitle {
+  margin: 0 0 1.5rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary, #888);
+  text-align: center;
+}
+
+.selector-section {
+  margin-bottom: 1.5rem;
+}
+
+.section-header {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary, #a0a0a0);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.new-project-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.project-input {
+  padding: 0.75rem 1rem;
+  background: var(--bg-tertiary, #252525);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+  color: var(--text-primary, #e0e0e0);
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.project-input:focus {
+  border-color: var(--accent-color, #3b82f6);
+}
+
+.project-input::placeholder {
+  color: var(--text-tertiary, #666);
+}
+
+.project-error {
+  padding: 0.5rem;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 4px;
+  color: #f87171;
+  font-size: 0.75rem;
+}
+
+.create-btn {
+  padding: 0.75rem 1.5rem;
+  background: var(--accent-color, #3b82f6);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.create-btn:hover {
+  background: #2563eb;
+}
+
+.create-btn:active {
+  transform: scale(0.98);
+}
+
+.existing-projects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.projects-loading {
+  padding: 1rem;
+  text-align: center;
+  color: var(--text-secondary, #888);
+  font-size: 0.875rem;
+}
+
+.project-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-tertiary, #252525);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  text-align: left;
+  width: 100%;
+}
+
+.project-item:hover {
+  border-color: var(--accent-color, #3b82f6);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.project-item-icon {
+  font-size: 1.25rem;
+}
+
+.project-item-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.project-item-title {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-primary, #e0e0e0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-item-path {
+  font-size: 0.75rem;
+  color: var(--text-tertiary, #666);
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-item-date {
+  font-size: 0.75rem;
+  color: var(--text-tertiary, #666);
+  white-space: nowrap;
+}
+
+.selector-section.quick-start {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color, #333);
+}
+
+.quick-start-btn {
+  padding: 0.75rem 2rem;
+  background: transparent;
+  border: 1px solid var(--border-color, #444);
+  border-radius: 6px;
+  color: var(--text-secondary, #a0a0a0);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.quick-start-btn:hover {
+  border-color: var(--text-secondary, #888);
+  color: var(--text-primary, #e0e0e0);
+}
+
+.quick-start-hint {
+  font-size: 0.75rem;
+  color: var(--text-tertiary, #666);
+}

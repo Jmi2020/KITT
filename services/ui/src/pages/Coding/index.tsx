@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import './Coding.css';
 
 // Types
@@ -63,10 +63,19 @@ const PHASE_ICONS: Record<string, string> = {
 
 export default function Coding() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const projectId = searchParams.get('project');
 
   const [project, setProject] = useState<CodingProject | null>(null);
   const [projectLoading, setProjectLoading] = useState(false);
+
+  // Project selector state
+  const [showProjectSelector, setShowProjectSelector] = useState(!projectId);
+  const [existingProjects, setExistingProjects] = useState<CodingProject[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [newProjectTitle, setNewProjectTitle] = useState('');
+  const [newProjectDir, setNewProjectDir] = useState('');
+  const [createProjectError, setCreateProjectError] = useState<string | null>(null);
 
   const [state, setState] = useState<CodingState>({
     sessionId: '',
@@ -118,10 +127,77 @@ export default function Coding() {
     }
   }, [terminalLines]);
 
-  // Focus input on mount
+  // Focus input on mount (if not showing project selector)
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    if (!showProjectSelector) {
+      inputRef.current?.focus();
+    }
+  }, [showProjectSelector]);
+
+  // Fetch existing projects for selector
+  useEffect(() => {
+    if (!showProjectSelector) return;
+
+    const fetchProjects = async () => {
+      setProjectsLoading(true);
+      try {
+        const response = await fetch('/api/coding/projects?status=active&limit=10');
+        if (response.ok) {
+          const data = await response.json();
+          setExistingProjects(data.projects || []);
+        }
+      } catch (error) {
+        console.error('Failed to fetch projects:', error);
+      } finally {
+        setProjectsLoading(false);
+      }
+    };
+
+    fetchProjects();
+  }, [showProjectSelector]);
+
+  // Create new project
+  const handleCreateProject = async () => {
+    if (!newProjectTitle.trim()) {
+      setCreateProjectError('Please enter a project title');
+      return;
+    }
+
+    setCreateProjectError(null);
+    try {
+      const response = await fetch('/api/coding/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newProjectTitle.trim(),
+          working_dir: newProjectDir.trim() || undefined,
+          init_git: true,
+        }),
+      });
+
+      if (response.ok) {
+        const newProject = await response.json();
+        navigate(`/coding?project=${newProject.id}`);
+        setShowProjectSelector(false);
+      } else {
+        const error = await response.text();
+        setCreateProjectError(error || 'Failed to create project');
+      }
+    } catch (error) {
+      setCreateProjectError('Network error creating project');
+    }
+  };
+
+  // Select existing project
+  const handleSelectProject = (projectId: string) => {
+    navigate(`/coding?project=${projectId}`);
+    setShowProjectSelector(false);
+  };
+
+  // Continue without project (standalone session)
+  const handleContinueWithoutProject = () => {
+    setShowProjectSelector(false);
+  };
 
   // Fetch project details if project ID is present
   useEffect(() => {
@@ -461,6 +537,88 @@ export default function Coding() {
 
   return (
     <div className="coding-page">
+      {/* Project Selector Overlay */}
+      {showProjectSelector && (
+        <div className="project-selector-overlay">
+          <div className="project-selector-modal">
+            <h2 className="selector-title">Start Coding</h2>
+            <p className="selector-subtitle">Choose how you want to begin</p>
+
+            {/* Create New Project */}
+            <div className="selector-section">
+              <h3 className="section-header">Create New Project</h3>
+              <div className="new-project-form">
+                <input
+                  type="text"
+                  className="project-input"
+                  placeholder="Project title (e.g., API Server, CLI Tool)"
+                  value={newProjectTitle}
+                  onChange={(e) => setNewProjectTitle(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
+                />
+                <input
+                  type="text"
+                  className="project-input"
+                  placeholder="Working directory (optional, e.g., ~/projects/myapp)"
+                  value={newProjectDir}
+                  onChange={(e) => setNewProjectDir(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
+                />
+                {createProjectError && (
+                  <div className="project-error">{createProjectError}</div>
+                )}
+                <button className="create-btn" onClick={handleCreateProject}>
+                  Create Project
+                </button>
+              </div>
+            </div>
+
+            {/* Load Existing Project */}
+            {existingProjects.length > 0 && (
+              <div className="selector-section">
+                <h3 className="section-header">Load Existing Project</h3>
+                <div className="existing-projects-list">
+                  {projectsLoading ? (
+                    <div className="projects-loading">Loading projects...</div>
+                  ) : (
+                    existingProjects.map((proj) => (
+                      <button
+                        key={proj.id}
+                        className="project-item"
+                        onClick={() => handleSelectProject(proj.id)}
+                      >
+                        <span className="project-item-icon">
+                          {proj.metadata?.gitRepo ? '📁' : '📄'}
+                        </span>
+                        <div className="project-item-info">
+                          <span className="project-item-title">{proj.title}</span>
+                          {proj.workingDir && (
+                            <span className="project-item-path">{proj.workingDir}</span>
+                          )}
+                        </div>
+                        <span className="project-item-date">
+                          {new Date(proj.createdAt).toLocaleDateString()}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Quick Start (no project) */}
+            <div className="selector-section quick-start">
+              <button className="quick-start-btn" onClick={handleContinueWithoutProject}>
+                Quick Start (no project)
+              </button>
+              <span className="quick-start-hint">
+                Start coding immediately without project tracking
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Project Header (if project context present) */}
       {project && (
         <div className="project-header">
