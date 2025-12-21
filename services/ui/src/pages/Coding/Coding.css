@@ -940,3 +940,138 @@
 .modal-actions .card-btn {
   flex: 1;
 }
+
+/* ========================================
+   Light Markdown Styling for Terminal
+   Maintains terminal aesthetic with subtle formatting
+   ======================================== */
+
+.markdown-content {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* Headers - subtle size/color differences */
+.md-h1 {
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: #60a5fa;
+  margin: 0.75rem 0 0.5rem 0;
+}
+
+.md-h2 {
+  font-size: 1rem;
+  font-weight: bold;
+  color: #818cf8;
+  margin: 0.6rem 0 0.4rem 0;
+}
+
+.md-h3 {
+  font-size: 0.95rem;
+  font-weight: bold;
+  color: #a78bfa;
+  margin: 0.5rem 0 0.3rem 0;
+}
+
+.md-h4 {
+  font-size: 0.9rem;
+  font-weight: bold;
+  color: #c4b5fd;
+  margin: 0.4rem 0 0.25rem 0;
+}
+
+/* Bold and italic */
+.md-bold {
+  font-weight: bold;
+  color: #f0f0f0;
+}
+
+.md-italic {
+  font-style: italic;
+  color: #d1d5db;
+}
+
+/* Inline code */
+.md-inline-code {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5f3fc;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+
+/* Code blocks */
+.md-code-block {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  background: rgba(0, 0, 0, 0.4);
+  border-left: 3px solid #6366f1;
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+  border-radius: 0 4px 4px 0;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.md-code-block code {
+  color: #e2e8f0;
+  white-space: pre;
+}
+
+/* Python syntax hint */
+.md-code-block.lang-python {
+  border-left-color: #fbbf24;
+}
+
+/* JavaScript/TypeScript syntax hint */
+.md-code-block.lang-javascript,
+.md-code-block.lang-typescript,
+.md-code-block.lang-js,
+.md-code-block.lang-ts {
+  border-left-color: #22d3ee;
+}
+
+/* List items */
+.md-list-item {
+  display: flex;
+  align-items: flex-start;
+  margin: 0.2rem 0;
+  line-height: 1.5;
+}
+
+.md-bullet {
+  color: #6366f1;
+  margin-right: 0.5rem;
+  flex-shrink: 0;
+}
+
+/* Horizontal rule */
+.md-hr {
+  border: none;
+  border-top: 1px solid #4b5563;
+  margin: 0.75rem 0;
+}
+
+/* Empty line spacing */
+.md-empty-line {
+  height: 0.5rem;
+}
+
+/* Regular text */
+.md-text {
+  line-height: 1.5;
+  margin: 0.15rem 0;
+}
+
+/* Ensure streaming content styles work with markdown */
+.terminal-line.streaming .md-h1,
+.terminal-line.streaming .md-h2,
+.terminal-line.streaming .md-h3,
+.terminal-line.streaming .md-h4 {
+  color: inherit;
+  filter: brightness(1.1);
+}
+
+.terminal-line.streaming .md-text {
+  color: inherit;
+}

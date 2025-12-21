@@ -1,6 +1,157 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import './Coding.css';
+
+// Light markdown renderer - maintains terminal aesthetic with subtle styling
+function renderMarkdown(text: string): ReactNode {
+  if (!text) return null;
+
+  const lines = text.split('\n');
+  const elements: ReactNode[] = [];
+  let inCodeBlock = false;
+  let codeBlockContent: string[] = [];
+  let codeBlockLang = '';
+
+  const processInlineMarkdown = (line: string): ReactNode => {
+    // Process inline elements: bold, italic, inline code
+    const parts: ReactNode[] = [];
+    let remaining = line;
+    let key = 0;
+
+    while (remaining.length > 0) {
+      // Inline code: `code`
+      const codeMatch = remaining.match(/^`([^`]+)`/);
+      if (codeMatch) {
+        parts.push(<code key={key++} className="md-inline-code">{codeMatch[1]}</code>);
+        remaining = remaining.slice(codeMatch[0].length);
+        continue;
+      }
+
+      // Bold: **text** or __text__
+      const boldMatch = remaining.match(/^(\*\*|__)([^*_]+)\1/);
+      if (boldMatch) {
+        parts.push(<strong key={key++} className="md-bold">{boldMatch[2]}</strong>);
+        remaining = remaining.slice(boldMatch[0].length);
+        continue;
+      }
+
+      // Italic: *text* or _text_
+      const italicMatch = remaining.match(/^(\*|_)([^*_]+)\1/);
+      if (italicMatch) {
+        parts.push(<em key={key++} className="md-italic">{italicMatch[2]}</em>);
+        remaining = remaining.slice(italicMatch[0].length);
+        continue;
+      }
+
+      // Plain text - consume until next special character or end
+      const plainMatch = remaining.match(/^[^`*_]+/);
+      if (plainMatch) {
+        parts.push(plainMatch[0]);
+        remaining = remaining.slice(plainMatch[0].length);
+        continue;
+      }
+
+      // Single special char that didn't match patterns
+      parts.push(remaining[0]);
+      remaining = remaining.slice(1);
+    }
+
+    return parts.length === 1 ? parts[0] : <>{parts}</>;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const key = `line-${i}`;
+
+    // Code block start/end
+    if (line.startsWith('```')) {
+      if (!inCodeBlock) {
+        inCodeBlock = true;
+        codeBlockLang = line.slice(3).trim();
+        codeBlockContent = [];
+      } else {
+        elements.push(
+          <pre key={key} className={`md-code-block ${codeBlockLang ? `lang-${codeBlockLang}` : ''}`}>
+            <code>{codeBlockContent.join('\n')}</code>
+          </pre>
+        );
+        inCodeBlock = false;
+        codeBlockLang = '';
+      }
+      continue;
+    }
+
+    // Inside code block
+    if (inCodeBlock) {
+      codeBlockContent.push(line);
+      continue;
+    }
+
+    // Headers
+    const h4Match = line.match(/^#{4}\s+(.+)/);
+    if (h4Match) {
+      elements.push(<div key={key} className="md-h4">{processInlineMarkdown(h4Match[1])}</div>);
+      continue;
+    }
+
+    const h3Match = line.match(/^#{3}\s+(.+)/);
+    if (h3Match) {
+      elements.push(<div key={key} className="md-h3">{processInlineMarkdown(h3Match[1])}</div>);
+      continue;
+    }
+
+    const h2Match = line.match(/^#{2}\s+(.+)/);
+    if (h2Match) {
+      elements.push(<div key={key} className="md-h2">{processInlineMarkdown(h2Match[1])}</div>);
+      continue;
+    }
+
+    const h1Match = line.match(/^#\s+(.+)/);
+    if (h1Match) {
+      elements.push(<div key={key} className="md-h1">{processInlineMarkdown(h1Match[1])}</div>);
+      continue;
+    }
+
+    // Horizontal rule
+    if (line.match(/^(-{3,}|_{3,}|\*{3,})$/)) {
+      elements.push(<hr key={key} className="md-hr" />);
+      continue;
+    }
+
+    // List items
+    const listMatch = line.match(/^(\s*)[-*]\s+(.+)/);
+    if (listMatch) {
+      const indent = Math.floor(listMatch[1].length / 2);
+      elements.push(
+        <div key={key} className="md-list-item" style={{ paddingLeft: `${indent * 1}rem` }}>
+          <span className="md-bullet">•</span>
+          {processInlineMarkdown(listMatch[2])}
+        </div>
+      );
+      continue;
+    }
+
+    // Empty line
+    if (line.trim() === '') {
+      elements.push(<div key={key} className="md-empty-line">&nbsp;</div>);
+      continue;
+    }
+
+    // Regular text
+    elements.push(<div key={key} className="md-text">{processInlineMarkdown(line)}</div>);
+  }
+
+  // Handle unclosed code block
+  if (inCodeBlock && codeBlockContent.length > 0) {
+    elements.push(
+      <pre key="unclosed-code" className={`md-code-block ${codeBlockLang ? `lang-${codeBlockLang}` : ''}`}>
+        <code>{codeBlockContent.join('\n')}</code>
+      </pre>
+    );
+  }
+
+  return <>{elements}</>;
+}
 
 // Types
 interface CodingProject {
@@ -864,12 +1015,12 @@ export default function Coding() {
           <div className="terminal-output" ref={terminalRef}>
             {terminalLines.map((line) => (
               <div key={line.id} className={`terminal-line ${line.type}`}>
-                {line.content}
+                {line.type === 'output' ? renderMarkdown(line.content) : line.content}
               </div>
             ))}
             {state.streamingContent && (
-              <div className="terminal-line output streaming">
-                {state.streamingContent}
+              <div className="terminal-line output streaming markdown-content">
+                {renderMarkdown(state.streamingContent)}
                 <span className="cursor">▊</span>
               </div>
             )}
