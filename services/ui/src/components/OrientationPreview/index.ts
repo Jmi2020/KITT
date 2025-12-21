@@ -2,6 +2,5 @@
  * OrientationPreview component exports
  */
 
-export { OrientationPreview } from './OrientationPreview';
+export { OrientationPreview, default } from './OrientationPreview';
 export type { OrientationPreviewProps } from './OrientationPreview';
-export default OrientationPreview;
