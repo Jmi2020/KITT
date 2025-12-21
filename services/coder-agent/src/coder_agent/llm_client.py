@@ -243,75 +243,82 @@ class CoderLLMClient:
     """
     High-level LLM client for coding tasks with model routing.
 
-    Local-first: Uses Ollama with Devstral 2 as primary.
-    Fallback to llama.cpp servers if Ollama unavailable:
-    - Q4 (fast, 8083): Quick planning, test generation
-    - F16 (precise, 8082): Code generation, refinement
+    Local-first: Uses llama.cpp with Devstral 2 123B as primary (port 8087).
+    Fallback to Ollama if llama.cpp unavailable:
+    - llama.cpp Coder (8087): Primary - Devstral 2 123B
+    - Ollama (11434): Fallback - Devstral 2 123B (alternative backend)
     """
 
     def __init__(self) -> None:
-        """Initialize coder LLM client with Ollama-first routing."""
-        # Local-first: Ollama with Devstral 2 (primary)
+        """Initialize coder LLM client with llama.cpp-first routing."""
+        # Backend selection via environment variable
+        self.primary_backend = os.getenv("CODER_PRIMARY_BACKEND", "llamacpp")
+
+        # Primary: llama.cpp with Devstral 2 123B (port 8087)
+        llamacpp_coder_base = os.getenv("LLAMACPP_CODER_HOST", "http://localhost:8087")
+        self.llamacpp_coder_client = LlamaCppClient(
+            base_url=llamacpp_coder_base,
+            timeout=180,  # Allow time for large generations
+        )
+
+        # Fallback: Ollama with Devstral 2
         ollama_base = os.getenv("OLLAMA_CODER_BASE", "http://localhost:11434")
         self.ollama_model = os.getenv("OLLAMA_CODER_MODEL", "devstral:123b")
         self.ollama_client = LlamaCppClient(
             base_url=ollama_base,
-            timeout=180,  # Longer timeout for large model
+            timeout=180,
         )
 
-        # Fallback: Q4 server for fast operations
-        self.q4_client = LlamaCppClient(
-            base_url=os.getenv("LLAMACPP_Q4_BASE", "http://localhost:8083"),
-            timeout=60,
-        )
-
-        # Fallback: F16 server for precise operations
-        self.f16_client = LlamaCppClient(
-            base_url=os.getenv("LLAMACPP_F16_BASE", "http://localhost:8082"),
-            timeout=120,
-        )
-
-        # Track which backend to use
-        self._use_ollama = True
-        self._ollama_checked = False
+        # Track which backend is available
+        self._use_llamacpp = self.primary_backend == "llamacpp"
+        self._backend_checked = False
 
         logger.info(
-            f"Initialized CoderLLMClient: ollama={ollama_base}, "
-            f"model={self.ollama_model}, fallback=Q4/F16"
+            f"Initialized CoderLLMClient: primary={self.primary_backend}, "
+            f"llamacpp={llamacpp_coder_base}, ollama={ollama_base}"
         )
 
     async def close(self) -> None:
         """Close all HTTP clients."""
+        await self.llamacpp_coder_client.close()
         await self.ollama_client.close()
-        await self.q4_client.close()
-        await self.f16_client.close()
 
     async def _get_client(self, prefer_fast: bool = False) -> LlamaCppClient:
         """
         Get the best available client.
 
-        Local-first: Try Ollama first, fall back to llama.cpp servers.
+        Local-first: Try llama.cpp Coder first, fall back to Ollama.
 
         Args:
-            prefer_fast: If True and Ollama unavailable, use Q4 over F16
+            prefer_fast: Currently unused (kept for API compatibility)
 
         Returns:
             Best available LLM client
         """
-        # Check Ollama health once per session
-        if not self._ollama_checked:
-            self._use_ollama = await self.ollama_client.health_check()
-            self._ollama_checked = True
-            if self._use_ollama:
-                logger.info("Using Ollama with Devstral 2")
+        # Check primary backend health once per session
+        if not self._backend_checked:
+            if self.primary_backend == "llamacpp":
+                self._use_llamacpp = await self.llamacpp_coder_client.health_check()
+                if self._use_llamacpp:
+                    logger.info("Using llama.cpp with Devstral 2 123B")
+                else:
+                    logger.warning("llama.cpp unavailable, falling back to Ollama")
             else:
-                logger.warning("Ollama unavailable, falling back to llama.cpp")
+                # Ollama primary
+                self._use_llamacpp = False
+                ollama_ok = await self.ollama_client.health_check()
+                if ollama_ok:
+                    logger.info("Using Ollama with Devstral 2")
+                else:
+                    # Try llama.cpp as fallback
+                    self._use_llamacpp = await self.llamacpp_coder_client.health_check()
+                    if self._use_llamacpp:
+                        logger.warning("Ollama unavailable, using llama.cpp")
+                    else:
+                        logger.error("No LLM backends available!")
+            self._backend_checked = True
 
-        if self._use_ollama:
-            return self.ollama_client
-
-        # Fallback to llama.cpp servers
-        return self.q4_client if prefer_fast else self.f16_client
+        return self.llamacpp_coder_client if self._use_llamacpp else self.ollama_client
 
     async def plan(
         self,
@@ -333,7 +340,7 @@ class CoderLLMClient:
             Implementation plan text
         """
         client = await self._get_client(prefer_fast=True)
-        logger.info(f"Generating plan with {'Ollama' if self._use_ollama else 'Q4'}")
+        logger.info(f"Generating plan with {'llama.cpp' if self._use_llamacpp else 'Ollama'}")
         return await client.generate(
             prompt=user_request,
             system_prompt=system_prompt,
@@ -361,7 +368,7 @@ class CoderLLMClient:
             Generated Python code
         """
         client = await self._get_client(prefer_fast=False)
-        logger.info(f"Generating code with {'Ollama' if self._use_ollama else 'F16'}")
+        logger.info(f"Generating code with {'llama.cpp' if self._use_llamacpp else 'Ollama'}")
         return await client.generate(
             prompt=prompt,
             system_prompt=system_prompt,
@@ -389,7 +396,7 @@ class CoderLLMClient:
             Generated pytest test code
         """
         client = await self._get_client(prefer_fast=True)
-        logger.info(f"Generating tests with {'Ollama' if self._use_ollama else 'Q4'}")
+        logger.info(f"Generating tests with {'llama.cpp' if self._use_llamacpp else 'Ollama'}")
         return await client.generate(
             prompt=prompt,
             system_prompt=system_prompt,
@@ -417,7 +424,7 @@ class CoderLLMClient:
             Refined Python code
         """
         client = await self._get_client(prefer_fast=False)
-        logger.info(f"Refining code with {'Ollama' if self._use_ollama else 'F16'}")
+        logger.info(f"Refining code with {'llama.cpp' if self._use_llamacpp else 'Ollama'}")
         return await client.generate(
             prompt=prompt,
             system_prompt=system_prompt,
@@ -445,7 +452,7 @@ class CoderLLMClient:
             Markdown summary with usage examples
         """
         client = await self._get_client(prefer_fast=True)
-        logger.info(f"Generating summary with {'Ollama' if self._use_ollama else 'Q4'}")
+        logger.info(f"Generating summary with {'llama.cpp' if self._use_llamacpp else 'Ollama'}")
         return await client.generate(
             prompt=prompt,
             system_prompt=system_prompt,
@@ -461,9 +468,8 @@ class CoderLLMClient:
             Dictionary of server health status
         """
         health = {
+            "llamacpp_coder": await self.llamacpp_coder_client.health_check(),
             "ollama": await self.ollama_client.health_check(),
-            "q4": await self.q4_client.health_check(),
-            "f16": await self.f16_client.health_check(),
         }
 
         return health

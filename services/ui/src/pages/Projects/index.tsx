@@ -123,6 +123,10 @@ const Projects = () => {
 
   // Tab change handler
   const handleTabChange = (tab: ArtifactTab) => {
+    if (tab === 'coding') {
+      navigate('/coding');
+      return;
+    }
     setActiveTab(tab);
     setSearchParams({ tab });
   };
@@ -197,10 +201,11 @@ const Projects = () => {
   const localCount = unifiedArtifacts.filter((a) => a.source === 'filesystem').length;
   const dbCount = unifiedArtifacts.filter((a) => a.source === 'database').length;
 
-  const tabs: { id: ArtifactTab; label: string; count: number }[] = [
+  const tabs: { id: ArtifactTab; label: string; count: number; icon?: string }[] = [
     { id: 'all', label: 'All Artifacts', count: allCount },
     { id: 'local', label: 'Local Files', count: localCount },
     { id: 'database', label: 'Project Artifacts', count: dbCount },
+    { id: 'coding', label: 'Coding', count: 0, icon: '💻' },
   ];
 
   // Get unique types for quick navigation
@@ -257,11 +262,12 @@ const Projects = () => {
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            className={`tab-button ${activeTab === tab.id ? 'active' : ''}`}
+            className={`tab-button ${activeTab === tab.id ? 'active' : ''} ${tab.id === 'coding' ? 'coding-tab' : ''}`}
             onClick={() => handleTabChange(tab.id)}
           >
+            {tab.icon && <span className="tab-icon">{tab.icon}</span>}
             <span className="tab-label">{tab.label}</span>
-            <span className="tab-count">{tab.count}</span>
+            {tab.id !== 'coding' && <span className="tab-count">{tab.count}</span>}
           </button>
         ))}
       </nav>

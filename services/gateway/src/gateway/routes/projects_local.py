@@ -39,6 +39,7 @@ class ArtifactCategory(str, Enum):
     CAD = "cad"
     INSTRUCTION = "instruction"
     IMAGE = "image"
+    CODE = "code"
 
 
 # Artifact type definitions: extension(s), media type, category, subdirectory
@@ -90,6 +91,24 @@ ARTIFACT_TYPES: Dict[str, Dict] = {
         "media_type": "image/jpeg",
         "category": ArtifactCategory.IMAGE,
         "subdir": "images",
+    },
+    "py": {
+        "extensions": [".py"],
+        "media_type": "text/x-python",
+        "category": ArtifactCategory.CODE,
+        "subdir": "code",
+    },
+    "js": {
+        "extensions": [".js"],
+        "media_type": "text/javascript",
+        "category": ArtifactCategory.CODE,
+        "subdir": "code",
+    },
+    "ts": {
+        "extensions": [".ts"],
+        "media_type": "text/typescript",
+        "category": ArtifactCategory.CODE,
+        "subdir": "code",
     },
 }
 

@@ -1,7 +1,20 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import './Coding.css';
 
 // Types
+interface CodingProject {
+  id: string;
+  title: string;
+  workingDir?: string;
+  status: string;
+  createdAt: string;
+  metadata?: {
+    gitRepo?: boolean;
+    filesGenerated?: number;
+  };
+}
+
 interface CodingState {
   sessionId: string;
   phase: 'idle' | 'planning' | 'coding' | 'testing' | 'running' | 'refining' | 'summarizing' | 'complete' | 'error';
@@ -49,6 +62,12 @@ const PHASE_ICONS: Record<string, string> = {
 };
 
 export default function Coding() {
+  const [searchParams] = useSearchParams();
+  const projectId = searchParams.get('project');
+
+  const [project, setProject] = useState<CodingProject | null>(null);
+  const [projectLoading, setProjectLoading] = useState(false);
+
   const [state, setState] = useState<CodingState>({
     sessionId: '',
     phase: 'idle',
@@ -75,7 +94,7 @@ export default function Coding() {
     {
       id: '1',
       type: 'output',
-      content: 'Powered by Devstral 2 via Ollama',
+      content: 'Powered by Devstral 2 via llama.cpp',
       timestamp: new Date(),
     },
     {
@@ -103,6 +122,38 @@ export default function Coding() {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Fetch project details if project ID is present
+  useEffect(() => {
+    if (!projectId) return;
+
+    const fetchProject = async () => {
+      setProjectLoading(true);
+      try {
+        const response = await fetch(`/api/coding/projects/${projectId}`);
+        if (response.ok) {
+          const data = await response.json();
+          setProject(data);
+          // Add project info to terminal
+          setTerminalLines(prev => [
+            ...prev,
+            {
+              id: `project-${Date.now()}`,
+              type: 'output',
+              content: `Project: ${data.title}${data.workingDir ? ` (${data.workingDir})` : ''}`,
+              timestamp: new Date(),
+            },
+          ]);
+        }
+      } catch (error) {
+        console.error('Failed to fetch project:', error);
+      } finally {
+        setProjectLoading(false);
+      }
+    };
+
+    fetchProject();
+  }, [projectId]);
 
   // Add terminal line helper
   const addTerminalLine = useCallback((type: TerminalLine['type'], content: string) => {
@@ -410,6 +461,24 @@ export default function Coding() {
 
   return (
     <div className="coding-page">
+      {/* Project Header (if project context present) */}
+      {project && (
+        <div className="project-header">
+          <div className="project-info">
+            <span className="project-icon">💻</span>
+            <div className="project-details">
+              <h2 className="project-title">{project.title}</h2>
+              {project.workingDir && (
+                <span className="project-path">{project.workingDir}</span>
+              )}
+            </div>
+          </div>
+          {project.metadata?.gitRepo && (
+            <span className="git-badge">Git</span>
+          )}
+        </div>
+      )}
+
       {/* Phase Indicator */}
       <div className="phase-indicator">
         {Object.entries(PHASE_LABELS).filter(([key]) => key !== 'idle' && key !== 'error').map(([phase, label]) => (
