@@ -5,6 +5,9 @@
  * - New Research (query form)
  * - Active Sessions (WebSocket streaming)
  * - Results (completed research browser)
+ * - Datasets (topic management & paper harvesting)
+ * - Fine-Tuning (training job management)
+ * - Experts (expert model browser)
  * - Schedule (autonomy calendar)
  */
 
@@ -15,7 +18,11 @@ import type { ResearchHubTab, ResearchSession, ProgressUpdate } from '../../type
 import NewResearch from './tabs/NewResearch';
 import ActiveSessions from './tabs/ActiveSessions';
 import Results from './tabs/Results';
+import DatasetsTab from './tabs/Datasets';
+import FineTuningTab from './tabs/FineTuning';
+import ExpertsTab from './tabs/Experts';
 import Schedule from './tabs/Schedule';
+import ResourcesPanel from './components/ResourcesPanel';
 import './ResearchHub.css';
 
 const ResearchHub = () => {
@@ -124,6 +131,9 @@ const ResearchHub = () => {
     { id: 'new', label: 'New Research', icon: '🔬' },
     { id: 'active', label: 'Active', icon: '📡' },
     { id: 'results', label: 'Results', icon: '📊' },
+    { id: 'datasets', label: 'Datasets', icon: '📚' },
+    { id: 'finetune', label: 'Fine-Tuning', icon: '🧠' },
+    { id: 'experts', label: 'Experts', icon: '🎓' },
     { id: 'schedule', label: 'Schedule', icon: '📅' },
   ];
 
@@ -186,52 +196,70 @@ const ResearchHub = () => {
             />
           )}
 
+          {activeTab === 'datasets' && (
+            <DatasetsTab api={api} />
+          )}
+
+          {activeTab === 'finetune' && (
+            <FineTuningTab api={api} />
+          )}
+
+          {activeTab === 'experts' && (
+            <ExpertsTab api={api} />
+          )}
+
           {activeTab === 'schedule' && (
             <Schedule api={api} />
           )}
         </div>
 
-        {/* Session Sidebar */}
+        {/* Right Sidebar - Resources Panel for datasets/finetune/experts, Sessions otherwise */}
         <div className="research-hub-sidebar">
-          <div className="sidebar-header">
-            <h3>Recent Sessions</h3>
-            <button className="btn-small" onClick={() => api.loadSessions()}>
-              🔄
-            </button>
-          </div>
+          {['datasets', 'finetune', 'experts'].includes(activeTab) ? (
+            <ResourcesPanel api={api} />
+          ) : (
+            <>
+              <div className="sidebar-header">
+                <h3>Recent Sessions</h3>
+                <button className="btn-small" onClick={() => api.loadSessions()}>
+                  🔄
+                </button>
+              </div>
 
-          <div className="session-list">
-            {api.sessions.length === 0 ? (
-              <p className="empty-state">No sessions yet</p>
-            ) : (
-              api.sessions.slice(0, 10).map((session) => (
-                <div
-                  key={session.session_id}
-                  className={`session-card ${activeSession?.session_id === session.session_id ? 'selected' : ''}`}
-                  onClick={() => handleSelectSession(session)}
-                >
-                  <div className="session-card-header">
-                    <span className={`status-dot status-${session.status}`}></span>
-                    <span className="session-status">{session.status}</span>
-                    <span className="session-date">
-                      {new Date(session.created_at).toLocaleDateString()}
-                    </span>
-                  </div>
+              <div className="session-list">
+                {api.sessions.length === 0 ? (
+                  <p className="empty-state">No sessions yet</p>
+                ) : (
+                  api.sessions.slice(0, 10).map((session) => (
+                    <div
+                      key={session.session_id}
+                      className={`session-card ${activeSession?.session_id === session.session_id ? 'selected' : ''}`}
+                      onClick={() => handleSelectSession(session)}
+                    >
+                      <div className="session-card-header">
+                        <span className={`status-dot status-${session.status}`}></span>
+                        <span className="session-status">{session.status}</span>
+                        <span className="session-date">
+                          {new Date(session.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
 
-                  <div className="session-card-query">
-                    {session.query.substring(0, 60)}
-                    {session.query.length > 60 && '...'}
-                  </div>
+                      <div className="session-card-query">
+                        {session.query.substring(0, 60)}
+                        {session.query.length > 60 && '...'}
+                      </div>
 
-                  <div className="session-card-stats">
-                    <span>📊 {session.total_findings}</span>
-                    <span>🔗 {session.total_sources}</span>
-                    <span>💰 ${session.total_cost_usd.toFixed(2)}</span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+                      <div className="session-card-stats">
+                        <span>📊 {session.total_findings}</span>
+                        <span>🔗 {session.total_sources}</span>
+                        <span>💰 ${session.total_cost_usd.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

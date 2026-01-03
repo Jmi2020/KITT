@@ -1462,6 +1462,50 @@ async def create_research_topic(request: CreateTopicRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/topics")
+async def list_topics():
+    """
+    List all research topics.
+
+    Returns:
+        List of topics with status and statistics
+    """
+    try:
+        from .topic_registry import get_topic_registry
+
+        registry = get_topic_registry()
+        topics = await registry.list_topics()
+
+        return {
+            "topics": [
+                {
+                    "topic_id": t.topic_id,
+                    "name": t.name,
+                    "description": t.description,
+                    "status": t.status.value if hasattr(t.status, 'value') else t.status,
+                    "sources": t.sources,
+                    "max_papers": t.max_papers,
+                    "papers_harvested": t.papers_harvested,
+                    "claims_extracted": t.claims_extracted,
+                    "dataset_entries": t.dataset_entries,
+                    "maturation_score": t.maturation_score,
+                    "created_at": t.created_at.isoformat() if t.created_at else None,
+                    "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+                    "error_message": t.error_message,
+                }
+                for t in topics
+            ],
+            "count": len(topics),
+        }
+
+    except ImportError:
+        # Topic registry not yet implemented, return empty
+        return {"topics": [], "count": 0}
+    except Exception as e:
+        logger.error(f"Error listing topics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/topics/{topic_id}")
 async def get_topic_status(topic_id: str):
     """
@@ -1474,8 +1518,34 @@ async def get_topic_status(topic_id: str):
         Topic status and statistics
     """
     try:
-        # TODO: Fetch from database
-        # For now, return placeholder
+        from .topic_registry import get_topic_registry
+
+        registry = get_topic_registry()
+        topic = await registry.get_topic(topic_id)
+
+        if not topic:
+            raise HTTPException(status_code=404, detail=f"Topic {topic_id} not found")
+
+        return {
+            "topic_id": topic.topic_id,
+            "name": topic.name,
+            "description": topic.description,
+            "status": topic.status.value if hasattr(topic.status, 'value') else topic.status,
+            "sources": topic.sources,
+            "max_papers": topic.max_papers,
+            "papers_harvested": topic.papers_harvested,
+            "claims_extracted": topic.claims_extracted,
+            "dataset_entries": topic.dataset_entries,
+            "maturation_score": topic.maturation_score,
+            "created_at": topic.created_at.isoformat() if topic.created_at else None,
+            "updated_at": topic.updated_at.isoformat() if topic.updated_at else None,
+            "error_message": topic.error_message,
+        }
+
+    except HTTPException:
+        raise
+    except ImportError:
+        # Topic registry not yet implemented
         return {
             "topic_id": topic_id,
             "name": "Unknown Topic",
@@ -1484,9 +1554,8 @@ async def get_topic_status(topic_id: str):
             "claims_extracted": 0,
             "dataset_entries": 0,
             "maturation_score": 0.0,
-            "message": "Topic status endpoint placeholder",
+            "message": "Topic registry not yet implemented",
         }
-
     except Exception as e:
         logger.error(f"Error getting topic status: {e}")
         raise HTTPException(status_code=500, detail=str(e))

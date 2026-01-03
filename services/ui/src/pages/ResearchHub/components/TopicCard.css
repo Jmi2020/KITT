@@ -1,0 +1,250 @@
+/**
+ * TopicCard Styles
+ */
+
+.topic-card {
+  background: var(--card-bg, #1a1a2e);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 12px;
+  padding: 1.25rem;
+  transition: border-color 0.2s ease;
+}
+
+.topic-card:hover {
+  border-color: var(--accent-color, #4ade80);
+}
+
+/* Status-based border colors */
+.topic-card.status-harvesting {
+  border-color: #f59e0b;
+}
+
+.topic-card.status-extracting {
+  border-color: #3b82f6;
+}
+
+.topic-card.status-ready {
+  border-color: #4ade80;
+}
+
+.topic-card.status-error {
+  border-color: #dc2626;
+}
+
+/* Header */
+.topic-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+}
+
+.topic-name {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--text-primary, #fff);
+  flex: 1;
+  margin-right: 0.5rem;
+}
+
+.topic-status {
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.topic-status.status-created {
+  background: rgba(107, 114, 128, 0.3);
+  color: #9ca3af;
+}
+
+.topic-status.status-harvesting {
+  background: rgba(245, 158, 11, 0.3);
+  color: #f59e0b;
+}
+
+.topic-status.status-extracting {
+  background: rgba(59, 130, 246, 0.3);
+  color: #3b82f6;
+}
+
+.topic-status.status-ready {
+  background: rgba(74, 222, 128, 0.3);
+  color: #4ade80;
+}
+
+.topic-status.status-error {
+  background: rgba(220, 38, 38, 0.3);
+  color: #dc2626;
+}
+
+/* Description */
+.topic-description {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary, #888);
+  line-height: 1.4;
+}
+
+/* Sources */
+.topic-sources {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.source-badge {
+  padding: 0.15rem 0.5rem;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: var(--text-secondary, #aaa);
+  text-transform: uppercase;
+}
+
+/* Stats Grid */
+.topic-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+}
+
+.topic-stat {
+  text-align: center;
+}
+
+.topic-stat .stat-value {
+  display: block;
+  font-size: 1.25rem;
+  font-weight: bold;
+  color: var(--text-primary, #fff);
+}
+
+.topic-stat .stat-label {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-secondary, #888);
+  text-transform: uppercase;
+  margin-top: 0.15rem;
+}
+
+/* Maturation Progress */
+.topic-maturation {
+  margin-bottom: 1rem;
+}
+
+.maturation-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.maturation-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #888);
+}
+
+.maturation-value {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+}
+
+.maturation-bar {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  position: relative;
+  overflow: visible;
+}
+
+.maturation-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4ade80, #22c55e);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.threshold-marker {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 12px;
+  background: var(--accent-color, #4ade80);
+  border-radius: 1px;
+}
+
+.ready-badge {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  background: rgba(74, 222, 128, 0.2);
+  color: #4ade80;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* Error */
+.topic-error {
+  padding: 0.75rem;
+  background: rgba(220, 38, 38, 0.2);
+  border: 1px solid rgba(220, 38, 38, 0.5);
+  border-radius: 6px;
+  color: #fca5a5;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+/* Actions */
+.topic-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.topic-actions .btn-primary,
+.topic-actions .btn-secondary {
+  flex: 1;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.topic-actions .btn-primary {
+  background: var(--accent-color, #4ade80);
+  color: #000;
+  border: none;
+}
+
+.topic-actions .btn-secondary {
+  background: transparent;
+  border: 1px solid var(--accent-color, #4ade80);
+  color: var(--accent-color, #4ade80);
+}
+
+.topic-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Timestamps */
+.topic-timestamps {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.topic-timestamps small {
+  color: var(--text-muted, #666);
+  font-size: 0.75rem;
+}

@@ -263,4 +263,148 @@ export interface ScheduleExecution {
   error_message?: string;
 }
 
-export type ResearchHubTab = 'new' | 'active' | 'results' | 'schedule';
+export type ResearchHubTab = 'new' | 'active' | 'results' | 'datasets' | 'finetune' | 'experts' | 'schedule';
+
+// ============================================================================
+// Dataset Generation & Fine-Tuning Types
+// ============================================================================
+
+/**
+ * Research topic for dataset generation
+ */
+export interface ResearchTopic {
+  topic_id: string;
+  name: string;
+  description?: string;
+  status: 'created' | 'harvesting' | 'extracting' | 'ready' | 'error';
+  sources: string[];
+  max_papers: number;
+  papers_harvested: number;
+  claims_extracted: number;
+  dataset_entries: number;
+  maturation_score: number;
+  created_at: string;
+  updated_at: string;
+  error_message?: string;
+}
+
+/**
+ * Topic creation parameters
+ */
+export interface CreateTopicParams {
+  name: string;
+  description?: string;
+  sources: string[];
+  max_papers: number;
+}
+
+/**
+ * Fine-tuning configuration
+ */
+export interface FinetuneConfig {
+  epochs: number;
+  batch_size: number;
+  learning_rate: number;
+  lora_rank: number;
+  export_gguf: boolean;
+}
+
+/**
+ * Fine-tuning job
+ */
+export interface FinetuneJob {
+  job_id: string;
+  topic_id: string;
+  topic_name: string;
+  status: 'pending' | 'preparing' | 'training' | 'fusing' | 'converting' | 'completed' | 'failed';
+  config: FinetuneConfig;
+  progress: {
+    current_epoch: number;
+    total_epochs: number;
+    current_step: number;
+    total_steps: number;
+    current_loss: number;
+    tokens_per_second: number;
+  };
+  metrics?: {
+    final_loss: number;
+    epochs_completed: number;
+    training_samples: number;
+    training_duration_seconds: number;
+  };
+  started_at?: string;
+  completed_at?: string;
+  error_message?: string;
+}
+
+/**
+ * Expert model trained on a topic
+ */
+export interface ExpertModel {
+  model_id: string;
+  topic_id: string;
+  topic_name: string;
+  training_samples: number;
+  final_loss: number;
+  is_active: boolean;
+  adapter_path: string;
+  gguf_path?: string;
+  created_at: string;
+  last_used_at?: string;
+}
+
+/**
+ * Memory mode state for LLM resource management
+ */
+export interface MemoryModeState {
+  mode: 'idle' | 'research' | 'collective' | 'finetune';
+  models_loaded: string[];
+  memory_used_gb: number;
+  memory_available_gb: number;
+  can_transition_to: string[];
+}
+
+/**
+ * Disk usage for research data storage
+ */
+export interface DiskUsage {
+  total_gb: number;
+  used_gb: number;
+  available_gb: number;
+  usage_percent: number;
+  research_data_gb: number;
+  expert_models_gb: number;
+  temp_files_gb: number;
+  quota_gb: number;
+  quota_status: 'ok' | 'warning' | 'critical' | 'paused';
+  quota_message: string;
+}
+
+/**
+ * Harvest progress event for WebSocket updates
+ */
+export interface HarvestProgressEvent {
+  topic_id: string;
+  phase: 'harvesting' | 'extracting' | 'building';
+  source?: string;
+  papers_found: number;
+  papers_processed: number;
+  claims_extracted: number;
+  entries_created: number;
+  current_paper?: string;
+  error?: string;
+}
+
+/**
+ * Training progress event for WebSocket updates
+ */
+export interface TrainingProgressEvent {
+  job_id: string;
+  phase: 'preparing' | 'training' | 'fusing' | 'converting';
+  epoch: number;
+  step: number;
+  loss: number;
+  tokens_per_second: number;
+  eta_seconds?: number;
+  error?: string;
+}
