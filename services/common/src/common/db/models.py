@@ -986,6 +986,395 @@ class CollectiveSessionRecord(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
+# =============================================================================
+# Dataset Generation & Fine-Tuning System
+# =============================================================================
+
+
+class TopicStatus(enum.Enum):
+    """Status of a research topic for dataset generation."""
+    pending = "pending"
+    harvesting = "harvesting"
+    extracting = "extracting"
+    evaluating = "evaluating"
+    mature = "mature"
+    finetuning = "finetuning"
+    completed = "completed"
+    paused = "paused"
+
+
+class ClaimType(enum.Enum):
+    """Classification of extracted claims."""
+    finding = "finding"           # Empirical result or discovery
+    method = "method"             # Technique, algorithm, or approach
+    definition = "definition"     # Concept or term definition
+    comparison = "comparison"     # Comparison between approaches/results
+    limitation = "limitation"     # Acknowledged limitation or constraint
+
+
+class SectionType(enum.Enum):
+    """Paper section where claim was extracted."""
+    abstract = "abstract"
+    introduction = "introduction"
+    methods = "methods"
+    results = "results"
+    discussion = "discussion"
+    conclusion = "conclusion"
+    unknown = "unknown"
+
+
+class EntryStatus(enum.Enum):
+    """Evaluation status for claims and dataset entries."""
+    pending = "pending"
+    accepted = "accepted"
+    refined = "refined"
+    rejected = "rejected"
+
+
+class BatchStatus(enum.Enum):
+    """Status of a training batch."""
+    pending = "pending"
+    generating = "generating"
+    completed = "completed"
+    failed = "failed"
+
+
+class ResearchTopic(Base):
+    """Research topic for dataset generation and fine-tuning.
+
+    Tracks the lifecycle of a research topic from initial harvesting
+    through claim extraction, evaluation, and eventual fine-tuning.
+    """
+
+    __tablename__ = "research_topics"
+    __table_args__ = (
+        Index("ix_research_topics_status", "status"),
+        Index("ix_research_topics_maturation", "maturation_score"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    query_terms: Mapped[list] = mapped_column(ARRAY(String), nullable=False)
+    categories: Mapped[list] = mapped_column(ARRAY(String), default=list)
+    sources: Mapped[list] = mapped_column(ARRAY(String), default=lambda: ["arxiv"])
+
+    # Configuration
+    target_papers: Mapped[int] = mapped_column(Integer, default=500)
+    target_entries: Mapped[int] = mapped_column(Integer, default=5000)
+    min_citations: Mapped[int] = mapped_column(Integer, default=0)
+    date_from: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    date_to: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    auto_finetune: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Status and progress
+    status: Mapped[TopicStatus] = mapped_column(
+        Enum(TopicStatus), default=TopicStatus.pending
+    )
+    papers_harvested: Mapped[int] = mapped_column(Integer, default=0)
+    papers_processed: Mapped[int] = mapped_column(Integer, default=0)
+    claims_extracted: Mapped[int] = mapped_column(Integer, default=0)
+    claims_accepted: Mapped[int] = mapped_column(Integer, default=0)
+    dataset_entries: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Maturation metrics
+    maturation_score: Mapped[float] = mapped_column(Numeric(5, 4), default=0.0)
+    topic_coverage_score: Mapped[float] = mapped_column(Numeric(5, 4), default=0.0)
+    claim_conflict_rate: Mapped[float] = mapped_column(Numeric(5, 4), default=0.0)
+
+    # Configuration and metadata
+    config: Mapped[dict] = mapped_column(JSONB, default=dict)
+    topic_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=datetime.utcnow)
+    last_harvest_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_evaluation_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Relationships
+    papers: Mapped[List["ResearchPaper"]] = relationship(
+        "ResearchPaper",
+        secondary="paper_topics",
+        back_populates="topics"
+    )
+    dataset_entry_records: Mapped[List["DatasetEntry"]] = relationship(back_populates="topic")
+    training_batches: Mapped[List["TrainingBatch"]] = relationship(back_populates="topic")
+    expert_models: Mapped[List["ExpertModel"]] = relationship(back_populates="topic")
+
+
+class ResearchPaper(Base):
+    """Harvested research paper from academic sources.
+
+    Stores paper metadata, content, and processing status.
+    Papers can belong to multiple topics via the paper_topics junction table.
+    """
+
+    __tablename__ = "research_papers"
+    __table_args__ = (
+        Index("ix_research_papers_source", "source"),
+        Index("ix_research_papers_harvested_at", "harvested_at"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+
+    # Source IDs (at least one should be present)
+    arxiv_id: Mapped[Optional[str]] = mapped_column(String(50), unique=True)
+    semantic_scholar_id: Mapped[Optional[str]] = mapped_column(String(100), unique=True)
+    pubmed_id: Mapped[Optional[str]] = mapped_column(String(50), unique=True)
+    core_id: Mapped[Optional[str]] = mapped_column(String(100), unique=True)
+    doi: Mapped[Optional[str]] = mapped_column(String(255))
+
+    # Content
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    abstract: Mapped[Optional[str]] = mapped_column(Text)
+    full_text: Mapped[Optional[str]] = mapped_column(Text)
+    authors: Mapped[list] = mapped_column(JSONB, default=list)
+    published_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    citations_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Source and storage
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_url: Mapped[Optional[str]] = mapped_column(String(500))
+    pdf_url: Mapped[Optional[str]] = mapped_column(String(500))
+    pdf_path: Mapped[Optional[str]] = mapped_column(String(500))
+
+    # Processing status
+    text_extracted: Mapped[bool] = mapped_column(Boolean, default=False)
+    claims_extracted: Mapped[bool] = mapped_column(Boolean, default=False)
+    embedding_id: Mapped[Optional[str]] = mapped_column(String(100))
+
+    # Timestamps
+    harvested_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Relationships
+    topics: Mapped[List["ResearchTopic"]] = relationship(
+        "ResearchTopic",
+        secondary="paper_topics",
+        back_populates="papers"
+    )
+    claims: Mapped[List["ExtractedClaim"]] = relationship(back_populates="paper")
+
+
+class PaperTopic(Base):
+    """Junction table for paper-topic many-to-many relationship."""
+
+    __tablename__ = "paper_topics"
+    __table_args__ = (
+        Index("ix_paper_topics_topic_id", "topic_id"),
+    )
+
+    paper_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("research_papers.id", ondelete="CASCADE"),
+        primary_key=True
+    )
+    topic_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("research_topics.id", ondelete="CASCADE"),
+        primary_key=True
+    )
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ExtractedClaim(Base):
+    """Claim extracted from a research paper.
+
+    Includes classification, evidence quotes, and evaluation status.
+    """
+
+    __tablename__ = "extracted_claims"
+    __table_args__ = (
+        Index("ix_extracted_claims_paper_id", "paper_id"),
+        Index("ix_extracted_claims_type", "claim_type"),
+        Index("ix_extracted_claims_fingerprint", "dedupe_fingerprint"),
+        Index("ix_extracted_claims_eval_status", "evaluation_status"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    paper_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("research_papers.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    session_id: Mapped[Optional[str]] = mapped_column(String(100))
+
+    # Claim content
+    claim_text: Mapped[str] = mapped_column(Text, nullable=False)
+    claim_type: Mapped[ClaimType] = mapped_column(Enum(ClaimType), nullable=False)
+    section: Mapped[SectionType] = mapped_column(
+        Enum(SectionType), default=SectionType.unknown
+    )
+
+    # Evidence
+    evidence_quotes: Mapped[list] = mapped_column(JSONB, nullable=False)
+    evidence_positions: Mapped[list] = mapped_column(JSONB, default=list)
+    citations: Mapped[list] = mapped_column(JSONB, default=list)
+
+    # Scores
+    confidence: Mapped[float] = mapped_column(Numeric(5, 4), default=0.0)
+    provenance_score: Mapped[float] = mapped_column(Numeric(5, 4), default=0.0)
+    entailment_score: Mapped[float] = mapped_column(Numeric(5, 4), default=0.0)
+    novelty_score: Mapped[float] = mapped_column(Numeric(5, 4), default=0.0)
+
+    # Embedding and deduplication
+    embedding_id: Mapped[Optional[str]] = mapped_column(String(100))
+    dedupe_fingerprint: Mapped[Optional[str]] = mapped_column(String(32))
+
+    # Evaluation
+    evaluation_status: Mapped[EntryStatus] = mapped_column(
+        Enum(EntryStatus), default=EntryStatus.pending
+    )
+    evaluation_notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Timestamps
+    extracted_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    evaluated_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Relationships
+    paper: Mapped["ResearchPaper"] = relationship(back_populates="claims")
+
+
+class DatasetEntry(Base):
+    """Alpaca-format training dataset entry.
+
+    Generated from extracted claims for fine-tuning.
+    """
+
+    __tablename__ = "dataset_entries"
+    __table_args__ = (
+        Index("ix_dataset_entries_topic_id", "topic_id"),
+        Index("ix_dataset_entries_status", "evaluation_status"),
+        Index("ix_dataset_entries_quality", "quality_score"),
+        Index("ix_dataset_entries_batch_id", "batch_id"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    topic_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("research_topics.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    # Alpaca format fields
+    instruction: Mapped[str] = mapped_column(Text, nullable=False)
+    input: Mapped[str] = mapped_column(Text, default="")
+    output: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Provenance
+    source_paper_ids: Mapped[list] = mapped_column(JSONB, nullable=False)
+    source_claim_ids: Mapped[list] = mapped_column(JSONB, nullable=False)
+
+    # Quality
+    quality_score: Mapped[float] = mapped_column(Numeric(5, 4), default=0.0)
+    evaluation_status: Mapped[EntryStatus] = mapped_column(
+        Enum(EntryStatus), default=EntryStatus.pending
+    )
+    evaluation_notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Batch tracking
+    batch_id: Mapped[Optional[str]] = mapped_column(UUID(as_uuid=False))
+
+    # Timestamps
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    evaluated_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Relationships
+    topic: Mapped["ResearchTopic"] = relationship(back_populates="dataset_entry_records")
+
+
+class TrainingBatch(Base):
+    """Training batch export for fine-tuning.
+
+    Tracks batches of dataset entries exported for training.
+    """
+
+    __tablename__ = "training_batches"
+    __table_args__ = (
+        Index("ix_training_batches_topic_id", "topic_id"),
+        Index("ix_training_batches_status", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    topic_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("research_topics.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    # Batch info
+    batch_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    entry_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    file_path: Mapped[Optional[str]] = mapped_column(String(500))
+    file_format: Mapped[str] = mapped_column(String(20), default="alpaca_json")
+    file_size_bytes: Mapped[Optional[int]] = mapped_column(Integer)
+
+    # Status
+    status: Mapped[BatchStatus] = mapped_column(
+        Enum(BatchStatus), default=BatchStatus.pending
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Quality metrics
+    avg_quality_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 4))
+    accepted_count: Mapped[Optional[int]] = mapped_column(Integer)
+    rejected_count: Mapped[Optional[int]] = mapped_column(Integer)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Relationships
+    topic: Mapped["ResearchTopic"] = relationship(back_populates="training_batches")
+
+
+class ExpertModel(Base):
+    """Fine-tuned expert model registry.
+
+    Tracks expert models created from research topic datasets.
+    """
+
+    __tablename__ = "expert_models"
+    __table_args__ = (
+        Index("ix_expert_models_topic_id", "topic_id"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    model_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    topic_id: Mapped[Optional[str]] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("research_topics.id", ondelete="SET NULL")
+    )
+    topic_name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Model info
+    base_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    adapter_path: Mapped[Optional[str]] = mapped_column(String(500))
+    gguf_path: Mapped[Optional[str]] = mapped_column(String(500))
+
+    # Training info
+    training_samples: Mapped[int] = mapped_column(Integer, nullable=False)
+    training_epochs: Mapped[int] = mapped_column(Integer, nullable=False)
+    training_loss: Mapped[Optional[float]] = mapped_column(Numeric(8, 6))
+    validation_loss: Mapped[Optional[float]] = mapped_column(Numeric(8, 6))
+
+    # Training config and metrics
+    training_config: Mapped[dict] = mapped_column(JSONB, default=dict)
+    metrics: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+    # Status
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    registered_in_kitt: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=datetime.utcnow)
+
+    # Relationships
+    topic: Mapped[Optional["ResearchTopic"]] = relationship(back_populates="expert_models")
+
+
 __all__ = [
     "Base",
     # Enums
@@ -1048,4 +1437,17 @@ __all__ = [
     "CollectivePatternEnum",
     "CollectiveStatusEnum",
     "CollectiveSessionRecord",
+    # Dataset Generation & Fine-Tuning
+    "TopicStatus",
+    "ClaimType",
+    "SectionType",
+    "EntryStatus",
+    "BatchStatus",
+    "ResearchTopic",
+    "ResearchPaper",
+    "PaperTopic",
+    "ExtractedClaim",
+    "DatasetEntry",
+    "TrainingBatch",
+    "ExpertModel",
 ]

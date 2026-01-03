@@ -1358,3 +1358,367 @@ async def extract_claims_endpoint(
     except Exception as e:
         logger.error(f"❌ Error in HTTP extraction endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
+
+
+# ============================================================================
+# Dataset Generation & Fine-Tuning Endpoints
+# ============================================================================
+
+class CreateTopicRequest(BaseModel):
+    """Request to create a research topic for dataset generation."""
+    name: str = Field(..., description="Topic name", min_length=3)
+    description: str = Field("", description="Topic description")
+    sources: List[str] = Field(
+        default=["arxiv", "semantic_scholar"],
+        description="Academic sources to harvest from"
+    )
+    max_papers: int = Field(500, ge=10, le=5000, description="Maximum papers to harvest")
+
+
+class TopicStatusResponse(BaseModel):
+    """Response with topic status."""
+    topic_id: str
+    name: str
+    status: str
+    papers_harvested: int
+    claims_extracted: int
+    dataset_entries: int
+    maturation_score: float
+    created_at: datetime
+
+    class Config:
+        json_encoders = {datetime: lambda v: v.isoformat()}
+
+
+class FinetuneTopicRequest(BaseModel):
+    """Request to start fine-tuning for a topic."""
+    epochs: int = Field(3, ge=1, le=10, description="Training epochs")
+    batch_size: int = Field(4, ge=1, le=16, description="Batch size")
+    learning_rate: float = Field(1e-4, description="Learning rate")
+    export_gguf: bool = Field(True, description="Export to GGUF after training")
+
+
+class MemoryModeResponse(BaseModel):
+    """Response with memory mode status."""
+    mode: str
+    models_loaded: List[str]
+    memory_used_gb: float
+    memory_available_gb: float
+    entered_at: Optional[datetime] = None
+
+    class Config:
+        json_encoders = {datetime: lambda v: v.isoformat()}
+
+
+class SetMemoryModeRequest(BaseModel):
+    """Request to set memory mode."""
+    mode: str = Field(..., description="Mode: idle, research, collective, finetune")
+    checkpoint_id: Optional[str] = Field(None, description="Optional checkpoint ID")
+
+
+class DiskUsageResponse(BaseModel):
+    """Response with disk usage statistics."""
+    total_gb: float
+    used_gb: float
+    available_gb: float
+    research_data_gb: float
+    expert_models_gb: float
+    quota_status: str
+    usage_percent: float
+
+
+@router.post("/topics", status_code=201)
+async def create_research_topic(request: CreateTopicRequest):
+    """
+    Create a new research topic for dataset generation.
+
+    This creates a topic entry and starts the paper harvesting process.
+
+    Args:
+        request: Topic creation request
+
+    Returns:
+        Created topic ID and status
+    """
+    try:
+        import uuid
+        from datetime import datetime
+
+        topic_id = uuid.uuid4().hex[:16]
+
+        # TODO: Store in database and start harvesting
+        # For now, return a placeholder response
+        return {
+            "topic_id": topic_id,
+            "name": request.name,
+            "status": "created",
+            "sources": request.sources,
+            "max_papers": request.max_papers,
+            "message": f"Topic '{request.name}' created. Paper harvesting will begin shortly.",
+        }
+
+    except Exception as e:
+        logger.error(f"Error creating topic: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/topics/{topic_id}")
+async def get_topic_status(topic_id: str):
+    """
+    Get status of a research topic.
+
+    Args:
+        topic_id: Topic ID
+
+    Returns:
+        Topic status and statistics
+    """
+    try:
+        # TODO: Fetch from database
+        # For now, return placeholder
+        return {
+            "topic_id": topic_id,
+            "name": "Unknown Topic",
+            "status": "not_found",
+            "papers_harvested": 0,
+            "claims_extracted": 0,
+            "dataset_entries": 0,
+            "maturation_score": 0.0,
+            "message": "Topic status endpoint placeholder",
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting topic status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/topics/{topic_id}/finetune")
+async def start_topic_finetune(topic_id: str, request: FinetuneTopicRequest):
+    """
+    Start fine-tuning for a research topic.
+
+    Requires at least 5000 dataset entries for quality training.
+
+    Args:
+        topic_id: Topic ID
+        request: Fine-tuning configuration
+
+    Returns:
+        Fine-tuning job status
+    """
+    try:
+        from .finetune_pipeline import get_finetune_pipeline, FinetuneConfig
+
+        pipeline = get_finetune_pipeline()
+
+        # TODO: Get topic and entries from database
+        # For now, return placeholder
+        return {
+            "topic_id": topic_id,
+            "status": "pending",
+            "message": "Fine-tuning requires at least 5000 dataset entries. Current count: 0",
+            "config": {
+                "epochs": request.epochs,
+                "batch_size": request.batch_size,
+                "learning_rate": request.learning_rate,
+                "export_gguf": request.export_gguf,
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Error starting fine-tune: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/memory/mode", response_model=MemoryModeResponse)
+async def get_memory_mode():
+    """
+    Get current memory mode status.
+
+    Returns:
+        Current mode, loaded models, and memory statistics
+    """
+    try:
+        from .memory_scheduler import get_memory_scheduler
+
+        scheduler = get_memory_scheduler()
+        state = scheduler.current_state
+        memory_stats = await scheduler.get_memory_stats()
+
+        return MemoryModeResponse(
+            mode=state.mode.value,
+            models_loaded=state.models_loaded,
+            memory_used_gb=memory_stats["used_gb"],
+            memory_available_gb=memory_stats["available_gb"],
+            entered_at=state.entered_at,
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting memory mode: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/memory/mode", response_model=MemoryModeResponse)
+async def set_memory_mode(request: SetMemoryModeRequest):
+    """
+    Set memory mode for research pipeline.
+
+    Mode transitions involve loading/unloading models to optimize memory.
+
+    Args:
+        request: Mode to transition to
+
+    Returns:
+        New memory mode status
+    """
+    try:
+        from .memory_scheduler import get_memory_scheduler, ResearchMemoryMode
+
+        scheduler = get_memory_scheduler()
+
+        # Parse mode
+        try:
+            target_mode = ResearchMemoryMode(request.mode)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid mode: {request.mode}. Valid: idle, research, collective, finetune"
+            )
+
+        # Transition to new mode
+        state = await scheduler.enter_mode(
+            target_mode,
+            checkpoint_id=request.checkpoint_id
+        )
+
+        memory_stats = await scheduler.get_memory_stats()
+
+        return MemoryModeResponse(
+            mode=state.mode.value,
+            models_loaded=state.models_loaded,
+            memory_used_gb=memory_stats["used_gb"],
+            memory_available_gb=memory_stats["available_gb"],
+            entered_at=state.entered_at,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting memory mode: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/experts")
+async def list_expert_models(
+    active_only: bool = Query(True, description="Only show active models"),
+    topic_id: Optional[str] = Query(None, description="Filter by topic ID"),
+):
+    """
+    List fine-tuned expert models.
+
+    Args:
+        active_only: Only return active models
+        topic_id: Filter by topic ID
+
+    Returns:
+        List of expert models
+    """
+    try:
+        from .finetune_pipeline import get_expert_registry
+
+        registry = get_expert_registry()
+        experts = await registry.list_experts(
+            active_only=active_only,
+            topic_id=topic_id,
+        )
+
+        return {
+            "experts": [
+                {
+                    "model_id": e.model_id,
+                    "topic_id": e.topic_id,
+                    "topic_name": e.topic_name,
+                    "base_model": e.base_model,
+                    "adapter_path": e.adapter_path,
+                    "gguf_path": e.gguf_path,
+                    "training_samples": e.training_samples,
+                    "final_loss": e.final_loss,
+                    "is_active": e.is_active,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                }
+                for e in experts
+            ],
+            "count": len(experts),
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing experts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/disk", response_model=DiskUsageResponse)
+async def get_disk_usage():
+    """
+    Get disk usage statistics for research data.
+
+    Returns:
+        Disk usage and quota status
+    """
+    try:
+        from .disk_manager import get_disk_quota_manager
+
+        manager = get_disk_quota_manager()
+        usage = await manager.get_usage()
+        quota = await manager.check_quota()
+
+        return DiskUsageResponse(
+            total_gb=usage.total_gb,
+            used_gb=usage.used_gb,
+            available_gb=usage.available_gb,
+            research_data_gb=usage.research_data_gb,
+            expert_models_gb=usage.expert_models_gb,
+            quota_status=quota.alert_level,
+            usage_percent=quota.usage_percent,
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting disk usage: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/disk/compress")
+async def compress_old_data(
+    age_days: int = Query(30, ge=1, le=365, description="Compress files older than this"),
+    dry_run: bool = Query(False, description="Only report what would be compressed"),
+):
+    """
+    Compress old research data files.
+
+    Args:
+        age_days: Files older than this will be compressed
+        dry_run: Only report without compressing
+
+    Returns:
+        Compression statistics
+    """
+    try:
+        from .disk_manager import get_disk_quota_manager
+
+        manager = get_disk_quota_manager()
+        result = await manager.compress_old_data(
+            age_days=age_days,
+            dry_run=dry_run,
+        )
+
+        return {
+            "files_compressed": result.files_compressed,
+            "bytes_before": result.bytes_before,
+            "bytes_after": result.bytes_after,
+            "compression_ratio": result.compression_ratio,
+            "duration_seconds": result.duration_seconds,
+            "dry_run": dry_run,
+        }
+
+    except Exception as e:
+        logger.error(f"Error compressing data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
