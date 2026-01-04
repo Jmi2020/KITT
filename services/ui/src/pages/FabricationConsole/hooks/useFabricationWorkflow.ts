@@ -93,7 +93,7 @@ export interface OrientationAnalysis {
 }
 
 export type WorkflowStep = 1 | 2 | 3 | 4 | 5;
-export type GenerationProvider = 'tripo' | 'zoo' | null;
+export type GenerationProvider = 'meshy' | 'tripo' | 'zoo' | null;
 export type GenerationMode = 'generate' | 'import';
 export type QualityPreset = 'quick' | 'standard' | 'quality';
 
@@ -104,6 +104,7 @@ export interface WorkflowState {
   provider: GenerationProvider;
   mode: GenerationMode;
   prompt: string;
+  refineMode: boolean;  // For Meshy: run HD refine after preview
   artifacts: Artifact[];
   selectedArtifact: Artifact | null;
   generationLoading: boolean;
@@ -181,9 +182,10 @@ const initialState: WorkflowState = {
   currentStep: 1,
 
   // Step 1
-  provider: 'tripo',
+  provider: 'meshy',  // Primary provider (Tripo is fallback)
   mode: 'generate',
   prompt: '',
+  refineMode: false,  // HD refine disabled by default
   artifacts: [],
   selectedArtifact: null,
   generationLoading: false,
@@ -231,6 +233,7 @@ export interface WorkflowActions {
   setProvider: (provider: GenerationProvider) => void;
   setMode: (mode: GenerationMode) => void;
   setPrompt: (prompt: string) => void;
+  setRefineMode: (refine: boolean) => void;
   generateModel: () => Promise<void>;
   importModel: (file: File) => Promise<void>;
   selectArtifact: (artifact: Artifact) => void;
@@ -378,6 +381,10 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
       setState(prev => ({ ...prev, prompt }));
     }, []),
 
+    setRefineMode: useCallback((refineMode: boolean) => {
+      setState(prev => ({ ...prev, refineMode }));
+    }, []),
+
     generateModel: useCallback(async () => {
       if (!state.prompt.trim()) {
         setState(prev => ({ ...prev, generationError: 'Enter a prompt first' }));
@@ -400,6 +407,7 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
             conversationId,
             prompt: state.prompt,
             mode: state.provider === 'zoo' ? 'parametric' : 'organic',
+            refine: state.refineMode,  // For Meshy: run HD refine after preview
           }),
         });
 
@@ -422,7 +430,7 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
           generationError: (error as Error).message,
         }));
       }
-    }, [state.prompt, state.provider, conversationId]),
+    }, [state.prompt, state.provider, state.refineMode, conversationId]),
 
     importModel: useCallback(async (file: File) => {
       setState(prev => ({

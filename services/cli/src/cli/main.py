@@ -2281,7 +2281,7 @@ def cad(
         False,
         "--o",
         "--organic",
-        help="Force Tripo organic workflow",
+        help="Force organic workflow (Meshy/Tripo)",
         is_flag=True,
     ),
     parametric: bool = typer.Option(
@@ -2291,6 +2291,24 @@ def cad(
         help="Force Zoo parametric workflow",
         is_flag=True,
     ),
+    meshy: bool = typer.Option(
+        False,
+        "--meshy",
+        help="Force Meshy.ai provider (organic)",
+        is_flag=True,
+    ),
+    tripo: bool = typer.Option(
+        False,
+        "--tripo",
+        help="Force Tripo provider (organic fallback)",
+        is_flag=True,
+    ),
+    refine: bool = typer.Option(
+        False,
+        "--refine",
+        help="Enable Meshy HD refinement for text-to-3D (slower, higher quality)",
+        is_flag=True,
+    ),
     image_filters: Optional[List[str]] = typer.Option(
         None,
         "--image",
@@ -2298,22 +2316,32 @@ def cad(
         help="Limit CAD input to specific stored references (friendly name, ID, or newest-first index). Repeat to include multiple.",
     ),
 ) -> None:
-    """Generate CAD artifacts using Zoo/Tripo/local providers."""
+    """Generate CAD artifacts using Meshy/Tripo/Zoo providers."""
     if organic and parametric:
         console.print("[red]Choose either --o or --p, not both.")
+        raise typer.Exit(1)
+    if meshy and tripo:
+        console.print("[red]Choose either --meshy or --tripo, not both.")
         raise typer.Exit(1)
 
     text = " ".join(prompt)
     payload: Dict[str, Any] = {
         "conversationId": state.conversation_id,
         "prompt": text,
+        "refine": refine,  # For Meshy HD refinement
     }
 
     chosen_mode: Optional[str] = None
-    if organic:
+    if organic or meshy or tripo:
         chosen_mode = "organic"
     elif parametric:
         chosen_mode = "parametric"
+
+    # Log provider hint if explicitly specified
+    if meshy:
+        console.print("[dim]Using Meshy.ai provider[/dim]")
+    elif tripo:
+        console.print("[dim]Using Tripo provider[/dim]")
 
     auto_selected: List[Dict[str, Any]] = []
     if state.stored_images:

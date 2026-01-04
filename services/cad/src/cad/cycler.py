@@ -18,6 +18,7 @@ from common.logging import get_logger
 
 from .fallback.freecad_runner import FreeCADRunner
 from .models import ImageReference, ReferencePayload
+from .providers.meshy_client import MeshyClient
 from .providers.tripo_client import TripoClient
 from .providers.tripo_local import LocalMeshRunner
 from .providers.zoo_client import ZooClient
@@ -47,6 +48,7 @@ class CADCycler:
         artifact_store: ArtifactStore,
         local_runner: Optional[LocalMeshRunner] = None,
         freecad_runner: Optional[FreeCADRunner] = None,
+        meshy_client: Optional[MeshyClient] = None,
         max_tripo_images: int = 2,
         tripo_model_version: Optional[str] = None,
         tripo_texture_quality: Optional[str] = None,
@@ -54,6 +56,8 @@ class CADCycler:
         tripo_orientation: Optional[str] = None,
         tripo_poll_interval: float = 3.0,
         tripo_poll_timeout: float = 180.0,
+        meshy_poll_interval: float = 5.0,
+        meshy_poll_timeout: float = 900.0,
         storage_root: Optional[Path] = None,
         gateway_internal_url: Optional[str] = None,
         mesh_converter: Optional[Callable[[bytes, Optional[str]], bytes]] = None,
@@ -62,7 +66,8 @@ class CADCycler:
         tripo_unit: Optional[str] = "millimeters",
     ) -> None:
         self._zoo = zoo_client
-        self._tripo = tripo_client
+        self._meshy = meshy_client  # Primary for organic mode
+        self._tripo = tripo_client  # Fallback for organic mode
         self._store = artifact_store
         self._local_runner = local_runner
         self._freecad = freecad_runner
@@ -73,6 +78,8 @@ class CADCycler:
         self._tripo_orientation = tripo_orientation
         self._tripo_poll_interval = max(1.0, tripo_poll_interval)
         self._tripo_poll_timeout = max(self._tripo_poll_interval, tripo_poll_timeout)
+        self._meshy_poll_interval = max(1.0, meshy_poll_interval)
+        self._meshy_poll_timeout = max(self._meshy_poll_interval, meshy_poll_timeout)
 
         root = storage_root or Path(os.getenv("KITTY_STORAGE_ROOT", "storage"))
         if not root.is_absolute():
@@ -94,13 +101,26 @@ class CADCycler:
         references: Optional[Dict[str, str]] = None,
         image_refs: Optional[Sequence[Any]] = None,
         mode: Optional[str] = None,
+        refine: bool = False,
     ) -> List[CADArtifact]:
+        """Run CAD generation with the given prompt and options.
+
+        Args:
+            prompt: Text description of the model to generate
+            references: Additional reference parameters (e.g., image_url)
+            image_refs: List of image references for image-to-3D
+            mode: Generation mode - "auto", "parametric", or "organic"
+            refine: For Meshy text-to-3D, run HD refine stage after preview
+
+        Returns:
+            List of generated artifacts
+        """
         artifacts: List[CADArtifact] = []
         references = references or {}
         normalized_refs = self._normalize_image_refs(references, image_refs or [])
         mode_normalized = (mode or "auto").lower()
         run_zoo = mode_normalized in {"auto", "parametric"}
-        run_tripo = mode_normalized in {"auto", "organic"}
+        run_organic = mode_normalized in {"auto", "organic"}
 
         # Zoo parametric generation
         if run_zoo:
@@ -159,16 +179,16 @@ class CADCycler:
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning("Zoo generation failed", error=str(exc))
 
-        # Tripo cloud mesh generation
-        if run_tripo:
+        # Organic mesh generation: Meshy (primary) with Tripo (fallback)
+        if run_organic:
             if normalized_refs:
                 # Image-to-3D when images are provided
-                artifacts.extend(await self._generate_tripo_meshes(normalized_refs))
+                artifacts.extend(await self._generate_organic_meshes(normalized_refs))
             else:
                 # Text-to-3D when no images
-                tripo_text_artifact = await self._generate_tripo_text_mesh(prompt)
-                if tripo_text_artifact:
-                    artifacts.append(tripo_text_artifact)
+                organic_artifact = await self._generate_organic_text_mesh(prompt, refine=refine)
+                if organic_artifact:
+                    artifacts.append(organic_artifact)
 
         # Local fallback
         if self._local_runner and "image_path" in references:
@@ -255,6 +275,273 @@ class CADCycler:
                 caption=item.get("caption"),
             )
         return None
+
+    # =========================================================================
+    # Organic Generation (Meshy primary, Tripo fallback)
+    # =========================================================================
+
+    async def _generate_organic_meshes(
+        self,
+        refs: Sequence[ImageReference],
+    ) -> List[CADArtifact]:
+        """Generate 3D meshes from images using Meshy (primary) or Tripo (fallback)."""
+        if self._meshy:
+            # Try Meshy first
+            try:
+                artifacts = await self._generate_meshy_meshes(refs)
+                if artifacts:
+                    return artifacts
+                LOGGER.info("Meshy returned no artifacts, falling back to Tripo")
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("Meshy image-to-3D failed, falling back to Tripo", error=str(exc))
+
+        # Fall back to Tripo
+        return await self._generate_tripo_meshes(refs)
+
+    async def _generate_organic_text_mesh(
+        self,
+        prompt: str,
+        refine: bool = False,
+    ) -> Optional[CADArtifact]:
+        """Generate 3D mesh from text using Meshy (primary) or Tripo (fallback)."""
+        if self._meshy:
+            # Try Meshy first
+            try:
+                artifact = await self._generate_meshy_text_mesh(prompt, refine=refine)
+                if artifact:
+                    return artifact
+                LOGGER.info("Meshy returned no artifact, falling back to Tripo")
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("Meshy text-to-3D failed, falling back to Tripo", error=str(exc))
+
+        # Fall back to Tripo
+        return await self._generate_tripo_text_mesh(prompt)
+
+    # =========================================================================
+    # Meshy Generation Methods
+    # =========================================================================
+
+    async def _generate_meshy_meshes(
+        self,
+        refs: Sequence[ImageReference],
+    ) -> List[CADArtifact]:
+        """Generate 3D models from images using Meshy."""
+        if not self._meshy or not refs:
+            return []
+
+        artifacts: List[CADArtifact] = []
+        for reference in refs:
+            # Get image URL - Meshy accepts URLs or base64 data URIs
+            image_url = reference.source_url or reference.download_url
+            if not image_url:
+                # Try to load and convert to data URI
+                payload = await self._load_reference_payload(reference)
+                if payload:
+                    import base64
+                    b64 = base64.b64encode(payload.data).decode()
+                    image_url = f"data:{payload.content_type};base64,{b64}"
+
+            if not image_url:
+                LOGGER.warning(
+                    "Skipping reference - no URL available",
+                    reference=reference.dedupe_key(),
+                )
+                continue
+
+            try:
+                job = await self._meshy.start_image_task(image_url=image_url)
+                result = await self._await_meshy_completion(job, task_type="image")
+                artifact = await self._store_meshy_result(
+                    result,
+                    reference,
+                    job.get("task_id"),
+                    source="image_to_model",
+                )
+                if artifact:
+                    artifacts.append(artifact)
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning(
+                    "Meshy image generation failed for reference",
+                    error=str(exc),
+                    reference=reference.dedupe_key(),
+                )
+
+        return artifacts
+
+    async def _generate_meshy_text_mesh(
+        self,
+        prompt: str,
+        refine: bool = False,
+    ) -> Optional[CADArtifact]:
+        """Generate a 3D mesh from text prompt using Meshy text-to-model.
+
+        Args:
+            prompt: Text description of the model
+            refine: If True, run HD refine stage after preview for better quality
+        """
+        if not self._meshy or not prompt:
+            return None
+
+        try:
+            # Step 1: Create preview task
+            preview_job = await self._meshy.start_text_task(prompt=prompt, mode="preview")
+            preview_result = await self._await_meshy_completion(preview_job, task_type="text")
+
+            if not preview_result:
+                raise RuntimeError("Meshy preview task failed - no result")
+
+            preview_task_id = preview_job.get("task_id")
+
+            # Step 2: Optionally run refine for HD quality
+            if refine and preview_task_id:
+                LOGGER.info("Running Meshy HD refine stage", preview_task_id=preview_task_id)
+                refine_job = await self._meshy.start_text_task(
+                    prompt=prompt,
+                    mode="refine",
+                    preview_task_id=preview_task_id,
+                )
+                result = await self._await_meshy_completion(refine_job, task_type="text")
+                task_id = refine_job.get("task_id")
+            else:
+                result = preview_result
+                task_id = preview_task_id
+
+            return await self._store_meshy_result(
+                result,
+                reference=None,
+                task_id=task_id,
+                source="text_to_model",
+                prompt=prompt,
+            )
+
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Meshy text-to-3D generation failed", error=str(exc))
+            return None
+
+    async def _await_meshy_completion(
+        self,
+        job: Dict[str, Any],
+        task_type: str = "text",
+    ) -> Dict[str, Any]:
+        """Poll Meshy task until completion.
+
+        Args:
+            job: Initial job response from task creation
+            task_type: "text", "image", or "multi_image"
+
+        Returns:
+            Final result dict with model_urls on success
+        """
+        status = (job.get("status") or "").lower()
+        task_id = job.get("task_id")
+        result = job.get("result") or job
+
+        if status == "succeeded":
+            return result
+        if not task_id:
+            raise RuntimeError("Meshy response missing task_id")
+
+        # Select appropriate getter based on task type
+        getter_map = {
+            "text": self._meshy.get_text_task,
+            "image": self._meshy.get_image_task,
+            "multi_image": self._meshy.get_multi_image_task,
+        }
+        getter = getter_map.get(task_type, self._meshy.get_text_task)
+
+        start = time.perf_counter()
+        while True:
+            if time.perf_counter() - start >= self._meshy_poll_timeout:
+                raise TimeoutError(f"Meshy job {task_id} timed out after {self._meshy_poll_timeout}s")
+            await asyncio.sleep(self._meshy_poll_interval)
+            latest = await getter(task_id)
+            status = (latest.get("status") or "").lower()
+            result = latest.get("result") or latest
+            if status == "succeeded":
+                return result
+            if status == "failed":
+                error_info = result.get("task_error", {})
+                error_msg = error_info.get("message", "Unknown error") if isinstance(error_info, dict) else str(error_info)
+                raise RuntimeError(f"Meshy job {task_id} failed: {error_msg}")
+
+    async def _store_meshy_result(
+        self,
+        result: Dict[str, Any],
+        reference: Optional[ImageReference],
+        task_id: Optional[str],
+        source: str = "image_to_model",
+        prompt: Optional[str] = None,
+    ) -> Optional[CADArtifact]:
+        """Download and store Meshy result.
+
+        Meshy returns model_urls with signed URLs for GLB, FBX, OBJ formats.
+        """
+        # Meshy v2 API returns model_urls directly in result
+        model_urls = result.get("model_urls", {})
+        glb_url = model_urls.get("glb")
+
+        if not glb_url:
+            LOGGER.warning("Meshy result missing GLB URL", task_id=task_id, result_keys=list(result.keys()))
+            return None
+
+        # Download GLB
+        glb_bytes = await self._download_bytes(glb_url)
+        glb_location = await asyncio.to_thread(
+            self._store.save_bytes, glb_bytes, ".glb", "glb"
+        )
+        LOGGER.info("Saved Meshy GLB", location=glb_location)
+
+        # Convert to 3MF for slicer compatibility
+        threemf_location = None
+        artifact_type = "glb"
+        primary_location = glb_location
+
+        try:
+            threemf_data = convert_mesh_to_3mf(glb_bytes, source_format="glb")
+            threemf_location = await asyncio.to_thread(
+                self._store.save_bytes, threemf_data, ".3mf", "3mf"
+            )
+            artifact_type = "3mf"
+            primary_location = threemf_location
+            LOGGER.info("Saved Meshy 3MF", location=threemf_location)
+        except MeshConversionError as conv_err:
+            LOGGER.warning("Meshy GLB to 3MF conversion failed", error=str(conv_err))
+
+        thumbnail = result.get("thumbnail_url", "") or result.get("thumbnail", "")
+        metadata = {
+            "task_id": task_id or "",
+            "thumbnail": thumbnail,
+            "source": source,
+            "glb_location": glb_location,
+        }
+        if threemf_location:
+            metadata["threemf_location"] = threemf_location
+        if reference:
+            metadata["source_image"] = reference.source_url or reference.download_url or ""
+            metadata["friendly_name"] = reference.friendly_name or ""
+        if prompt:
+            metadata["prompt"] = prompt
+
+        # Emit rename event for background processing
+        asyncio.create_task(
+            self._emit_rename_event(
+                glb_location=glb_location,
+                threemf_location=threemf_location,
+                thumbnail=thumbnail,
+                prompt=prompt or (reference.friendly_name if reference else ""),
+            )
+        )
+
+        return CADArtifact(
+            provider="meshy",
+            artifact_type=artifact_type,
+            location=primary_location,
+            metadata={k: v for k, v in metadata.items() if v},
+        )
+
+    # =========================================================================
+    # Tripo Generation Methods (Fallback)
+    # =========================================================================
 
     async def _generate_tripo_meshes(
         self,

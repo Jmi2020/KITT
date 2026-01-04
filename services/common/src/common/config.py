@@ -175,6 +175,14 @@ class Settings(BaseSettings):
     tripo_face_limit: Optional[int] = None
     tripo_unit: str = "millimeters"
 
+    # Meshy.ai provider (primary for organic mode, Tripo is fallback)
+    meshy_api_base: str = "https://api.meshy.ai"
+    meshy_api_key: Optional[str] = None
+    meshy_poll_interval: float = 5.0
+    meshy_poll_timeout: float = 900.0
+    meshy_enable_pbr: bool = True
+    meshy_should_remesh: bool = True
+
     # UniFi Access
     unifi_access_base_url: Optional[str] = None
     unifi_access_token: Optional[str] = None

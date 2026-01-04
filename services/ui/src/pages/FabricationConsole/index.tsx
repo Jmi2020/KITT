@@ -79,6 +79,7 @@ export default function FabricationConsole() {
         provider={state.provider}
         mode={state.mode}
         prompt={state.prompt}
+        refineMode={state.refineMode}
         artifacts={state.artifacts}
         selectedArtifact={state.selectedArtifact}
         isLoading={state.generationLoading}
@@ -89,6 +90,7 @@ export default function FabricationConsole() {
         onProviderChange={actions.setProvider}
         onModeChange={actions.setMode}
         onPromptChange={actions.setPrompt}
+        onRefineChange={actions.setRefineMode}
         onGenerate={actions.generateModel}
         onImport={actions.importModel}
         onSelectArtifact={actions.selectArtifact}

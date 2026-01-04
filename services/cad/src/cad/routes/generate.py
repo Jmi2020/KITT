@@ -63,6 +63,10 @@ class GenerateRequest(BaseModel):
     references: Optional[Dict[str, str]] = None
     image_refs_raw: Optional[List[Any]] = Field(default=None, alias="imageRefs")
     mode: Optional[str] = Field(default=None, alias="mode")
+    refine: bool = Field(
+        default=False,
+        description="For Meshy text-to-3D: run HD refine stage after preview for higher quality",
+    )
 
 
 class ArtifactResponse(BaseModel):
@@ -109,6 +113,7 @@ async def generate_cad(
         body.references,
         parsed_refs or None,
         mode=body.mode,
+        refine=body.refine,
     )
     return GenerateResponse(
         conversation_id=body.conversation_id,

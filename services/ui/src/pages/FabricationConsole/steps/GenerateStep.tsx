@@ -28,9 +28,16 @@ interface Provider {
 
 const PROVIDERS: Provider[] = [
   {
+    id: 'meshy',
+    name: 'Meshy.ai',
+    description: 'AI 3D generation (text & image)',
+    available: true,
+    icon: '✨',
+  },
+  {
     id: 'tripo',
     name: 'Tripo',
-    description: 'Organic & artistic shapes via AI',
+    description: 'Organic shapes (backup)',
     available: true,
     icon: '🎨',
   },
@@ -40,13 +47,6 @@ const PROVIDERS: Provider[] = [
     description: 'Mechanical & parametric parts',
     available: true,
     icon: '⚙️',
-  },
-  {
-    id: 'meshy',
-    name: 'Meshy.ai',
-    description: 'Text-to-3D generation',
-    available: false,
-    icon: '✨',
   },
   {
     id: 'hitem3d',
@@ -62,6 +62,7 @@ interface GenerateStepProps {
   provider: GenerationProvider;
   mode: GenerationMode;
   prompt: string;
+  refineMode: boolean;
   artifacts: Artifact[];
   selectedArtifact: Artifact | null;
   isLoading: boolean;
@@ -74,6 +75,7 @@ interface GenerateStepProps {
   onProviderChange: (provider: GenerationProvider) => void;
   onModeChange: (mode: GenerationMode) => void;
   onPromptChange: (prompt: string) => void;
+  onRefineChange: (refine: boolean) => void;
   onGenerate: () => void;
   onImport: (file: File) => void;
   onSelectArtifact: (artifact: Artifact) => void;
@@ -83,6 +85,7 @@ export function GenerateStep({
   provider,
   mode,
   prompt,
+  refineMode,
   artifacts,
   selectedArtifact,
   isLoading,
@@ -93,6 +96,7 @@ export function GenerateStep({
   onProviderChange,
   onModeChange,
   onPromptChange,
+  onRefineChange,
   onGenerate,
   onImport,
   onSelectArtifact,
@@ -229,6 +233,26 @@ export function GenerateStep({
                 </span>
               </div>
             </div>
+
+            {/* Refine Toggle (Meshy only, text-to-3D) */}
+            {provider === 'meshy' && (
+              <div className="generate-step__refine-section">
+                <label className="generate-step__refine-toggle">
+                  <input
+                    type="checkbox"
+                    checked={refineMode}
+                    onChange={(e) => onRefineChange(e.target.checked)}
+                    disabled={isLoading}
+                  />
+                  <span className="generate-step__refine-label">
+                    Enable HD Refinement
+                    <span className="generate-step__refine-hint">
+                      Higher quality textures (slower)
+                    </span>
+                  </span>
+                </label>
+              </div>
+            )}
 
             {/* Generate Button */}
             <button
