@@ -261,7 +261,7 @@ export function ModelViewer({ artifact, isGenerating = false }: ModelViewerProps
       if (fileType === 'stl' && artifact.metadata?.stl_location) {
         url = translateArtifactPath(artifact.metadata.stl_location);
       } else if (fileType === '3mf') {
-        url = `/api/fabrication/segmentation/download-file?path=${encodeURIComponent(artifact.location)}`;
+        url = translateArtifactPath(artifact.location);
       } else {
         url = translateArtifactPath(artifact.location);
       }

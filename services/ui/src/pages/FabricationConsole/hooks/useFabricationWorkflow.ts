@@ -146,6 +146,10 @@ export interface WorkflowState {
 const ARTIFACTS_FILES_URL = '/api/cad/files';
 
 export const translateArtifactPath = (location: string): string => {
+  // Already a valid API URL - return as-is
+  if (location.startsWith('/api/cad/files/')) {
+    return location;
+  }
   if (location.startsWith('artifacts/')) {
     return `${ARTIFACTS_FILES_URL}/${location.replace('artifacts/', '')}`;
   }

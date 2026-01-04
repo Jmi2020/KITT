@@ -64,17 +64,60 @@ async def generate_cad(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"CAD service error: {e}")
 
 
-@router.get("/artifacts/{subdir}/{filename}")
-async def get_artifact(subdir: str, filename: str):
+@router.get("/files/{subdir}/{filename}")
+async def get_file(subdir: str, filename: str):
     """
-    Serve artifact files (GLB, STL) from CAD service.
+    Serve artifact files (GLB, STL, 3MF) from CAD service static mount.
 
-    Proxies to cad_service /api/cad/artifacts/{subdir}/{filename}
+    Proxies to cad_service /api/cad/files/{subdir}/{filename}
+    This is the primary endpoint for downloading generated artifacts.
     """
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(
-                f"{CAD_BASE}/api/cad/artifacts/{subdir}/{filename}",
+                f"{CAD_BASE}/api/cad/files/{subdir}/{filename}",
+                follow_redirects=True
+            )
+            response.raise_for_status()
+
+            # Determine content type
+            content_type = "application/octet-stream"
+            if filename.endswith(".glb"):
+                content_type = "model/gltf-binary"
+            elif filename.endswith(".3mf"):
+                content_type = "application/vnd.ms-package.3dmanufacturing-3dmodel+xml"
+            elif filename.endswith(".stl"):
+                content_type = "model/stl"
+            elif filename.endswith(".gcode"):
+                content_type = "text/plain"
+            elif filename.endswith(".step") or filename.endswith(".stp"):
+                content_type = "application/step"
+
+            return StreamingResponse(
+                iter([response.content]),
+                media_type=content_type,
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"'
+                }
+            )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail="File not found")
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"CAD service error: {e}")
+
+
+@router.get("/artifacts/{subdir}/{filename}")
+async def get_artifact(subdir: str, filename: str):
+    """
+    Serve artifact files (GLB, STL) from CAD service.
+    Legacy endpoint - prefer /files/{subdir}/{filename}.
+
+    Proxies to cad_service /api/cad/files/{subdir}/{filename}
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{CAD_BASE}/api/cad/files/{subdir}/{filename}",
                 follow_redirects=True
             )
             response.raise_for_status()
@@ -101,6 +144,49 @@ async def get_artifact(subdir: str, filename: str):
         raise HTTPException(status_code=500, detail=f"CAD service error: {e}")
 
 
+@router.get("/artifacts/list")
+async def list_artifacts(
+    type: str = "all",
+    limit: int = 100,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """
+    List all artifacts in storage.
+
+    Proxies to cad_service /api/cad/artifacts/list
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{CAD_BASE}/api/cad/artifacts/list",
+                params={"type": type, "limit": limit, "offset": offset}
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"CAD service error: {e}")
+
+
+@router.get("/artifacts/stats")
+async def get_artifact_stats() -> dict[str, Any]:
+    """
+    Get storage statistics for artifacts.
+
+    Proxies to cad_service /api/cad/artifacts/stats
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(f"{CAD_BASE}/api/cad/artifacts/stats")
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"CAD service error: {e}")
+
+
 @router.get("/artifacts/{filename}")
 async def get_artifact_flat(filename: str):
     """
@@ -109,7 +195,7 @@ async def get_artifact_flat(filename: str):
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(
-                f"{CAD_BASE}/api/cad/artifacts/{filename}",
+                f"{CAD_BASE}/api/cad/files/{filename}",
                 follow_redirects=True
             )
             response.raise_for_status()

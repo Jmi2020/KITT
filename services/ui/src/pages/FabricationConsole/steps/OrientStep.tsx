@@ -8,7 +8,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { StepContainer } from '../../../components/FabricationWorkflow';
 import { OrientationPreview } from '../../../components/OrientationPreview';
-import type { Artifact } from '../hooks/useFabricationWorkflow';
+import { translateArtifactPath, type Artifact } from '../hooks/useFabricationWorkflow';
 import './OrientStep.css';
 
 // Types matching backend schemas
@@ -90,17 +90,7 @@ export function OrientStep({
     if (!selectedArtifact) return '';
     const path =
       selectedArtifact.metadata?.stl_location || selectedArtifact.location;
-    if (path.startsWith('artifacts/')) {
-      return `/api/cad/artifacts/${path.replace('artifacts/', '')}`;
-    }
-    if (path.startsWith('storage/artifacts/')) {
-      return `/api/cad/artifacts/${path.replace('storage/artifacts/', '')}`;
-    }
-    if (path.startsWith('/')) {
-      const filename = path.split('/').pop() || path;
-      return `/api/cad/artifacts/${filename}`;
-    }
-    return path;
+    return translateArtifactPath(path);
   }, [selectedArtifact]);
 
   // Get file type

@@ -374,7 +374,7 @@ export function GenerateStep({
                   ? artifact.location
                   : artifact.metadata?.threemf_location || null;
                 const threemfDownloadUrl = threemfPath
-                  ? `/api/fabrication/segmentation/download-file?path=${encodeURIComponent(threemfPath)}`
+                  ? translateArtifactPath(threemfPath)
                   : null;
                 const isSelected = selectedArtifact?.location === artifact.location;
 

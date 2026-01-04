@@ -625,3 +625,134 @@ async def upload_gcode_to_printer(job_id: str, request: Request) -> dict[str, An
         raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
     except httpx.HTTPError as e:
         raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+# === Mesh Orientation Optimization Endpoints ===
+
+# Container path for shared artifacts (mounted in both CAD and Fabrication services)
+ARTIFACTS_CONTAINER_PATH = "/app/artifacts"
+
+
+def _transform_mesh_path(mesh_path: str) -> str:
+    """
+    Transform a mesh path from URL/relative format to container filesystem path.
+
+    Examples:
+    - "glb/model.glb" -> "/app/artifacts/glb/model.glb"
+    - "/api/cad/files/glb/model.glb" -> "/app/artifacts/glb/model.glb"
+    - "artifacts/glb/model.glb" -> "/app/artifacts/glb/model.glb"
+    - "/app/artifacts/glb/model.glb" -> "/app/artifacts/glb/model.glb" (unchanged)
+    """
+    if not mesh_path:
+        return mesh_path
+
+    # Already a container path
+    if mesh_path.startswith(ARTIFACTS_CONTAINER_PATH):
+        return mesh_path
+
+    # Strip URL prefixes
+    if mesh_path.startswith("/api/cad/files/"):
+        mesh_path = mesh_path[len("/api/cad/files/"):]
+    elif mesh_path.startswith("/api/cad/artifacts/"):
+        mesh_path = mesh_path[len("/api/cad/artifacts/"):]
+    elif mesh_path.startswith("artifacts/"):
+        mesh_path = mesh_path[len("artifacts/"):]
+
+    # Construct container path
+    return f"{ARTIFACTS_CONTAINER_PATH}/{mesh_path}"
+
+
+@router.get("/orientation/status")
+async def get_orientation_status() -> dict[str, Any]:
+    """Get orientation service status."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{FABRICATION_BASE}/api/orientation/status")
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.post("/orientation/analyze")
+async def analyze_orientations(request: Request) -> dict[str, Any]:
+    """
+    Analyze mesh and return ranked orientation options.
+
+    Tests 6 cardinal orientations and returns them ranked by overhang ratio.
+
+    Request body:
+    {
+        "mesh_path": "glb/model.glb",  # Can be relative path or URL path
+        "threshold_angle": 45.0,
+        "include_intermediate": false
+    }
+    """
+    try:
+        data = await request.json()
+
+        # Transform mesh_path to container filesystem path
+        if "mesh_path" in data:
+            data["mesh_path"] = _transform_mesh_path(data["mesh_path"])
+            logger.info(f"Orientation analyze: transformed path to {data['mesh_path']}")
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{FABRICATION_BASE}/api/orientation/analyze",
+                json=data
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.post("/orientation/apply")
+async def apply_orientation(request: Request) -> dict[str, Any]:
+    """
+    Apply selected orientation to mesh.
+
+    Request body:
+    {
+        "mesh_path": "glb/model.glb",  # Can be relative path or URL path
+        "orientation_id": "z_up",
+        "rotation_matrix": [[1,0,0], [0,1,0], [0,0,1]]
+    }
+    """
+    try:
+        data = await request.json()
+
+        # Transform mesh_path to container filesystem path
+        if "mesh_path" in data:
+            data["mesh_path"] = _transform_mesh_path(data["mesh_path"])
+            logger.info(f"Orientation apply: transformed path to {data['mesh_path']}")
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{FABRICATION_BASE}/api/orientation/apply",
+                json=data
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
+
+
+@router.get("/orientation/orientations")
+async def list_orientations() -> dict[str, Any]:
+    """List available cardinal orientations with rotation matrices."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{FABRICATION_BASE}/api/orientation/orientations")
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Fabrication service error: {e}")
