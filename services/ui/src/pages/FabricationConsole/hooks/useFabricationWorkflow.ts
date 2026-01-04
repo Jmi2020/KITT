@@ -94,7 +94,7 @@ export interface OrientationAnalysis {
 
 export type WorkflowStep = 1 | 2 | 3 | 4 | 5;
 export type GenerationProvider = 'meshy' | 'tripo' | 'zoo' | null;
-export type GenerationMode = 'generate' | 'import';
+export type GenerationMode = 'generate' | 'import' | 'browse';
 export type QualityPreset = 'quick' | 'standard' | 'quality';
 
 export interface WorkflowState {
@@ -143,18 +143,18 @@ export interface WorkflowState {
   printLoading: boolean;
 }
 
-const ARTIFACTS_BASE_URL = '/api/cad/artifacts';
+const ARTIFACTS_FILES_URL = '/api/cad/files';
 
 export const translateArtifactPath = (location: string): string => {
   if (location.startsWith('artifacts/')) {
-    return `${ARTIFACTS_BASE_URL}/${location.replace('artifacts/', '')}`;
+    return `${ARTIFACTS_FILES_URL}/${location.replace('artifacts/', '')}`;
   }
   if (location.startsWith('storage/artifacts/')) {
-    return `${ARTIFACTS_BASE_URL}/${location.replace('storage/artifacts/', '')}`;
+    return `${ARTIFACTS_FILES_URL}/${location.replace('storage/artifacts/', '')}`;
   }
   if (location.startsWith('/')) {
     const filename = location.split('/').pop() || location;
-    return `${ARTIFACTS_BASE_URL}/${filename}`;
+    return `${ARTIFACTS_FILES_URL}/${filename}`;
   }
   return location;
 };
@@ -237,6 +237,7 @@ export interface WorkflowActions {
   generateModel: () => Promise<void>;
   importModel: (file: File) => Promise<void>;
   selectArtifact: (artifact: Artifact) => void;
+  selectArtifactFromBrowser: (path: string, type: string) => void;
 
   // Step 2 actions (Orient)
   analyzeOrientation: () => Promise<void>;
@@ -505,6 +506,37 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
       setState(prev => ({
         ...prev,
         selectedArtifact: artifact,
+        // Reset downstream state
+        orientationAnalysis: null,
+        selectedOrientation: null,
+        orientedMeshPath: null,
+        orientationSkipped: false,
+        dimensionCheck: null,
+        segmentResult: null,
+        sliceResult: null,
+      }));
+    }, []),
+
+    selectArtifactFromBrowser: useCallback((path: string, type: string) => {
+      // Create artifact from browser selection
+      const filename = path.split('/').pop() || path;
+      const artifact: Artifact = {
+        provider: 'storage',
+        artifactType: type,
+        location: `/api/cad/files/${path}`,
+        metadata: {
+          filename,
+          glb_location: type === 'glb' ? `artifacts/${path}` : undefined,
+          stl_location: type === 'stl' ? `artifacts/${path}` : undefined,
+          threemf_location: type === '3mf' ? `artifacts/${path}` : undefined,
+        } as Record<string, string>,
+      };
+
+      setState(prev => ({
+        ...prev,
+        artifacts: [artifact],
+        selectedArtifact: artifact,
+        currentStep: 2,
         // Reset downstream state
         orientationAnalysis: null,
         selectedOrientation: null,

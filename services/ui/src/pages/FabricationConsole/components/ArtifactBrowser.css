@@ -1,0 +1,345 @@
+/* ArtifactBrowser.css - Styles for artifact storage browser */
+
+.artifact-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Header with stats and refresh */
+.artifact-browser__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border, #333);
+}
+
+.artifact-browser__stats {
+  display: flex;
+  gap: 16px;
+}
+
+.artifact-browser__stat {
+  font-size: 12px;
+  color: var(--color-text-secondary, #888);
+}
+
+.artifact-browser__stat strong {
+  color: var(--color-text-primary, #fff);
+}
+
+.artifact-browser__refresh-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--color-border, #444);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary, #888);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.artifact-browser__refresh-btn:hover {
+  border-color: var(--color-primary, #3b82f6);
+  color: var(--color-primary, #3b82f6);
+}
+
+.artifact-browser__refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.artifact-browser__refresh-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.artifact-browser__refresh-icon.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Type filter tabs */
+.artifact-browser__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.artifact-browser__filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border, #444);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--color-text-secondary, #888);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.artifact-browser__filter-btn:hover:not(:disabled) {
+  border-color: var(--color-primary, #3b82f6);
+  color: var(--color-text-primary, #fff);
+}
+
+.artifact-browser__filter-btn--active {
+  border-color: var(--color-primary, #3b82f6);
+  background: var(--color-primary, #3b82f6);
+  color: #fff;
+}
+
+.artifact-browser__filter-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.artifact-browser__type-icon {
+  font-size: 12px;
+}
+
+.artifact-browser__filter-count {
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 10px;
+}
+
+.artifact-browser__filter-btn--active .artifact-browser__filter-count {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* Error display */
+.artifact-browser__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  font-size: 13px;
+}
+
+.artifact-browser__error button {
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Loading state */
+.artifact-browser__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 20px;
+  color: var(--color-text-secondary, #888);
+  font-size: 13px;
+}
+
+/* Spinner */
+.artifact-browser__spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--color-border, #444);
+  border-top-color: var(--color-primary, #3b82f6);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.artifact-browser__spinner--small {
+  width: 14px;
+  height: 14px;
+  border-width: 1.5px;
+}
+
+/* Empty state */
+.artifact-browser__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.artifact-browser__empty-icon {
+  width: 48px;
+  height: 48px;
+  color: var(--color-text-muted, #555);
+}
+
+.artifact-browser__empty-text {
+  font-size: 14px;
+  color: var(--color-text-secondary, #888);
+}
+
+.artifact-browser__empty-hint {
+  font-size: 12px;
+  color: var(--color-text-muted, #666);
+}
+
+/* Artifact list */
+.artifact-browser__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 400px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.artifact-browser__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--color-surface-secondary, #1a1a1a);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.artifact-browser__item:hover {
+  background: var(--color-surface-hover, #252525);
+  border-color: var(--color-border, #333);
+}
+
+.artifact-browser__item--selected {
+  border-color: var(--color-primary, #3b82f6);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.artifact-browser__item-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  background: var(--color-surface, #222);
+  font-size: 18px;
+}
+
+.artifact-browser__item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.artifact-browser__item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary, #fff);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.artifact-browser__item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted, #666);
+}
+
+.artifact-browser__item-type {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--color-surface, #222);
+  font-weight: 500;
+  color: var(--color-text-secondary, #888);
+}
+
+.artifact-browser__item-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.artifact-browser__item:hover .artifact-browser__item-actions {
+  opacity: 1;
+}
+
+.artifact-browser__download-btn,
+.artifact-browser__delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--color-border, #444);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary, #888);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-decoration: none;
+}
+
+.artifact-browser__download-btn:hover {
+  border-color: var(--color-primary, #3b82f6);
+  color: var(--color-primary, #3b82f6);
+}
+
+.artifact-browser__delete-btn:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.artifact-browser__download-btn:disabled,
+.artifact-browser__delete-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.artifact-browser__download-btn svg,
+.artifact-browser__delete-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Scrollbar styling */
+.artifact-browser__list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.artifact-browser__list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.artifact-browser__list::-webkit-scrollbar-thumb {
+  background: var(--color-border, #444);
+  border-radius: 3px;
+}
+
+.artifact-browser__list::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted, #666);
+}

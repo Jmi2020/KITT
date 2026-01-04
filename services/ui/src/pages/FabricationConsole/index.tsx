@@ -11,6 +11,7 @@ import { useMemo } from 'react';
 import { WorkflowStepper } from '../../components/FabricationWorkflow';
 import { GenerateStep, OrientStep, SegmentStep, SliceStep, PrintStep } from './steps';
 import { useFabricationWorkflow, WorkflowStep } from './hooks/useFabricationWorkflow';
+import { ModelViewer } from './components';
 import ThermalPanel from '../../components/ThermalPanel';
 import GcodeConsole from '../../components/GcodeConsole';
 import './FabricationConsole.css';
@@ -74,106 +75,121 @@ export default function FabricationConsole() {
         canNavigateTo={canNavigateTo}
       />
 
-      {/* Step 1: Generate */}
-      <GenerateStep
-        provider={state.provider}
-        mode={state.mode}
-        prompt={state.prompt}
-        refineMode={state.refineMode}
-        artifacts={state.artifacts}
-        selectedArtifact={state.selectedArtifact}
-        isLoading={state.generationLoading}
-        error={state.generationError}
-        isActive={state.currentStep === 1}
-        isCompleted={completedSteps.includes(1)}
-        uploadProgress={state.uploadProgress}
-        onProviderChange={actions.setProvider}
-        onModeChange={actions.setMode}
-        onPromptChange={actions.setPrompt}
-        onRefineChange={actions.setRefineMode}
-        onGenerate={actions.generateModel}
-        onImport={actions.importModel}
-        onSelectArtifact={actions.selectArtifact}
-      />
+      {/* Main content area with steps and model viewer */}
+      <div className="fabrication-console-v2__content">
+        {/* Left column: Workflow Steps */}
+        <div className="fabrication-console-v2__steps">
+          {/* Step 1: Generate */}
+          <GenerateStep
+            provider={state.provider}
+            mode={state.mode}
+            prompt={state.prompt}
+            refineMode={state.refineMode}
+            artifacts={state.artifacts}
+            selectedArtifact={state.selectedArtifact}
+            isLoading={state.generationLoading}
+            error={state.generationError}
+            isActive={state.currentStep === 1}
+            isCompleted={completedSteps.includes(1)}
+            uploadProgress={state.uploadProgress}
+            onProviderChange={actions.setProvider}
+            onModeChange={actions.setMode}
+            onPromptChange={actions.setPrompt}
+            onRefineChange={actions.setRefineMode}
+            onGenerate={actions.generateModel}
+            onImport={actions.importModel}
+            onSelectArtifact={actions.selectArtifact}
+            onSelectFromBrowser={actions.selectArtifactFromBrowser}
+          />
 
-      {/* Step 2: Orient */}
-      <OrientStep
-        selectedArtifact={state.selectedArtifact}
-        orientationAnalysis={state.orientationAnalysis}
-        selectedOrientation={state.selectedOrientation}
-        orientedMeshPath={state.orientedMeshPath}
-        isLoading={state.orientationLoading}
-        error={state.orientationError}
-        isActive={state.currentStep === 2}
-        isCompleted={completedSteps.includes(2)}
-        isLocked={!state.selectedArtifact}
-        onAnalyze={actions.analyzeOrientation}
-        onSelectOrientation={actions.selectOrientation}
-        onApplyOrientation={actions.applyOrientation}
-        onSkipOrientation={actions.skipOrientation}
-      />
+          {/* Step 2: Orient */}
+          <OrientStep
+            selectedArtifact={state.selectedArtifact}
+            orientationAnalysis={state.orientationAnalysis}
+            selectedOrientation={state.selectedOrientation}
+            orientedMeshPath={state.orientedMeshPath}
+            isLoading={state.orientationLoading}
+            error={state.orientationError}
+            isActive={state.currentStep === 2}
+            isCompleted={completedSteps.includes(2)}
+            isLocked={!state.selectedArtifact}
+            onAnalyze={actions.analyzeOrientation}
+            onSelectOrientation={actions.selectOrientation}
+            onApplyOrientation={actions.applyOrientation}
+            onSkipOrientation={actions.skipOrientation}
+          />
 
-      {/* Step 3: Segment */}
-      <SegmentStep
-        selectedArtifact={state.selectedArtifact}
-        dimensionCheck={state.dimensionCheck}
-        segmentationRequired={state.segmentationRequired}
-        segmentationSkipped={state.segmentationSkipped}
-        segmentResult={state.segmentResult}
-        isLoading={state.segmentationLoading}
-        error={state.segmentationError}
-        isActive={state.currentStep === 3}
-        isCompleted={completedSteps.includes(3)}
-        isLocked={!canNavigateTo(3)}
-        selectedPrinter={state.selectedPrinter || undefined}
-        onCheckComplete={(result) => {
-          // The hook handles state updates internally via MeshSegmenter callbacks
-        }}
-        onSegmentComplete={(result) => {
-          // The hook handles state updates internally via MeshSegmenter callbacks
-        }}
-        onSkipSegmentation={actions.skipSegmentation}
-      />
+          {/* Step 3: Segment */}
+          <SegmentStep
+            selectedArtifact={state.selectedArtifact}
+            dimensionCheck={state.dimensionCheck}
+            segmentationRequired={state.segmentationRequired}
+            segmentationSkipped={state.segmentationSkipped}
+            segmentResult={state.segmentResult}
+            isLoading={state.segmentationLoading}
+            error={state.segmentationError}
+            isActive={state.currentStep === 3}
+            isCompleted={completedSteps.includes(3)}
+            isLocked={!canNavigateTo(3)}
+            selectedPrinter={state.selectedPrinter || undefined}
+            onCheckComplete={() => {
+              // The hook handles state updates internally via MeshSegmenter callbacks
+            }}
+            onSegmentComplete={() => {
+              // The hook handles state updates internally via MeshSegmenter callbacks
+            }}
+            onSkipSegmentation={actions.skipSegmentation}
+          />
 
-      {/* Step 4: Slice */}
-      <SliceStep
-        selectedArtifact={state.selectedArtifact}
-        segmentResult={state.segmentResult}
-        selectedPrinter={state.selectedPrinter}
-        printerRecommendations={state.printerRecommendations}
-        preset={state.preset}
-        advancedSettings={state.advancedSettings}
-        showAdvanced={state.showAdvanced}
-        sliceResult={state.sliceResult}
-        isLoading={state.slicingLoading}
-        error={state.slicingError}
-        isActive={state.currentStep === 4}
-        isCompleted={completedSteps.includes(4)}
-        isLocked={!canNavigateTo(4)}
-        onPrinterSelect={actions.selectPrinter}
-        onPresetChange={actions.setPreset}
-        onAdvancedSettingsChange={actions.setAdvancedSettings}
-        onToggleAdvanced={actions.toggleAdvanced}
-        onStartSlicing={actions.startSlicing}
-        onSliceComplete={(result) => {
-          // Update state with slice result
-        }}
-      />
+          {/* Step 4: Slice */}
+          <SliceStep
+            selectedArtifact={state.selectedArtifact}
+            segmentResult={state.segmentResult}
+            selectedPrinter={state.selectedPrinter}
+            printerRecommendations={state.printerRecommendations}
+            preset={state.preset}
+            advancedSettings={state.advancedSettings}
+            showAdvanced={state.showAdvanced}
+            sliceResult={state.sliceResult}
+            isLoading={state.slicingLoading}
+            error={state.slicingError}
+            isActive={state.currentStep === 4}
+            isCompleted={completedSteps.includes(4)}
+            isLocked={!canNavigateTo(4)}
+            onPrinterSelect={actions.selectPrinter}
+            onPresetChange={actions.setPreset}
+            onAdvancedSettingsChange={actions.setAdvancedSettings}
+            onToggleAdvanced={actions.toggleAdvanced}
+            onStartSlicing={actions.startSlicing}
+            onSliceComplete={() => {
+              // Update state with slice result
+            }}
+          />
 
-      {/* Step 5: Print */}
-      <PrintStep
-        sliceResult={state.sliceResult}
-        selectedPrinter={state.selectedPrinter}
-        printers={printers}
-        printJobId={state.printJobId}
-        printStatus={state.printStatus}
-        isLoading={state.printLoading}
-        isActive={state.currentStep === 5}
-        isCompleted={completedSteps.includes(5)}
-        isLocked={!canNavigateTo(5)}
-        onSendToPrinter={actions.sendToPrinter}
-        onAddToQueue={actions.addToQueue}
-      />
+          {/* Step 5: Print */}
+          <PrintStep
+            sliceResult={state.sliceResult}
+            selectedPrinter={state.selectedPrinter}
+            printers={printers}
+            printJobId={state.printJobId}
+            printStatus={state.printStatus}
+            isLoading={state.printLoading}
+            isActive={state.currentStep === 5}
+            isCompleted={completedSteps.includes(5)}
+            isLocked={!canNavigateTo(5)}
+            onSendToPrinter={actions.sendToPrinter}
+            onAddToQueue={actions.addToQueue}
+          />
+        </div>
+
+        {/* Right column: Model Viewer */}
+        <aside className="fabrication-console-v2__viewer">
+          <ModelViewer
+            artifact={state.selectedArtifact}
+            isGenerating={state.generationLoading}
+          />
+        </aside>
+      </div>
 
       {/* Elegoo Control Panel - shown when Elegoo is selected and online */}
       {state.selectedPrinter === 'elegoo_giga' && selectedPrinterInfo?.is_online && (

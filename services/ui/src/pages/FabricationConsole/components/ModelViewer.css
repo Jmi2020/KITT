@@ -1,0 +1,201 @@
+/* ModelViewer.css - Inline 3D model viewer for Fabrication Console */
+
+.model-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 400px;
+  background: var(--color-surface-secondary, #1e1e1e);
+  border: 1px solid var(--color-border, #333);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.model-viewer__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border, #333);
+  background: var(--color-surface-tertiary, #252525);
+}
+
+.model-viewer__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary, #fff);
+}
+
+.model-viewer__type {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--color-primary-muted, #1e3a5f);
+  color: var(--color-primary-light, #60a5fa);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.model-viewer__canvas {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1a1a1a;
+  overflow: hidden;
+}
+
+/* Empty state */
+.model-viewer__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.model-viewer__empty-icon {
+  width: 64px;
+  height: 64px;
+  color: var(--color-text-muted, #444);
+}
+
+.model-viewer__empty p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-muted, #555);
+}
+
+/* Generating state */
+.model-viewer__generating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.model-viewer__generating p {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-text-primary, #fff);
+}
+
+.model-viewer__hint {
+  font-size: 12px;
+  color: var(--color-text-muted, #666);
+}
+
+/* Spinner */
+.model-viewer__spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--color-border, #333);
+  border-top-color: var(--color-primary, #3b82f6);
+  border-radius: 50%;
+  animation: model-viewer-spin 0.8s linear infinite;
+}
+
+@keyframes model-viewer-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Three.js container */
+.model-viewer__threejs {
+  position: absolute;
+  inset: 0;
+}
+
+.model-viewer__threejs canvas {
+  display: block;
+}
+
+/* Loading overlay for Three.js */
+.model-viewer__loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(26, 26, 26, 0.9);
+  z-index: 10;
+}
+
+.model-viewer__loading p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-secondary, #888);
+}
+
+/* Error state */
+.model-viewer__error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(26, 26, 26, 0.9);
+}
+
+.model-viewer__error p {
+  margin: 0;
+  padding: 12px 20px;
+  background: var(--color-error-bg, #3d2020);
+  border: 1px solid var(--color-error, #ef4444);
+  border-radius: 8px;
+  color: var(--color-error, #ef4444);
+  font-size: 14px;
+}
+
+/* Unsupported type */
+.model-viewer__unsupported {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.model-viewer__unsupported p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-muted, #555);
+}
+
+.model-viewer__thumbnail {
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Controls hint */
+.model-viewer__controls {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--color-border, #333);
+  background: var(--color-surface-tertiary, #252525);
+}
+
+.model-viewer__controls span {
+  font-size: 11px;
+  color: var(--color-text-muted, #555);
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+  .model-viewer {
+    min-height: 300px;
+  }
+}

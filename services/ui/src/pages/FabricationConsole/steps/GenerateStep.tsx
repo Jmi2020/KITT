@@ -10,6 +10,7 @@
 
 import { useRef, ChangeEvent, DragEvent, useState } from 'react';
 import { StepContainer } from '../../../components/FabricationWorkflow';
+import { ArtifactBrowser } from '../components';
 import {
   Artifact,
   GenerationProvider,
@@ -79,6 +80,7 @@ interface GenerateStepProps {
   onGenerate: () => void;
   onImport: (file: File) => void;
   onSelectArtifact: (artifact: Artifact) => void;
+  onSelectFromBrowser: (path: string, type: string) => void;
 }
 
 export function GenerateStep({
@@ -100,6 +102,7 @@ export function GenerateStep({
   onGenerate,
   onImport,
   onSelectArtifact,
+  onSelectFromBrowser,
 }: GenerateStepProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -174,6 +177,19 @@ export function GenerateStep({
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
             Import File
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className={`generate-step__mode-btn ${mode === 'browse' ? 'generate-step__mode-btn--active' : ''}`}
+            onClick={() => onModeChange('browse')}
+            aria-selected={mode === 'browse'}
+          >
+            <svg viewBox="0 0 24 24" className="generate-step__mode-icon">
+              <path d="M3 3h18v18H3V3z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M3 9h18M9 21V9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Browse Storage
           </button>
         </div>
 
@@ -328,6 +344,13 @@ export function GenerateStep({
                 </p>
               </>
             )}
+          </div>
+        )}
+
+        {/* Browse Mode */}
+        {mode === 'browse' && (
+          <div className="generate-step__browse-panel" role="tabpanel">
+            <ArtifactBrowser onSelectArtifact={onSelectFromBrowser} />
           </div>
         )}
 
