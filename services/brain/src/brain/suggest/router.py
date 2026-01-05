@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -65,7 +65,7 @@ class SuggestConfigRequest(BaseModel):
     debounce_ms: Optional[int] = Field(default=None, ge=100, le=2000)
     min_input_length: Optional[int] = Field(default=None, ge=3, le=50)
     max_suggestions: Optional[int] = Field(default=None, ge=1, le=5)
-    contexts: Optional[Dict[str, Dict[str, any]]] = None
+    contexts: Optional[Dict[str, Dict[str, Any]]] = None
 
 
 class SuggestConfigResponse(BaseModel):
@@ -77,11 +77,11 @@ class SuggestConfigResponse(BaseModel):
     max_suggestions: int
     default_model: str
     coder_model: str
-    contexts: Dict[str, Dict[str, any]]
+    contexts: Dict[str, Dict[str, Any]]
 
 
 @router.get("/status")
-async def get_status() -> Dict[str, any]:
+async def get_status() -> Dict[str, Any]:
     """Get the status of the suggestion service."""
     return {
         "enabled": SUGGEST_ENABLED,
