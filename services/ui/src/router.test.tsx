@@ -17,8 +17,8 @@ vi.mock('./pages/Dashboard', () => ({
   default: () => <div data-testid="dashboard-page">Dashboard</div>,
 }));
 
-vi.mock('./pages/Voice', () => ({
-  default: () => <div data-testid="voice-page">Voice</div>,
+vi.mock('./pages/Interact', () => ({
+  default: () => <div data-testid="interact-page">Interact</div>,
 }));
 
 vi.mock('./pages/Shell', () => ({
@@ -91,10 +91,10 @@ describe('Router Configuration', () => {
     });
   });
 
-  it('renders voice page at /voice', async () => {
-    renderWithRouter('/voice');
+  it('renders interact page at /interact', async () => {
+    renderWithRouter('/interact');
     await waitFor(() => {
-      expect(screen.getByTestId('voice-page')).toBeInTheDocument();
+      expect(screen.getByTestId('interact-page')).toBeInTheDocument();
     });
   });
 
@@ -231,7 +231,7 @@ describe('Router - All Routes (Consolidation in Progress)', () => {
   // Redirect tests are skipped due to jsdom AbortSignal incompatibility
   const routes = [
     { path: '/', testId: 'menu-page', name: 'Menu' },
-    { path: '/voice', testId: 'voice-page', name: 'Voice' },
+    { path: '/interact', testId: 'interact-page', name: 'Interact' },
     { path: '/shell', testId: 'shell-page', name: 'Shell' },
     { path: '/console', testId: 'console-page', name: 'Console' },
     { path: '/dashboard', testId: 'dashboard-page', name: 'Dashboard' },

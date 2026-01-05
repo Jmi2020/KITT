@@ -99,8 +99,8 @@ describe('Settings Page', () => {
       renderWithRouter();
 
       expect(screen.getByText('Connections')).toBeInTheDocument();
-      expect(screen.getByText('Voice')).toBeInTheDocument();
-      expect(screen.getByText('Voice Modes')).toBeInTheDocument();
+      expect(screen.getByText('Interact')).toBeInTheDocument();
+      expect(screen.getByText('Interact Modes')).toBeInTheDocument();
       expect(screen.getByText('Fabrication')).toBeInTheDocument();
       expect(screen.getByText('Interface')).toBeInTheDocument();
       expect(screen.getByText('System')).toBeInTheDocument();
@@ -113,14 +113,14 @@ describe('Settings Page', () => {
       expect(connectionsTab).toHaveClass('active');
     });
 
-    it('switches to Voice tab when clicked', async () => {
+    it('switches to Interact tab when clicked', async () => {
       renderWithRouter();
 
-      fireEvent.click(screen.getByText('Voice'));
+      fireEvent.click(screen.getByText('Interact'));
 
       await waitFor(() => {
-        const voiceTab = screen.getByText('Voice').closest('button');
-        expect(voiceTab).toHaveClass('active');
+        const interactTab = screen.getByText('Interact').closest('button');
+        expect(interactTab).toHaveClass('active');
       });
     });
 
@@ -146,21 +146,21 @@ describe('Settings Page', () => {
     });
   });
 
-  describe('Voice Tab', () => {
-    it('renders voice settings when Voice tab is active', async () => {
+  describe('Interact Tab', () => {
+    it('renders interact settings when Interact tab is active', async () => {
       renderWithRouter();
 
-      fireEvent.click(screen.getByText('Voice'));
+      fireEvent.click(screen.getByText('Interact'));
 
       await waitFor(() => {
-        expect(screen.getByText('Voice Settings')).toBeInTheDocument();
+        expect(screen.getByText('Interact Settings')).toBeInTheDocument();
       });
     });
 
     it('renders voice preference toggle', async () => {
       renderWithRouter();
 
-      fireEvent.click(screen.getByText('Voice'));
+      fireEvent.click(screen.getByText('Interact'));
 
       await waitFor(() => {
         expect(screen.getByText('Prefer Local Processing')).toBeInTheDocument();
@@ -170,29 +170,31 @@ describe('Settings Page', () => {
     it('renders TTS voice selector', async () => {
       renderWithRouter();
 
-      fireEvent.click(screen.getByText('Voice'));
+      fireEvent.click(screen.getByText('Interact'));
 
       await waitFor(() => {
-        expect(screen.getByLabelText('TTS Voice')).toBeInTheDocument();
+        // InteractTab uses div-based labels, not <label> elements
+        expect(screen.getByText('Voice')).toBeInTheDocument();
       });
     });
 
     it('renders language selector', async () => {
       renderWithRouter();
 
-      fireEvent.click(screen.getByText('Voice'));
+      fireEvent.click(screen.getByText('Interact'));
 
       await waitFor(() => {
-        expect(screen.getByLabelText('Language')).toBeInTheDocument();
+        // InteractTab uses div-based labels, not <label> elements
+        expect(screen.getByText('Language')).toBeInTheDocument();
       });
     });
   });
 
-  describe('Voice Modes Tab', () => {
+  describe('Interact Modes Tab', () => {
     it('renders voice modes editor', async () => {
       renderWithRouter();
 
-      fireEvent.click(screen.getByText('Voice Modes'));
+      fireEvent.click(screen.getByText('Interact Modes'));
 
       await waitFor(() => {
         expect(screen.getByTestId('voice-mode-editor')).toBeInTheDocument();

@@ -1,9 +1,33 @@
 /* Collective Page Styles */
 
+/* Animations */
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes phasePulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(100, 181, 246, 0.4);
+  }
+  50% {
+    transform: scale(1.1);
+    box-shadow: 0 0 0 8px rgba(100, 181, 246, 0);
+  }
+}
+
 .collective-page {
   padding: 2rem;
   max-width: 1200px;
   margin: 0 auto;
+  animation: pageEnter 0.3s ease-out;
 }
 
 .collective-header {
@@ -14,7 +38,11 @@
 .collective-header h1 {
   font-size: 2rem;
   margin-bottom: 0.5rem;
-  color: var(--text-primary, #e0e0e0);
+  color: white;
+  background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .collective-subtitle {
@@ -27,29 +55,36 @@
   display: flex;
   gap: 0.5rem;
   margin-bottom: 2rem;
-  border-bottom: 1px solid var(--border-color, #333);
-  padding-bottom: 0.5rem;
+  padding: 12px;
+  background: rgba(26, 26, 46, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
 }
 
 .tab-btn {
   padding: 0.75rem 1.5rem;
   background: transparent;
-  border: none;
+  border: 1px solid transparent;
   color: var(--text-secondary, #888);
   cursor: pointer;
   font-size: 1rem;
-  border-radius: 4px 4px 0 0;
-  transition: all 0.2s;
+  border-radius: 10px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .tab-btn:hover {
   color: var(--text-primary, #e0e0e0);
-  background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateY(-1px);
 }
 
 .tab-btn.active {
-  color: var(--accent-color, #64b5f6);
-  border-bottom: 2px solid var(--accent-color, #64b5f6);
+  color: #64b5f6;
+  background: linear-gradient(135deg, rgba(100, 181, 246, 0.2) 0%, rgba(100, 181, 246, 0.1) 100%);
+  border-color: rgba(100, 181, 246, 0.3);
+  box-shadow: 0 4px 12px rgba(100, 181, 246, 0.2);
 }
 
 /* Form */
@@ -98,23 +133,26 @@
   align-items: flex-start;
   gap: 1rem;
   padding: 1rem;
-  background: var(--bg-secondary, #1e1e1e);
-  border: 2px solid var(--border-color, #333);
-  border-radius: 8px;
+  background: rgba(30, 30, 30, 0.8);
+  border: 2px solid rgba(51, 51, 51, 0.8);
+  border-radius: 12px;
   cursor: pointer;
   text-align: left;
-  transition: all 0.2s;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
 }
 
 .pattern-card:hover:not(.disabled) {
-  border-color: var(--accent-color, #64b5f6);
-  background: var(--bg-hover, rgba(100, 181, 246, 0.1));
+  border-color: rgba(100, 181, 246, 0.5);
+  background: rgba(100, 181, 246, 0.1);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
 }
 
 .pattern-card.selected {
-  border-color: var(--accent-color, #64b5f6);
-  background: var(--bg-hover, rgba(100, 181, 246, 0.15));
+  border-color: rgba(100, 181, 246, 0.6);
+  background: rgba(100, 181, 246, 0.15);
+  box-shadow: 0 4px 16px rgba(100, 181, 246, 0.2);
 }
 
 .pattern-card.disabled {
@@ -172,23 +210,31 @@
 .submit-btn {
   width: 100%;
   padding: 1rem;
-  background: var(--accent-color, #64b5f6);
+  background: linear-gradient(135deg, #64b5f6 0%, #42a5f5 100%);
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   color: white;
   font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 14px rgba(100, 181, 246, 0.3);
 }
 
 .submit-btn:hover:not(:disabled) {
-  background: var(--accent-hover, #42a5f5);
+  background: linear-gradient(135deg, #42a5f5 0%, #2196f3 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(100, 181, 246, 0.4);
+}
+
+.submit-btn:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .submit-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 /* Progress */
@@ -242,15 +288,10 @@
 }
 
 .phase-step.active .phase-dot {
-  background: var(--accent-color, #64b5f6);
-  border-color: var(--accent-color, #64b5f6);
+  background: linear-gradient(135deg, #64b5f6 0%, #42a5f5 100%);
+  border-color: #64b5f6;
   color: white;
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.1); }
+  animation: phasePulse 2s ease-in-out infinite;
 }
 
 .phase-label {

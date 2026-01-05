@@ -166,7 +166,9 @@ describe('NewResearch Tab', () => {
       const mockApi = createMockApi();
       render(<NewResearch api={mockApi} onSessionCreated={vi.fn()} />);
 
-      expect(screen.getByLabelText(/Paid Tools/i)).toBeInTheDocument();
+      // The checkbox is inside a label with span text
+      const checkbox = screen.getByRole('checkbox', { name: /paid.*tools/i });
+      expect(checkbox).toBeInTheDocument();
     });
   });
 

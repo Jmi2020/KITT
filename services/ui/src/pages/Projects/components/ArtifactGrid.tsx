@@ -16,6 +16,29 @@ interface ArtifactGridProps {
   onRetry?: () => void;
 }
 
+/** Skeleton card component for loading state */
+function SkeletonCard() {
+  return (
+    <div className="skeleton-card">
+      <div className="skeleton-card-header">
+        <div className="skeleton-icon" />
+        <div className="skeleton-badge" />
+      </div>
+      <div className="skeleton-card-body">
+        <div className="skeleton-title" />
+        <div className="skeleton-meta">
+          <div className="skeleton-meta-item" />
+          <div className="skeleton-meta-item" />
+        </div>
+      </div>
+      <div className="skeleton-card-actions">
+        <div className="skeleton-btn" />
+        <div className="skeleton-btn" />
+      </div>
+    </div>
+  );
+}
+
 export function ArtifactGrid({
   artifacts,
   loading,
@@ -27,9 +50,10 @@ export function ArtifactGrid({
 }: ArtifactGridProps) {
   if (loading) {
     return (
-      <div className="loading-container">
-        <div className="loader-spinner"></div>
-        <p>Loading artifacts...</p>
+      <div className="skeleton-grid">
+        {[...Array(6)].map((_, i) => (
+          <SkeletonCard key={i} />
+        ))}
       </div>
     );
   }

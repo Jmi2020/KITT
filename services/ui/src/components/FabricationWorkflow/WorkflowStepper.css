@@ -1,14 +1,41 @@
 /* WorkflowStepper.css - Visual step indicator for fabrication workflow */
 
+/* Animations */
+@keyframes stepperEnter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes activePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(59, 130, 246, 0); }
+}
+
+@keyframes checkBounce {
+  0% { transform: scale(0); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
 .workflow-stepper {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0;
   padding: 16px 24px;
-  background: var(--color-surface-secondary, #1e1e1e);
-  border-radius: 8px;
+  background: rgba(26, 26, 46, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
   margin-bottom: 16px;
+  animation: stepperEnter 0.3s ease-out;
 }
 
 .workflow-stepper__step-wrapper {
@@ -23,9 +50,9 @@
   padding: 8px 16px;
   border-radius: 20px;
   border: 2px solid transparent;
-  background: var(--color-surface-tertiary, #2a2a2a);
+  background: rgba(42, 42, 42, 0.8);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   font-family: inherit;
   font-size: 14px;
   font-weight: 500;
@@ -33,7 +60,8 @@
 }
 
 .workflow-stepper__step:hover:not(:disabled) {
-  background: var(--color-surface-hover, #333);
+  background: rgba(60, 60, 60, 0.9);
+  transform: translateY(-1px);
 }
 
 .workflow-stepper__step:focus-visible {
@@ -43,35 +71,39 @@
 
 /* Step states */
 .workflow-stepper__step--active {
-  background: var(--color-primary, #3b82f6);
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   color: white;
-  border-color: var(--color-primary, #3b82f6);
+  border-color: rgba(59, 130, 246, 0.5);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+  animation: activePulse 2s ease-in-out infinite;
 }
 
 .workflow-stepper__step--active:hover {
-  background: var(--color-primary-hover, #2563eb);
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  transform: translateY(-1px);
 }
 
 .workflow-stepper__step--completed {
-  background: var(--color-success-bg, #1a3d2d);
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(22, 163, 74, 0.2) 100%);
   color: var(--color-success, #22c55e);
-  border-color: var(--color-success, #22c55e);
+  border-color: rgba(34, 197, 94, 0.4);
 }
 
 .workflow-stepper__step--completed:hover:not(:disabled) {
-  background: var(--color-success-hover, #166534);
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.3) 0%, rgba(22, 163, 74, 0.3) 100%);
+  transform: translateY(-1px);
 }
 
 .workflow-stepper__step--pending {
-  background: var(--color-surface-tertiary, #2a2a2a);
+  background: rgba(42, 42, 42, 0.8);
   color: var(--color-text-secondary, #888);
-  border-color: var(--color-border, #444);
+  border-color: rgba(68, 68, 68, 0.6);
 }
 
 .workflow-stepper__step--locked {
   opacity: 0.5;
   cursor: not-allowed;
-  background: var(--color-surface-tertiary, #2a2a2a);
+  background: rgba(42, 42, 42, 0.5);
   color: var(--color-text-disabled, #555);
 }
 
@@ -86,21 +118,25 @@
   background: rgba(255, 255, 255, 0.1);
   font-weight: 600;
   font-size: 12px;
+  transition: all 0.3s ease;
 }
 
 .workflow-stepper__step--active .workflow-stepper__number {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.2);
 }
 
 .workflow-stepper__step--completed .workflow-stepper__number {
-  background: var(--color-success, #22c55e);
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
   color: white;
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.4);
 }
 
 .workflow-stepper__check {
   width: 14px;
   height: 14px;
   fill: currentColor;
+  animation: checkBounce 0.4s ease-out;
 }
 
 /* Labels */
@@ -120,17 +156,23 @@
   width: 40px;
   height: 8px;
   margin: 0 4px;
-  color: var(--color-border, #444);
+  color: rgba(68, 68, 68, 0.8);
+  transition: color 0.3s ease;
 }
 
 .workflow-stepper__connector svg {
   width: 100%;
   height: 100%;
   stroke: currentColor;
+  transition: stroke 0.3s ease;
 }
 
 .workflow-stepper__connector--completed {
-  color: var(--color-success, #22c55e);
+  color: #22c55e;
+}
+
+.workflow-stepper__connector--completed svg {
+  filter: drop-shadow(0 0 4px rgba(34, 197, 94, 0.4));
 }
 
 /* Responsive - compact on smaller screens */
