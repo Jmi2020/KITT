@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import '../styles/Shell.css';
 import ProviderSelector from '../components/ProviderSelector';
 import ProviderBadge, { ProviderMetadata } from '../components/ProviderBadge';
+import { SuggestionPopup } from '../components/SuggestionPopup';
+import { usePromptSuggestion } from '../hooks/usePromptSuggestion';
 import { generateId } from '../utils/user';
 
 interface Message {
@@ -152,6 +154,22 @@ const Shell = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Prompt suggestion state
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+  const {
+    suggestions,
+    isLoading: suggestionsLoading,
+    fetchSuggestions,
+    clearSuggestions,
+    acceptSuggestion,
+  } = usePromptSuggestion({
+    context: 'chat',
+    fieldId: 'shell-input',
+    debounceMs: 300,
+    minLength: 10,
+  });
+
   // Image upload handlers
   const handleImageUpload = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -244,8 +262,20 @@ Verbosity: ${state.verbosity}/5  |  Agent: ${state.agentEnabled ? 'ON' : 'OFF'} 
       );
       setFilteredCommands(filtered);
       setShowCommands(true);
+      // Hide suggestions when typing commands
+      setShowSuggestions(false);
+      clearSuggestions();
     } else {
       setShowCommands(false);
+      // Fetch prompt suggestions for non-command input
+      if (value.length >= 10) {
+        fetchSuggestions(value);
+        setShowSuggestions(true);
+        setSelectedSuggestionIndex(0);
+      } else {
+        setShowSuggestions(false);
+        clearSuggestions();
+      }
     }
   };
 
@@ -782,11 +812,40 @@ Examples:
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Handle suggestion navigation
+    if (showSuggestions && suggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedSuggestionIndex(i => Math.min(i + 1, suggestions.length - 1));
+        return;
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedSuggestionIndex(i => Math.max(i - 1, 0));
+        return;
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        const accepted = acceptSuggestion(selectedSuggestionIndex);
+        if (accepted) {
+          setInput(accepted);
+          setShowSuggestions(false);
+        }
+        return;
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowSuggestions(false);
+        clearSuggestions();
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      setShowSuggestions(false);
+      clearSuggestions();
       sendMessage();
     } else if (e.key === 'Escape') {
       setShowCommands(false);
+      setShowSuggestions(false);
     } else if (e.key === 'ArrowDown' && showCommands) {
       e.preventDefault();
       // TODO: Navigate command dropdown
@@ -890,6 +949,29 @@ Examples:
               </div>
             ))}
           </div>
+        )}
+        {/* Prompt Suggestions Popup */}
+        {!showCommands && (showSuggestions || suggestionsLoading) && (
+          <SuggestionPopup
+            suggestions={suggestions}
+            isLoading={suggestionsLoading}
+            isVisible={showSuggestions || suggestionsLoading}
+            selectedIndex={selectedSuggestionIndex}
+            onSelect={(index) => {
+              const accepted = acceptSuggestion(index);
+              if (accepted) {
+                setInput(accepted);
+                setShowSuggestions(false);
+              }
+            }}
+            onDismiss={() => {
+              setShowSuggestions(false);
+              clearSuggestions();
+            }}
+            onSelectedIndexChange={setSelectedSuggestionIndex}
+            anchorRef={inputRef}
+            position="above"
+          />
         )}
         {/* Vision Model Image Strip */}
         {state.isVisionModel && (
