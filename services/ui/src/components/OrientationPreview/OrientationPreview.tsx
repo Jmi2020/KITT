@@ -316,7 +316,7 @@ export function OrientationPreview({
           }
         );
       } else {
-        setError(`Unsupported file type: ${type}`);
+        setError(`${type.toUpperCase()} files cannot be used for orientation analysis. Please select an STL or 3MF file.`);
         setLoading(false);
       }
     };

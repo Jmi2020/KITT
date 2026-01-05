@@ -115,33 +115,57 @@ async def analyze_orientations(request: AnalyzeOrientationRequest) -> AnalyzeOri
 @router.post("/apply", response_model=ApplyOrientationResponse)
 async def apply_orientation(request: ApplyOrientationRequest) -> ApplyOrientationResponse:
     """
-    Apply selected orientation to mesh.
+    Apply selected orientation and optional scaling to mesh.
 
-    Creates a rotated copy of the mesh in temp storage.
+    Creates a rotated (and optionally scaled) copy of the mesh in temp storage.
     The original file is NOT modified.
+
+    If target_height is provided, the mesh is uniformly scaled so that the
+    height (Z dimension after rotation) matches the target.
 
     Returns the path to the oriented mesh for use in subsequent slicing.
     """
     optimizer = get_optimizer()
+    scale_factor = None
 
     try:
         # Load the mesh
         mesh = optimizer.load_mesh(request.mesh_path)
 
-        # Save oriented mesh
+        # Save oriented mesh (rotation is applied during save)
         oriented_path = optimizer.save_oriented_mesh(
             mesh=mesh,
             rotation_matrix=request.rotation_matrix,
             original_path=request.mesh_path,
         )
 
-        # Load the oriented mesh to get new dimensions
+        # Load the oriented mesh to get dimensions and optionally scale
         oriented_mesh = optimizer.load_mesh(oriented_path)
+
+        # Apply scaling if target_height is specified
+        if request.target_height is not None:
+            # Get current height (Z dimension) after orientation
+            bounds = oriented_mesh.bounds
+            current_height = bounds[1][2] - bounds[0][2]
+
+            if current_height > 0:
+                scale_factor = request.target_height / current_height
+                oriented_mesh.apply_scale(scale_factor)
+
+                # Re-save the scaled mesh
+                oriented_mesh.export(oriented_path)
+
+                LOGGER.info(
+                    f"Applied scaling: factor={scale_factor:.4f}, "
+                    f"target_height={request.target_height}mm"
+                )
+
         new_dims = optimizer.get_mesh_dimensions(oriented_mesh)
 
         LOGGER.info(
             f"Applied orientation {request.orientation_id}: "
             f"new dimensions {new_dims}"
+            + (f", scale_factor={scale_factor:.4f}" if scale_factor else "")
         )
 
         return ApplyOrientationResponse(
@@ -149,6 +173,7 @@ async def apply_orientation(request: ApplyOrientationRequest) -> ApplyOrientatio
             oriented_mesh_path=oriented_path,
             new_dimensions=new_dims,
             applied_rotation=request.rotation_matrix,
+            scale_factor=scale_factor,
             error=None,
         )
 
@@ -163,6 +188,7 @@ async def apply_orientation(request: ApplyOrientationRequest) -> ApplyOrientatio
             oriented_mesh_path="",
             new_dimensions=(0.0, 0.0, 0.0),
             applied_rotation=request.rotation_matrix,
+            scale_factor=None,
             error=str(e),
         )
 

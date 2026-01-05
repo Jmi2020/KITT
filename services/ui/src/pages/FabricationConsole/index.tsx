@@ -56,7 +56,7 @@ export default function FabricationConsole() {
       <header className="fabrication-console-v2__header">
         <div className="fabrication-console-v2__title-group">
           <h1 className="fabrication-console-v2__title">Fabrication Console</h1>
-          <span className="fabrication-console-v2__subtitle">Generate → Orient → Segment → Slice → Print</span>
+          <span className="fabrication-console-v2__subtitle">Generate → Orient & Scale → Segment → Slice → Print</span>
         </div>
         <button
           type="button"
@@ -102,7 +102,7 @@ export default function FabricationConsole() {
             onSelectFromBrowser={actions.selectArtifactFromBrowser}
           />
 
-          {/* Step 2: Orient */}
+          {/* Step 2: Orient and Scale */}
           <OrientStep
             selectedArtifact={state.selectedArtifact}
             orientationAnalysis={state.orientationAnalysis}
@@ -113,10 +113,15 @@ export default function FabricationConsole() {
             isActive={state.currentStep === 2}
             isCompleted={completedSteps.includes(2)}
             isLocked={!state.selectedArtifact}
+            scalingEnabled={state.scalingEnabled}
+            targetHeight={state.targetHeight}
+            appliedScaleFactor={state.appliedScaleFactor}
             onAnalyze={actions.analyzeOrientation}
             onSelectOrientation={actions.selectOrientation}
             onApplyOrientation={actions.applyOrientation}
             onSkipOrientation={actions.skipOrientation}
+            onSetScalingEnabled={actions.setScalingEnabled}
+            onSetTargetHeight={actions.setTargetHeight}
           />
 
           {/* Step 3: Segment */}

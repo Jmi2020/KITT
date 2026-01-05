@@ -61,26 +61,34 @@ class AnalyzeOrientationResponse(BaseModel):
 
 
 class ApplyOrientationRequest(BaseModel):
-    """Request to apply an orientation to a mesh."""
+    """Request to apply an orientation and optional scaling to a mesh."""
 
     mesh_path: str = Field(..., description="Path to original mesh file")
     orientation_id: str = Field(..., description="ID of selected orientation")
     rotation_matrix: List[List[float]] = Field(
         ..., description="3x3 rotation matrix to apply"
     )
+    target_height: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description="Target maximum height in mm. If set, mesh will be uniformly scaled.",
+    )
 
 
 class ApplyOrientationResponse(BaseModel):
-    """Response after applying orientation."""
+    """Response after applying orientation and optional scaling."""
 
     success: bool = Field(..., description="Whether application succeeded")
     oriented_mesh_path: str = Field(
-        ..., description="Path to the rotated mesh copy"
+        ..., description="Path to the rotated and optionally scaled mesh copy"
     )
     new_dimensions: Tuple[float, float, float] = Field(
-        ..., description="New dimensions after rotation (width, depth, height) in mm"
+        ..., description="New dimensions after rotation/scaling (width, depth, height) in mm"
     )
     applied_rotation: List[List[float]] = Field(
         ..., description="The rotation matrix that was applied"
+    )
+    scale_factor: Optional[float] = Field(
+        default=None, description="Scale factor applied (if scaling was requested)"
     )
     error: Optional[str] = Field(default=None, description="Error message if failed")

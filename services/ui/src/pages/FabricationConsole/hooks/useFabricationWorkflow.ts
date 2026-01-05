@@ -111,13 +111,16 @@ export interface WorkflowState {
   generationError: string | null;
   uploadProgress: number; // 0-100 for file upload progress
 
-  // Step 2: Orient
+  // Step 2: Orient and Scale
   orientationAnalysis: OrientationAnalysis | null;
   selectedOrientation: OrientationOption | null;
   orientedMeshPath: string | null;
   orientationSkipped: boolean;
   orientationLoading: boolean;
   orientationError: string | null;
+  scalingEnabled: boolean;
+  targetHeight: number | null;
+  appliedScaleFactor: number | null;
 
   // Step 3: Segment
   dimensionCheck: DimensionCheckResult | null;
@@ -196,13 +199,16 @@ const initialState: WorkflowState = {
   generationError: null,
   uploadProgress: 0,
 
-  // Step 2: Orient
+  // Step 2: Orient and Scale
   orientationAnalysis: null,
   selectedOrientation: null,
   orientedMeshPath: null,
   orientationSkipped: false,
   orientationLoading: false,
   orientationError: null,
+  scalingEnabled: false,
+  targetHeight: null,
+  appliedScaleFactor: null,
 
   // Step 3: Segment
   dimensionCheck: null,
@@ -243,11 +249,13 @@ export interface WorkflowActions {
   selectArtifact: (artifact: Artifact) => void;
   selectArtifactFromBrowser: (path: string, type: string) => void;
 
-  // Step 2 actions (Orient)
+  // Step 2 actions (Orient and Scale)
   analyzeOrientation: () => Promise<void>;
   selectOrientation: (orientation: OrientationOption) => void;
   applyOrientation: () => Promise<void>;
   skipOrientation: () => void;
+  setScalingEnabled: (enabled: boolean) => void;
+  setTargetHeight: (height: number | null) => void;
 
   // Step 3 actions (Segment)
   checkDimensions: (printerId?: string) => Promise<void>;
@@ -515,6 +523,9 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
         selectedOrientation: null,
         orientedMeshPath: null,
         orientationSkipped: false,
+        scalingEnabled: false,
+        targetHeight: null,
+        appliedScaleFactor: null,
         dimensionCheck: null,
         segmentResult: null,
         sliceResult: null,
@@ -546,6 +557,9 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
         selectedOrientation: null,
         orientedMeshPath: null,
         orientationSkipped: false,
+        scalingEnabled: false,
+        targetHeight: null,
+        appliedScaleFactor: null,
         dimensionCheck: null,
         segmentResult: null,
         sliceResult: null,
@@ -611,14 +625,21 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
         const meshPath = state.selectedArtifact.metadata?.stl_location ||
           state.selectedArtifact.location;
 
+        // Include target_height if scaling is enabled
+        const requestBody: Record<string, unknown> = {
+          mesh_path: meshPath,
+          orientation_id: state.selectedOrientation.id,
+          rotation_matrix: state.selectedOrientation.rotation_matrix,
+        };
+
+        if (state.scalingEnabled && state.targetHeight !== null && state.targetHeight > 0) {
+          requestBody.target_height = state.targetHeight;
+        }
+
         const response = await fetch('/api/fabrication/orientation/apply', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            mesh_path: meshPath,
-            orientation_id: state.selectedOrientation.id,
-            rotation_matrix: state.selectedOrientation.rotation_matrix,
-          }),
+          body: JSON.stringify(requestBody),
         });
 
         if (!response.ok) throw new Error('Failed to apply orientation');
@@ -632,6 +653,7 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
         setState(prev => ({
           ...prev,
           orientedMeshPath: result.oriented_mesh_path,
+          appliedScaleFactor: result.scale_factor || null,
           orientationLoading: false,
           currentStep: 3,
         }));
@@ -642,7 +664,7 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
           orientationError: (error as Error).message,
         }));
       }
-    }, [state.selectedArtifact, state.selectedOrientation]),
+    }, [state.selectedArtifact, state.selectedOrientation, state.scalingEnabled, state.targetHeight]),
 
     skipOrientation: useCallback(() => {
       setState(prev => ({
@@ -650,6 +672,14 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
         orientationSkipped: true,
         currentStep: 3,
       }));
+    }, []),
+
+    setScalingEnabled: useCallback((scalingEnabled: boolean) => {
+      setState(prev => ({ ...prev, scalingEnabled }));
+    }, []),
+
+    setTargetHeight: useCallback((targetHeight: number | null) => {
+      setState(prev => ({ ...prev, targetHeight }));
     }, []),
 
     // Step 3: Segmentation

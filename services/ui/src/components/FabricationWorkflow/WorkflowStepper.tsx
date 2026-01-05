@@ -16,7 +16,7 @@ interface StepConfig {
 
 const STEPS: StepConfig[] = [
   { number: 1, label: 'Generate', shortLabel: 'GEN' },
-  { number: 2, label: 'Orient', shortLabel: 'ORI' },
+  { number: 2, label: 'Orient & Scale', shortLabel: 'ORI' },
   { number: 3, label: 'Segment', shortLabel: 'SEG' },
   { number: 4, label: 'Slice', shortLabel: 'SLC' },
   { number: 5, label: 'Print', shortLabel: 'PRT' },

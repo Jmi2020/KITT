@@ -5,7 +5,7 @@
  * to minimize support requirements and improve print quality.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { StepContainer } from '../../../components/FabricationWorkflow';
 import { OrientationPreview } from '../../../components/OrientationPreview';
 import { translateArtifactPath, type Artifact } from '../hooks/useFabricationWorkflow';
@@ -43,12 +43,18 @@ interface OrientStepProps {
   isActive: boolean;
   isCompleted: boolean;
   isLocked: boolean;
+  // Scaling state
+  scalingEnabled: boolean;
+  targetHeight: number | null;
+  appliedScaleFactor: number | null;
 
   // Actions
   onAnalyze: () => Promise<void>;
   onSelectOrientation: (orientation: OrientationOption) => void;
   onApplyOrientation: () => Promise<void>;
   onSkipOrientation: () => void;
+  onSetScalingEnabled: (enabled: boolean) => void;
+  onSetTargetHeight: (height: number | null) => void;
 }
 
 export function OrientStep({
@@ -61,19 +67,29 @@ export function OrientStep({
   isActive,
   isCompleted,
   isLocked,
+  scalingEnabled,
+  targetHeight,
+  appliedScaleFactor,
   onAnalyze,
   onSelectOrientation,
   onApplyOrientation,
   onSkipOrientation,
+  onSetScalingEnabled,
+  onSetTargetHeight,
 }: OrientStepProps) {
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  // Check if the selected artifact is a GLB file (preview only, not printable)
+  const isGlbFile = selectedArtifact?.artifactType?.toLowerCase() === 'glb' ||
+    selectedArtifact?.artifactType?.toLowerCase() === 'gltf';
+
   // Auto-analyze when artifact is selected and step becomes active
+  // Skip analysis for GLB files - they are for viewing only
   useEffect(() => {
-    if (selectedArtifact && isActive && !orientationAnalysis && !isLoading) {
+    if (selectedArtifact && isActive && !orientationAnalysis && !isLoading && !isGlbFile) {
       onAnalyze();
     }
-  }, [selectedArtifact, isActive, orientationAnalysis, isLoading, onAnalyze]);
+  }, [selectedArtifact, isActive, orientationAnalysis, isLoading, onAnalyze, isGlbFile]);
 
   // Auto-select recommended orientation
   useEffect(() => {
@@ -110,6 +126,7 @@ export function OrientStep({
   // Get status subtitle
   const getSubtitle = () => {
     if (isLocked) return 'Select a model in Step 1 to analyze orientation';
+    if (isGlbFile) return 'GLB files are for preview only - skip to use STL/3MF for printing';
     if (isLoading) return 'Analyzing mesh orientations...';
     if (error) return 'Failed to analyze orientations';
     if (orientedMeshPath) return `Orientation applied: ${selectedOrientation?.label || 'Custom'}`;
@@ -120,7 +137,7 @@ export function OrientStep({
     if (orientationAnalysis) {
       return `${orientationAnalysis.orientations.length} orientations analyzed`;
     }
-    return 'Optimize model orientation for best print results';
+    return 'Optimize model orientation and scale for printing';
   };
 
   // Format support estimate with color
@@ -138,10 +155,46 @@ export function OrientStep({
     );
   };
 
+  // Compute current height and scale preview
+  const scalingPreview = useMemo(() => {
+    if (!orientationAnalysis || !selectedOrientation) {
+      return null;
+    }
+
+    // Get original dimensions
+    const [w, d, h] = orientationAnalysis.original_dimensions;
+
+    // For now, use height (Z) as the dimension - in reality this should
+    // be calculated based on the rotation matrix, but we use height for simplicity
+    // The backend will handle the actual calculation
+    const currentHeight = h;
+
+    if (!targetHeight || targetHeight <= 0) {
+      return {
+        currentHeight,
+        scaleFactor: null,
+        scaledDimensions: null,
+      };
+    }
+
+    const scaleFactor = targetHeight / currentHeight;
+    const scaledDimensions: [number, number, number] = [
+      w * scaleFactor,
+      d * scaleFactor,
+      h * scaleFactor,
+    ];
+
+    return {
+      currentHeight,
+      scaleFactor,
+      scaledDimensions,
+    };
+  }, [orientationAnalysis, selectedOrientation, targetHeight]);
+
   return (
     <StepContainer
       stepNumber={2}
-      title="Orient for Printing"
+      title="Orient and Scale"
       subtitle={getSubtitle()}
       isActive={isActive}
       isCompleted={isCompleted}
@@ -149,7 +202,7 @@ export function OrientStep({
       isLoading={isLoading}
       error={error}
       collapsible={isCompleted}
-      helpText="Choose optimal orientation to minimize support material and improve print quality"
+      helpText="Choose optimal orientation and adjust scale to minimize support material and fit your printer"
     >
       <div className="orient-step">
         {/* Analysis results with preview */}
@@ -207,6 +260,72 @@ export function OrientStep({
                 ))}
               </div>
 
+              {/* Scaling controls */}
+              {!orientedMeshPath && (
+                <div className="orient-step__scaling">
+                  <div className="orient-step__scaling-toggle">
+                    <input
+                      type="checkbox"
+                      id="enable-scaling"
+                      checked={scalingEnabled}
+                      onChange={(e) => onSetScalingEnabled(e.target.checked)}
+                      disabled={isLoading}
+                    />
+                    <label htmlFor="enable-scaling">Enable Scaling</label>
+                  </div>
+
+                  {scalingEnabled && (
+                    <div className="orient-step__scaling-controls">
+                      <div className="orient-step__scaling-input">
+                        <label htmlFor="target-height">Target Height:</label>
+                        <input
+                          type="number"
+                          id="target-height"
+                          min="1"
+                          max="1000"
+                          step="1"
+                          value={targetHeight || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            onSetTargetHeight(val ? parseFloat(val) : null);
+                          }}
+                          placeholder={scalingPreview?.currentHeight?.toFixed(0) || ''}
+                          disabled={isLoading}
+                        />
+                        <span>mm</span>
+                      </div>
+
+                      {scalingPreview?.scaleFactor && scalingPreview.scaledDimensions && (
+                        <div className="orient-step__scaling-preview">
+                          <div className="orient-step__scaling-preview-row orient-step__scaling-preview-row--highlight">
+                            <span>Scale Factor:</span>
+                            <span>{scalingPreview.scaleFactor.toFixed(3)}x</span>
+                          </div>
+                          <div className="orient-step__scaling-preview-row">
+                            <span>New Dimensions:</span>
+                            <span>
+                              {scalingPreview.scaledDimensions[0].toFixed(1)} x{' '}
+                              {scalingPreview.scaledDimensions[1].toFixed(1)} x{' '}
+                              {scalingPreview.scaledDimensions[2].toFixed(1)} mm
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Show applied scale factor if orientation was applied with scaling */}
+              {orientedMeshPath && appliedScaleFactor && (
+                <div className="orient-step__scaling-preview">
+                  <div className="orient-step__scaling-preview-row orient-step__scaling-preview-row--highlight">
+                    <span>Applied Scale Factor:</span>
+                    <span>{appliedScaleFactor.toFixed(3)}x</span>
+                  </div>
+                </div>
+              )}
+
               {/* Actions */}
               <div className="orient-step__actions">
                 {!orientedMeshPath ? (
@@ -258,6 +377,37 @@ export function OrientStep({
             <p className="orient-step__loading-hint">
               Testing 6 cardinal orientations to find optimal print position
             </p>
+          </div>
+        )}
+
+        {/* GLB file message */}
+        {isGlbFile && selectedArtifact && (
+          <div className="orient-step__glb-notice">
+            <svg viewBox="0 0 24 24" className="orient-step__glb-icon">
+              <path
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <div className="orient-step__glb-content">
+              <h4>GLB files are for preview only</h4>
+              <p>
+                Orientation analysis requires STL or 3MF format. If available, select the STL or 3MF
+                version of this model in Step 1, or skip this step to proceed with the original file.
+              </p>
+              <button
+                type="button"
+                className="orient-step__skip-btn"
+                onClick={onSkipOrientation}
+                disabled={isLoading}
+              >
+                Skip Orientation Step
+              </button>
+            </div>
           </div>
         )}
 
