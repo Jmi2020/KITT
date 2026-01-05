@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import './Coding.css';
+import { SuggestionPopup } from '../../components/SuggestionPopup';
+import { usePromptSuggestion } from '../../hooks/usePromptSuggestion';
 
 // Light markdown renderer - maintains terminal aesthetic with subtle styling
 function renderMarkdown(text: string): ReactNode {
@@ -274,6 +276,22 @@ export default function Coding() {
   ]);
   const [showCodePanel, setShowCodePanel] = useState(true);
   const [showTestPanel, setShowTestPanel] = useState(true);
+
+  // Prompt suggestion state (uses Qwen Coder model for coding context)
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+  const {
+    suggestions,
+    isLoading: suggestionsLoading,
+    fetchSuggestions,
+    clearSuggestions,
+    acceptSuggestion,
+  } = usePromptSuggestion({
+    context: 'coding',
+    fieldId: 'coding-input',
+    debounceMs: 300,
+    minLength: 10,
+  });
 
   const terminalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -777,16 +795,64 @@ export default function Coding() {
     }
   }, [addTerminalLine]);
 
+  // Handle input change for suggestions
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setInputValue(value);
+
+    // Fetch prompt suggestions
+    if (value.length >= 10) {
+      fetchSuggestions(value);
+      setShowSuggestions(true);
+      setSelectedSuggestionIndex(0);
+    } else {
+      setShowSuggestions(false);
+      clearSuggestions();
+    }
+  }, [fetchSuggestions, clearSuggestions]);
+
+  // Handle keyboard navigation for suggestions
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (showSuggestions && suggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedSuggestionIndex(i => Math.min(i + 1, suggestions.length - 1));
+        return;
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedSuggestionIndex(i => Math.max(i - 1, 0));
+        return;
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        const accepted = acceptSuggestion(selectedSuggestionIndex);
+        if (accepted) {
+          setInputValue(accepted);
+          setShowSuggestions(false);
+        }
+        return;
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowSuggestions(false);
+        clearSuggestions();
+        return;
+      }
+    }
+  }, [showSuggestions, suggestions.length, selectedSuggestionIndex, acceptSuggestion, clearSuggestions]);
+
   // Handle input submission
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = inputValue.trim();
     if (!trimmed) return;
 
+    // Clear suggestions
+    setShowSuggestions(false);
+    clearSuggestions();
+
     addTerminalLine('input', `> ${trimmed}`);
     setInputValue('');
     startCodingStream(trimmed);
-  }, [inputValue, addTerminalLine, startCodingStream]);
+  }, [inputValue, addTerminalLine, startCodingStream, clearSuggestions]);
 
   // Copy code to clipboard
   const copyToClipboard = useCallback(async (text: string | null) => {
@@ -1027,13 +1093,37 @@ export default function Coding() {
           </div>
 
           <form className="terminal-input-container" onSubmit={handleSubmit}>
+            {/* Prompt Suggestions Popup */}
+            {(showSuggestions || suggestionsLoading) && (
+              <SuggestionPopup
+                suggestions={suggestions}
+                isLoading={suggestionsLoading}
+                isVisible={showSuggestions || suggestionsLoading}
+                selectedIndex={selectedSuggestionIndex}
+                onSelect={(index) => {
+                  const accepted = acceptSuggestion(index);
+                  if (accepted) {
+                    setInputValue(accepted);
+                    setShowSuggestions(false);
+                  }
+                }}
+                onDismiss={() => {
+                  setShowSuggestions(false);
+                  clearSuggestions();
+                }}
+                onSelectedIndexChange={setSelectedSuggestionIndex}
+                anchorRef={inputRef}
+                position="above"
+              />
+            )}
             <span className="terminal-prompt">$</span>
             <input
               ref={inputRef}
               type="text"
               className="terminal-input"
               value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
               placeholder="Enter coding request..."
               disabled={state.phase !== 'idle' && state.phase !== 'complete' && state.phase !== 'error'}
             />
