@@ -1,13 +1,13 @@
 import { useState, useCallback } from 'react';
 import { VoiceAssistant } from '../components/VoiceAssistant';
 import { KittyBadge } from '../components/KittyBadge';
-import './Voice.css';
+import './Interact.css';
 
 /**
- * Voice assistant page.
+ * Interact page - voice assistant interface.
  * Provides full-screen voice interaction with KITTY.
  */
-export default function Voice() {
+export default function Interact() {
   const [isActive, setIsActive] = useState(false);
 
   // Callback to track when voice is active (listening or responding)
@@ -16,14 +16,14 @@ export default function Voice() {
   }, []);
 
   return (
-    <div className="voice-page">
-      <div className="voice-aurora left" />
-      <div className="voice-aurora right" />
-      <div className="voice-grid" />
-      <div className="voice-scan" />
-      <div className="voice-noise" />
+    <div className="interact-page">
+      <div className="interact-aurora left" />
+      <div className="interact-aurora right" />
+      <div className="interact-grid" />
+      <div className="interact-scan" />
+      <div className="interact-noise" />
 
-      <div className="voice-shell">
+      <div className="interact-shell">
         <VoiceAssistant fullscreen onStatusChange={handleStatusChange} />
       </div>
 

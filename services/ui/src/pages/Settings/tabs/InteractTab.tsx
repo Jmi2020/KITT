@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VoiceSettings } from '../../../hooks/useSettings';
-import './VoiceTab.css';
+import './InteractTab.css';
 
 interface Voice {
   id: string;
@@ -10,12 +10,12 @@ interface Voice {
   curated: boolean;
 }
 
-interface VoiceTabProps {
+interface InteractTabProps {
   settings: { voice: VoiceSettings };
   updateSection: (section: 'voice', updates: Partial<VoiceSettings>) => void;
 }
 
-export function VoiceTab({ settings, updateSection }: VoiceTabProps) {
+export function InteractTab({ settings, updateSection }: InteractTabProps) {
   const [voices, setVoices] = useState<Voice[]>([]);
   const [curatedVoices, setCuratedVoices] = useState<Voice[]>([]);
   const [showAllVoices, setShowAllVoices] = useState(false);
@@ -166,7 +166,7 @@ export function VoiceTab({ settings, updateSection }: VoiceTabProps) {
   return (
     <div className="settings-section">
       <div className="voice-settings-header">
-        <h2>Voice Settings</h2>
+        <h2>Interact Settings</h2>
         {savedBadge && (
           <span className="saved-badge">
             <span className="saved-checkmark">✓</span> {savedBadge}

@@ -12,7 +12,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { path: '/', icon: '🏠', label: 'Home' },
-  { path: '/voice', icon: '🎙️', label: 'Voice' },
+  { path: '/interact', icon: '🎙️', label: 'Interact' },
   { path: '/research', icon: '🔬', label: 'Research' },
   { path: '/console', icon: '🎨', label: 'Fabrication' },
   { path: '/settings', icon: '⚙️', label: 'Settings' },
@@ -32,7 +32,7 @@ const moreItems: NavItem[] = [
 export function Layout() {
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
-  const isVoicePage = location.pathname === '/voice';
+  const isInteractPage = location.pathname === '/interact';
   const [moreOpen, setMoreOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
@@ -102,12 +102,12 @@ export function Layout() {
           </button>
         </nav>
       </header>
-      <main style={isVoicePage ? { padding: 0, maxWidth: 'none', margin: 0, height: 'calc(100vh - 64px)' } : undefined}>
+      <main style={isInteractPage ? { padding: 0, maxWidth: 'none', margin: 0, height: 'calc(100vh - 64px)' } : undefined}>
         <Outlet />
       </main>
 
-      {/* Floating KITTY badge - appears on all pages except Voice (which has its own with pause behavior) */}
-      {!isVoicePage && (
+      {/* Floating KITTY badge - appears on all pages except Interact (which has its own with pause behavior) */}
+      {!isInteractPage && (
         <KittyBadge size={80} wandering={true} wanderInterval={30000} />
       )}
     </div>

@@ -13,8 +13,8 @@ interface MenuItem {
 
 const menuItems: MenuItem[] = [
   {
-    id: 'voice',
-    title: 'KITTY (Voice)',
+    id: 'interact',
+    title: 'KITTY (Interact)',
     description: 'Real-time voice assistant with STT/TTS',
     icon: '🎙️',
   },

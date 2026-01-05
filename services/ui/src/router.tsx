@@ -22,7 +22,7 @@ const ResearchHub = lazy(() => import('./pages/ResearchHub'));
 // MaterialInventory is now part of Dashboard as Materials tab
 // VisionService/cameras is now part of Dashboard as Cameras tab
 const PrintIntelligence = lazy(() => import('./pages/PrintIntelligence'));
-const Voice = lazy(() => import('./pages/Voice'));
+const Interact = lazy(() => import('./pages/Interact'));
 const Settings = lazy(() => import('./pages/Settings/index'));
 const Collective = lazy(() => import('./pages/Collective'));
 const Coding = lazy(() => import('./pages/Coding'));
@@ -74,7 +74,7 @@ function LegacyViewRedirect() {
     intelligence: '/intelligence',
     cameras: '/dashboard?tab=cameras',
     calendar: '/research?tab=schedule',
-    voice: '/voice',
+    interact: '/interact',
     settings: '/settings',
   };
 
@@ -117,7 +117,7 @@ function MenuWrapper() {
       intelligence: '/intelligence',
       cameras: '/dashboard?tab=cameras',
       calendar: '/research?tab=schedule',
-      voice: '/voice',
+      interact: '/interact',
       settings: '/settings',
     };
 
@@ -144,12 +144,12 @@ export const router = createBrowserRouter([
         ),
       },
 
-      // Voice & Chat
+      // Interact & Chat
       {
-        path: 'voice',
+        path: 'interact',
         element: (
           <Suspense fallback={<PageLoader />}>
-            <Voice />
+            <Interact />
           </Suspense>
         ),
       },

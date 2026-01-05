@@ -1,5 +1,5 @@
-/* Voice page visual system */
-.voice-page {
+/* Interact page visual system */
+.interact-page {
   position: relative;
   width: 100%;
   height: 100%;
@@ -12,7 +12,7 @@
   overflow: hidden;
 }
 
-.voice-aurora {
+.interact-aurora {
   position: absolute;
   filter: blur(120px);
   opacity: 0.65;
@@ -21,31 +21,31 @@
   transform: translateZ(0);
 }
 
-.voice-aurora.left {
+.interact-aurora.left {
   width: 520px;
   height: 520px;
   top: -140px;
   left: -160px;
   background: radial-gradient(circle at 30% 30%, rgba(34, 211, 238, 0.65), rgba(59, 130, 246, 0.35), transparent 60%);
-  animation: voice-drift 18s ease-in-out infinite;
+  animation: interact-drift 18s ease-in-out infinite;
 }
 
-.voice-aurora.right {
+.interact-aurora.right {
   width: 560px;
   height: 560px;
   bottom: -200px;
   right: -160px;
   background: radial-gradient(circle at 50% 40%, rgba(236, 72, 153, 0.45), rgba(249, 115, 22, 0.3), transparent 60%);
-  animation: voice-drift 22s ease-in-out infinite reverse;
+  animation: interact-drift 22s ease-in-out infinite reverse;
 }
 
-@keyframes voice-drift {
+@keyframes interact-drift {
   0% { transform: translateY(0) scale(1); }
   50% { transform: translateY(-18px) scale(1.04); }
   100% { transform: translateY(0) scale(1); }
 }
 
-.voice-grid {
+.interact-grid {
   position: absolute;
   inset: 0;
   background-image:
@@ -57,7 +57,7 @@
   pointer-events: none;
 }
 
-.voice-grid::after {
+.interact-grid::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -71,7 +71,7 @@
   -webkit-mask-image: radial-gradient(circle at 50% 45%, black 55%, transparent 95%);
 }
 
-.voice-scan {
+.interact-scan {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -82,7 +82,7 @@
   opacity: 0.16;
 }
 
-.voice-noise {
+.interact-noise {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -91,7 +91,7 @@
   mix-blend-mode: soft-light;
 }
 
-.voice-shell {
+.interact-shell {
   position: relative;
   z-index: 1;
   height: 100%;
@@ -99,7 +99,7 @@
   -webkit-backdrop-filter: blur(4px);
 }
 
-.voice-shell::after {
+.interact-shell::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -110,7 +110,7 @@
 }
 
 /* Mode toggle and action buttons */
-.voice-mode-toggle {
+.interact-mode-toggle {
   display: inline-flex;
   gap: 0.35rem;
   padding: 0.35rem;
@@ -120,7 +120,7 @@
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.35);
 }
 
-.voice-mode-option {
+.interact-mode-option {
   border: 1px solid transparent;
   background: transparent;
   color: #9fb3ce;
@@ -132,27 +132,27 @@
   transition: all 0.2s ease;
 }
 
-.voice-mode-option:hover {
+.interact-mode-option:hover {
   color: #e8edf7;
   border-color: rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.04);
 }
 
-.voice-mode-option.active {
+.interact-mode-option.active {
   color: #0c111f;
   background: linear-gradient(135deg, #22d3ee, #a855f7);
   border-color: rgba(255, 255, 255, 0.32);
   box-shadow: 0 12px 28px rgba(34, 211, 238, 0.3);
 }
 
-.voice-mic-wrap {
+.interact-mic-wrap {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.voice-mic-ring {
+.interact-mic-ring {
   position: absolute;
   inset: -18px;
   border-radius: 999px;
@@ -162,13 +162,13 @@
   transition: all 0.25s ease;
 }
 
-.voice-mic-ring.active {
+.interact-mic-ring.active {
   background: radial-gradient(circle, rgba(239, 68, 68, 0.55), transparent 70%);
   opacity: 0.85;
-  animation: voice-pulse 1.5s ease-in-out infinite;
+  animation: interact-pulse 1.5s ease-in-out infinite;
 }
 
-.voice-mic-button {
+.interact-mic-button {
   position: relative;
   height: 4.25rem;
   width: 4.25rem;
@@ -182,30 +182,30 @@
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
-.voice-mic-button:hover {
+.interact-mic-button:hover {
   transform: translateY(-2px);
   border-color: rgba(255, 255, 255, 0.32);
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
-.voice-mic-button.active {
+.interact-mic-button.active {
   background: radial-gradient(circle at 30% 30%, rgba(239, 68, 68, 0.8), rgba(62, 7, 24, 0.9));
   border-color: rgba(239, 68, 68, 0.65);
   box-shadow: 0 20px 60px rgba(239, 68, 68, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.12);
   transform: translateY(-2px);
 }
 
-.voice-mic-button .icon {
+.interact-mic-button .icon {
   font-size: 1.6rem;
 }
 
-@keyframes voice-pulse {
+@keyframes interact-pulse {
   0% { transform: scale(0.94); opacity: 0.65; }
   50% { transform: scale(1.05); opacity: 1; }
   100% { transform: scale(0.94); opacity: 0.65; }
 }
 
-.voice-button-hint {
+.interact-button-hint {
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
@@ -217,7 +217,7 @@
   justify-content: center;
 }
 
-.voice-chip {
+.interact-chip {
   padding: 0.25rem 0.7rem;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -226,7 +226,7 @@
   letter-spacing: 0.08em;
 }
 
-.voice-hint-row {
+.interact-hint-row {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -240,7 +240,7 @@
   letter-spacing: 0.18em;
 }
 
-.voice-hint-chip {
+.interact-hint-chip {
   padding: 4px 8px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -250,13 +250,13 @@
 }
 
 /* Markdown helper for response bubble */
-.voice-response {
+.interact-response {
   max-width: min(960px, 92vw);
   line-height: 1.7;
   font-size: 15px;
 }
 
-.voice-terminal-bar {
+.interact-terminal-bar {
   position: relative;
   border-radius: 18px;
   border: 1px solid transparent;
@@ -268,7 +268,7 @@
   overflow: hidden;
 }
 
-.voice-terminal-inner {
+.interact-terminal-inner {
   display: flex;
   align-items: center;
   gap: 0.35rem;
@@ -277,11 +277,11 @@
   border-radius: 16px;
 }
 
-.voice-terminal-input {
+.interact-terminal-input {
   flex: 1;
 }
 
-.voice-terminal-input input {
+.interact-terminal-input input {
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
@@ -290,11 +290,11 @@
   padding: 0.9rem 1rem !important;
 }
 
-.voice-terminal-input input::placeholder {
+.interact-terminal-input input::placeholder {
   color: #5d6d88 !important;
 }
 
-.voice-terminal-send {
+.interact-terminal-send {
   height: 3rem;
   width: 3rem;
   border-radius: 14px;
@@ -304,11 +304,11 @@
 }
 
 @media (max-width: 768px) {
-  .voice-page {
+  .interact-page {
     min-height: calc(100vh - 56px);
   }
 
-  .voice-mic-button {
+  .interact-mic-button {
     height: 3.75rem;
     width: 3.75rem;
   }

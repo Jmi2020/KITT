@@ -1,6 +1,6 @@
 /**
  * Settings Page - Consolidated settings with System tab
- * Includes: Connections, Voice, Voice Modes, Fabrication, UI, Runtime, System (IOControl)
+ * Includes: Connections, Interact, Interact Modes, Fabrication, UI, Runtime, System (IOControl)
  */
 
 import { useState, useCallback, useEffect } from 'react';
@@ -13,10 +13,10 @@ import type { VoiceMode } from '../../types/voiceModes';
 import SystemTab from './tabs/SystemTab';
 import RuntimeTab from './tabs/RuntimeTab';
 import ModelTestingTab from './tabs/ModelTestingTab';
-import { VoiceTab } from './tabs/VoiceTab';
+import { InteractTab } from './tabs/InteractTab';
 import './Settings.css';
 
-type SettingsTab = 'connections' | 'voice' | 'voice_modes' | 'fabrication' | 'ui' | 'runtime' | 'model_testing' | 'system';
+type SettingsTab = 'connections' | 'interact' | 'interact_modes' | 'fabrication' | 'ui' | 'runtime' | 'model_testing' | 'system';
 
 /**
  * Settings page with service connections, preferences, and system configuration.
@@ -42,8 +42,8 @@ export default function Settings() {
 
   const tabs: { id: SettingsTab; label: string; icon: string }[] = [
     { id: 'connections', label: 'Connections', icon: '🔌' },
-    { id: 'voice', label: 'Voice', icon: '🎙️' },
-    { id: 'voice_modes', label: 'Voice Modes', icon: '🎭' },
+    { id: 'interact', label: 'Interact', icon: '🎙️' },
+    { id: 'interact_modes', label: 'Interact Modes', icon: '🎭' },
     { id: 'fabrication', label: 'Fabrication', icon: '🖨️' },
     { id: 'ui', label: 'Interface', icon: '🎨' },
     { id: 'runtime', label: 'Runtime', icon: '🚀' },
@@ -111,13 +111,13 @@ export default function Settings() {
             </div>
           )}
 
-          {/* Voice Tab */}
-          {activeTab === 'voice' && settings && (
-            <VoiceTab settings={settings} updateSection={updateSection} />
+          {/* Interact Tab */}
+          {activeTab === 'interact' && settings && (
+            <InteractTab settings={settings} updateSection={updateSection} />
           )}
 
-          {/* Voice Modes Tab */}
-          {activeTab === 'voice_modes' && settings && (
+          {/* Interact Modes Tab */}
+          {activeTab === 'interact_modes' && settings && (
             <div className="settings-section">
               <h2>Voice Modes</h2>
               <div className="settings-card">
