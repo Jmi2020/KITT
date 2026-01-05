@@ -6,9 +6,11 @@
  * Collective Intelligence specialist pattern.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { UseResearchApiReturn } from '../../../hooks/useResearchApi';
 import type { ResearchSession } from '../../../types/research';
+import { SuggestionPopup } from '../../../components/SuggestionPopup';
+import { usePromptSuggestion } from '../../../hooks/usePromptSuggestion';
 
 interface SearchProvider {
   id: string;
@@ -50,6 +52,66 @@ const NewResearch = ({ api, onSessionCreated }: NewResearchProps) => {
   const [selectedProviders, setSelectedProviders] = useState<string[]>(['duckduckgo']);
   const [costEstimate, setCostEstimate] = useState<CostEstimate | null>(null);
   const [showAdvancedProviders, setShowAdvancedProviders] = useState(false);
+
+  // Prompt suggestion state (research context)
+  const queryTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+  const {
+    suggestions,
+    isLoading: suggestionsLoading,
+    fetchSuggestions,
+    clearSuggestions,
+    acceptSuggestion,
+  } = usePromptSuggestion({
+    context: 'research',
+    fieldId: 'research-query',
+    debounceMs: 300,
+    minLength: 10,
+  });
+
+  // Handle query change with suggestions
+  const handleQueryChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setQuery(value);
+
+    if (value.length >= 10) {
+      fetchSuggestions(value);
+      setShowSuggestions(true);
+      setSelectedSuggestionIndex(0);
+    } else {
+      setShowSuggestions(false);
+      clearSuggestions();
+    }
+  }, [fetchSuggestions, clearSuggestions]);
+
+  // Handle keyboard navigation for suggestions
+  const handleSuggestionKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showSuggestions && suggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedSuggestionIndex(i => Math.min(i + 1, suggestions.length - 1));
+        return;
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedSuggestionIndex(i => Math.max(i - 1, 0));
+        return;
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        const accepted = acceptSuggestion(selectedSuggestionIndex);
+        if (accepted) {
+          setQuery(accepted);
+          setShowSuggestions(false);
+        }
+        return;
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowSuggestions(false);
+        clearSuggestions();
+        return;
+      }
+    }
+  }, [showSuggestions, suggestions.length, selectedSuggestionIndex, acceptSuggestion, clearSuggestions]);
 
   // Fetch available providers on mount
   useEffect(() => {
@@ -166,14 +228,41 @@ const NewResearch = ({ api, onSessionCreated }: NewResearchProps) => {
 
       <div className="form-group">
         <label htmlFor="query">Research Query</label>
-        <textarea
-          id="query"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="What would you like to research? (min. 10 characters)"
-          rows={4}
-          disabled={api.loading}
-        />
+        <div className="query-textarea-wrapper">
+          {/* Prompt Suggestions Popup */}
+          {(showSuggestions || suggestionsLoading) && (
+            <SuggestionPopup
+              suggestions={suggestions}
+              isLoading={suggestionsLoading}
+              isVisible={showSuggestions || suggestionsLoading}
+              selectedIndex={selectedSuggestionIndex}
+              onSelect={(index) => {
+                const accepted = acceptSuggestion(index);
+                if (accepted) {
+                  setQuery(accepted);
+                  setShowSuggestions(false);
+                }
+              }}
+              onDismiss={() => {
+                setShowSuggestions(false);
+                clearSuggestions();
+              }}
+              onSelectedIndexChange={setSelectedSuggestionIndex}
+              anchorRef={queryTextareaRef}
+              position="below"
+            />
+          )}
+          <textarea
+            ref={queryTextareaRef}
+            id="query"
+            value={query}
+            onChange={handleQueryChange}
+            onKeyDown={handleSuggestionKeyDown}
+            placeholder="What would you like to research? (min. 10 characters)"
+            rows={4}
+            disabled={api.loading}
+          />
+        </div>
         <small>{query.length}/10 characters minimum</small>
       </div>
 

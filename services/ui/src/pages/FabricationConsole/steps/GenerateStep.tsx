@@ -8,9 +8,11 @@
  * Displays generated/imported artifacts with download links and thumbnails.
  */
 
-import { useRef, ChangeEvent, DragEvent, useState } from 'react';
+import { useRef, ChangeEvent, DragEvent, useState, useCallback } from 'react';
 import { StepContainer } from '../../../components/FabricationWorkflow';
 import { ArtifactBrowser } from '../components';
+import { SuggestionPopup } from '../../../components/SuggestionPopup';
+import { usePromptSuggestion } from '../../../hooks/usePromptSuggestion';
 import {
   Artifact,
   GenerationProvider,
@@ -117,8 +119,70 @@ export function GenerateStep({
 }: GenerateStepProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [imageDragOver, setImageDragOver] = useState(false);
+
+  // Prompt suggestion state (CAD context)
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+  const {
+    suggestions,
+    isLoading: suggestionsLoading,
+    fetchSuggestions,
+    clearSuggestions,
+    acceptSuggestion,
+  } = usePromptSuggestion({
+    context: 'cad',
+    fieldId: 'cad-prompt',
+    debounceMs: 300,
+    minLength: 10,
+  });
+
+  // Handle prompt change with suggestions
+  const handlePromptChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    onPromptChange(value);
+
+    if (value.length >= 10) {
+      fetchSuggestions(value);
+      setShowSuggestions(true);
+      setSelectedSuggestionIndex(0);
+    } else {
+      setShowSuggestions(false);
+      clearSuggestions();
+    }
+  }, [onPromptChange, fetchSuggestions, clearSuggestions]);
+
+  // Handle keyboard navigation for suggestions
+  const handleSuggestionKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showSuggestions && suggestions.length > 0) {
+      if (e.key === 'ArrowDown' && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        setSelectedSuggestionIndex(i => Math.min(i + 1, suggestions.length - 1));
+        return;
+      } else if (e.key === 'ArrowUp' && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        setSelectedSuggestionIndex(i => Math.max(i - 1, 0));
+        return;
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        const accepted = acceptSuggestion(selectedSuggestionIndex);
+        if (accepted) {
+          onPromptChange(accepted);
+          setShowSuggestions(false);
+        }
+        return;
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowSuggestions(false);
+        clearSuggestions();
+        return;
+      }
+    }
+    // Pass through to original handler for Cmd+Enter
+    handleKeyPress(e);
+  }, [showSuggestions, suggestions.length, selectedSuggestionIndex, acceptSuggestion, onPromptChange, clearSuggestions]);
 
   const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -308,20 +372,46 @@ export function GenerateStep({
                   Model Description
                   <span className="generate-step__label-hint">Describe what you want to create</span>
                 </label>
-                <textarea
-                  id="cad-prompt"
-                  className="generate-step__textarea"
-                  rows={4}
-                  value={prompt}
-                  onChange={(e) => onPromptChange(e.target.value)}
-                  onKeyDown={handleKeyPress}
-                  placeholder={
-                    provider === 'zoo'
-                      ? 'Describe the part (e.g., "2U rack faceplate with 80mm cable passthrough")'
-                      : 'Describe the model (e.g., "A cat sitting on a pillow")'
-                  }
-                  disabled={isLoading}
-                />
+                <div className="generate-step__textarea-wrapper">
+                  {/* Prompt Suggestions Popup */}
+                  {(showSuggestions || suggestionsLoading) && (
+                    <SuggestionPopup
+                      suggestions={suggestions}
+                      isLoading={suggestionsLoading}
+                      isVisible={showSuggestions || suggestionsLoading}
+                      selectedIndex={selectedSuggestionIndex}
+                      onSelect={(index) => {
+                        const accepted = acceptSuggestion(index);
+                        if (accepted) {
+                          onPromptChange(accepted);
+                          setShowSuggestions(false);
+                        }
+                      }}
+                      onDismiss={() => {
+                        setShowSuggestions(false);
+                        clearSuggestions();
+                      }}
+                      onSelectedIndexChange={setSelectedSuggestionIndex}
+                      anchorRef={promptTextareaRef}
+                      position="above"
+                    />
+                  )}
+                  <textarea
+                    ref={promptTextareaRef}
+                    id="cad-prompt"
+                    className="generate-step__textarea"
+                    rows={4}
+                    value={prompt}
+                    onChange={handlePromptChange}
+                    onKeyDown={handleSuggestionKeyDown}
+                    placeholder={
+                      provider === 'zoo'
+                        ? 'Describe the part (e.g., "2U rack faceplate with 80mm cable passthrough")'
+                        : 'Describe the model (e.g., "A cat sitting on a pillow")'
+                    }
+                    disabled={isLoading}
+                  />
+                </div>
                 <div className="generate-step__prompt-footer">
                   <span className="generate-step__shortcut">
                     <kbd>Cmd</kbd> + <kbd>Enter</kbd> to generate

@@ -3,9 +3,11 @@
  * Stable Diffusion image generation with Apple Silicon MPS acceleration
  */
 
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import type { GenerateRequest, JobStatusResponse, RecentImage } from '../../../types/media';
 import { MODELS, SIZES, GENERATOR_STARTER_PROMPTS } from '../../../types/media';
+import { SuggestionPopup } from '../../../components/SuggestionPopup';
+import { usePromptSuggestion } from '../../../hooks/usePromptSuggestion';
 import './Generate.css';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
@@ -28,6 +30,66 @@ const Generate = () => {
 
   const [recentImages, setRecentImages] = useState<RecentImage[]>([]);
   const [showRecent, setShowRecent] = useState(false);
+
+  // Prompt suggestion state (image context)
+  const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+  const {
+    suggestions,
+    isLoading: suggestionsLoading,
+    fetchSuggestions,
+    clearSuggestions,
+    acceptSuggestion,
+  } = usePromptSuggestion({
+    context: 'image',
+    fieldId: 'image-prompt',
+    debounceMs: 300,
+    minLength: 10,
+  });
+
+  // Handle prompt change with suggestions
+  const handlePromptChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setPrompt(value);
+
+    if (value.length >= 10) {
+      fetchSuggestions(value);
+      setShowSuggestions(true);
+      setSelectedSuggestionIndex(0);
+    } else {
+      setShowSuggestions(false);
+      clearSuggestions();
+    }
+  }, [fetchSuggestions, clearSuggestions]);
+
+  // Handle keyboard navigation for suggestions
+  const handleSuggestionKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showSuggestions && suggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedSuggestionIndex(i => Math.min(i + 1, suggestions.length - 1));
+        return;
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedSuggestionIndex(i => Math.max(i - 1, 0));
+        return;
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        const accepted = acceptSuggestion(selectedSuggestionIndex);
+        if (accepted) {
+          setPrompt(accepted);
+          setShowSuggestions(false);
+        }
+        return;
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowSuggestions(false);
+        clearSuggestions();
+        return;
+      }
+    }
+  }, [showSuggestions, suggestions.length, selectedSuggestionIndex, acceptSuggestion, clearSuggestions]);
 
   const pickRandomPrompt = () => {
     const randomPrompt = GENERATOR_STARTER_PROMPTS[Math.floor(Math.random() * GENERATOR_STARTER_PROMPTS.length)];
@@ -163,13 +225,40 @@ const Generate = () => {
         <div className="generate-form">
           <div className="form-group">
             <label>Prompt</label>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe the image you want to generate..."
-              rows={3}
-              disabled={loading}
-            />
+            <div className="prompt-textarea-wrapper">
+              {/* Prompt Suggestions Popup */}
+              {(showSuggestions || suggestionsLoading) && (
+                <SuggestionPopup
+                  suggestions={suggestions}
+                  isLoading={suggestionsLoading}
+                  isVisible={showSuggestions || suggestionsLoading}
+                  selectedIndex={selectedSuggestionIndex}
+                  onSelect={(index) => {
+                    const accepted = acceptSuggestion(index);
+                    if (accepted) {
+                      setPrompt(accepted);
+                      setShowSuggestions(false);
+                    }
+                  }}
+                  onDismiss={() => {
+                    setShowSuggestions(false);
+                    clearSuggestions();
+                  }}
+                  onSelectedIndexChange={setSelectedSuggestionIndex}
+                  anchorRef={promptTextareaRef}
+                  position="below"
+                />
+              )}
+              <textarea
+                ref={promptTextareaRef}
+                value={prompt}
+                onChange={handlePromptChange}
+                onKeyDown={handleSuggestionKeyDown}
+                placeholder="Describe the image you want to generate..."
+                rows={3}
+                disabled={loading}
+              />
+            </div>
             <button
               onClick={pickRandomPrompt}
               className="btn-secondary"
