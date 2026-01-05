@@ -250,9 +250,9 @@ const ResearchHub = () => {
                       </div>
 
                       <div className="session-card-stats">
-                        <span>📊 {session.total_findings}</span>
-                        <span>🔗 {session.total_sources}</span>
-                        <span>💰 ${session.total_cost_usd.toFixed(2)}</span>
+                        <span>📊 {session.total_findings ?? 0}</span>
+                        <span>🔗 {session.total_sources ?? 0}</span>
+                        <span>💰 ${(session.total_cost_usd ?? 0).toFixed(2)}</span>
                       </div>
                     </div>
                   ))
