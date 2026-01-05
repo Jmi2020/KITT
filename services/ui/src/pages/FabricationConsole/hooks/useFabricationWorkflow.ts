@@ -95,6 +95,7 @@ export interface OrientationAnalysis {
 export type WorkflowStep = 1 | 2 | 3 | 4 | 5;
 export type GenerationProvider = 'meshy' | 'tripo' | 'zoo' | null;
 export type GenerationMode = 'generate' | 'import' | 'browse';
+export type GenerationInputMode = 'text' | 'image';
 export type QualityPreset = 'quick' | 'standard' | 'quality';
 
 export interface WorkflowState {
@@ -103,8 +104,11 @@ export interface WorkflowState {
   // Step 1: Generate
   provider: GenerationProvider;
   mode: GenerationMode;
+  inputMode: GenerationInputMode;  // Text or image input for AI generation
   prompt: string;
   refineMode: boolean;  // For Meshy: run HD refine after preview
+  imageFile: File | null;  // Image file for image-to-3D
+  imagePreview: string | null;  // Base64 preview of image
   artifacts: Artifact[];
   selectedArtifact: Artifact | null;
   generationLoading: boolean;
@@ -191,8 +195,11 @@ const initialState: WorkflowState = {
   // Step 1
   provider: 'meshy',  // Primary provider (Tripo is fallback)
   mode: 'generate',
+  inputMode: 'text',  // Default to text input
   prompt: '',
   refineMode: false,  // HD refine disabled by default
+  imageFile: null,
+  imagePreview: null,
   artifacts: [],
   selectedArtifact: null,
   generationLoading: false,
@@ -242,8 +249,11 @@ export interface WorkflowActions {
   // Step 1 actions
   setProvider: (provider: GenerationProvider) => void;
   setMode: (mode: GenerationMode) => void;
+  setInputMode: (inputMode: GenerationInputMode) => void;
   setPrompt: (prompt: string) => void;
   setRefineMode: (refine: boolean) => void;
+  setImageFile: (file: File | null) => void;
+  clearImage: () => void;
   generateModel: () => Promise<void>;
   importModel: (file: File) => Promise<void>;
   selectArtifact: (artifact: Artifact) => void;
@@ -390,6 +400,10 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
       setState(prev => ({ ...prev, mode }));
     }, []),
 
+    setInputMode: useCallback((inputMode: GenerationInputMode) => {
+      setState(prev => ({ ...prev, inputMode }));
+    }, []),
+
     setPrompt: useCallback((prompt: string) => {
       setState(prev => ({ ...prev, prompt }));
     }, []),
@@ -398,9 +412,43 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
       setState(prev => ({ ...prev, refineMode }));
     }, []),
 
+    setImageFile: useCallback((file: File | null) => {
+      if (file) {
+        // Create preview URL
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setState(prev => ({
+            ...prev,
+            imageFile: file,
+            imagePreview: reader.result as string,
+          }));
+        };
+        reader.readAsDataURL(file);
+      } else {
+        setState(prev => ({
+          ...prev,
+          imageFile: null,
+          imagePreview: null,
+        }));
+      }
+    }, []),
+
+    clearImage: useCallback(() => {
+      setState(prev => ({
+        ...prev,
+        imageFile: null,
+        imagePreview: null,
+      }));
+    }, []),
+
     generateModel: useCallback(async () => {
-      if (!state.prompt.trim()) {
+      // Validate input based on input mode
+      if (state.inputMode === 'text' && !state.prompt.trim()) {
         setState(prev => ({ ...prev, generationError: 'Enter a prompt first' }));
+        return;
+      }
+      if (state.inputMode === 'image' && !state.imagePreview) {
+        setState(prev => ({ ...prev, generationError: 'Select an image first' }));
         return;
       }
 
@@ -413,15 +461,25 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
       }));
 
       try {
+        // Build request body
+        const requestBody: Record<string, unknown> = {
+          conversationId,
+          prompt: state.prompt || 'Generate 3D model from image',
+          mode: state.provider === 'zoo' ? 'parametric' : 'organic',
+          refine: state.refineMode,
+        };
+
+        // Add image reference for image-to-3D
+        if (state.inputMode === 'image' && state.imagePreview) {
+          requestBody.imageRefs = [{
+            download_url: state.imagePreview,  // Base64 data URI
+          }];
+        }
+
         const response = await fetch('/api/cad/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            conversationId,
-            prompt: state.prompt,
-            mode: state.provider === 'zoo' ? 'parametric' : 'organic',
-            refine: state.refineMode,  // For Meshy: run HD refine after preview
-          }),
+          body: JSON.stringify(requestBody),
         });
 
         if (!response.ok) throw new Error('CAD generation failed');
@@ -435,6 +493,9 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
           selectedArtifact: artifacts[0] || null,
           generationLoading: false,
           currentStep: artifacts.length > 0 ? 2 : 1,
+          // Clear image after successful generation
+          imageFile: null,
+          imagePreview: null,
         }));
       } catch (error) {
         setState(prev => ({
@@ -443,7 +504,7 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
           generationError: (error as Error).message,
         }));
       }
-    }, [state.prompt, state.provider, state.refineMode, conversationId]),
+    }, [state.prompt, state.provider, state.refineMode, state.inputMode, state.imagePreview, conversationId]),
 
     importModel: useCallback(async (file: File) => {
       setState(prev => ({

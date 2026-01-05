@@ -15,6 +15,7 @@ import {
   Artifact,
   GenerationProvider,
   GenerationMode,
+  GenerationInputMode,
   translateArtifactPath,
 } from '../hooks/useFabricationWorkflow';
 import './GenerateStep.css';
@@ -62,8 +63,10 @@ interface GenerateStepProps {
   // State
   provider: GenerationProvider;
   mode: GenerationMode;
+  inputMode: GenerationInputMode;
   prompt: string;
   refineMode: boolean;
+  imagePreview: string | null;
   artifacts: Artifact[];
   selectedArtifact: Artifact | null;
   isLoading: boolean;
@@ -75,8 +78,11 @@ interface GenerateStepProps {
   // Actions
   onProviderChange: (provider: GenerationProvider) => void;
   onModeChange: (mode: GenerationMode) => void;
+  onInputModeChange: (inputMode: GenerationInputMode) => void;
   onPromptChange: (prompt: string) => void;
   onRefineChange: (refine: boolean) => void;
+  onImageSelect: (file: File | null) => void;
+  onClearImage: () => void;
   onGenerate: () => void;
   onImport: (file: File) => void;
   onSelectArtifact: (artifact: Artifact) => void;
@@ -86,8 +92,10 @@ interface GenerateStepProps {
 export function GenerateStep({
   provider,
   mode,
+  inputMode,
   prompt,
   refineMode,
+  imagePreview,
   artifacts,
   selectedArtifact,
   isLoading,
@@ -97,15 +105,20 @@ export function GenerateStep({
   uploadProgress = 0,
   onProviderChange,
   onModeChange,
+  onInputModeChange,
   onPromptChange,
   onRefineChange,
+  onImageSelect,
+  onClearImage,
   onGenerate,
   onImport,
   onSelectArtifact,
   onSelectFromBrowser,
 }: GenerateStepProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [imageDragOver, setImageDragOver] = useState(false);
 
   const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -138,6 +151,35 @@ export function GenerateStep({
       onGenerate();
     }
   };
+
+  // Image upload handlers
+  const handleImageSelect = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      onImageSelect(file);
+    }
+  };
+
+  const handleImageDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setImageDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      onImageSelect(file);
+    }
+  };
+
+  const handleImageDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setImageDragOver(true);
+  };
+
+  const handleImageDragLeave = () => {
+    setImageDragOver(false);
+  };
+
+  // Check if image input is supported (only Meshy supports image-to-3D)
+  const supportsImageInput = provider === 'meshy';
 
   return (
     <StepContainer
@@ -223,32 +265,131 @@ export function GenerateStep({
               </div>
             </div>
 
-            {/* Prompt Input */}
-            <div className="generate-step__prompt-section">
-              <label className="generate-step__label" htmlFor="cad-prompt">
-                Model Description
-                <span className="generate-step__label-hint">Describe what you want to create</span>
-              </label>
-              <textarea
-                id="cad-prompt"
-                className="generate-step__textarea"
-                rows={4}
-                value={prompt}
-                onChange={(e) => onPromptChange(e.target.value)}
-                onKeyDown={handleKeyPress}
-                placeholder={
-                  provider === 'zoo'
-                    ? 'Describe the part (e.g., "2U rack faceplate with 80mm cable passthrough")'
-                    : 'Describe the model (e.g., "A cat sitting on a pillow")'
-                }
-                disabled={isLoading}
-              />
-              <div className="generate-step__prompt-footer">
-                <span className="generate-step__shortcut">
-                  <kbd>Cmd</kbd> + <kbd>Enter</kbd> to generate
-                </span>
+            {/* Input Mode Toggle (Meshy only) */}
+            {supportsImageInput && (
+              <div className="generate-step__input-mode-section">
+                <label className="generate-step__label">
+                  Input Type
+                  <span className="generate-step__label-hint">Choose text or image input</span>
+                </label>
+                <div className="generate-step__input-mode-toggle">
+                  <button
+                    type="button"
+                    className={`generate-step__input-mode-btn ${inputMode === 'text' ? 'generate-step__input-mode-btn--active' : ''}`}
+                    onClick={() => onInputModeChange('text')}
+                    disabled={isLoading}
+                  >
+                    <svg viewBox="0 0 24 24" className="generate-step__input-mode-icon">
+                      <path d="M4 7V4h16v3M9 20h6M12 4v16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Text to 3D
+                  </button>
+                  <button
+                    type="button"
+                    className={`generate-step__input-mode-btn ${inputMode === 'image' ? 'generate-step__input-mode-btn--active' : ''}`}
+                    onClick={() => onInputModeChange('image')}
+                    disabled={isLoading}
+                  >
+                    <svg viewBox="0 0 24 24" className="generate-step__input-mode-icon">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="2"/>
+                      <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/>
+                      <path d="M21 15l-5-5L5 21" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Image to 3D
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Text Input (default mode or when text mode selected) */}
+            {inputMode === 'text' && (
+              <div className="generate-step__prompt-section">
+                <label className="generate-step__label" htmlFor="cad-prompt">
+                  Model Description
+                  <span className="generate-step__label-hint">Describe what you want to create</span>
+                </label>
+                <textarea
+                  id="cad-prompt"
+                  className="generate-step__textarea"
+                  rows={4}
+                  value={prompt}
+                  onChange={(e) => onPromptChange(e.target.value)}
+                  onKeyDown={handleKeyPress}
+                  placeholder={
+                    provider === 'zoo'
+                      ? 'Describe the part (e.g., "2U rack faceplate with 80mm cable passthrough")'
+                      : 'Describe the model (e.g., "A cat sitting on a pillow")'
+                  }
+                  disabled={isLoading}
+                />
+                <div className="generate-step__prompt-footer">
+                  <span className="generate-step__shortcut">
+                    <kbd>Cmd</kbd> + <kbd>Enter</kbd> to generate
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Image Input (when image mode selected) */}
+            {inputMode === 'image' && supportsImageInput && (
+              <div className="generate-step__image-section">
+                <label className="generate-step__label">
+                  Reference Image
+                  <span className="generate-step__label-hint">Upload an image to convert to 3D</span>
+                </label>
+
+                {!imagePreview ? (
+                  /* Image Dropzone */
+                  <div
+                    className={`generate-step__image-dropzone ${imageDragOver ? 'generate-step__image-dropzone--dragover' : ''}`}
+                    onDrop={handleImageDrop}
+                    onDragOver={handleImageDragOver}
+                    onDragLeave={handleImageDragLeave}
+                  >
+                    <input
+                      ref={imageInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageSelect}
+                      className="generate-step__file-input"
+                      id="image-upload"
+                      disabled={isLoading}
+                    />
+                    <label htmlFor="image-upload" className="generate-step__image-dropzone-content">
+                      <svg viewBox="0 0 24 24" className="generate-step__image-upload-icon">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="2"/>
+                        <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/>
+                        <path d="M21 15l-5-5L5 21" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      <span className="generate-step__image-dropzone-text">
+                        Drag & drop an image here
+                      </span>
+                      <span className="generate-step__image-dropzone-hint">or click to browse</span>
+                    </label>
+                  </div>
+                ) : (
+                  /* Image Preview */
+                  <div className="generate-step__image-preview">
+                    <img src={imagePreview} alt="Selected reference" className="generate-step__preview-image" />
+                    <button
+                      type="button"
+                      className="generate-step__clear-image-btn"
+                      onClick={onClearImage}
+                      disabled={isLoading}
+                      title="Remove image"
+                    >
+                      <svg viewBox="0 0 24 24" className="generate-step__clear-icon">
+                        <path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                      </svg>
+                    </button>
+                  </div>
+                )}
+
+                <p className="generate-step__image-note">
+                  Supported: <strong>PNG</strong>, <strong>JPG</strong>, <strong>WEBP</strong> (max 10MB)
+                </p>
+              </div>
+            )}
 
             {/* Refine Toggle (Meshy only, text-to-3D) */}
             {provider === 'meshy' && (
@@ -275,19 +416,19 @@ export function GenerateStep({
               type="button"
               className="generate-step__generate-btn"
               onClick={onGenerate}
-              disabled={isLoading || !prompt.trim()}
+              disabled={isLoading || (inputMode === 'text' && !prompt.trim()) || (inputMode === 'image' && !imagePreview)}
             >
               {isLoading ? (
                 <>
                   <span className="generate-step__spinner" />
-                  Generating...
+                  {inputMode === 'image' ? 'Converting Image...' : 'Generating...'}
                 </>
               ) : (
                 <>
                   <svg viewBox="0 0 24 24" className="generate-step__btn-icon">
                     <path d="M12 2v4m0 12v4m10-10h-4M6 12H2m15.07-5.07l-2.83 2.83M9.76 14.24l-2.83 2.83m11.31 0l-2.83-2.83M9.76 9.76L6.93 6.93" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
                   </svg>
-                  Generate Model
+                  {inputMode === 'image' ? 'Convert to 3D' : 'Generate Model'}
                 </>
               )}
             </button>

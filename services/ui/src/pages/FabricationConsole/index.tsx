@@ -83,8 +83,10 @@ export default function FabricationConsole() {
           <GenerateStep
             provider={state.provider}
             mode={state.mode}
+            inputMode={state.inputMode}
             prompt={state.prompt}
             refineMode={state.refineMode}
+            imagePreview={state.imagePreview}
             artifacts={state.artifacts}
             selectedArtifact={state.selectedArtifact}
             isLoading={state.generationLoading}
@@ -94,8 +96,11 @@ export default function FabricationConsole() {
             uploadProgress={state.uploadProgress}
             onProviderChange={actions.setProvider}
             onModeChange={actions.setMode}
+            onInputModeChange={actions.setInputMode}
             onPromptChange={actions.setPrompt}
             onRefineChange={actions.setRefineMode}
+            onImageSelect={actions.setImageFile}
+            onClearImage={actions.clearImage}
             onGenerate={actions.generateModel}
             onImport={actions.importModel}
             onSelectArtifact={actions.selectArtifact}
