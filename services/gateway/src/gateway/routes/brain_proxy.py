@@ -331,3 +331,60 @@ async def proxy_service_restart(request: Request, service_name: str) -> Response
 async def proxy_service_ensure(request: Request, service_name: str) -> Response:
     """Proxy service ensure running to brain."""
     return await proxy_to_brain(request, f"/services/{service_name}/ensure")
+
+
+# Prompt Suggestion endpoints
+@router.get("/api/suggest/status")
+async def proxy_suggest_status(request: Request) -> Response:
+    """Proxy suggest status to brain."""
+    return await proxy_to_brain(request, "/api/suggest/status")
+
+
+@router.get("/api/suggest/config")
+async def proxy_suggest_config(request: Request) -> Response:
+    """Proxy suggest config to brain."""
+    return await proxy_to_brain(request, "/api/suggest/config")
+
+
+@router.post("/api/suggest")
+async def proxy_suggest(request: Request) -> Response:
+    """Proxy non-streaming suggest to brain."""
+    return await proxy_to_brain(request, "/api/suggest")
+
+
+@router.post("/api/suggest/stream")
+async def proxy_suggest_stream(request: Request) -> StreamingResponse:
+    """Proxy SSE streaming suggest to brain."""
+    url = f"{BRAIN_URL}/api/suggest/stream"
+
+    # Get headers
+    headers = {
+        key: value for key, value in request.headers.items()
+        if key.lower() not in ("host", "content-length")
+    }
+
+    body = await request.body()
+
+    async def stream_response():
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                async with client.stream(
+                    "POST",
+                    url,
+                    headers=headers,
+                    content=body,
+                ) as response:
+                    async for chunk in response.aiter_bytes():
+                        yield chunk
+        except Exception as e:
+            yield f"data: {{\"type\": \"error\", \"error\": \"{str(e)}\"}}\n\n".encode()
+
+    return StreamingResponse(
+        stream_response(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
