@@ -16,8 +16,17 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
   });
 
   useEffect(() => {
+    const root = document.documentElement;
+
+    // Save to localStorage
     localStorage.setItem('kitty-theme', theme);
-    document.documentElement.setAttribute('data-theme', theme);
+
+    // Set data-theme attribute for legacy CSS
+    root.setAttribute('data-theme', theme);
+
+    // Set class for Tailwind dark: variant
+    root.classList.remove('light', 'dark');
+    root.classList.add(theme);
   }, [theme]);
 
   const toggleTheme = () => {

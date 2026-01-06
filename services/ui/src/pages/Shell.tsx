@@ -6,6 +6,8 @@ import { SuggestionPopup } from '../components/SuggestionPopup';
 import { usePromptSuggestion } from '../hooks/usePromptSuggestion';
 import { generateId } from '../utils/user';
 import { ArtifactCard, CadArtifact } from './Shell/components/ArtifactCard';
+import { MessageContent } from '@/components/MessageContent';
+import { MessageSkeleton } from '@/components/Skeleton';
 
 interface Message {
   id: string;
@@ -133,6 +135,7 @@ const Shell = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isThinking, setIsThinking] = useState(false);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [state, setState] = useState<ShellState>({
     conversationId: generateId(),
     verbosity: 3,
@@ -604,6 +607,7 @@ Examples:
         let streamedThinking = '';
         let routingData: any = null;
         const responseId = generateId();
+        setStreamingMessageId(responseId);
 
         // Update thinking message with elapsed time
         const elapsedInterval = setInterval(() => {
@@ -660,7 +664,7 @@ Examples:
                     if (event.delta) {
                       streamedContent += event.delta;
                       setMessages(prev => prev.map(m =>
-                        m.id === responseId ? { ...m, content: streamedContent + '▌' } : m
+                        m.id === responseId ? { ...m, content: streamedContent } : m
                       ));
                     }
                     if (event.delta_thinking) {
@@ -690,6 +694,7 @@ Examples:
           ));
           setMessages(prev => prev.filter(m => m.id !== thinkingId));
           setIsThinking(false);
+          setStreamingMessageId(null);
           clearInterval(elapsedInterval);
           return;
 
@@ -901,14 +906,17 @@ Examples:
             </div>
             <div className="message-content">
               {msg.type === 'thinking' ? (
-                <div className="thinking-animation">
-                  <span className="dot"></span>
-                  <span className="dot"></span>
-                  <span className="dot"></span>
-                </div>
+                <MessageSkeleton lines={2} showMetadata={false} />
               ) : (
                 <>
-                  <pre className="message-text">{msg.content}</pre>
+                  {msg.type === 'assistant' ? (
+                    <MessageContent
+                      content={msg.content}
+                      isStreaming={streamingMessageId === msg.id}
+                    />
+                  ) : (
+                    <pre className="message-text">{msg.content}</pre>
+                  )}
                   {msg.type === 'assistant' && (
                     <ProviderBadge metadata={msg.metadata as ProviderMetadata} />
                   )}

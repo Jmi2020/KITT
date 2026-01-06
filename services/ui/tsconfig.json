@@ -5,13 +5,16 @@
     "lib": ["DOM", "DOM.Iterable", "ES2020"],
     "module": "ES2020",
     "skipLibCheck": true,
-    "moduleResolution": "Node",
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "esModuleInterop": true,
     "jsx": "react-jsx",
     "strict": true,
-    "baseUrl": "./src"
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["src"]
 }
