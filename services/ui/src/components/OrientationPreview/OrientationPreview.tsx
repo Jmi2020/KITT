@@ -42,13 +42,16 @@ const IDENTITY_MATRIX: number[][] = [
   [0, 0, 1],
 ];
 
+// Default build plate dimensions (constant to prevent re-renders)
+const DEFAULT_BUILD_PLATE: [number, number, number] = [200, 200, 200];
+
 export function OrientationPreview({
   meshUrl,
   fileType,
   rotationMatrix = IDENTITY_MATRIX,
   overhangRatio,
   showOverhangs = false,
-  buildPlate = [200, 200, 200],
+  buildPlate = DEFAULT_BUILD_PLATE,
   onMeshLoaded,
   height = 300,
   autoRotate = false,
@@ -62,6 +65,24 @@ export function OrientationPreview({
   const meshRef = useRef<THREE.Object3D | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Store props in refs to prevent re-renders when parent provides new references
+  // This allows reading current values without adding them as dependencies
+  const onMeshLoadedRef = useRef(onMeshLoaded);
+  const rotationMatrixRef = useRef(rotationMatrix);
+  const overhangRatioRef = useRef(overhangRatio);
+  const showOverhangsRef = useRef(showOverhangs);
+  const buildPlateRef = useRef(buildPlate);
+  const autoRotateRef = useRef(autoRotate);
+
+  useEffect(() => {
+    onMeshLoadedRef.current = onMeshLoaded;
+    rotationMatrixRef.current = rotationMatrix;
+    overhangRatioRef.current = overhangRatio;
+    showOverhangsRef.current = showOverhangs;
+    buildPlateRef.current = buildPlate;
+    autoRotateRef.current = autoRotate;
+  }, [onMeshLoaded, rotationMatrix, overhangRatio, showOverhangs, buildPlate, autoRotate]);
 
   // Cleanup Three.js resources
   const cleanupThreeJS = useCallback(() => {
@@ -115,6 +136,13 @@ export function OrientationPreview({
     setError(null);
     cleanupThreeJS();
 
+    // Read current values from refs to avoid dependency issues
+    const currentBuildPlate = buildPlateRef.current;
+    const currentAutoRotate = autoRotateRef.current;
+    const currentRotationMatrix = rotationMatrixRef.current;
+    const currentOverhangRatio = overhangRatioRef.current;
+    const currentShowOverhangs = showOverhangsRef.current;
+
     const container = containerRef.current;
     const width = container.clientWidth;
     const containerHeight = height;
@@ -140,7 +168,7 @@ export function OrientationPreview({
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.autoRotate = autoRotate;
+    controls.autoRotate = currentAutoRotate;
     controls.autoRotateSpeed = 1;
     controlsRef.current = controls;
 
@@ -157,9 +185,9 @@ export function OrientationPreview({
     scene.add(directionalLight2);
 
     // Build plate (grid)
-    const gridScale = Math.max(buildPlate[0], buildPlate[1]) / 200;
+    const gridScale = Math.max(currentBuildPlate[0], currentBuildPlate[1]) / 200;
     const gridHelper = new THREE.GridHelper(
-      Math.max(buildPlate[0], buildPlate[1]),
+      Math.max(currentBuildPlate[0], currentBuildPlate[1]),
       20,
       0x444466,
       0x333355
@@ -172,16 +200,16 @@ export function OrientationPreview({
 
     // Build volume outline (optional wireframe box)
     const volumeGeometry = new THREE.BoxGeometry(
-      buildPlate[0],
-      buildPlate[2],
-      buildPlate[1]
+      currentBuildPlate[0],
+      currentBuildPlate[2],
+      currentBuildPlate[1]
     );
     const volumeEdges = new THREE.EdgesGeometry(volumeGeometry);
     const volumeLines = new THREE.LineSegments(
       volumeEdges,
       new THREE.LineBasicMaterial({ color: 0x4444ff, transparent: true, opacity: 0.3 })
     );
-    volumeLines.position.y = buildPlate[2] / 2;
+    volumeLines.position.y = currentBuildPlate[2] / 2;
     scene.add(volumeLines);
 
     // Load model based on type
@@ -195,10 +223,10 @@ export function OrientationPreview({
           (geometry) => {
             // Choose color based on overhang ratio
             let meshColor = 0x7c5cff; // Purple (default)
-            if (showOverhangs && overhangRatio !== undefined) {
-              if (overhangRatio < 0.1) {
+            if (currentShowOverhangs && currentOverhangRatio !== undefined) {
+              if (currentOverhangRatio < 0.1) {
                 meshColor = 0x10b981; // Green (minimal overhangs)
-              } else if (overhangRatio < 0.3) {
+              } else if (currentOverhangRatio < 0.3) {
                 meshColor = 0xf59e0b; // Amber (moderate)
               } else {
                 meshColor = 0xef4444; // Red (significant)
@@ -213,7 +241,7 @@ export function OrientationPreview({
             const mesh = new THREE.Mesh(geometry, material);
 
             // Apply rotation matrix
-            applyRotationMatrix(mesh, rotationMatrix);
+            applyRotationMatrix(mesh, currentRotationMatrix);
 
             // Center on grid
             geometry.computeBoundingBox();
@@ -231,7 +259,7 @@ export function OrientationPreview({
 
             // Scale to fit view
             const maxDim = Math.max(size.x, size.y, size.z);
-            const targetScale = Math.min(buildPlate[0], buildPlate[1], buildPlate[2]) * 0.6;
+            const targetScale = Math.min(currentBuildPlate[0], currentBuildPlate[1], currentBuildPlate[2]) * 0.6;
             const scale = targetScale / maxDim;
             mesh.scale.setScalar(scale);
             mesh.position.y = (size.y * scale) / 2;
@@ -240,8 +268,8 @@ export function OrientationPreview({
             meshRef.current = mesh;
 
             // Report dimensions
-            if (onMeshLoaded) {
-              onMeshLoaded([size.x, size.y, size.z]);
+            if (onMeshLoadedRef.current) {
+              onMeshLoadedRef.current([size.x, size.y, size.z]);
             }
 
             setLoading(false);
@@ -259,7 +287,7 @@ export function OrientationPreview({
           meshUrl,
           (object) => {
             // Apply rotation matrix
-            applyRotationMatrix(object, rotationMatrix);
+            applyRotationMatrix(object, currentRotationMatrix);
 
             // Center and scale
             const box = new THREE.Box3().setFromObject(object);
@@ -271,11 +299,11 @@ export function OrientationPreview({
             box.getSize(size);
 
             // Apply color based on overhangs
-            if (showOverhangs && overhangRatio !== undefined) {
+            if (currentShowOverhangs && currentOverhangRatio !== undefined) {
               let meshColor = 0x7c5cff;
-              if (overhangRatio < 0.1) {
+              if (currentOverhangRatio < 0.1) {
                 meshColor = 0x10b981;
-              } else if (overhangRatio < 0.3) {
+              } else if (currentOverhangRatio < 0.3) {
                 meshColor = 0xf59e0b;
               } else {
                 meshColor = 0xef4444;
@@ -294,7 +322,7 @@ export function OrientationPreview({
 
             // Scale to fit
             const maxDim = Math.max(size.x, size.y, size.z);
-            const targetScale = Math.min(buildPlate[0], buildPlate[1], buildPlate[2]) * 0.6;
+            const targetScale = Math.min(currentBuildPlate[0], currentBuildPlate[1], currentBuildPlate[2]) * 0.6;
             const scale = targetScale / maxDim;
             object.scale.setScalar(scale);
             object.position.y = (size.y * scale) / 2;
@@ -302,8 +330,8 @@ export function OrientationPreview({
             scene.add(object);
             meshRef.current = object;
 
-            if (onMeshLoaded) {
-              onMeshLoaded([size.x, size.y, size.z]);
+            if (onMeshLoadedRef.current) {
+              onMeshLoadedRef.current([size.x, size.y, size.z]);
             }
 
             setLoading(false);
@@ -346,7 +374,10 @@ export function OrientationPreview({
       window.removeEventListener('resize', handleResize);
       cleanupThreeJS();
     };
-  }, [meshUrl, fileType, rotationMatrix, overhangRatio, showOverhangs, buildPlate, height, autoRotate, onMeshLoaded, cleanupThreeJS, applyRotationMatrix]);
+  // Only meshUrl and fileType trigger re-initialization. Other values are read from refs
+  // to prevent infinite re-renders when parent passes unstable references.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meshUrl, fileType, height, cleanupThreeJS, applyRotationMatrix]);
 
   // Initialize on mount and when URL/rotation changes
   useEffect(() => {

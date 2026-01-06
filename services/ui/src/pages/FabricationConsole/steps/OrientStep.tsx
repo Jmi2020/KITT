@@ -79,6 +79,11 @@ export function OrientStep({
 }: OrientStepProps) {
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  // Memoize the onMeshLoaded callback to prevent infinite re-renders in OrientationPreview
+  const handleMeshLoaded = useCallback(() => {
+    setPreviewLoading(false);
+  }, []);
+
   // Check if the selected artifact is a GLB file (preview only, not printable)
   const isGlbFile = selectedArtifact?.artifactType?.toLowerCase() === 'glb' ||
     selectedArtifact?.artifactType?.toLowerCase() === 'gltf';
@@ -218,7 +223,7 @@ export function OrientStep({
                 showOverhangs={true}
                 height={280}
                 autoRotate={false}
-                onMeshLoaded={() => setPreviewLoading(false)}
+                onMeshLoaded={handleMeshLoaded}
               />
             </div>
 
