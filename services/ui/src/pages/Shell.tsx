@@ -5,6 +5,7 @@ import ProviderBadge, { ProviderMetadata } from '../components/ProviderBadge';
 import { SuggestionPopup } from '../components/SuggestionPopup';
 import { usePromptSuggestion } from '../hooks/usePromptSuggestion';
 import { generateId } from '../utils/user';
+import { ArtifactCard, CadArtifact } from './Shell/components/ArtifactCard';
 
 interface Message {
   id: string;
@@ -910,6 +911,10 @@ Examples:
                   <pre className="message-text">{msg.content}</pre>
                   {msg.type === 'assistant' && (
                     <ProviderBadge metadata={msg.metadata as ProviderMetadata} />
+                  )}
+                  {/* Render ArtifactCard for CAD artifacts */}
+                  {msg.metadata?.artifacts && msg.metadata.artifacts.length > 0 && (
+                    <ArtifactCard artifacts={msg.metadata.artifacts as CadArtifact[]} />
                   )}
                 </>
               )}
