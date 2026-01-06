@@ -167,6 +167,11 @@ export const translateArtifactPath = (location: string): string => {
     const filename = location.split('/').pop() || location;
     return `${ARTIFACTS_FILES_URL}/${filename}`;
   }
+  // Handle type-prefixed paths like "3mf/file.3mf", "glb/file.glb", "stl/file.stl"
+  const typeMatch = location.match(/^(3mf|glb|stl|gcode|step|gltf)\//i);
+  if (typeMatch) {
+    return `${ARTIFACTS_FILES_URL}/${location}`;
+  }
   return location;
 };
 
