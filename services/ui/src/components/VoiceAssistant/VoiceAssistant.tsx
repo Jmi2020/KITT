@@ -189,6 +189,35 @@ export function VoiceAssistant({
     }
   }, [status, onStatusChange]);
 
+  // Persist messages when response completes
+  const prevStatusRef = useRef<string>(status);
+  const pendingTranscriptRef = useRef<string>('');
+
+  useEffect(() => {
+    // Capture transcript when we start responding (user input is done)
+    if (status === 'responding' && prevStatusRef.current !== 'responding' && transcript) {
+      pendingTranscriptRef.current = transcript;
+    }
+
+    // When response completes (responding -> connected), persist both messages
+    if (prevStatusRef.current === 'responding' && status === 'connected') {
+      const userText = pendingTranscriptRef.current;
+      const assistantText = response;
+
+      if (userText) {
+        addUserMessage(userText);
+      }
+      if (assistantText) {
+        addAssistantMessage(assistantText, tier || undefined);
+      }
+
+      // Clear refs for next exchange
+      pendingTranscriptRef.current = '';
+    }
+
+    prevStatusRef.current = status;
+  }, [status, transcript, response, tier, addUserMessage, addAssistantMessage]);
+
   // Track processing timer when responding
   useEffect(() => {
     const shouldProcess =
