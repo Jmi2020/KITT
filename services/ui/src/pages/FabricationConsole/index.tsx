@@ -132,6 +132,7 @@ export default function FabricationConsole() {
           {/* Step 3: Segment */}
           <SegmentStep
             selectedArtifact={state.selectedArtifact}
+            orientedMeshPath={state.orientedMeshPath}
             dimensionCheck={state.dimensionCheck}
             segmentationRequired={state.segmentationRequired}
             segmentationSkipped={state.segmentationSkipped}

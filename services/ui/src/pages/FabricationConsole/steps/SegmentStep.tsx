@@ -13,6 +13,7 @@ import './SegmentStep.css';
 interface SegmentStepProps {
   // State
   selectedArtifact: Artifact | null;
+  orientedMeshPath: string | null;  // Path to oriented/scaled mesh (overrides artifact location)
   dimensionCheck: DimensionCheckResult | null;
   segmentationRequired: boolean;
   segmentationSkipped: boolean;
@@ -32,6 +33,7 @@ interface SegmentStepProps {
 
 export function SegmentStep({
   selectedArtifact,
+  orientedMeshPath,
   dimensionCheck,
   segmentationRequired,
   segmentationSkipped,
@@ -67,7 +69,8 @@ export function SegmentStep({
   };
 
   // Get artifact path for MeshSegmenter
-  const artifactPath = selectedArtifact?.metadata?.stl_location || selectedArtifact?.location;
+  // Prefer orientedMeshPath (from orientation step) over original artifact location
+  const artifactPath = orientedMeshPath || selectedArtifact?.metadata?.stl_location || selectedArtifact?.location;
 
   return (
     <StepContainer
@@ -138,6 +141,7 @@ export function SegmentStep({
         {selectedArtifact && (!dimensionCheck || dimensionCheck.needs_segmentation) && !segmentationSkipped && (
           <div className="segment-step__segmenter">
             <MeshSegmenter
+              key={artifactPath}
               artifactPath={artifactPath}
               onCheckComplete={(result) => {
                 onCheckComplete({

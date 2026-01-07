@@ -122,6 +122,9 @@ export default function MeshSegmenter({
   const [completedJobId, setCompletedJobId] = useState<string | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
+  // AbortController for cancelling pending requests on unmount or path change
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   // Load available printers
   useEffect(() => {
     const loadPrinters = async () => {
@@ -152,15 +155,22 @@ export default function MeshSegmenter({
       setFilePath(artifactPath);
       setCheckResult(null);
       setSegmentResult(null);
+      setError(null);  // Clear stale errors from previous path
     }
   }, [artifactPath]);
 
-  // Auto-check dimensions when artifactPath changes and autoCheck is enabled
+  // Track if we've already done the initial auto-check for this mount
+  const hasAutoCheckedRef = useRef(false);
+
+  // Auto-check dimensions on mount when enabled
+  // Note: Component should use key={artifactPath} to remount when path changes
   useEffect(() => {
-    if (autoCheck && artifactPath && selectedPrinter && !disabled) {
-      // Small delay to ensure file path is set
+    // Only auto-check once per mount, when enabled with valid path
+    if (autoCheck && artifactPath && selectedPrinter && !disabled && !hasAutoCheckedRef.current) {
+      hasAutoCheckedRef.current = true;
+      // Small delay to ensure React has finished propagating all state
       const timer = setTimeout(() => {
-        handleCheck();
+        handleCheck(artifactPath);
       }, 100);
       return () => clearTimeout(timer);
     }
@@ -266,11 +276,18 @@ export default function MeshSegmenter({
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
 
-  const handleCheck = useCallback(async () => {
-    if (!filePath.trim()) {
+  const handleCheck = useCallback(async (pathOverride?: string) => {
+    const pathToUse = pathOverride || filePath;
+    if (!pathToUse.trim()) {
       setError('Please enter a file path');
       return;
     }
+
+    // Cancel any pending request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
 
     setChecking(true);
     setError(null);
@@ -278,7 +295,7 @@ export default function MeshSegmenter({
 
     try {
       const requestBody: Record<string, unknown> = {
-        stl_path: filePath,
+        stl_path: pathToUse,
       };
 
       if (selectedPrinter === 'custom') {
@@ -291,6 +308,7 @@ export default function MeshSegmenter({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
+        signal: abortControllerRef.current.signal,
       });
 
       if (!response.ok) {
@@ -302,17 +320,25 @@ export default function MeshSegmenter({
       setCheckResult(data);
       onCheckComplete?.(data);
     } catch (err) {
+      // Don't set error if request was aborted (component unmounted or path changed)
+      if ((err as Error).name === 'AbortError') {
+        return;
+      }
       setError((err as Error).message);
     } finally {
       setChecking(false);
     }
   }, [filePath, selectedPrinter, customBuildX, customBuildY, customBuildZ, onCheckComplete]);
 
-  // Cleanup polling on unmount
+  // Cleanup polling and pending requests on unmount
   useEffect(() => {
     return () => {
       if (pollingRef.current) {
         clearInterval(pollingRef.current);
+      }
+      // Cancel any pending check request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
       }
     };
   }, []);

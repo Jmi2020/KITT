@@ -755,7 +755,9 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
       setState(prev => ({ ...prev, segmentationLoading: true, segmentationError: null }));
 
       try {
-        const stlPath = state.selectedArtifact.metadata?.stl_location ||
+        // Prefer oriented mesh path (from orientation step) over original artifact
+        const stlPath = state.orientedMeshPath ||
+          state.selectedArtifact.metadata?.stl_location ||
           state.selectedArtifact.location;
 
         const response = await fetch('/api/fabrication/segmentation/check', {
@@ -787,7 +789,7 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
           segmentationError: (error as Error).message,
         }));
       }
-    }, [state.selectedArtifact, state.selectedPrinter, printers, updatePrinterRecommendations]),
+    }, [state.selectedArtifact, state.selectedPrinter, state.orientedMeshPath, printers, updatePrinterRecommendations]),
 
     runSegmentation: useCallback(async (options?: Record<string, unknown>) => {
       if (!state.selectedArtifact) return;
@@ -795,7 +797,9 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
       setState(prev => ({ ...prev, segmentationLoading: true, segmentationError: null }));
 
       try {
-        const stlPath = state.selectedArtifact.metadata?.stl_location ||
+        // Prefer oriented mesh path (from orientation step) over original artifact
+        const stlPath = state.orientedMeshPath ||
+          state.selectedArtifact.metadata?.stl_location ||
           state.selectedArtifact.location;
 
         const response = await fetch('/api/fabrication/segmentation/segment/async', {
@@ -842,7 +846,7 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
           segmentationError: (error as Error).message,
         }));
       }
-    }, [state.selectedArtifact, state.selectedPrinter]),
+    }, [state.selectedArtifact, state.selectedPrinter, state.orientedMeshPath]),
 
     skipSegmentation: useCallback(() => {
       setState(prev => ({
