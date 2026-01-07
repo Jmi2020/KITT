@@ -75,6 +75,8 @@ export function VoiceAssistant({
   const autoStopLevel = settings?.voice?.auto_stop_level ?? 0.08;
   const [processingSince, setProcessingSince] = useState<number | null>(null);
   const [processingElapsedMs, setProcessingElapsedMs] = useState<number>(0);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [reconnectError, setReconnectError] = useState<string | null>(null);
   const quickPrompts = [
     'Summarize this URL',
     'What happened in the last 24h on X for <topic>?',
@@ -96,12 +98,31 @@ export function VoiceAssistant({
 
   useEffect(() => {
     fetchConversations();
-    connect({
-      conversationId,
-      userId,
-      voice: settings?.voice?.voice || 'bf_emma',
-      speed: settings?.voice?.speed || 1.1,
-    });
+
+    // Ensure voice service is running before connecting
+    const ensureVoiceServiceAndConnect = async () => {
+      try {
+        // Try to ensure voice service is running via service manager
+        const response = await fetch('/api/services/voice/ensure', { method: 'POST' });
+        if (!response.ok) {
+          console.warn('Failed to ensure voice service is running:', response.status);
+        }
+        // Wait a moment for service to be ready
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (err) {
+        console.warn('Could not contact service manager to start voice service:', err);
+      }
+
+      // Connect regardless - WebSocket will retry if service isn't ready yet
+      connect({
+        conversationId,
+        userId,
+        voice: settings?.voice?.voice || 'bf_emma',
+        speed: settings?.voice?.speed || 1.1,
+      });
+    };
+
+    ensureVoiceServiceAndConnect();
     return () => disconnect();
   }, []);
 
@@ -161,6 +182,11 @@ export function VoiceAssistant({
 
   useEffect(() => {
     onStatusChange?.(status);
+    // Clear reconnect error when successfully connected
+    if (status === 'connected') {
+      setReconnectError(null);
+      setIsReconnecting(false);
+    }
   }, [status, onStatusChange]);
 
   // Track processing timer when responding
@@ -482,12 +508,86 @@ export function VoiceAssistant({
     </div>
   ) : null;
 
+  // Handler to try reconnecting with loading state
+  const handleReconnect = useCallback(async () => {
+    setIsReconnecting(true);
+    setReconnectError(null);
+
+    try {
+      // Try to ensure voice service is running
+      const response = await fetch('/api/services/voice/ensure', { method: 'POST' });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || data.success === false) {
+        // Service couldn't be started automatically - show helpful message
+        setReconnectError('Voice service needs to be started manually');
+      }
+
+      // Wait a moment for service to be ready
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    } catch (err) {
+      console.warn('Could not start voice service:', err);
+      setReconnectError('Voice service needs to be started manually');
+    }
+
+    // Try connecting regardless
+    connect({
+      conversationId,
+      userId,
+      voice: settings?.voice?.voice || 'bf_emma',
+      speed: settings?.voice?.speed || 1.1,
+    });
+
+    // Give connection attempt some time, then reset loading state
+    setTimeout(() => {
+      setIsReconnecting(false);
+    }, 2000);
+  }, [connect, conversationId, userId, settings?.voice?.voice, settings?.voice?.speed]);
+
   // 4. Main Content (Messages + Visualizer)
   const MainNode = (
     <div className="flex flex-col h-full relative">
        {/* Background Ambience */}
        <div className={`absolute inset-0 bg-gradient-to-b from-${currentModeConfig?.color}-500/5 via-transparent to-transparent pointer-events-none transition-colors duration-1000`} />
-       
+
+       {/* Disconnected Overlay */}
+       {(status === 'disconnected' || status === 'error') && (
+         <div className="absolute inset-x-0 top-4 z-30 flex flex-col items-center gap-2 px-4">
+           <div className="flex items-center gap-4 px-5 py-3 rounded-2xl border border-red-500/30 bg-red-900/20 backdrop-blur-xl shadow-lg">
+             <div className="flex items-center gap-2">
+               {isReconnecting ? (
+                 <span className="h-2.5 w-2.5 rounded-full border-2 border-yellow-400 border-t-transparent animate-spin" />
+               ) : (
+                 <span className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
+               )}
+               <span className="text-sm font-medium text-red-200">
+                 {isReconnecting ? 'Connecting...' : 'Voice Service Offline'}
+               </span>
+             </div>
+             <button
+               onClick={handleReconnect}
+               disabled={isReconnecting}
+               className={`px-4 py-1.5 text-sm font-medium rounded-lg border transition-all ${
+                 isReconnecting
+                   ? 'bg-white/5 text-gray-400 border-white/10 cursor-wait'
+                   : 'bg-white/10 hover:bg-white/20 text-white border-white/20'
+               }`}
+             >
+               {isReconnecting ? 'Connecting...' : 'Connect'}
+             </button>
+             <span className="text-xs text-gray-400 hidden md:inline">
+               or run: <code className="px-1.5 py-0.5 rounded bg-black/40 text-gray-300 font-mono">./ops/scripts/start-voice-service.sh</code>
+             </span>
+           </div>
+           {/* Error message when auto-start fails */}
+           {reconnectError && !isReconnecting && (
+             <div className="px-4 py-2 rounded-xl border border-amber-500/30 bg-amber-900/20 backdrop-blur-xl text-xs text-amber-200">
+               {reconnectError} — run the script above or check if the service is already running
+             </div>
+           )}
+         </div>
+       )}
+
        {/* Messages Area - SCROLLABLE */}
        <div 
           ref={scrollViewportRef}

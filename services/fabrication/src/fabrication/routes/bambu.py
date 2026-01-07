@@ -34,6 +34,18 @@ class CommandRequest(BaseModel):
     command: str  # pause, resume, stop
 
 
+class PrintRequest(BaseModel):
+    """Print 3MF file request."""
+
+    file_path: str  # Path to local 3MF file
+    plate_number: int = 1
+    use_ams: bool = True
+    bed_leveling: bool = True
+    flow_calibration: bool = True
+    vibration_calibration: bool = True
+    timelapse: bool = False
+
+
 @router.get("/status")
 async def token_status() -> dict[str, Any]:
     """Check if logged in to Bambu Labs cloud."""
@@ -199,3 +211,49 @@ async def connect_mqtt() -> dict[str, Any]:
     success = await client.connect_mqtt()
 
     return {"success": success, "connected": client.is_connected}
+
+
+@router.post("/printers/{device_id}/print")
+async def print_3mf(device_id: str, request: PrintRequest) -> dict[str, Any]:
+    """
+    Upload and print a 3MF file directly on a Bambu printer.
+
+    This bypasses the slicing step - the 3MF file should already contain
+    sliced G-code (e.g., exported from Bambu Studio or OrcaSlicer).
+
+    The file is uploaded to Bambu cloud storage and a print command
+    is sent via MQTT to start the print.
+    """
+    client = get_bambu_client()
+
+    if not client.is_logged_in:
+        raise HTTPException(status_code=401, detail="Not logged in to Bambu Labs")
+
+    if not client.is_connected:
+        # Try to connect if not already connected
+        await client.connect_mqtt()
+        if not client.is_connected:
+            raise HTTPException(status_code=503, detail="MQTT not connected")
+
+    # Start the print
+    result = await client.print_3mf_file(
+        device_id=device_id,
+        file_path=request.file_path,
+        plate_number=request.plate_number,
+        use_ams=request.use_ams,
+        bed_leveling=request.bed_leveling,
+        flow_calibration=request.flow_calibration,
+        vibration_calibration=request.vibration_calibration,
+        timelapse=request.timelapse,
+    )
+
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return {
+        "success": True,
+        "device_id": device_id,
+        "task_id": result.get("task_id"),
+        "file_url": result.get("file_url"),
+        "message": "Print job started successfully",
+    }

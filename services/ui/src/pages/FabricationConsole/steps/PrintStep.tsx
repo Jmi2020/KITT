@@ -1,7 +1,8 @@
 /**
- * PrintStep - Step 4 of fabrication workflow
+ * PrintStep - Step 5 of fabrication workflow
  *
  * Final step: Send G-code to printer or add to print queue.
+ * For Bambu printers with cloud login, supports direct 3MF printing (no slicing needed).
  * Shows print time estimate and confirmation before starting.
  */
 
@@ -22,9 +23,14 @@ interface PrintStepProps {
   isCompleted: boolean;
   isLocked: boolean;
 
+  // Bambu direct print state
+  bambuLoggedIn?: boolean;
+  input3mfPath?: string;  // Path to 3MF file (from segmentation or oriented mesh)
+
   // Actions
   onSendToPrinter: (startPrint: boolean) => void;
   onAddToQueue: () => void;
+  onPrintOnBambu?: () => void;  // Direct 3MF print on Bambu
 }
 
 export function PrintStep({
@@ -37,20 +43,31 @@ export function PrintStep({
   isActive,
   isCompleted,
   isLocked,
+  bambuLoggedIn,
+  input3mfPath,
   onSendToPrinter,
   onAddToQueue,
+  onPrintOnBambu,
 }: PrintStepProps) {
   const [confirmPrint, setConfirmPrint] = useState(false);
+  const [confirmBambuPrint, setConfirmBambuPrint] = useState(false);
 
   // Get printer info
   const printer = printers.find((p) => p.printer_id === selectedPrinter);
   const printerName = formatPrinterName(selectedPrinter || '');
 
+  // Check if selected printer is a Bambu printer
+  const isBambuPrinter = selectedPrinter?.startsWith('bambu_') || selectedPrinter?.includes('bambu');
+
+  // Check if direct Bambu print is available
+  const canPrintOnBambu = isBambuPrinter && bambuLoggedIn && input3mfPath && onPrintOnBambu;
+
   // Get subtitle
   const getSubtitle = () => {
-    if (isLocked) return 'Complete slicing to send to printer';
+    if (isLocked && !canPrintOnBambu) return 'Complete slicing to send to printer';
     if (printJobId) return `Print job ${printJobId.slice(0, 8)}... sent to ${printerName}`;
     if (printStatus) return printStatus;
+    if (canPrintOnBambu && !sliceResult) return `Ready for direct 3MF print on ${printerName}`;
     return `Ready to send to ${printerName}`;
   };
 
@@ -76,6 +93,18 @@ export function PrintStep({
 
   const handleCancel = () => {
     setConfirmPrint(false);
+    setConfirmBambuPrint(false);
+  };
+
+  const handlePrintOnBambu = () => {
+    if (!confirmBambuPrint) {
+      setConfirmBambuPrint(true);
+      return;
+    }
+    if (onPrintOnBambu) {
+      onPrintOnBambu();
+    }
+    setConfirmBambuPrint(false);
   };
 
   return (
@@ -177,9 +206,61 @@ export function PrintStep({
           </div>
         )}
 
+        {/* Bambu direct print confirmation */}
+        {confirmBambuPrint && (
+          <div className="print-step__confirm print-step__confirm--bambu">
+            <div className="print-step__confirm-header">
+              <svg viewBox="0 0 24 24" className="print-step__confirm-icon print-step__confirm-icon--bambu">
+                <path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+              <span>Direct 3MF Print</span>
+            </div>
+            <p className="print-step__confirm-text">
+              Send <strong>3MF file directly</strong> to <strong>{printerName}</strong>?
+              <br />
+              <span className="print-step__confirm-note">
+                No slicing needed - the printer will slice and print the 3MF file.
+              </span>
+            </p>
+            <div className="print-step__confirm-actions">
+              <button
+                type="button"
+                className="print-step__cancel-btn"
+                onClick={handleCancel}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="print-step__confirm-btn print-step__confirm-btn--bambu"
+                onClick={handlePrintOnBambu}
+                disabled={isLoading}
+              >
+                {isLoading ? 'Uploading...' : 'Print on Bambu'}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Action buttons */}
-        {!confirmPrint && !printJobId && (
+        {!confirmPrint && !confirmBambuPrint && !printJobId && (
           <div className="print-step__actions">
+            {/* Bambu direct print button (when available) */}
+            {canPrintOnBambu && (
+              <button
+                type="button"
+                className="print-step__bambu-btn"
+                onClick={handlePrintOnBambu}
+                disabled={isLoading}
+              >
+                <svg viewBox="0 0 24 24" className="print-step__btn-icon">
+                  <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Print on Bambu (Direct 3MF)
+              </button>
+            )}
+
+            {/* Regular print buttons (need slicing) */}
             <button
               type="button"
               className="print-step__queue-btn"

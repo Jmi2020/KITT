@@ -4,16 +4,19 @@ Connects to Bambu Labs cloud broker to:
 - Receive real-time printer telemetry
 - Send control commands (pause, resume, stop)
 - Discover bound printers
+- Upload 3MF files and start prints directly (no G-code slicing needed)
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import ssl
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -404,6 +407,211 @@ class BambuCloudClient:
         self._client.publish(topic, json.dumps(message))
         logger.info("Sent %s command to %s", command, device_id)
         return True
+
+    async def upload_3mf(self, file_path: str | Path) -> dict:
+        """
+        Upload a 3MF file to Bambu cloud storage for printing.
+
+        Args:
+            file_path: Path to the 3MF file
+
+        Returns:
+            dict with 'success', 'file_url', 'file_name', 'md5' on success
+            dict with 'error' on failure
+        """
+        if not self.is_logged_in:
+            return {"error": "Not logged in to Bambu Labs"}
+
+        file_path = Path(file_path)
+        if not file_path.exists():
+            return {"error": f"File not found: {file_path}"}
+
+        if not file_path.suffix.lower() == ".3mf":
+            return {"error": "File must be a .3mf file"}
+
+        # Read file and compute MD5
+        file_data = file_path.read_bytes()
+        file_md5 = hashlib.md5(file_data).hexdigest()
+        file_name = file_path.name
+        file_size = len(file_data)
+
+        logger.info("Uploading 3MF file: %s (%d bytes, md5=%s)", file_name, file_size, file_md5)
+
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                # Step 1: Request upload URL from Bambu API
+                # The API returns a signed S3 URL for uploading
+                upload_request = await client.post(
+                    f"{BAMBU_API_BASE}/v1/iot-service/api/slicer/upload",
+                    headers={"Authorization": f"Bearer {self._token.access_token}"},
+                    json={
+                        "name": file_name,
+                        "size": file_size,
+                        "md5": file_md5,
+                    },
+                )
+
+                if upload_request.status_code != 200:
+                    logger.error("Failed to get upload URL: %s", upload_request.text)
+                    return {"error": f"Failed to get upload URL: {upload_request.status_code}"}
+
+                upload_data = upload_request.json()
+                upload_url = upload_data.get("url")
+                osskey = upload_data.get("osskey") or upload_data.get("key")
+
+                if not upload_url:
+                    logger.error("No upload URL in response: %s", upload_data)
+                    return {"error": "No upload URL returned"}
+
+                logger.info("Got upload URL, uploading file...")
+
+                # Step 2: Upload file to S3/OSS
+                # Use minimal headers to avoid signature mismatch
+                upload_response = await client.put(
+                    upload_url,
+                    content=file_data,
+                    headers={"Content-Type": "application/octet-stream"},
+                )
+
+                if upload_response.status_code not in (200, 201, 204):
+                    logger.error("File upload failed: %s", upload_response.text)
+                    return {"error": f"File upload failed: {upload_response.status_code}"}
+
+                logger.info("File uploaded successfully to cloud storage")
+
+                # Construct the cloud file URL for printing
+                # The printer will download from this URL
+                cloud_file_url = upload_data.get("file_url") or f"cloud://{osskey}"
+
+                return {
+                    "success": True,
+                    "file_url": cloud_file_url,
+                    "file_name": file_name,
+                    "md5": file_md5,
+                    "osskey": osskey,
+                }
+
+        except Exception as e:
+            logger.error("Error uploading 3MF: %s", e)
+            return {"error": str(e)}
+
+    async def start_print_3mf(
+        self,
+        device_id: str,
+        file_url: str,
+        file_name: str,
+        md5: str,
+        *,
+        plate_number: int = 1,
+        use_ams: bool = True,
+        bed_leveling: bool = True,
+        flow_calibration: bool = True,
+        vibration_calibration: bool = True,
+        timelapse: bool = False,
+    ) -> dict:
+        """
+        Start a print job on a Bambu printer using a cloud-uploaded 3MF file.
+
+        Args:
+            device_id: Printer serial number
+            file_url: Cloud URL of the uploaded 3MF file
+            file_name: Name of the 3MF file
+            md5: MD5 hash of the file
+            plate_number: Plate number to print (default 1)
+            use_ams: Whether to use AMS (default True)
+            bed_leveling: Enable bed leveling (default True)
+            flow_calibration: Enable flow calibration (default True)
+            vibration_calibration: Enable vibration calibration (default True)
+            timelapse: Enable timelapse recording (default False)
+
+        Returns:
+            dict with 'success' and 'task_id' on success
+            dict with 'error' on failure
+        """
+        if not self._client or not self._connected:
+            return {"error": "MQTT not connected"}
+
+        if device_id not in self._printers:
+            return {"error": f"Unknown printer: {device_id}"}
+
+        # Generate unique task ID
+        task_id = str(uuid.uuid4())
+        sequence_id = str(int(time.time() * 1000))
+
+        # Build the print command
+        # The printer expects the gcode path inside the 3MF (usually Metadata/plate_X.gcode)
+        gcode_path = f"Metadata/plate_{plate_number}.gcode"
+
+        message = {
+            "print": {
+                "sequence_id": sequence_id,
+                "command": "project_file",
+                "param": gcode_path,
+                "project_id": "0",
+                "profile_id": "0",
+                "task_id": task_id,
+                "subtask_id": "0",
+                "subtask_name": file_name,
+                "url": file_url,
+                "md5": md5,
+                "timelapse": timelapse,
+                "bed_leveling": bed_leveling,
+                "flow_cali": flow_calibration,
+                "vibration_cali": vibration_calibration,
+                "layer_inspect": False,
+                "use_ams": use_ams,
+            }
+        }
+
+        topic = f"device/{device_id}/request"
+        try:
+            self._client.publish(topic, json.dumps(message))
+            logger.info("Sent print command for %s to %s (task_id=%s)", file_name, device_id, task_id)
+            return {"success": True, "task_id": task_id}
+        except Exception as e:
+            logger.error("Failed to send print command: %s", e)
+            return {"error": str(e)}
+
+    async def print_3mf_file(
+        self,
+        device_id: str,
+        file_path: str | Path,
+        **print_options: Any,
+    ) -> dict:
+        """
+        Upload a 3MF file and start printing on a Bambu printer.
+
+        This is a convenience method that combines upload_3mf() and start_print_3mf().
+
+        Args:
+            device_id: Printer serial number
+            file_path: Path to the 3MF file
+            **print_options: Options passed to start_print_3mf()
+
+        Returns:
+            dict with 'success', 'task_id', 'file_url' on success
+            dict with 'error' on failure
+        """
+        # Upload the file
+        upload_result = await self.upload_3mf(file_path)
+        if not upload_result.get("success"):
+            return upload_result
+
+        # Start the print
+        print_result = await self.start_print_3mf(
+            device_id=device_id,
+            file_url=upload_result["file_url"],
+            file_name=upload_result["file_name"],
+            md5=upload_result["md5"],
+            **print_options,
+        )
+
+        if print_result.get("success"):
+            return {
+                **print_result,
+                "file_url": upload_result["file_url"],
+            }
+        return print_result
 
     def get_telemetry(self, device_id: str) -> PrinterTelemetry | None:
         """Get cached telemetry for a printer."""

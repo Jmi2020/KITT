@@ -148,6 +148,9 @@ export interface WorkflowState {
   printJobId: string | null;
   printStatus: string;
   printLoading: boolean;
+
+  // Bambu cloud integration
+  bambuLoggedIn: boolean;
 }
 
 const ARTIFACTS_FILES_URL = '/api/cad/files';
@@ -244,6 +247,9 @@ const initialState: WorkflowState = {
   printJobId: null,
   printStatus: '',
   printLoading: false,
+
+  // Bambu cloud integration
+  bambuLoggedIn: false,
 };
 
 export interface WorkflowActions {
@@ -288,6 +294,7 @@ export interface WorkflowActions {
   // Step 5 actions (Print)
   sendToPrinter: (startPrint: boolean) => Promise<void>;
   addToQueue: () => Promise<void>;
+  printOnBambu: () => Promise<void>;  // Direct 3MF print on Bambu
 
   // Printers
   fetchPrinters: () => Promise<void>;
@@ -372,6 +379,26 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
     const interval = setInterval(fetchPrinters, pollInterval);
     return () => clearInterval(interval);
   }, [fetchPrinters, state.selectedPrinter]);
+
+  // Fetch Bambu cloud login status
+  useEffect(() => {
+    const checkBambuStatus = async () => {
+      try {
+        const response = await fetch('/api/bambu/status');
+        if (response.ok) {
+          const data = await response.json();
+          setState(prev => ({ ...prev, bambuLoggedIn: data.logged_in }));
+        }
+      } catch (err) {
+        console.warn('Failed to check Bambu status:', err);
+      }
+    };
+
+    checkBambuStatus();
+    // Check every 30 seconds in case user logs in via Settings
+    const interval = setInterval(checkBambuStatus, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Actions
   const actions: WorkflowActions = {
@@ -998,6 +1025,64 @@ export function useFabricationWorkflow(): [WorkflowState, WorkflowActions, Print
     addToQueue: useCallback(async () => {
       await actions.sendToPrinter(false);
     }, []),
+
+    // Direct 3MF print on Bambu (bypasses slicing)
+    printOnBambu: useCallback(async () => {
+      if (!state.selectedPrinter) {
+        setState(prev => ({ ...prev, printStatus: 'No printer selected' }));
+        return;
+      }
+
+      // Get Bambu device ID (e.g., bambu_h2d -> h2d or actual device ID)
+      const deviceId = state.selectedPrinter.replace('bambu_', '');
+
+      // Get 3MF path: segmented output > oriented mesh > original artifact
+      const input3mfPath = state.segmentResult?.combined_3mf_path ||
+        state.orientedMeshPath ||
+        state.selectedArtifact?.metadata?.threemf_location ||
+        state.selectedArtifact?.location;
+
+      if (!input3mfPath) {
+        setState(prev => ({ ...prev, printStatus: 'No 3MF file available' }));
+        return;
+      }
+
+      setState(prev => ({ ...prev, printLoading: true, printStatus: 'Uploading to Bambu cloud...' }));
+
+      try {
+        const response = await fetch(`/api/bambu/printers/${deviceId}/print`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            file_path: input3mfPath,
+            use_ams: true,
+            bed_leveling: true,
+            flow_calibration: true,
+            vibration_calibration: true,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ detail: 'Print failed' }));
+          throw new Error(errorData.detail || 'Print failed');
+        }
+
+        const data = await response.json();
+
+        setState(prev => ({
+          ...prev,
+          printJobId: data.task_id || data.job_id || 'bambu-print',
+          printLoading: false,
+          printStatus: 'Print started on Bambu printer!',
+        }));
+      } catch (error) {
+        setState(prev => ({
+          ...prev,
+          printLoading: false,
+          printStatus: (error as Error).message,
+        }));
+      }
+    }, [state.selectedPrinter, state.segmentResult, state.orientedMeshPath, state.selectedArtifact]),
 
     fetchPrinters,
 

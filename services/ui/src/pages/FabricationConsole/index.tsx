@@ -42,7 +42,17 @@ export default function FabricationConsole() {
       case 4: return state.selectedArtifact !== null &&
         (state.orientationSkipped || state.orientedMeshPath !== null) &&
         (state.segmentationSkipped || !state.segmentationRequired || state.segmentResult !== null);
-      case 5: return state.sliceResult?.status === 'completed' && state.selectedPrinter !== null;
+      case 5: {
+        // Standard path: slicing completed
+        const sliceReady = state.sliceResult?.status === 'completed' && state.selectedPrinter !== null;
+        // Bambu direct path: logged in, Bambu printer, has 3MF
+        const isBambuPrinter = state.selectedPrinter?.startsWith('bambu_') || state.selectedPrinter?.includes('bambu');
+        const has3mfPath = state.segmentResult?.combined_3mf_path ||
+          state.orientedMeshPath ||
+          state.selectedArtifact?.metadata?.threemf_location;
+        const bambuReady = state.bambuLoggedIn && isBambuPrinter && state.selectedPrinter !== null && !!has3mfPath;
+        return sliceReady || bambuReady;
+      }
       default: return false;
     }
   };
@@ -155,6 +165,7 @@ export default function FabricationConsole() {
           {/* Step 4: Slice */}
           <SliceStep
             selectedArtifact={state.selectedArtifact}
+            orientedMeshPath={state.orientedMeshPath}
             segmentResult={state.segmentResult}
             selectedPrinter={state.selectedPrinter}
             printerRecommendations={state.printerRecommendations}
@@ -188,8 +199,15 @@ export default function FabricationConsole() {
             isActive={state.currentStep === 5}
             isCompleted={completedSteps.includes(5)}
             isLocked={!canNavigateTo(5)}
+            bambuLoggedIn={state.bambuLoggedIn}
+            input3mfPath={
+              state.segmentResult?.combined_3mf_path ||
+              state.orientedMeshPath ||
+              state.selectedArtifact?.metadata?.threemf_location
+            }
             onSendToPrinter={actions.sendToPrinter}
             onAddToQueue={actions.addToQueue}
+            onPrintOnBambu={actions.printOnBambu}
           />
         </div>
 

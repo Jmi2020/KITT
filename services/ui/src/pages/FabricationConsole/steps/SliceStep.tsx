@@ -20,6 +20,7 @@ import './SliceStep.css';
 interface SliceStepProps {
   // State
   selectedArtifact: Artifact | null;
+  orientedMeshPath: string | null;  // Path to oriented/scaled mesh from orientation step
   segmentResult: SegmentResult | null;
   selectedPrinter: string | null;
   printerRecommendations: PrinterRecommendation[];
@@ -44,6 +45,7 @@ interface SliceStepProps {
 
 export function SliceStep({
   selectedArtifact,
+  orientedMeshPath,
   segmentResult,
   selectedPrinter,
   printerRecommendations,
@@ -63,10 +65,13 @@ export function SliceStep({
   onStartSlicing,
   onSliceComplete,
 }: SliceStepProps) {
-  // Get input path - use segmented output if available, otherwise artifact
+  // Get input path - priority: segmented output > oriented mesh > original artifact
   const getInputPath = () => {
     if (segmentResult?.combined_3mf_path) {
       return segmentResult.combined_3mf_path;
+    }
+    if (orientedMeshPath) {
+      return orientedMeshPath;
     }
     if (selectedArtifact) {
       return selectedArtifact.metadata?.stl_location || selectedArtifact.location;
