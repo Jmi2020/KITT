@@ -48,6 +48,10 @@ dependencies = [
 
 [project.optional-dependencies]
 cloud = ["mistralai>=1.9.11"]
+semantic = [
+    "sentence-transformers>=2.2.0",
+    "numpy>=1.24.0",
+]
 dev = [
     "pre-commit>=4.2.0",
     "pytest>=8.3.5",

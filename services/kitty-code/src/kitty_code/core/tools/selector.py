@@ -1,17 +1,20 @@
 """Semantic tool selection for kitty-code.
 
 Reduces context usage by only loading tools relevant to the user's query.
-Uses keyword matching to determine which tool categories are needed.
+Uses semantic embeddings for relevance ranking with keyword boost fallback.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
+import logging
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from kitty_code.core.llm.types import AvailableTool
+    from kitty_code.core.types import AvailableTool
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -155,7 +158,9 @@ class ToolSelector:
         query: str,
         available_tools: list[AvailableTool],
     ) -> list[AvailableTool]:
-        """Select tools relevant to the query.
+        """Select tools using semantic search with keyword boost.
+
+        Tries semantic search first for accuracy, falls back to keywords.
 
         Args:
             query: The user's query
@@ -165,8 +170,69 @@ class ToolSelector:
             Filtered list of relevant tools
         """
         if not query or not available_tools:
-            return available_tools[:self.max_tools]
+            return available_tools[: self.max_tools]
 
+        # Try semantic search first for better accuracy
+        try:
+            from kitty_code.core.tools.embeddings import get_embedding_manager
+
+            manager = get_embedding_manager()
+            manager.compute_embeddings(available_tools)
+
+            # Get semantic matches
+            semantic_results = manager.search(query, top_k=self.max_tools)
+            selected_names = {t.function.name for t in semantic_results}
+
+            # Keyword boost: add tools from matching categories that semantic missed
+            matching_categories = [
+                cat for cat in self.categories if cat.matches(query)
+            ]
+            for cat in matching_categories:
+                for tool in available_tools:
+                    tool_name_lower = tool.function.name.lower()
+                    if any(
+                        tool_name_lower.startswith(p.lower())
+                        or p.lower() in tool_name_lower
+                        for p in cat.tool_prefixes
+                    ):
+                        if tool.function.name not in selected_names:
+                            semantic_results.append(tool)
+                            selected_names.add(tool.function.name)
+                            logger.debug(
+                                f"Keyword boost: added {tool.function.name} "
+                                f"from category '{cat.name}'"
+                            )
+
+            logger.info(
+                f"Semantic search returned {len(semantic_results)} tools "
+                f"(query: '{query[:50]}...')"
+            )
+            return semantic_results[: self.max_tools]
+
+        except ImportError:
+            logger.debug(
+                "sentence-transformers not available, using keyword fallback"
+            )
+        except Exception as e:
+            logger.warning(f"Semantic search failed: {e}, using keyword fallback")
+
+        # Fallback to keyword-based selection
+        return self._keyword_select(query, available_tools)
+
+    def _keyword_select(
+        self,
+        query: str,
+        available_tools: list[AvailableTool],
+    ) -> list[AvailableTool]:
+        """Select tools using keyword matching (fallback).
+
+        Args:
+            query: The user's query
+            available_tools: All available tools
+
+        Returns:
+            Filtered list of relevant tools
+        """
         # Find matching categories
         matching_categories = [cat for cat in self.categories if cat.matches(query)]
         matching_names = {cat.name for cat in matching_categories}
@@ -203,8 +269,8 @@ class ToolSelector:
                         selected.append(tool)
                         break
 
-        # Enforce max tools limit
-        return selected[:self.max_tools]
+        logger.debug(f"Keyword selection returned {len(selected)} tools")
+        return selected[: self.max_tools]
 
     def get_matched_categories(self, query: str) -> list[str]:
         """Get names of categories matching the query (for debugging)."""
