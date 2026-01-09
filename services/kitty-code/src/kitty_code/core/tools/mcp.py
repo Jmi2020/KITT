@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -211,7 +212,8 @@ async def list_tools_stdio(
     command: list[str], env: dict[str, str] | None = None
 ) -> list[RemoteTool]:
     params = StdioServerParameters(command=command[0], args=command[1:], env=env)
-    async with stdio_client(params) as (read, write):
+    # Suppress stderr to prevent MCP server intro messages from interfering with TUI
+    async with stdio_client(params, errlog=io.StringIO()) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools_resp = await session.list_tools()
@@ -225,7 +227,8 @@ async def call_tool_stdio(
     env: dict[str, str] | None = None,
 ) -> MCPToolResult:
     params = StdioServerParameters(command=command[0], args=command[1:], env=env)
-    async with stdio_client(params) as (read, write):
+    # Suppress stderr to prevent MCP server messages from interfering with TUI
+    async with stdio_client(params, errlog=io.StringIO()) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool(tool_name, arguments)
