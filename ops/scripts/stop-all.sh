@@ -65,6 +65,19 @@ else
 fi
 
 # ========================================
+# Phase 1.6: Stop HexStrike
+# ========================================
+
+log "Phase 1.6: Stopping HexStrike (if running)"
+if [ -x "$SCRIPT_DIR/stop-hexstrike.sh" ]; then
+    if "$SCRIPT_DIR/stop-hexstrike.sh" >/dev/null 2>&1; then
+        success "HexStrike stopped"
+    else
+        warn "HexStrike stop script reported an issue (may not have been running)"
+    fi
+fi
+
+# ========================================
 # Phase 2: Stop Docker Services
 # ========================================
 

@@ -6,7 +6,7 @@ set -e
 
 HEXSTRIKE_DIR="/Users/Shared/Coding/KITT/Reference/hexstrike-ai"
 HEXSTRIKE_VENV="$HEXSTRIKE_DIR/hexstrike-env"
-HEXSTRIKE_PORT="${HEXSTRIKE_PORT:-8888}"
+HEXSTRIKE_PORT="${HEXSTRIKE_PORT:-8889}"
 PID_FILE="/tmp/hexstrike_server.pid"
 LOG_FILE="/Users/Shared/Coding/KITT/.logs/hexstrike_server.log"
 
@@ -41,14 +41,12 @@ fi
 # Activate virtual environment
 source "$HEXSTRIKE_VENV/bin/activate"
 
-# Install dependencies if requirements.txt exists and is newer than marker
+# Install core dependencies (skip pwntools/angr/unicorn which have build issues on macOS)
 DEPS_MARKER="$HEXSTRIKE_VENV/.deps_installed"
-if [ -f "requirements.txt" ]; then
-    if [ ! -f "$DEPS_MARKER" ] || [ "requirements.txt" -nt "$DEPS_MARKER" ]; then
-        echo "Installing HexStrike dependencies..."
-        pip install -r requirements.txt -q
-        touch "$DEPS_MARKER"
-    fi
+if [ ! -f "$DEPS_MARKER" ]; then
+    echo "Installing HexStrike core dependencies..."
+    pip install flask requests psutil fastmcp beautifulsoup4 selenium webdriver-manager aiohttp mitmproxy Pillow lxml -q
+    touch "$DEPS_MARKER"
 fi
 
 # Start the server in background

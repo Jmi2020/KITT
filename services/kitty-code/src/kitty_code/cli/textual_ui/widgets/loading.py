@@ -10,7 +10,7 @@ from textual.containers import Horizontal
 from textual.widgets import Static
 
 from kitty_code.cli.textual_ui.widgets.no_markup_static import NoMarkupStatic
-from kitty_code.cli.textual_ui.widgets.spinner import SpinnerMixin, SpinnerType
+from kitty_code.cli.textual_ui.widgets.spinner import SpinnerMixin, SpinnerType, create_spinner
 
 
 class LoadingWidget(SpinnerMixin, Static):
@@ -57,7 +57,10 @@ class LoadingWidget(SpinnerMixin, Static):
 
     def __init__(self, status: str | None = None) -> None:
         super().__init__(classes="loading-widget")
-        self.init_spinner()
+        # Initialize spinner attributes directly (init_spinner() is a generator for compose())
+        self._spinner = create_spinner(self.SPINNER_TYPE)
+        self._spinner_timer = None
+        self._is_spinning = False
         self.status = status or self._get_default_status()
         self.current_color_index = 0
         self.transition_progress = 0

@@ -412,6 +412,38 @@ else
 fi
 
 # ========================================
+# Phase 8: HexStrike Security Tools (Optional)
+# ========================================
+
+HEXSTRIKE_ENABLED="${HEXSTRIKE_ENABLED:-0}"
+HEXSTRIKE_PORT="${HEXSTRIKE_PORT:-8889}"
+
+is_hexstrike_running() {
+    curl -sf "http://localhost:${HEXSTRIKE_PORT}/health" >/dev/null 2>&1
+}
+
+if is_enabled "$HEXSTRIKE_ENABLED"; then
+    log "Phase 8: Starting HexStrike security tools server"
+
+    if is_hexstrike_running; then
+        success "HexStrike already running"
+    else
+        if "$SCRIPT_DIR/start-hexstrike.sh"; then
+            sleep 3
+            if is_hexstrike_running; then
+                success "HexStrike running on port $HEXSTRIKE_PORT"
+            else
+                warn "HexStrike health check failed (may still be starting)"
+            fi
+        else
+            warn "HexStrike startup failed (non-critical)"
+        fi
+    fi
+else
+    log "Phase 8: Skipping HexStrike (set HEXSTRIKE_ENABLED=1 to enable)"
+fi
+
+# ========================================
 # Startup Summary
 # ========================================
 
@@ -434,6 +466,9 @@ echo "  I/O Control:   http://localhost:8080/io-control  (P1 #3)"
 echo "  Grafana:       http://localhost:3000"
 echo "  Prometheus:    http://localhost:9090"
 echo "  RabbitMQ:      http://localhost:15672/rabbitmq/  (kitty/changeme)"
+if is_enabled "$HEXSTRIKE_ENABLED"; then
+echo "  HexStrike:     http://localhost:${HEXSTRIKE_PORT}  (151 security tools)"
+fi
 echo ""
 echo "P0/P1 Features:"
 echo "  ✅ Conversation state persistence (P0 #1)"
