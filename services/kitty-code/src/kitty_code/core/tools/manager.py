@@ -187,6 +187,9 @@ class ToolManager:
                     server_hint=srv.prompt,
                     headers=headers,
                 )
+                # Set force approval flag if server requires it
+                if srv.require_approval:
+                    proxy_cls._force_approval = True  # type: ignore[attr-defined]
                 self._available[proxy_cls.get_name()] = proxy_cls
                 added += 1
             except Exception as exc:
@@ -219,6 +222,9 @@ class ToolManager:
                 proxy_cls = create_mcp_stdio_proxy_tool_class(
                     command=cmd, remote=remote, alias=srv.name, server_hint=srv.prompt, env=env
                 )
+                # Set force approval flag if server requires it
+                if srv.require_approval:
+                    proxy_cls._force_approval = True  # type: ignore[attr-defined]
                 self._available[proxy_cls.get_name()] = proxy_cls
                 added += 1
             except Exception as exc:

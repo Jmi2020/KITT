@@ -154,6 +154,13 @@ class _MCPBase(BaseModel):
     prompt: str | None = Field(
         default=None, description="Optional usage hint appended to tool descriptions"
     )
+    require_approval: bool = Field(
+        default=False,
+        description=(
+            "Force user approval for all tools from this server. "
+            "Useful for MCP servers with tools that access external resources."
+        ),
+    )
 
     @field_validator("name", mode="after")
     @classmethod

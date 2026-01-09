@@ -763,6 +763,10 @@ class Agent:
         if self.auto_approve:
             return ToolDecision(verdict=ToolExecutionResponse.EXECUTE)
 
+        # Check if MCP server requires approval for all its tools
+        if getattr(tool.__class__, "_force_approval", False):
+            return await self._ask_approval(tool.get_name(), args, tool_call_id)
+
         args_model, _ = tool._get_tool_args_results()
         validated_args = args_model.model_validate(args)
 
