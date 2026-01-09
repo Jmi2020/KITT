@@ -107,6 +107,16 @@ TOOL_CATEGORIES = [
         ],
         tool_prefixes=["kitty_discovery", "discovery"],
     ),
+    ToolCategory(
+        name="security",
+        keywords=[
+            "security", "scan", "nmap", "vulnerability", "pentest", "exploit",
+            "hexstrike", "nuclei", "sqlmap", "nikto", "gobuster", "burp",
+            "recon", "osint", "ctf", "hack", "port scan", "web security",
+            "cloud security", "binary analysis", "forensics"
+        ],
+        tool_prefixes=["hexstrike"],
+    ),
 ]
 
 # Tools that should always be available (core functionality)
@@ -123,7 +133,8 @@ ALWAYS_AVAILABLE_PREFIXES = [
 EXCLUDE_BASH_CATEGORIES = {"search", "browser"}
 
 # Maximum tools to include (to stay under context limits)
-MAX_TOOLS = 20
+# Reduced from 20 to 10 to avoid context overflow with large tool schemas
+MAX_TOOLS = 10
 
 
 class ToolSelector:

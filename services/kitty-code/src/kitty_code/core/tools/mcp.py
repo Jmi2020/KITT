@@ -211,9 +211,11 @@ def create_mcp_http_proxy_tool_class(
 async def list_tools_stdio(
     command: list[str], env: dict[str, str] | None = None
 ) -> list[RemoteTool]:
+    import subprocess
     params = StdioServerParameters(command=command[0], args=command[1:], env=env)
     # Suppress stderr to prevent MCP server intro messages from interfering with TUI
-    async with stdio_client(params, errlog=io.StringIO()) as (read, write):
+    # Use DEVNULL since io.StringIO() lacks fileno() needed by subprocess
+    async with stdio_client(params, errlog=subprocess.DEVNULL) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools_resp = await session.list_tools()
@@ -226,9 +228,11 @@ async def call_tool_stdio(
     arguments: dict[str, Any],
     env: dict[str, str] | None = None,
 ) -> MCPToolResult:
+    import subprocess
     params = StdioServerParameters(command=command[0], args=command[1:], env=env)
     # Suppress stderr to prevent MCP server messages from interfering with TUI
-    async with stdio_client(params, errlog=io.StringIO()) as (read, write):
+    # Use DEVNULL since io.StringIO() lacks fileno() needed by subprocess
+    async with stdio_client(params, errlog=subprocess.DEVNULL) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool(tool_name, arguments)
