@@ -51,6 +51,7 @@ from kitty_code.core.types import (
     CompactStartEvent,
     LLMChunk,
     LLMMessage,
+    ReasoningEvent,
     Role,
     SyncApprovalCallback,
     ToolCall,
@@ -298,7 +299,7 @@ class Agent:
 
     async def _perform_llm_turn(
         self,
-    ) -> AsyncGenerator[AssistantEvent | ToolCallEvent | ToolResultEvent]:
+    ) -> AsyncGenerator[AssistantEvent | ReasoningEvent | ToolCallEvent | ToolResultEvent]:
         if self.enable_streaming:
             async for event in self._stream_assistant_events():
                 yield event
@@ -333,14 +334,33 @@ class Agent:
     ) -> AssistantEvent:
         return AssistantEvent(content=content)
 
-    async def _stream_assistant_events(self) -> AsyncGenerator[AssistantEvent]:
+    async def _stream_assistant_events(
+        self,
+    ) -> AsyncGenerator[AssistantEvent | ReasoningEvent]:
         chunks: list[LLMChunk] = []
         content_buffer = ""
+        reasoning_buffer = ""
         chunks_with_content = 0
+        chunks_with_reasoning = 0
         BATCH_SIZE = 5
 
         async for chunk in self._chat_streaming():
             chunks.append(chunk)
+
+            # Handle reasoning_content first (flush content buffer if switching)
+            if chunk.message.reasoning_content:
+                if content_buffer:
+                    yield self._create_assistant_event(content_buffer, chunk)
+                    content_buffer = ""
+                    chunks_with_content = 0
+
+                reasoning_buffer += chunk.message.reasoning_content
+                chunks_with_reasoning += 1
+
+                if chunks_with_reasoning >= BATCH_SIZE:
+                    yield ReasoningEvent(content=reasoning_buffer)
+                    reasoning_buffer = ""
+                    chunks_with_reasoning = 0
 
             if chunk.message.tool_calls and chunk.finish_reason is None:
                 if chunk.message.content:
@@ -354,6 +374,12 @@ class Agent:
                 continue
 
             if chunk.message.content:
+                # Flush reasoning buffer if switching to content
+                if reasoning_buffer:
+                    yield ReasoningEvent(content=reasoning_buffer)
+                    reasoning_buffer = ""
+                    chunks_with_reasoning = 0
+
                 content_buffer += chunk.message.content
                 chunks_with_content += 1
 
@@ -362,14 +388,21 @@ class Agent:
                     content_buffer = ""
                     chunks_with_content = 0
 
+        # Flush remaining buffers
+        if reasoning_buffer:
+            yield ReasoningEvent(content=reasoning_buffer)
+
         if content_buffer:
             last_chunk = chunks[-1] if chunks else None
             yield self._create_assistant_event(content_buffer, last_chunk)
 
+        # Accumulate full message for history
         full_content = ""
+        full_reasoning_content = ""
         full_tool_calls_map = OrderedDict[int, ToolCall]()
         for chunk in chunks:
             full_content += chunk.message.content or ""
+            full_reasoning_content += chunk.message.reasoning_content or ""
             if not chunk.message.tool_calls:
                 continue
 
@@ -386,7 +419,10 @@ class Agent:
 
         full_tool_calls = list(full_tool_calls_map.values()) or None
         last_message = LLMMessage(
-            role=Role.assistant, content=full_content, tool_calls=full_tool_calls
+            role=Role.assistant,
+            content=full_content,
+            reasoning_content=full_reasoning_content or None,
+            tool_calls=full_tool_calls,
         )
         self.messages.append(last_message)
         finish_reason = next(

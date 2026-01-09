@@ -9,25 +9,32 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.widgets import Static
 
-from kitty_code.cli.textual_ui.widgets.spinner import BrailleSpinner
+from kitty_code.cli.textual_ui.widgets.no_markup_static import NoMarkupStatic
+from kitty_code.cli.textual_ui.widgets.spinner import SpinnerMixin, SpinnerType
 
 
-class LoadingWidget(Static):
+class LoadingWidget(SpinnerMixin, Static):
+    """Loading widget with animated spinner and color-transitioning status text.
+
+    Performance optimized: Uses a single _status_widget with pre-built markup
+    instead of N separate widgets per character.
+    """
+
     TARGET_COLORS = ("#FFD800", "#FFAF00", "#FF8205", "#FA500F", "#E10500")
+    SPINNER_TYPE = SpinnerType.BRAILLE
 
     EASTER_EGGS: ClassVar[list[str]] = [
-        "Eating a chocolatine",
-        "Eating a pain au chocolat",
+        "Chasing yarn balls",
+        "Grooming fur",
         "Réflexion",
         "Analyse",
         "Contemplation",
         "Synthèse",
         "Reading Proust",
-        "Oui oui baguette",
         "Counting Rs in strawberry",
-        "Seeding Mistral weights",
-        "Vibing",
-        "Sending good vibes",
+        "Contemplating laser pointers",
+        "Knocking things off tables",
+        "Napping in sunbeams",
         "Petting le chat",
     ]
 
@@ -50,15 +57,14 @@ class LoadingWidget(Static):
 
     def __init__(self, status: str | None = None) -> None:
         super().__init__(classes="loading-widget")
+        self.init_spinner()
         self.status = status or self._get_default_status()
         self.current_color_index = 0
         self.transition_progress = 0
-        self._spinner = BrailleSpinner()
-        self.char_widgets: list[Static] = []
-        self.spinner_widget: Static | None = None
-        self.ellipsis_widget: Static | None = None
+        self._status_widget: Static | None = None
         self.hint_widget: Static | None = None
         self.start_time: float | None = None
+        self._last_elapsed: int = -1
 
     def _get_easter_egg(self) -> str | None:
         EASTER_EGG_PROBABILITY = 0.10
@@ -85,47 +91,35 @@ class LoadingWidget(Static):
 
     def set_status(self, status: str) -> None:
         self.status = self._apply_easter_egg(status)
-        self._rebuild_chars()
+        self._update_animation()
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="loading-container"):
-            self.spinner_widget = Static(
+            self._indicator_widget = Static(
                 self._spinner.current_frame(), classes="loading-indicator"
             )
-            yield self.spinner_widget
+            yield self._indicator_widget
 
-            with Horizontal(classes="loading-status"):
-                for char in self.status:
-                    widget = Static(char, classes="loading-char")
-                    self.char_widgets.append(widget)
-                    yield widget
+            self._status_widget = Static("", classes="loading-status")
+            yield self._status_widget
 
-            self.ellipsis_widget = Static("… ", classes="loading-ellipsis")
-            yield self.ellipsis_widget
-
-            self.hint_widget = Static("(0s esc to interrupt)", classes="loading-hint")
+            self.hint_widget = NoMarkupStatic(
+                "(0s esc to interrupt)", classes="loading-hint"
+            )
             yield self.hint_widget
-
-    def _rebuild_chars(self) -> None:
-        if not self.is_mounted:
-            return
-
-        status_container = self.query_one(".loading-status", Horizontal)
-
-        status_container.remove_children()
-        self.char_widgets.clear()
-
-        for char in self.status:
-            widget = Static(char, classes="loading-char")
-            self.char_widgets.append(widget)
-            status_container.mount(widget)
-
-        self.update_animation()
 
     def on_mount(self) -> None:
         self.start_time = time()
-        self.update_animation()
-        self.set_interval(0.1, self.update_animation)
+        self._update_animation()
+        self.start_spinner_timer()
+
+    def on_resize(self) -> None:
+        self.refresh_spinner()
+
+    def _update_spinner_frame(self) -> None:
+        if not self._is_spinning:
+            return
+        self._update_animation()
 
     def _get_color_for_position(self, position: int) -> str:
         current_color = self.TARGET_COLORS[self.current_color_index]
@@ -136,24 +130,28 @@ class LoadingWidget(Static):
             return next_color
         return current_color
 
-    def update_animation(self) -> None:
-        total_elements = 1 + len(self.char_widgets) + 2
+    def _build_status_text(self) -> str:
+        """Build the status text with color markup for each character."""
+        parts = []
+        for i, char in enumerate(self.status):
+            color = self._get_color_for_position(1 + i)
+            parts.append(f"[{color}]{char}[/]")
+        ellipsis_start = 1 + len(self.status)
+        color_ellipsis = self._get_color_for_position(ellipsis_start)
+        parts.append(f"[{color_ellipsis}]… [/]")
+        return "".join(parts)
 
-        if self.spinner_widget:
+    def _update_animation(self) -> None:
+        """Update animation frame - single widget update for performance."""
+        total_elements = 1 + len(self.status) + 1
+
+        if self._indicator_widget:
             spinner_char = self._spinner.next_frame()
             color = self._get_color_for_position(0)
-            self.spinner_widget.update(f"[{color}]{spinner_char}[/]")
+            self._indicator_widget.update(f"[{color}]{spinner_char}[/]")
 
-        for i, widget in enumerate(self.char_widgets):
-            position = 1 + i
-            color = self._get_color_for_position(position)
-            widget.update(f"[{color}]{self.status[i]}[/]")
-
-        if self.ellipsis_widget:
-            ellipsis_start = 1 + len(self.status)
-            color_ellipsis = self._get_color_for_position(ellipsis_start)
-            color_space = self._get_color_for_position(ellipsis_start + 1)
-            self.ellipsis_widget.update(f"[{color_ellipsis}]…[/][{color_space}] [/]")
+        if self._status_widget:
+            self._status_widget.update(self._build_status_text())
 
         self.transition_progress += 1
         if self.transition_progress > total_elements:
@@ -164,4 +162,6 @@ class LoadingWidget(Static):
 
         if self.hint_widget and self.start_time is not None:
             elapsed = int(time() - self.start_time)
-            self.hint_widget.update(f"({elapsed}s esc to interrupt)")
+            if elapsed != self._last_elapsed:
+                self._last_elapsed = elapsed
+                self.hint_widget.update(f"({elapsed}s esc to interrupt)")

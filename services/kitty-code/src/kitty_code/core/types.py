@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import copy
 from abc import ABC
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from enum import StrEnum, auto
 from typing import Annotated, Any, Literal
@@ -166,6 +168,7 @@ class LLMMessage(BaseModel):
 
     role: Role
     content: Content | None = None
+    reasoning_content: Content | None = None
     tool_calls: list[ToolCall] | None = None
     name: str | None = None
     tool_call_id: str | None = None
@@ -180,10 +183,62 @@ class LLMMessage(BaseModel):
         return {
             "role": str(getattr(v, "role", "assistant")),
             "content": getattr(v, "content", ""),
+            "reasoning_content": getattr(v, "reasoning_content", None),
             "tool_calls": getattr(v, "tool_calls", None),
             "name": getattr(v, "name", None),
             "tool_call_id": getattr(v, "tool_call_id", None),
         }
+
+    def __add__(self, other: LLMMessage) -> LLMMessage:
+        """Accumulate streaming message chunks. Not commutative!"""
+        if self.role != other.role:
+            raise ValueError("Can't accumulate messages with different roles")
+
+        if self.name != other.name:
+            raise ValueError("Can't accumulate messages with different names")
+
+        if self.tool_call_id != other.tool_call_id:
+            raise ValueError("Can't accumulate messages with different tool_call_ids")
+
+        content = (self.content or "") + (other.content or "")
+        if not content:
+            content = None
+
+        reasoning_content = (self.reasoning_content or "") + (
+            other.reasoning_content or ""
+        )
+        if not reasoning_content:
+            reasoning_content = None
+
+        tool_calls_map = OrderedDict[int, ToolCall]()
+        for tool_calls in [self.tool_calls or [], other.tool_calls or []]:
+            for tc in tool_calls:
+                if tc.index is None:
+                    raise ValueError("Tool call chunk missing index")
+                if tc.index not in tool_calls_map:
+                    tool_calls_map[tc.index] = copy.deepcopy(tc)
+                else:
+                    existing_name = tool_calls_map[tc.index].function.name
+                    new_name = tc.function.name
+                    if existing_name and new_name and existing_name != new_name:
+                        raise ValueError(
+                            "Can't accumulate messages with different tool call names"
+                        )
+                    if new_name and not existing_name:
+                        tool_calls_map[tc.index].function.name = new_name
+                    new_args = (tool_calls_map[tc.index].function.arguments or "") + (
+                        tc.function.arguments or ""
+                    )
+                    tool_calls_map[tc.index].function.arguments = new_args
+
+        return LLMMessage(
+            role=self.role,
+            content=content,
+            reasoning_content=reasoning_content,
+            tool_calls=list(tool_calls_map.values()) or None,
+            name=self.name,
+            tool_call_id=self.tool_call_id,
+        )
 
 
 class LLMUsage(BaseModel):
@@ -208,6 +263,12 @@ class BaseEvent(BaseModel, ABC):
 class AssistantEvent(BaseEvent):
     content: str
     stopped_by_middleware: bool = False
+
+
+class ReasoningEvent(BaseEvent):
+    """Event for streaming reasoning/thinking content from LLMs."""
+
+    content: str
 
 
 class ToolCallEvent(BaseEvent):

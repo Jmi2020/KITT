@@ -22,6 +22,7 @@ from kitty_code.cli.textual_ui.widgets.approval_app import ApprovalApp
 from kitty_code.cli.textual_ui.widgets.chat_input import ChatInputContainer
 from kitty_code.cli.textual_ui.widgets.compact import CompactMessage
 from kitty_code.cli.textual_ui.widgets.config_app import ConfigApp
+from kitty_code.cli.textual_ui.widgets.directory_browser import DirectoryBrowserApp
 from kitty_code.cli.textual_ui.widgets.context_progress import ContextProgress, TokenState
 from kitty_code.cli.textual_ui.widgets.loading import LoadingWidget
 from kitty_code.cli.textual_ui.widgets.messages import (
@@ -65,6 +66,7 @@ class BottomApp(StrEnum):
     Approval = auto()
     Config = auto()
     Input = auto()
+    DirectoryBrowser = auto()
 
 
 class VibeApp(App):
@@ -1173,18 +1175,18 @@ class VibeApp(App):
             )
 
     async def _change_directory(self, path_arg: str) -> None:
-        """Change the working directory."""
-        if not path_arg:
-            await self._mount_and_scroll(
-                ErrorMessage(
-                    "Usage: /cd <path>\n\nExample: /cd ~/projects",
-                    collapsed=self._tools_collapsed,
-                )
-            )
-            return
+        """Change the working directory.
 
+        If no path is given, opens an interactive directory browser.
+        If a path is given, changes directly to that directory.
+        """
         from pathlib import Path
         import os
+
+        if not path_arg:
+            # No path given - open interactive directory browser
+            await self._switch_to_directory_browser()
+            return
 
         # Expand ~ and resolve the path
         try:
@@ -1298,6 +1300,58 @@ class VibeApp(App):
         self.call_after_refresh(approval_app.focus)
         self.call_after_refresh(self._scroll_to_bottom)
 
+    async def _switch_to_directory_browser(self) -> None:
+        """Switch to the interactive directory browser."""
+        from pathlib import Path
+
+        if self._current_bottom_app == BottomApp.DirectoryBrowser:
+            return
+
+        bottom_container = self.query_one("#bottom-app-container")
+
+        try:
+            chat_input_container = self.query_one(ChatInputContainer)
+            await chat_input_container.remove()
+        except Exception:
+            pass
+
+        if self._mode_indicator:
+            self._mode_indicator.display = False
+
+        initial_path = self.config.effective_workdir
+        browser = DirectoryBrowserApp(initial_path=Path(initial_path))
+        await bottom_container.mount(browser)
+        self._current_bottom_app = BottomApp.DirectoryBrowser
+
+        self.call_after_refresh(browser.focus)
+
+    async def on_directory_browser_app_directory_selected(
+        self, message: DirectoryBrowserApp.DirectorySelected
+    ) -> None:
+        """Handle directory selection from the browser."""
+        new_path = message.path
+
+        # Update the config workdir
+        self.config.workdir = new_path
+
+        # Update the PathDisplay widget
+        try:
+            path_display = self.query_one(PathDisplay)
+            path_display.set_path(new_path)
+        except Exception:
+            pass
+
+        await self._mount_and_scroll(
+            UserCommandMessage(f"Changed directory to: `{new_path}`")
+        )
+        await self._switch_to_input_app()
+
+    async def on_directory_browser_app_browser_cancelled(
+        self, message: DirectoryBrowserApp.BrowserCancelled
+    ) -> None:
+        """Handle browser cancellation."""
+        await self._switch_to_input_app()
+
     async def _switch_to_input_app(self) -> None:
         bottom_container = self.query_one("#bottom-app-container")
 
@@ -1310,6 +1364,12 @@ class VibeApp(App):
         try:
             approval_app = self.query_one("#approval-app")
             await approval_app.remove()
+        except Exception:
+            pass
+
+        try:
+            directory_browser = self.query_one("#directory-browser-app")
+            await directory_browser.remove()
         except Exception:
             pass
 
@@ -1347,6 +1407,8 @@ class VibeApp(App):
                     self.query_one(ConfigApp).focus()
                 case BottomApp.Approval:
                     self.query_one(ApprovalApp).focus()
+                case BottomApp.DirectoryBrowser:
+                    self.query_one(DirectoryBrowserApp).focus()
                 case app:
                     assert_never(app)
         except Exception:
@@ -1368,6 +1430,15 @@ class VibeApp(App):
             try:
                 approval_app = self.query_one(ApprovalApp)
                 approval_app.action_reject()
+            except Exception:
+                pass
+            self._last_escape_time = None
+            return
+
+        if self._current_bottom_app == BottomApp.DirectoryBrowser:
+            try:
+                browser = self.query_one(DirectoryBrowserApp)
+                browser.action_cancel()
             except Exception:
                 pass
             self._last_escape_time = None

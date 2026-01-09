@@ -6,13 +6,17 @@ from typing import TYPE_CHECKING
 from textual.widgets import Static
 
 from kitty_code.cli.textual_ui.widgets.compact import CompactMessage
-from kitty_code.cli.textual_ui.widgets.messages import AssistantMessage
+from kitty_code.cli.textual_ui.widgets.messages import (
+    AssistantMessage,
+    ReasoningMessage,
+)
 from kitty_code.cli.textual_ui.widgets.tools import ToolCallMessage, ToolResultMessage
 from kitty_code.core.types import (
     AssistantEvent,
     BaseEvent,
     CompactEndEvent,
     CompactStartEvent,
+    ReasoningEvent,
     ToolCallEvent,
     ToolResultEvent,
 )
@@ -53,6 +57,9 @@ class EventHandler:
                 sanitized_event = self._sanitize_event(event)
 
                 await self._handle_tool_result(sanitized_event)
+                return None
+            case ReasoningEvent():
+                await self._handle_reasoning_message(event)
                 return None
             case AssistantEvent():
                 await self._handle_assistant_message(event)
@@ -126,6 +133,12 @@ class EventHandler:
 
     async def _handle_assistant_message(self, event: AssistantEvent) -> None:
         await self.mount_callback(AssistantMessage(event.content))
+
+    async def _handle_reasoning_message(self, event: ReasoningEvent) -> None:
+        tools_collapsed = self.get_tools_collapsed()
+        await self.mount_callback(
+            ReasoningMessage(event.content, collapsed=tools_collapsed)
+        )
 
     async def _handle_compact_start(self) -> None:
         compact_msg = CompactMessage()

@@ -852,3 +852,52 @@ ContextProgress {
     margin: 0;
     color: $foreground;
 }
+
+#directory-browser-app {
+    width: 100%;
+    height: auto;
+    max-height: 16;
+    background: $background;
+    border: round $foreground-muted;
+    padding: 0 1;
+    margin: 0 0 1 0;
+}
+
+#directory-browser-content {
+    width: 100%;
+    height: auto;
+}
+
+.directory-browser-title {
+    height: auto;
+    text-style: bold;
+    color: $primary;
+}
+
+.directory-browser-path {
+    height: auto;
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+#directory-browser-list {
+    width: 100%;
+    height: auto;
+    max-height: 8;
+}
+
+.directory-option {
+    height: auto;
+    color: $foreground;
+}
+
+.directory-option-selected {
+    color: $primary;
+    text-style: bold;
+}
+
+.directory-browser-help {
+    height: auto;
+    color: $text-muted;
+    margin-top: 1;
+}

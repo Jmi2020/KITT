@@ -146,6 +146,7 @@ class ProviderConfig(BaseModel):
     api_key_env_var: str = ""
     api_style: str = "openai"
     backend: Backend = Backend.GENERIC
+    reasoning_field_name: str = "reasoning_content"
 
 
 class _MCPBase(BaseModel):
