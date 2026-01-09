@@ -190,33 +190,47 @@ export function VoiceAssistant({
   }, [status, onStatusChange]);
 
   // Persist messages when response completes
-  const prevStatusRef = useRef<string>(status);
+  const prevStatusRef = useRef<string>('disconnected');
   const pendingTranscriptRef = useRef<string>('');
+  const pendingResponseRef = useRef<string>('');
+  const pendingTierRef = useRef<string | null>(null);
 
+  // Capture data during the exchange (runs on every change)
   useEffect(() => {
-    // Capture transcript when we start responding (user input is done)
-    if (status === 'responding' && prevStatusRef.current !== 'responding' && transcript) {
-      pendingTranscriptRef.current = transcript;
+    if (status === 'responding') {
+      // Keep updating refs with latest data during response
+      if (transcript) pendingTranscriptRef.current = transcript;
+      if (response) pendingResponseRef.current = response;
+      if (tier) pendingTierRef.current = tier;
     }
+  }, [status, transcript, response, tier]);
+
+  // Watch ONLY status changes for persistence trigger
+  useEffect(() => {
+    const prevStatus = prevStatusRef.current;
+    prevStatusRef.current = status;
 
     // When response completes (responding -> connected), persist both messages
-    if (prevStatusRef.current === 'responding' && status === 'connected') {
+    if (prevStatus === 'responding' && status === 'connected') {
       const userText = pendingTranscriptRef.current;
-      const assistantText = response;
+      const assistantText = pendingResponseRef.current;
+      const usedTier = pendingTierRef.current;
+
+      console.log('[VoiceAssistant] Persisting conversation:', { userText, assistantText: assistantText?.slice(0, 50) + '...', tier: usedTier });
 
       if (userText) {
         addUserMessage(userText);
       }
       if (assistantText) {
-        addAssistantMessage(assistantText, tier || undefined);
+        addAssistantMessage(assistantText, usedTier || undefined);
       }
 
       // Clear refs for next exchange
       pendingTranscriptRef.current = '';
+      pendingResponseRef.current = '';
+      pendingTierRef.current = null;
     }
-
-    prevStatusRef.current = status;
-  }, [status, transcript, response, tier, addUserMessage, addAssistantMessage]);
+  }, [status, addUserMessage, addAssistantMessage]);
 
   // Track processing timer when responding
   useEffect(() => {

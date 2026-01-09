@@ -194,7 +194,10 @@ class BrainClient:
             logger.error(f"Brain API error: {e.response.status_code} - {e.response.text}")
             raise
         except httpx.RequestError as e:
-            logger.error(f"Brain connection error: {e}")
+            logger.error(f"Brain connection error: {type(e).__name__}: {e!r}")
+            raise
+        except Exception as e:
+            logger.error(f"Brain query unexpected error: {type(e).__name__}: {e!r}")
             raise
 
     async def query_stream(

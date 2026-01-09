@@ -198,8 +198,8 @@ class VoiceRouter:
                 }
 
             except Exception as e:
-                logger.error(f"Brain query failed: {e}")
-                yield {"type": "error", "message": f"Brain service error: {e}", "done": True}
+                logger.error(f"Brain query failed: {type(e).__name__}: {e!r}")
+                yield {"type": "error", "message": f"Brain service error: {type(e).__name__}: {e}", "done": True}
             return
 
         if command["type"] == "note":
