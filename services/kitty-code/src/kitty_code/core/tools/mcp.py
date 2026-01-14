@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import io
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -174,12 +173,7 @@ def create_mcp_http_proxy_tool_class(
 
         @classmethod
         def get_call_display(cls, event: ToolCallEvent) -> ToolCallDisplay:
-            return ToolCallDisplay(
-                summary=f"{published_name}",
-                details=event.args.model_dump()
-                if hasattr(event.args, "model_dump")
-                else {},
-            )
+            return ToolCallDisplay(summary=f"{published_name}")
 
         @classmethod
         def get_result_display(cls, event: ToolResultEvent) -> ToolResultDisplay:
@@ -190,15 +184,7 @@ def create_mcp_http_proxy_tool_class(
                 )
 
             message = f"MCP tool {event.result.tool} completed"
-            details = {}
-            if event.result.text:
-                details["text"] = event.result.text
-            if event.result.structured:
-                details["structured"] = event.result.structured
-
-            return ToolResultDisplay(
-                success=event.result.ok, message=message, details=details
-            )
+            return ToolResultDisplay(success=event.result.ok, message=message)
 
         @classmethod
         def get_status_text(cls) -> str:
@@ -208,14 +194,9 @@ def create_mcp_http_proxy_tool_class(
     return MCPHttpProxyTool
 
 
-async def list_tools_stdio(
-    command: list[str], env: dict[str, str] | None = None
-) -> list[RemoteTool]:
-    import subprocess
-    params = StdioServerParameters(command=command[0], args=command[1:], env=env)
-    # Suppress stderr to prevent MCP server intro messages from interfering with TUI
-    # Use DEVNULL since io.StringIO() lacks fileno() needed by subprocess
-    async with stdio_client(params, errlog=subprocess.DEVNULL) as (read, write):
+async def list_tools_stdio(command: list[str]) -> list[RemoteTool]:
+    params = StdioServerParameters(command=command[0], args=command[1:])
+    async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools_resp = await session.list_tools()
@@ -223,16 +204,10 @@ async def list_tools_stdio(
 
 
 async def call_tool_stdio(
-    command: list[str],
-    tool_name: str,
-    arguments: dict[str, Any],
-    env: dict[str, str] | None = None,
+    command: list[str], tool_name: str, arguments: dict[str, Any]
 ) -> MCPToolResult:
-    import subprocess
-    params = StdioServerParameters(command=command[0], args=command[1:], env=env)
-    # Suppress stderr to prevent MCP server messages from interfering with TUI
-    # Use DEVNULL since io.StringIO() lacks fileno() needed by subprocess
-    async with stdio_client(params, errlog=subprocess.DEVNULL) as (read, write):
+    params = StdioServerParameters(command=command[0], args=command[1:])
+    async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool(tool_name, arguments)
@@ -245,7 +220,6 @@ def create_mcp_stdio_proxy_tool_class(
     remote: RemoteTool,
     alias: str | None = None,
     server_hint: str | None = None,
-    env: dict[str, str] | None = None,
 ) -> type[BaseTool[_OpenArgs, MCPToolResult, BaseToolConfig, BaseToolState]]:
     def _alias_from_command(cmd: list[str]) -> str:
         prog = Path(cmd[0]).name.replace(".", "_") if cmd else "mcp"
@@ -271,7 +245,6 @@ def create_mcp_stdio_proxy_tool_class(
         _stdio_command: ClassVar[list[str]] = command
         _remote_name: ClassVar[str] = remote.name
         _input_schema: ClassVar[dict[str, Any]] = remote.input_schema
-        _stdio_env: ClassVar[dict[str, str] | None] = env
 
         @classmethod
         def get_name(cls) -> str:
@@ -285,7 +258,7 @@ def create_mcp_stdio_proxy_tool_class(
             try:
                 payload = args.model_dump(exclude_none=True)
                 result = await call_tool_stdio(
-                    self._stdio_command, self._remote_name, payload, env=self._stdio_env
+                    self._stdio_command, self._remote_name, payload
                 )
                 return result
             except Exception as exc:
@@ -293,12 +266,7 @@ def create_mcp_stdio_proxy_tool_class(
 
         @classmethod
         def get_call_display(cls, event: ToolCallEvent) -> ToolCallDisplay:
-            return ToolCallDisplay(
-                summary=f"{published_name}",
-                details=event.args.model_dump()
-                if hasattr(event.args, "model_dump")
-                else {},
-            )
+            return ToolCallDisplay(summary=f"{published_name}")
 
         @classmethod
         def get_result_display(cls, event: ToolResultEvent) -> ToolResultDisplay:
@@ -309,15 +277,7 @@ def create_mcp_stdio_proxy_tool_class(
                 )
 
             message = f"MCP tool {event.result.tool} completed"
-            details = {}
-            if event.result.text:
-                details["text"] = event.result.text
-            if event.result.structured:
-                details["structured"] = event.result.structured
-
-            return ToolResultDisplay(
-                success=event.result.ok, message=message, details=details
-            )
+            return ToolResultDisplay(success=event.result.ok, message=message)
 
         @classmethod
         def get_status_text(cls) -> str:

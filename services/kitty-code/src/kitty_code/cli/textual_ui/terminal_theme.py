@@ -1,10 +1,3 @@
-"""Terminal theme detection via OSC queries.
-
-This module queries the terminal for its current color palette using OSC
-(Operating System Commands) escape sequences and creates a matching Textual
-theme. This allows kitty-code to automatically match the user's terminal colors.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -69,8 +62,6 @@ _OSC_RESPONSE_RE = re.compile(
 
 @dataclass
 class TerminalColors:
-    """Container for terminal color palette."""
-
     foreground: str | None = None
     background: str | None = None
     black: str | None = None
@@ -91,7 +82,6 @@ class TerminalColors:
     bright_white: str | None = None
 
     def is_complete(self) -> bool:
-        """Check if all color fields are populated."""
         return all(getattr(self, f.name) is not None for f in fields(self))
 
 
@@ -126,7 +116,7 @@ _COLOR_QUERIES, _OSC_TO_FIELD = _build_color_queries()
 @contextmanager
 def _raw_mode(fd: int) -> Iterator[None]:
     """Context manager to temporarily set terminal to raw mode."""
-    assert termios is not None  # Only called on Unix
+    assert termios is not None  # Only called on Unix so typing doesn't freak out
     try:
         old_settings = termios.tcgetattr(fd)
     except termios.error:
@@ -169,7 +159,7 @@ def _read_responses(fd: int, timeout: float = 1.0) -> bytes:
     respond in order, receiving the DA1 response means all color responses
     (if any) have been received.
     """
-    assert select is not None  # Only called on Unix
+    assert select is not None  # Only called on Unix so typing doesn't freak out
     response = bytearray()
     while True:
         ready, _, _ = select.select([fd], [], [], timeout)
@@ -186,7 +176,6 @@ def _read_responses(fd: int, timeout: float = 1.0) -> bytes:
 
 
 def _parse_osc_responses(response: bytes) -> TerminalColors:
-    """Parse OSC color responses into a TerminalColors dataclass."""
     colors = TerminalColors()
     for match in _OSC_RESPONSE_RE.finditer(response):
         osc_code, r_hex, g_hex, b_hex = match.groups()
@@ -197,7 +186,6 @@ def _parse_osc_responses(response: bytes) -> TerminalColors:
 
 
 def _query_terminal_colors() -> TerminalColors:
-    """Query the terminal for its color palette."""
     if not _UNIX_AVAILABLE:
         return TerminalColors()
 
@@ -216,18 +204,15 @@ def _query_terminal_colors() -> TerminalColors:
 
 
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
-    """Convert hex color string to RGB tuple."""
     h = hex_color.lstrip("#")
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
 
 
 def _rgb_to_hex(r: int, g: int, b: int) -> str:
-    """Convert RGB values to hex color string."""
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
 def _adjust_brightness(hex_color: str, factor: float) -> str:
-    """Adjust brightness of a color by a factor."""
     r, g, b = _hex_to_rgb(hex_color)
     return _rgb_to_hex(
         min(255, max(0, int(r * factor))),
@@ -237,7 +222,6 @@ def _adjust_brightness(hex_color: str, factor: float) -> str:
 
 
 def _blend(c1: str, c2: str, ratio: float = 0.5) -> str:
-    """Blend two colors together."""
     r1, g1, b1 = _hex_to_rgb(c1)
     r2, g2, b2 = _hex_to_rgb(c2)
     return _rgb_to_hex(
@@ -254,11 +238,6 @@ def _luminance(hex_color: str) -> float:
 
 
 def capture_terminal_theme() -> Theme | None:
-    """Capture the terminal's color scheme and create a matching Textual theme.
-
-    Returns:
-        A Textual Theme matching the terminal's colors, or None if detection failed.
-    """
     colors = _query_terminal_colors()
 
     if not colors.background or not colors.foreground:

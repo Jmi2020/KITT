@@ -227,6 +227,67 @@ Markdown MarkdownFence {
     margin-bottom: 0;
 }
 
+.reasoning-message {
+    margin-top: 1;
+    width: 100%;
+    height: auto;
+}
+
+.reasoning-message-wrapper {
+    width: 100%;
+    height: auto;
+}
+
+.reasoning-message-header {
+    width: 100%;
+    height: auto;
+}
+
+.reasoning-indicator {
+    width: auto;
+    height: auto;
+    color: $text-muted;
+    margin-right: 1;
+
+    &.success {
+        color: $text-success;
+    }
+}
+
+.reasoning-collapsed-text {
+    width: auto;
+    height: auto;
+    color: $text-muted;
+    text-style: italic;
+}
+
+.reasoning-triangle {
+    width: auto;
+    height: auto;
+    color: $text-muted;
+    text-style: italic;
+    margin-left: 1;
+}
+
+.reasoning-message-content {
+    width: 100%;
+    height: auto;
+    padding: 0;
+    padding-left: 2;
+    margin: 0;
+    color: $text-muted;
+    text-style: italic;
+}
+
+.reasoning-message-content * {
+    color: $text-muted;
+    text-style: italic;
+}
+
+.reasoning-message-content > *:last-child {
+    margin-bottom: 0;
+}
+
 .interrupt-message {
     margin-top: 0;
     margin-bottom: 0;
@@ -851,53 +912,4 @@ ContextProgress {
     padding: 0;
     margin: 0;
     color: $foreground;
-}
-
-#directory-browser-app {
-    width: 100%;
-    height: auto;
-    max-height: 16;
-    background: $background;
-    border: round $foreground-muted;
-    padding: 0 1;
-    margin: 0 0 1 0;
-}
-
-#directory-browser-content {
-    width: 100%;
-    height: auto;
-}
-
-.directory-browser-title {
-    height: auto;
-    text-style: bold;
-    color: $primary;
-}
-
-.directory-browser-path {
-    height: auto;
-    color: $text-muted;
-    margin-bottom: 1;
-}
-
-#directory-browser-list {
-    width: 100%;
-    height: auto;
-    max-height: 8;
-}
-
-.directory-option {
-    height: auto;
-    color: $foreground;
-}
-
-.directory-option-selected {
-    color: $primary;
-    text-style: bold;
-}
-
-.directory-browser-help {
-    height: auto;
-    color: $text-muted;
-    margin-top: 1;
 }

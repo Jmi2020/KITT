@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 from abc import ABC
+from collections.abc import Callable
 from enum import Enum
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
 from textual.timer import Timer
-from textual.widgets import Static
 
 if TYPE_CHECKING:
-    from textual.app import ComposeResult
+    from textual.widgets import Static
+
+
+@runtime_checkable
+class HasSetInterval(Protocol):
+    def set_interval(
+        self, interval: float, callback: Callable[[], None], *, name: str | None = None
+    ) -> Timer: ...
 
 
 class Spinner(ABC):
@@ -94,67 +101,54 @@ def create_spinner(spinner_type: SpinnerType = SpinnerType.BRAILLE) -> Spinner:
 
 
 class SpinnerMixin:
-    """Mixin class providing spinner animation for widgets.
-
-    Classes using this mixin should:
-    1. Override SPINNER_TYPE, SPINNING_TEXT, COMPLETED_TEXT class variables
-    2. Call init_spinner() in compose() to get the indicator and status widgets
-    3. Call start_spinner_timer() to begin animation
-    4. Call stop_spinning() when done
-    """
-
     SPINNER_TYPE: ClassVar[SpinnerType] = SpinnerType.LINE
     SPINNING_TEXT: ClassVar[str] = ""
     COMPLETED_TEXT: ClassVar[str] = ""
 
     _spinner: Spinner
-    _spinner_timer: Timer | None
+    _spinner_timer: Any
     _is_spinning: bool
-    _indicator_widget: Static
-    _status_text_widget: Static
+    _indicator_widget: Static | None
+    _status_text_widget: Static | None
 
-    def init_spinner(self) -> ComposeResult:
-        """Initialize spinner widgets. Call this in compose()."""
+    def init_spinner(self) -> None:
         self._spinner = create_spinner(self.SPINNER_TYPE)
         self._spinner_timer = None
-        self._is_spinning = False
-        self._indicator_widget = Static(self._spinner.current_frame(), classes="indicator")
-        self._status_text_widget = Static(self.SPINNING_TEXT, classes="status-text")
-        yield self._indicator_widget
-        yield self._status_text_widget
+        self._is_spinning = True
+        self._status_text_widget = None
 
-    def start_spinner_timer(self, interval: float = 0.1) -> None:
-        """Start the spinner animation timer."""
-        if self._spinner_timer is None and hasattr(self, "set_timer"):
-            self._is_spinning = True
-            self._spinner_timer = self.set_timer(  # type: ignore[attr-defined]
-                interval, self._update_spinner_frame, pause=False
+    def start_spinner_timer(self) -> None:
+        if not isinstance(self, HasSetInterval):
+            raise TypeError(
+                "SpinnerMixin requires a class that implements HasSetInterval protocol"
             )
+        self._spinner_timer = self.set_interval(0.1, self._update_spinner_frame)
 
     def _update_spinner_frame(self) -> None:
-        """Update spinner to next frame and reschedule."""
-        if self._is_spinning:
-            self._indicator_widget.update(self._spinner.next_frame())
-            if hasattr(self, "set_timer"):
-                self._spinner_timer = self.set_timer(  # type: ignore[attr-defined]
-                    0.1, self._update_spinner_frame, pause=False
-                )
+        if not self._is_spinning or not self._indicator_widget:
+            return
+        self._indicator_widget.update(self._spinner.next_frame())
 
     def refresh_spinner(self) -> None:
-        """Refresh the spinner to current frame without advancing."""
-        self._indicator_widget.update(self._spinner.current_frame())
+        if self._indicator_widget:
+            self._indicator_widget.refresh()
 
-    def stop_spinning(self) -> None:
-        """Stop spinner animation and update to completed state."""
+    def stop_spinning(self, success: bool = True) -> None:
         self._is_spinning = False
-        if self._spinner_timer is not None:
+        if self._spinner_timer:
             self._spinner_timer.stop()
             self._spinner_timer = None
-        self._indicator_widget.update("▼")
-        self._status_text_widget.update(self.COMPLETED_TEXT)
+        if self._indicator_widget:
+            if success:
+                self._indicator_widget.update("✓")
+                self._indicator_widget.add_class("success")
+            else:
+                self._indicator_widget.update("✕")
+                self._indicator_widget.add_class("error")
+        if self._status_text_widget and self.COMPLETED_TEXT:
+            self._status_text_widget.update(self.COMPLETED_TEXT)
 
     def on_unmount(self) -> None:
-        """Clean up timer on unmount."""
-        if self._spinner_timer is not None:
+        if self._spinner_timer:
             self._spinner_timer.stop()
             self._spinner_timer = None

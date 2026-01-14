@@ -10,31 +10,26 @@ from textual.containers import Horizontal
 from textual.widgets import Static
 
 from kitty_code.cli.textual_ui.widgets.no_markup_static import NoMarkupStatic
-from kitty_code.cli.textual_ui.widgets.spinner import SpinnerMixin, SpinnerType, create_spinner
+from kitty_code.cli.textual_ui.widgets.spinner import SpinnerMixin, SpinnerType
 
 
 class LoadingWidget(SpinnerMixin, Static):
-    """Loading widget with animated spinner and color-transitioning status text.
-
-    Performance optimized: Uses a single _status_widget with pre-built markup
-    instead of N separate widgets per character.
-    """
-
     TARGET_COLORS = ("#FFD800", "#FFAF00", "#FF8205", "#FA500F", "#E10500")
     SPINNER_TYPE = SpinnerType.BRAILLE
 
     EASTER_EGGS: ClassVar[list[str]] = [
-        "Chasing yarn balls",
-        "Grooming fur",
+        "Eating a chocolatine",
+        "Eating a pain au chocolat",
         "Réflexion",
         "Analyse",
         "Contemplation",
         "Synthèse",
         "Reading Proust",
+        "Oui oui baguette",
         "Counting Rs in strawberry",
-        "Contemplating laser pointers",
-        "Knocking things off tables",
-        "Napping in sunbeams",
+        "Seeding Mistral weights",
+        "Vibing",
+        "Sending good vibes",
         "Petting le chat",
     ]
 
@@ -57,10 +52,7 @@ class LoadingWidget(SpinnerMixin, Static):
 
     def __init__(self, status: str | None = None) -> None:
         super().__init__(classes="loading-widget")
-        # Initialize spinner attributes directly (init_spinner() is a generator for compose())
-        self._spinner = create_spinner(self.SPINNER_TYPE)
-        self._spinner_timer = None
-        self._is_spinning = False
+        self.init_spinner()
         self.status = status or self._get_default_status()
         self.current_color_index = 0
         self.transition_progress = 0
@@ -87,7 +79,7 @@ class LoadingWidget(SpinnerMixin, Static):
         return None
 
     def _get_default_status(self) -> str:
-        return self._get_easter_egg() or "Thinking"
+        return self._get_easter_egg() or "Generating"
 
     def _apply_easter_egg(self, status: str) -> str:
         return self._get_easter_egg() or status
@@ -134,7 +126,6 @@ class LoadingWidget(SpinnerMixin, Static):
         return current_color
 
     def _build_status_text(self) -> str:
-        """Build the status text with color markup for each character."""
         parts = []
         for i, char in enumerate(self.status):
             color = self._get_color_for_position(1 + i)
@@ -145,7 +136,6 @@ class LoadingWidget(SpinnerMixin, Static):
         return "".join(parts)
 
     def _update_animation(self) -> None:
-        """Update animation frame - single widget update for performance."""
         total_elements = 1 + len(self.status) + 1
 
         if self._indicator_widget:

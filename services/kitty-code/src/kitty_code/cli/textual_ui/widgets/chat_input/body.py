@@ -8,11 +8,10 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Static
 
 from kitty_code.cli.history_manager import HistoryManager
-from kitty_code.cli.textual_ui.widgets.no_markup_static import NoMarkupStatic
 from kitty_code.cli.textual_ui.widgets.chat_input.text_area import ChatTextArea, InputMode
+from kitty_code.cli.textual_ui.widgets.no_markup_static import NoMarkupStatic
 
 
 class ChatInputBody(Widget):

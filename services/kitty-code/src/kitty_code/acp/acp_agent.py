@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncGenerator
 from pathlib import Path
 import sys
-from typing import Any, cast, override
+from typing import cast, override
 
 from acp import (
     PROTOCOL_VERSION,
@@ -46,7 +46,7 @@ from acp.schema import (
 )
 from pydantic import BaseModel, ConfigDict
 
-from kitty_code import KITTY_CODE_ROOT, __version__
+from kitty_code import VIBE_ROOT, __version__
 from kitty_code.acp.tools.base import BaseAcpTool
 from kitty_code.acp.tools.session_update import (
     tool_call_session_update,
@@ -164,7 +164,7 @@ class VibeAcpAgent(AcpAgent):
         try:
             config = VibeConfig.load(
                 workdir=cwd,
-                tool_paths=[str(KITTY_CODE_ROOT / "acp" / "tools" / "builtins")],
+                tool_paths=[str(VIBE_ROOT / "acp" / "tools" / "builtins")],
                 disabled_tools=capability_disabled_tools,
             )
         except MissingAPIKeyError as e:
@@ -244,7 +244,7 @@ class VibeAcpAgent(AcpAgent):
                     return (ApprovalResponse.NO, f"Unknown option: {option_id}")
 
         async def approval_callback(
-            tool_name: str, args: dict[str, Any], tool_call_id: str
+            tool_name: str, args: BaseModel, tool_call_id: str
         ) -> tuple[ApprovalResponse, str | None]:
             # Create the tool call update
             tool_call = ToolCall(toolCallId=tool_call_id)

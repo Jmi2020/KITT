@@ -4,7 +4,7 @@ from pathlib import Path
 
 from acp import ReadTextFileRequest
 
-from kitty_code import KITTY_CODE_ROOT
+from kitty_code import VIBE_ROOT
 from kitty_code.acp.tools.base import AcpToolState, BaseAcpTool
 from kitty_code.core.tools.base import ToolError
 from kitty_code.core.tools.builtins.read_file import (
@@ -24,7 +24,7 @@ class AcpReadFileState(ReadFileState, AcpToolState):
 
 class ReadFile(CoreReadFileTool, BaseAcpTool[AcpReadFileState]):
     state: AcpReadFileState
-    prompt_path = KITTY_CODE_ROOT / "core" / "tools" / "builtins" / "prompts" / "read_file.md"
+    prompt_path = VIBE_ROOT / "core" / "tools" / "builtins" / "prompts" / "read_file.md"
 
     @classmethod
     def _get_tool_state_class(cls) -> type[AcpReadFileState]:

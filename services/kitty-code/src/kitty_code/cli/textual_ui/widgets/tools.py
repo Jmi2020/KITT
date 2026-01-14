@@ -4,9 +4,10 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Static
 
-from kitty_code.cli.textual_ui.renderers import get_renderer
 from kitty_code.cli.textual_ui.widgets.messages import ExpandingBorder
+from kitty_code.cli.textual_ui.widgets.no_markup_static import NoMarkupStatic
 from kitty_code.cli.textual_ui.widgets.status_message import StatusMessage
+from kitty_code.cli.textual_ui.widgets.tool_widgets import get_result_widget
 from kitty_code.cli.textual_ui.widgets.utils import DEFAULT_TOOL_SHORTCUT, TOOL_SHORTCUTS
 from kitty_code.core.tools.ui import ToolUIDataAdapter
 from kitty_code.core.types import ToolCallEvent, ToolResultEvent
@@ -99,11 +100,11 @@ class ToolResultMessage(Static):
             self.add_class("error-text")
             if self.collapsed:
                 await self._content_container.mount(
-                    Static(f"Error. {self._hint()}", markup=False)
+                    NoMarkupStatic(f"Error. {self._hint()}")
                 )
             else:
                 await self._content_container.mount(
-                    Static(f"Error: {self._event.error}", markup=False)
+                    NoMarkupStatic(f"Error: {self._event.error}")
                 )
             return
 
@@ -112,11 +113,11 @@ class ToolResultMessage(Static):
             reason = self._event.skip_reason or "User skipped"
             if self.collapsed:
                 await self._content_container.mount(
-                    Static(f"Skipped. {self._hint()}", markup=False)
+                    NoMarkupStatic(f"Skipped. {self._hint()}")
                 )
             else:
                 await self._content_container.mount(
-                    Static(f"Skipped: {reason}", markup=False)
+                    NoMarkupStatic(f"Skipped: {reason}")
                 )
             return
 
@@ -129,11 +130,16 @@ class ToolResultMessage(Static):
 
         adapter = ToolUIDataAdapter(self._event.tool_class)
         display = adapter.get_result_display(self._event)
-        renderer = get_renderer(self._event.tool_name)
-        widget_class, data = renderer.get_result_widget(display, self.collapsed)
-        await self._content_container.mount(
-            widget_class(data, collapsed=self.collapsed)
+
+        widget = get_result_widget(
+            self._event.tool_name,
+            self._event.result,
+            success=display.success,
+            message=display.message,
+            collapsed=self.collapsed,
+            warnings=display.warnings,
         )
+        await self._content_container.mount(widget)
 
     async def _render_simple(self) -> None:
         if self._content_container is None:
@@ -141,15 +147,15 @@ class ToolResultMessage(Static):
 
         if self.collapsed:
             await self._content_container.mount(
-                Static(f"{self._tool_name} completed {self._hint()}", markup=False)
+                NoMarkupStatic(f"{self._tool_name} completed {self._hint()}")
             )
             return
 
         if self._content:
-            await self._content_container.mount(Static(self._content, markup=False))
+            await self._content_container.mount(NoMarkupStatic(self._content))
         else:
             await self._content_container.mount(
-                Static(f"{self._tool_name} completed.", markup=False)
+                NoMarkupStatic(f"{self._tool_name} completed.")
             )
 
     async def set_collapsed(self, collapsed: bool) -> None:

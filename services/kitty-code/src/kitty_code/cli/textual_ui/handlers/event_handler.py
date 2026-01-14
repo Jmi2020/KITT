@@ -3,13 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from textual.widgets import Static
-
 from kitty_code.cli.textual_ui.widgets.compact import CompactMessage
-from kitty_code.cli.textual_ui.widgets.messages import (
-    AssistantMessage,
-    ReasoningMessage,
-)
+from kitty_code.cli.textual_ui.widgets.messages import AssistantMessage, ReasoningMessage
+from kitty_code.cli.textual_ui.widgets.no_markup_static import NoMarkupStatic
 from kitty_code.cli.textual_ui.widgets.tools import ToolCallMessage, ToolResultMessage
 from kitty_code.core.types import (
     AssistantEvent,
@@ -42,7 +38,6 @@ class EventHandler:
         self.get_todos_collapsed = get_todos_collapsed
         self.current_tool_call: ToolCallMessage | None = None
         self.current_compact: CompactMessage | None = None
-        self.tool_results: list[ToolResultMessage] = []
 
     async def handle_event(
         self,
@@ -55,24 +50,18 @@ class EventHandler:
                 return await self._handle_tool_call(event, loading_widget)
             case ToolResultEvent():
                 sanitized_event = self._sanitize_event(event)
-
                 await self._handle_tool_result(sanitized_event)
-                return None
             case ReasoningEvent():
                 await self._handle_reasoning_message(event)
-                return None
             case AssistantEvent():
                 await self._handle_assistant_message(event)
-                return None
             case CompactStartEvent():
                 await self._handle_compact_start()
-                return None
             case CompactEndEvent():
                 await self._handle_compact_end(event)
-                return None
             case _:
                 await self._handle_unknown_event(event)
-                return None
+        return None
 
     def _sanitize_event(self, event: ToolResultEvent) -> ToolResultEvent:
         if isinstance(event, ToolResultEvent):
@@ -128,7 +117,6 @@ class EventHandler:
             )
             await self.mount_callback(tool_result)
 
-        self.tool_results.append(tool_result)
         self.current_tool_call = None
 
     async def _handle_assistant_message(self, event: AssistantEvent) -> None:
@@ -153,9 +141,7 @@ class EventHandler:
             self.current_compact = None
 
     async def _handle_unknown_event(self, event: BaseEvent) -> None:
-        await self.mount_callback(
-            Static(str(event), markup=False, classes="unknown-event")
-        )
+        await self.mount_callback(NoMarkupStatic(str(event), classes="unknown-event"))
 
     def stop_current_tool_call(self) -> None:
         if self.current_tool_call:
@@ -166,6 +152,3 @@ class EventHandler:
         if self.current_compact:
             self.current_compact.stop_spinning(success=False)
             self.current_compact = None
-
-    def get_last_tool_result(self) -> ToolResultMessage | None:
-        return self.tool_results[-1] if self.tool_results else None

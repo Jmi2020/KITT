@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 import importlib.util
 import inspect
 from logging import getLogger
@@ -19,7 +19,6 @@ from kitty_code.core.tools.mcp import (
     list_tools_http,
     list_tools_stdio,
 )
-from kitty_code.core.trusted_folders import trusted_folders_manager
 from kitty_code.core.utils import run_sync
 
 logger = getLogger("vibe")
@@ -39,31 +38,29 @@ class ToolManager:
     should have its own ToolManager instance.
     """
 
-    def __init__(self, config: VibeConfig) -> None:
-        self._config = config
+    def __init__(self, config_getter: Callable[[], VibeConfig]) -> None:
+        self._config_getter = config_getter
         self._instances: dict[str, BaseTool] = {}
-        self._search_paths: list[Path] = self._compute_search_paths(config)
+        self._search_paths: list[Path] = self._compute_search_paths(self._config)
 
         self._available: dict[str, type[BaseTool]] = {
             cls.get_name(): cls for cls in self._iter_tool_classes(self._search_paths)
         }
         self._integrate_mcp()
 
+    @property
+    def _config(self) -> VibeConfig:
+        return self._config_getter()
+
     @staticmethod
     def _compute_search_paths(config: VibeConfig) -> list[Path]:
         paths: list[Path] = [DEFAULT_TOOL_DIR.path]
 
-        for p in config.tool_paths:
-            path = Path(p).expanduser().resolve()
+        for path in config.tool_paths:
             if path.is_dir():
                 paths.append(path)
 
-        is_folder_trusted = trusted_folders_manager.is_trusted(config.effective_workdir)
-        if (
-            is_folder_trusted is True
-            and (tools_dir := resolve_local_tools_dir(config.effective_workdir))
-            is not None
-        ):
+        if (tools_dir := resolve_local_tools_dir(config.effective_workdir)) is not None:
             paths.append(tools_dir)
 
         if GLOBAL_TOOLS_DIR.path.is_dir():
@@ -187,9 +184,6 @@ class ToolManager:
                     server_hint=srv.prompt,
                     headers=headers,
                 )
-                # Set force approval flag if server requires it
-                if srv.require_approval:
-                    proxy_cls._force_approval = True  # type: ignore[attr-defined]
                 self._available[proxy_cls.get_name()] = proxy_cls
                 added += 1
             except Exception as exc:
@@ -207,11 +201,8 @@ class ToolManager:
             logger.warning("MCP stdio server '%s' has invalid/empty command", srv.name)
             return 0
 
-        # Get environment variables (resolves ${VAR} references)
-        env = srv.get_env() if hasattr(srv, 'get_env') else None
-
         try:
-            tools: list[RemoteTool] = await list_tools_stdio(cmd, env=env)
+            tools: list[RemoteTool] = await list_tools_stdio(cmd)
         except Exception as exc:
             logger.warning("MCP stdio discovery failed for %r: %s", cmd, exc)
             return 0
@@ -220,11 +211,8 @@ class ToolManager:
         for remote in tools:
             try:
                 proxy_cls = create_mcp_stdio_proxy_tool_class(
-                    command=cmd, remote=remote, alias=srv.name, server_hint=srv.prompt, env=env
+                    command=cmd, remote=remote, alias=srv.name, server_hint=srv.prompt
                 )
-                # Set force approval flag if server requires it
-                if srv.require_approval:
-                    proxy_cls._force_approval = True  # type: ignore[attr-defined]
                 self._available[proxy_cls.get_name()] = proxy_cls
                 added += 1
             except Exception as exc:

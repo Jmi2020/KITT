@@ -11,7 +11,7 @@ from acp.schema import (
     ToolCallStart,
 )
 
-from kitty_code import KITTY_CODE_ROOT
+from kitty_code import VIBE_ROOT
 from kitty_code.acp.tools.base import AcpToolState, BaseAcpTool
 from kitty_code.core.tools.base import ToolError
 from kitty_code.core.tools.builtins.search_replace import (
@@ -30,7 +30,7 @@ class AcpSearchReplaceState(SearchReplaceState, AcpToolState):
 class SearchReplace(CoreSearchReplaceTool, BaseAcpTool[AcpSearchReplaceState]):
     state: AcpSearchReplaceState
     prompt_path = (
-        KITTY_CODE_ROOT / "core" / "tools" / "builtins" / "prompts" / "search_replace.md"
+        VIBE_ROOT / "core" / "tools" / "builtins" / "prompts" / "search_replace.md"
     )
 
     @classmethod

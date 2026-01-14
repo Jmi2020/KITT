@@ -11,6 +11,11 @@ from textual.containers import CenterMiddle, Horizontal
 from textual.message import Message
 from textual.widgets import Static
 
+from kitty_code.cli.textual_ui.terminal_theme import (
+    TERMINAL_THEME_NAME,
+    capture_terminal_theme,
+)
+from kitty_code.cli.textual_ui.widgets.no_markup_static import NoMarkupStatic
 from kitty_code.core.paths.global_paths import GLOBAL_CONFIG_FILE, TRUSTED_FOLDERS_FILE
 
 
@@ -46,14 +51,14 @@ class TrustFolderDialog(CenterMiddle):
 
     def compose(self) -> ComposeResult:
         with CenterMiddle(id="trust-dialog"):
-            yield Static("⚠ Trust this folder?", id="trust-dialog-title")
-            yield Static(
+            yield NoMarkupStatic("⚠ Trust this folder?", id="trust-dialog-title")
+            yield NoMarkupStatic(
                 str(self.folder_path),
                 id="trust-dialog-path",
                 classes="trust-dialog-path",
             )
-            yield Static(
-                "A .vibe/ directory was found here. Should Vibe load custom configuration and tools from it?",
+            yield NoMarkupStatic(
+                "Files that can modify your Mistral Vibe setup were found here. Do you trust this folder?",
                 id="trust-dialog-message",
                 classes="trust-dialog-message",
             )
@@ -61,13 +66,17 @@ class TrustFolderDialog(CenterMiddle):
             with Horizontal(id="trust-options-container"):
                 options = ["Yes", "No"]
                 for idx, text in enumerate(options):
-                    widget = Static(f"  {idx + 1}. {text}", classes="trust-option")
+                    widget = NoMarkupStatic(
+                        f"  {idx + 1}. {text}", classes="trust-option"
+                    )
                     self.option_widgets.append(widget)
                     yield widget
 
-            yield Static("← → navigate  Enter select", classes="trust-dialog-help")
+            yield NoMarkupStatic(
+                "← → navigate  Enter select", classes="trust-dialog-help"
+            )
 
-            yield Static(
+            yield NoMarkupStatic(
                 f"Setting will be saved in: {TRUSTED_FOLDERS_FILE.path}",
                 id="trust-dialog-save-info",
                 classes="trust-dialog-save-info",
@@ -145,9 +154,13 @@ class TrustFolderApp(App):
         self.folder_path = folder_path
         self._result: bool | None = None
         self._quit_without_saving = False
+        self._terminal_theme = capture_terminal_theme()
         self._load_theme()
 
     def _load_theme(self) -> None:
+        if self._terminal_theme:
+            self.register_theme(self._terminal_theme)
+
         config_file = GLOBAL_CONFIG_FILE.path
         if not config_file.is_file():
             return
@@ -155,10 +168,18 @@ class TrustFolderApp(App):
         try:
             with config_file.open("rb") as f:
                 config_data = tomllib.load(f)
-                if textual_theme := config_data.get("textual_theme"):
-                    self.theme = textual_theme
-        except (OSError, tomllib.TOMLDecodeError, KeyError):
-            pass
+        except (OSError, tomllib.TOMLDecodeError):
+            return
+
+        textual_theme = config_data.get("textual_theme")
+        if not textual_theme:
+            return
+
+        if textual_theme == TERMINAL_THEME_NAME:
+            if self._terminal_theme:
+                self.theme = TERMINAL_THEME_NAME
+        else:
+            self.theme = textual_theme
 
     def compose(self) -> ComposeResult:
         yield TrustFolderDialog(self.folder_path)

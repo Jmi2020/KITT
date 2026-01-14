@@ -24,29 +24,12 @@ from kitty_code.core.paths.global_paths import GLOBAL_ENV_FILE, SESSION_LOG_DIR
 from kitty_code.core.prompts import SystemPrompt
 from kitty_code.core.tools.base import BaseToolConfig
 
-# Support both KITTY-specific and original vibe docs
-PROJECT_DOC_FILENAMES = ["AGENTS.md", "KITTY-CODE.md", ".kitty-code.md", "VIBE.md", ".vibe.md"]
-
 
 def load_api_keys_from_env() -> None:
-    """Load API keys from .env file and KITTY .env if available."""
-    # Load from kitty-code's own .env
     if GLOBAL_ENV_FILE.path.is_file():
         env_vars = dotenv_values(GLOBAL_ENV_FILE.path)
         for key, value in env_vars.items():
             if value:
-                os.environ.setdefault(key, value)
-
-    # Also try to load from KITTY's .env for integration
-    kitty_env = Path("/Users/Shared/Coding/KITT/.env")
-    if kitty_env.is_file():
-        env_vars = dotenv_values(kitty_env)
-        for key, value in env_vars.items():
-            # Load API keys for known providers and services
-            if value and key.startswith((
-                "OLLAMA_", "MISTRAL_", "OPENAI_", "ANTHROPIC_",
-                "PERPLEXITY_", "GOOGLE_",  # Additional providers
-            )):
                 os.environ.setdefault(key, value)
 
 
@@ -154,13 +137,6 @@ class _MCPBase(BaseModel):
     prompt: str | None = Field(
         default=None, description="Optional usage hint appended to tool descriptions"
     )
-    require_approval: bool = Field(
-        default=False,
-        description=(
-            "Force user approval for all tools from this server. "
-            "Useful for MCP servers with tools that access external resources."
-        ),
-    )
 
     @field_validator("name", mode="after")
     @classmethod
@@ -223,7 +199,6 @@ class MCPStdio(_MCPBase):
     transport: Literal["stdio"]
     command: str | list[str]
     args: list[str] = Field(default_factory=list)
-    env: dict[str, str] = Field(default_factory=dict)
 
     def argv(self) -> list[str]:
         base = (
@@ -232,18 +207,6 @@ class MCPStdio(_MCPBase):
             else list(self.command or [])
         )
         return [*base, *self.args] if self.args else base
-
-    def get_env(self) -> dict[str, str]:
-        """Get environment variables, resolving any ${VAR} references."""
-        import os
-        result = {}
-        for key, value in self.env.items():
-            if value.startswith("${") and value.endswith("}"):
-                env_var = value[2:-1]
-                result[key] = os.getenv(env_var, "")
-            else:
-                result[key] = value
-        return result
 
 
 MCPServer = Annotated[
@@ -268,49 +231,21 @@ class ModelConfig(BaseModel):
         return data
 
 
-# LOCAL-FIRST: Ollama is the default provider (no API key required)
 DEFAULT_PROVIDERS = [
-    ProviderConfig(
-        name="ollama",
-        api_base="http://localhost:11434/v1",
-        api_key_env_var="",  # No key needed for local Ollama
-        api_style="openai",
-        backend=Backend.GENERIC,
-    ),
-    ProviderConfig(
-        name="llamacpp",
-        api_base="http://127.0.0.1:8080/v1",
-        api_key_env_var="",
-    ),
     ProviderConfig(
         name="mistral",
         api_base="https://api.mistral.ai/v1",
         api_key_env_var="MISTRAL_API_KEY",
         backend=Backend.MISTRAL,
     ),
+    ProviderConfig(
+        name="llamacpp",
+        api_base="http://127.0.0.1:8080/v1",
+        api_key_env_var="",  # NOTE: if you wish to use --api-key in llama-server, change this value
+    ),
 ]
 
-# LOCAL-FIRST: Ollama model is the default (devstral:123b)
 DEFAULT_MODELS = [
-    # Primary: Local Ollama with Devstral 2 (no API key required)
-    ModelConfig(
-        name="devstral:123b",
-        provider="ollama",
-        alias="local",
-        temperature=0.2,
-        input_price=0.0,
-        output_price=0.0,
-    ),
-    # Alternative local: llama.cpp server
-    ModelConfig(
-        name="devstral",
-        provider="llamacpp",
-        alias="llamacpp",
-        temperature=0.2,
-        input_price=0.0,
-        output_price=0.0,
-    ),
-    # Cloud options (require MISTRAL_API_KEY)
     ModelConfig(
         name="mistral-vibe-cli-latest",
         provider="mistral",
@@ -325,18 +260,24 @@ DEFAULT_MODELS = [
         input_price=0.1,
         output_price=0.3,
     ),
+    ModelConfig(
+        name="devstral",
+        provider="llamacpp",
+        alias="local",
+        input_price=0.0,
+        output_price=0.0,
+    ),
 ]
 
 
-class KittyCodeConfig(BaseSettings):
-    # LOCAL-FIRST: Default to local Ollama model
-    active_model: str = "local"
+class VibeConfig(BaseSettings):
+    active_model: str = "devstral-2"
+    textual_theme: str = "terminal"
     vim_keybindings: bool = False
     disable_welcome_banner_animation: bool = False
     displayed_workdir: str = ""
     auto_compact_threshold: int = 200_000
     context_warnings: bool = False
-    textual_theme: str = "textual-dark"
     instructions: str = ""
     workdir: Path | None = Field(default=None, exclude=True)
     system_prompt_id: str = "cli"
@@ -344,7 +285,7 @@ class KittyCodeConfig(BaseSettings):
     include_model_info: bool = True
     include_project_context: bool = True
     include_prompt_detail: bool = True
-    enable_update_checks: bool = False  # Disabled by default for local-first
+    enable_update_checks: bool = True
     api_timeout: float = 720.0
     providers: list[ProviderConfig] = Field(
         default_factory=lambda: list(DEFAULT_PROVIDERS)
@@ -354,7 +295,7 @@ class KittyCodeConfig(BaseSettings):
     project_context: ProjectContextConfig = Field(default_factory=ProjectContextConfig)
     session_logging: SessionLoggingConfig = Field(default_factory=SessionLoggingConfig)
     tools: dict[str, BaseToolConfig] = Field(default_factory=dict)
-    tool_paths: list[str] = Field(
+    tool_paths: list[Path] = Field(
         default_factory=list,
         description=(
             "Additional directories to search for custom tools. "
@@ -384,8 +325,16 @@ class KittyCodeConfig(BaseSettings):
         ),
     )
 
+    skill_paths: list[Path] = Field(
+        default_factory=list,
+        description=(
+            "Additional directories to search for skills. "
+            "Each path may be absolute or relative to the current working directory."
+        ),
+    )
+
     model_config = SettingsConfigDict(
-        env_prefix="KITTY_CODE_", case_sensitive=False, extra="ignore"
+        env_prefix="VIBE_", case_sensitive=False, extra="ignore"
     )
 
     @property
@@ -433,7 +382,7 @@ class KittyCodeConfig(BaseSettings):
 
         Note: dotenv_settings is intentionally excluded. API keys and other
         non-config environment variables are stored in .env but loaded manually
-        into os.environ for use by providers. Only KITTY_CODE_* prefixed environment
+        into os.environ for use by providers. Only VIBE_* prefixed environment
         variables (via env_settings) and TOML config are used for Pydantic settings.
         """
         return (
@@ -444,7 +393,7 @@ class KittyCodeConfig(BaseSettings):
         )
 
     @model_validator(mode="after")
-    def _check_api_key(self) -> KittyCodeConfig:
+    def _check_api_key(self) -> VibeConfig:
         try:
             active_model = self.get_active_model()
             provider = self.get_provider_for_model(active_model)
@@ -456,7 +405,7 @@ class KittyCodeConfig(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _check_api_backend_compatibility(self) -> KittyCodeConfig:
+    def _check_api_backend_compatibility(self) -> VibeConfig:
         try:
             active_model = self.get_active_model()
             provider = self.get_provider_for_model(active_model)
@@ -475,6 +424,20 @@ class KittyCodeConfig(BaseSettings):
         except ValueError:
             pass
         return self
+
+    @field_validator("tool_paths", mode="before")
+    @classmethod
+    def _expand_tool_paths(cls, v: Any) -> list[Path]:
+        if not v:
+            return []
+        return [Path(p).expanduser().resolve() for p in v]
+
+    @field_validator("skill_paths", mode="before")
+    @classmethod
+    def _expand_skill_paths(cls, v: Any) -> list[Path]:
+        if not v:
+            return []
+        return [Path(p).expanduser().resolve() for p in v]
 
     @field_validator("workdir", mode="before")
     @classmethod
@@ -510,7 +473,7 @@ class KittyCodeConfig(BaseSettings):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_model_uniqueness(self) -> KittyCodeConfig:
+    def _validate_model_uniqueness(self) -> VibeConfig:
         seen_aliases: set[str] = set()
         for model in self.models:
             if model.alias in seen_aliases:
@@ -521,31 +484,8 @@ class KittyCodeConfig(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _check_system_prompt(self) -> KittyCodeConfig:
+    def _check_system_prompt(self) -> VibeConfig:
         _ = self.system_prompt
-        return self
-
-    @model_validator(mode="after")
-    def _auto_discover_kitty_services(self) -> KittyCodeConfig:
-        """Auto-discover KITTY MCP servers when running in KITTY environment."""
-        # Late import to avoid circular dependency
-        from kitty_code.integrations.mcp_kitty import (
-            get_kitty_mcp_servers,
-            is_kitty_environment,
-        )
-
-        if not is_kitty_environment():
-            return self
-
-        # Get existing MCP server names to avoid duplicates
-        existing_names = {srv.name for srv in self.mcp_servers}
-
-        # Discover and add KITTY services
-        for kitty_srv in get_kitty_mcp_servers():
-            if kitty_srv.name not in existing_names:
-                self.mcp_servers.append(kitty_srv)
-                existing_names.add(kitty_srv.name)
-
         return self
 
     @classmethod
@@ -598,29 +538,10 @@ class KittyCodeConfig(BaseSettings):
 
     @classmethod
     def _migrate(cls) -> None:
-        if not CONFIG_FILE.path.is_file():
-            return
-
-        try:
-            with CONFIG_FILE.path.open("rb") as f:
-                config = tomllib.load(f)
-        except (OSError, tomllib.TOMLDecodeError):
-            return
-
-        needs_save = False
-
-        if (
-            "auto_compact_threshold" not in config
-            or config["auto_compact_threshold"] == 100_000  # noqa: PLR2004
-        ):
-            config["auto_compact_threshold"] = 200_000
-            needs_save = True
-
-        if needs_save:
-            cls.dump_config(config)
+        pass
 
     @classmethod
-    def load(cls, agent: str | None = None, **overrides: Any) -> KittyCodeConfig:
+    def load(cls, agent: str | None = None, **overrides: Any) -> VibeConfig:
         cls._migrate()
         agent_config = cls._get_agent_config(agent)
         init_data = {**(agent_config or {}), **overrides}
@@ -642,7 +563,3 @@ class KittyCodeConfig(BaseSettings):
             config_dict["tools"] = tool_defaults
 
         return config_dict
-
-
-# Alias for backward compatibility
-VibeConfig = KittyCodeConfig

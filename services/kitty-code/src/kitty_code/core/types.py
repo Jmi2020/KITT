@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import copy
 from abc import ABC
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
+import copy
 from enum import StrEnum, auto
 from typing import Annotated, Any, Literal
 
@@ -190,7 +190,7 @@ class LLMMessage(BaseModel):
         }
 
     def __add__(self, other: LLMMessage) -> LLMMessage:
-        """Accumulate streaming message chunks. Not commutative!"""
+        """Careful: this is not commutative!"""
         if self.role != other.role:
             raise ValueError("Can't accumulate messages with different roles")
 
@@ -246,12 +246,24 @@ class LLMUsage(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
 
+    def __add__(self, other: LLMUsage) -> LLMUsage:
+        return LLMUsage(
+            prompt_tokens=self.prompt_tokens + other.prompt_tokens,
+            completion_tokens=self.completion_tokens + other.completion_tokens,
+        )
+
 
 class LLMChunk(BaseModel):
     model_config = ConfigDict(frozen=True)
     message: LLMMessage
-    finish_reason: str | None = None
     usage: LLMUsage | None = None
+
+    def __add__(self, other: LLMChunk) -> LLMChunk:
+        if self.usage is None and other.usage is None:
+            new_usage = None
+        else:
+            new_usage = (self.usage or LLMUsage()) + (other.usage or LLMUsage())
+        return LLMChunk(message=self.message + other.message, usage=new_usage)
 
 
 class BaseEvent(BaseModel, ABC):
@@ -264,10 +276,15 @@ class AssistantEvent(BaseEvent):
     content: str
     stopped_by_middleware: bool = False
 
+    def __add__(self, other: AssistantEvent) -> AssistantEvent:
+        return AssistantEvent(
+            content=self.content + other.content,
+            stopped_by_middleware=self.stopped_by_middleware
+            or other.stopped_by_middleware,
+        )
+
 
 class ReasoningEvent(BaseEvent):
-    """Event for streaming reasoning/thinking content from LLMs."""
-
     content: str
 
 
@@ -307,11 +324,11 @@ class OutputFormat(StrEnum):
 
 
 type AsyncApprovalCallback = Callable[
-    [str, dict[str, Any], str], Awaitable[tuple[ApprovalResponse, str | None]]
+    [str, BaseModel, str], Awaitable[tuple[ApprovalResponse, str | None]]
 ]
 
 type SyncApprovalCallback = Callable[
-    [str, dict[str, Any], str], tuple[ApprovalResponse, str | None]
+    [str, BaseModel, str], tuple[ApprovalResponse, str | None]
 ]
 
 type ApprovalCallback = AsyncApprovalCallback | SyncApprovalCallback

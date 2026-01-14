@@ -12,8 +12,6 @@ from kitty_code.cli.textual_ui.widgets.spinner import SpinnerMixin, SpinnerType
 
 
 class NonSelectableStatic(NoMarkupStatic):
-    """Static widget that cannot be selected and has markup disabled."""
-
     @property
     def text_selection(self) -> None:
         return None
@@ -26,9 +24,43 @@ class NonSelectableStatic(NoMarkupStatic):
         return None
 
 
-class StreamingMessageBase(Static):
-    """Base class for messages that support streaming content."""
+class ExpandingBorder(NonSelectableStatic):
+    def render(self) -> str:
+        height = self.size.height
+        return "\n".join(["⎢"] * (height - 1) + ["⎣"])
 
+    def on_resize(self) -> None:
+        self.refresh()
+
+
+class UserMessage(Static):
+    def __init__(self, content: str, pending: bool = False) -> None:
+        super().__init__()
+        self.add_class("user-message")
+        self._content = content
+        self._pending = pending
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(classes="user-message-container"):
+            yield NonSelectableStatic("> ", classes="user-message-prompt")
+            yield NoMarkupStatic(self._content, classes="user-message-content")
+            if self._pending:
+                self.add_class("pending")
+
+    async def set_pending(self, pending: bool) -> None:
+        if pending == self._pending:
+            return
+
+        self._pending = pending
+
+        if pending:
+            self.add_class("pending")
+            return
+
+        self.remove_class("pending")
+
+
+class StreamingMessageBase(Static):
     def __init__(self, content: str) -> None:
         super().__init__()
         self._content = content
@@ -64,57 +96,18 @@ class StreamingMessageBase(Static):
     async def stop_stream(self) -> None:
         if self._stream is None:
             return
+
         await self._stream.stop()
         self._stream = None
 
     def _should_write_content(self) -> bool:
-        """Override this to control when content should be written."""
         return True
 
 
-class ExpandingBorder(NonSelectableStatic):
-    def render(self) -> str:
-        height = self.size.height
-        return "\n".join(["⎢"] * (height - 1) + ["⎣"])
-
-    def on_resize(self) -> None:
-        self.refresh()
-
-
-class UserMessage(Static):
-    def __init__(self, content: str, pending: bool = False) -> None:
-        super().__init__()
-        self.add_class("user-message")
-        self._content = content
-        self._pending = pending
-
-    def compose(self) -> ComposeResult:
-        with Horizontal(classes="user-message-container"):
-            yield NonSelectableStatic("> ", classes="user-message-prompt")
-            yield Static(self._content, markup=False, classes="user-message-content")
-            if self._pending:
-                self.add_class("pending")
-
-    async def set_pending(self, pending: bool) -> None:
-        if pending == self._pending:
-            return
-
-        self._pending = pending
-
-        if pending:
-            self.add_class("pending")
-            return
-
-        self.remove_class("pending")
-
-
-class AssistantMessage(Static):
+class AssistantMessage(StreamingMessageBase):
     def __init__(self, content: str) -> None:
-        super().__init__()
+        super().__init__(content)
         self.add_class("assistant-message")
-        self._content = content
-        self._markdown: Markdown | None = None
-        self._stream: MarkdownStream | None = None
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="assistant-message-container"):
@@ -124,40 +117,8 @@ class AssistantMessage(Static):
                 self._markdown = markdown
                 yield markdown
 
-    def _get_markdown(self) -> Markdown:
-        if self._markdown is None:
-            self._markdown = self.query_one(Markdown)
-        return self._markdown
-
-    def _ensure_stream(self) -> MarkdownStream:
-        if self._stream is None:
-            self._stream = Markdown.get_stream(self._get_markdown())
-        return self._stream
-
-    async def append_content(self, content: str) -> None:
-        if not content:
-            return
-
-        self._content += content
-        stream = self._ensure_stream()
-        await stream.write(content)
-
-    async def write_initial_content(self) -> None:
-        if self._content:
-            stream = self._ensure_stream()
-            await stream.write(self._content)
-
-    async def stop_stream(self) -> None:
-        if self._stream is None:
-            return
-
-        await self._stream.stop()
-        self._stream = None
-
 
 class ReasoningMessage(SpinnerMixin, StreamingMessageBase):
-    """Collapsible message for displaying LLM reasoning/thinking content."""
-
     SPINNER_TYPE = SpinnerType.LINE
     SPINNING_TEXT = "Thinking"
     COMPLETED_TEXT = "Thought"
@@ -244,9 +205,8 @@ class InterruptMessage(Static):
     def compose(self) -> ComposeResult:
         with Horizontal(classes="interrupt-container"):
             yield ExpandingBorder(classes="interrupt-border")
-            yield Static(
-                "Interrupted · What should Kitty do instead?",
-                markup=False,
+            yield NoMarkupStatic(
+                "Interrupted · What should Vibe do instead?",
                 classes="interrupt-content",
             )
 
@@ -263,18 +223,20 @@ class BashOutputMessage(Static):
     def compose(self) -> ComposeResult:
         with Vertical(classes="bash-output-container"):
             with Horizontal(classes="bash-cwd-line"):
-                yield Static(self._cwd, markup=False, classes="bash-cwd")
-                yield Static("", classes="bash-cwd-spacer")
+                yield NoMarkupStatic(self._cwd, classes="bash-cwd")
+                yield NoMarkupStatic("", classes="bash-cwd-spacer")
                 if self._exit_code == 0:
-                    yield Static("✓", classes="bash-exit-success")
+                    yield NoMarkupStatic("✓", classes="bash-exit-success")
                 else:
-                    yield Static("✗", classes="bash-exit-failure")
-                    yield Static(f" ({self._exit_code})", classes="bash-exit-code")
+                    yield NoMarkupStatic("✗", classes="bash-exit-failure")
+                    yield NoMarkupStatic(
+                        f" ({self._exit_code})", classes="bash-exit-code"
+                    )
             with Horizontal(classes="bash-command-line"):
-                yield Static("> ", classes="bash-chevron")
-                yield Static(self._command, markup=False, classes="bash-command")
-                yield Static("", classes="bash-command-spacer")
-            yield Static(self._output, markup=False, classes="bash-output")
+                yield NoMarkupStatic("> ", classes="bash-chevron")
+                yield NoMarkupStatic(self._command, classes="bash-command")
+                yield NoMarkupStatic("", classes="bash-command-spacer")
+            yield NoMarkupStatic(self._output, classes="bash-output")
 
 
 class ErrorMessage(Static):
@@ -288,8 +250,8 @@ class ErrorMessage(Static):
     def compose(self) -> ComposeResult:
         with Horizontal(classes="error-container"):
             yield ExpandingBorder(classes="error-border")
-            self._content_widget = Static(
-                self._get_text(), markup=False, classes="error-content"
+            self._content_widget = NoMarkupStatic(
+                self._get_text(), classes="error-content"
             )
             yield self._content_widget
 
@@ -318,4 +280,4 @@ class WarningMessage(Static):
         with Horizontal(classes="warning-container"):
             if self._show_border:
                 yield ExpandingBorder(classes="warning-border")
-            yield Static(self._message, markup=False, classes="warning-content")
+            yield NoMarkupStatic(self._message, classes="warning-content")

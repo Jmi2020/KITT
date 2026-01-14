@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 from enum import StrEnum, auto
 import subprocess
 import time
 from typing import Any, ClassVar, assert_never
 
+from pydantic import BaseModel
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, VerticalScroll
@@ -19,11 +19,14 @@ from kitty_code.cli.clipboard import copy_selection_to_clipboard
 from kitty_code.cli.commands import CommandRegistry
 from kitty_code.cli.terminal_setup import setup_terminal
 from kitty_code.cli.textual_ui.handlers.event_handler import EventHandler
+from kitty_code.cli.textual_ui.terminal_theme import (
+    TERMINAL_THEME_NAME,
+    capture_terminal_theme,
+)
 from kitty_code.cli.textual_ui.widgets.approval_app import ApprovalApp
 from kitty_code.cli.textual_ui.widgets.chat_input import ChatInputContainer
 from kitty_code.cli.textual_ui.widgets.compact import CompactMessage
 from kitty_code.cli.textual_ui.widgets.config_app import ConfigApp
-from kitty_code.cli.textual_ui.widgets.directory_browser import DirectoryBrowserApp
 from kitty_code.cli.textual_ui.widgets.context_progress import ContextProgress, TokenState
 from kitty_code.cli.textual_ui.widgets.loading import LoadingWidget
 from kitty_code.cli.textual_ui.widgets.messages import (
@@ -31,6 +34,8 @@ from kitty_code.cli.textual_ui.widgets.messages import (
     BashOutputMessage,
     ErrorMessage,
     InterruptMessage,
+    ReasoningMessage,
+    StreamingMessageBase,
     UserCommandMessage,
     UserMessage,
     WarningMessage,
@@ -38,7 +43,6 @@ from kitty_code.cli.textual_ui.widgets.messages import (
 from kitty_code.cli.textual_ui.widgets.mode_indicator import ModeIndicator
 from kitty_code.cli.textual_ui.widgets.no_markup_static import NoMarkupStatic
 from kitty_code.cli.textual_ui.widgets.path_display import PathDisplay
-from kitty_code.cli.textual_ui.widgets.queue_indicator import QueueIndicator
 from kitty_code.cli.textual_ui.widgets.tools import ToolCallMessage, ToolResultMessage
 from kitty_code.cli.textual_ui.widgets.welcome import WelcomeBanner
 from kitty_code.cli.update_notifier import (
@@ -69,10 +73,9 @@ class BottomApp(StrEnum):
     Approval = auto()
     Config = auto()
     Input = auto()
-    DirectoryBrowser = auto()
 
 
-class VibeApp(App):
+class VibeApp(App):  # noqa: PLR0904
     ENABLE_COMMAND_PALETTE = False
     CSS_PATH = "app.tcss"
 
@@ -102,7 +105,7 @@ class VibeApp(App):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self.config = config
+        self._config = config
         self._current_agent_mode = initial_mode
         self.enable_streaming = enable_streaming
         self.agent: Agent | None = None
@@ -121,13 +124,13 @@ class VibeApp(App):
         self._mode_indicator: ModeIndicator | None = None
         self._context_progress: ContextProgress | None = None
         self._current_bottom_app: BottomApp = BottomApp.Input
-        self.theme = config.textual_theme
 
         self.history_file = HISTORY_FILE.path
 
         self._tools_collapsed = True
         self._todos_collapsed = False
         self._current_streaming_message: AssistantMessage | None = None
+        self._current_streaming_reasoning: ReasoningMessage | None = None
         self._version_update_notifier = version_update_notifier
         self._update_cache_repository = update_cache_repository
         self._is_update_check_enabled = config.enable_update_checks
@@ -143,7 +146,11 @@ class VibeApp(App):
         self._agent_init_interrupted = False
         self._auto_scroll = True
         self._last_escape_time: float | None = None
-        self._input_queue: deque[str] = deque()  # FIFO queue for pending inputs
+        self._terminal_theme = capture_terminal_theme()
+
+    @property
+    def config(self) -> VibeConfig:
+        return self.agent.config if self.agent else self._config
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="chat"):
@@ -169,10 +176,18 @@ class VibeApp(App):
                 self.config.displayed_workdir or self.config.effective_workdir
             )
             yield NoMarkupStatic(id="spacer")
-            yield QueueIndicator(id="queue-indicator")
             yield ContextProgress()
 
     async def on_mount(self) -> None:
+        if self._terminal_theme:
+            self.register_theme(self._terminal_theme)
+
+        if self.config.textual_theme == TERMINAL_THEME_NAME:
+            if self._terminal_theme:
+                self.theme = TERMINAL_THEME_NAME
+        else:
+            self.theme = self.config.textual_theme
+
         self.event_handler = EventHandler(
             mount_callback=self._mount_and_scroll,
             scroll_callback=self._scroll_to_bottom_deferred,
@@ -220,14 +235,7 @@ class VibeApp(App):
         input_widget.value = ""
 
         if self._agent_running:
-            # Queue instead of interrupt - message will be sent after current turn
-            self._input_queue.append(value)
-            self._update_queue_indicator()
-            # Restore focus using the proper pattern (set_app_focus + focus_input)
-            if input_widget.input_widget:
-                input_widget.input_widget.set_app_focus(True)
-            self.call_after_refresh(input_widget.focus_input)
-            return
+            await self._interrupt_agent()
 
         if value.startswith("!"):
             await self._handle_bash_command(value[1:])
@@ -294,7 +302,11 @@ class VibeApp(App):
 
     def on_config_app_setting_changed(self, message: ConfigApp.SettingChanged) -> None:
         if message.key == "textual_theme":
-            self.theme = message.value
+            if message.value == TERMINAL_THEME_NAME:
+                if self._terminal_theme:
+                    self.theme = TERMINAL_THEME_NAME
+            else:
+                self.theme = message.value
 
     async def on_config_app_config_closed(
         self, message: ConfigApp.ConfigClosed
@@ -308,6 +320,24 @@ class VibeApp(App):
             )
 
         await self._switch_to_input_app()
+
+    async def on_compact_message_completed(
+        self, message: CompactMessage.Completed
+    ) -> None:
+        messages_area = self.query_one("#messages")
+        children = list(messages_area.children)
+
+        try:
+            compact_index = children.index(message.compact_widget)
+        except ValueError:
+            return
+
+        if compact_index == 0:
+            return
+
+        with self.batch_update():
+            for widget in children[:compact_index]:
+                await widget.remove()
 
     def _set_tool_permission_always(
         self, tool_name: str, save_permanently: bool = False
@@ -339,26 +369,15 @@ class VibeApp(App):
             VibeConfig.save_updates(updates)
 
     async def _handle_command(self, user_input: str) -> bool:
-        result = self.commands.find_command(user_input)
-        if result is None:
-            return False
-
-        command, args = result
-        await self._mount_and_scroll(UserMessage(user_input))
-        handler = getattr(self, command.handler)
-
-        # Call handler with args if it accepts them
-        if asyncio.iscoroutinefunction(handler):
-            try:
-                await handler(args)
-            except TypeError:
+        if command := self.commands.find_command(user_input):
+            await self._mount_and_scroll(UserMessage(user_input))
+            handler = getattr(self, command.handler)
+            if asyncio.iscoroutinefunction(handler):
                 await handler()
-        else:
-            try:
-                handler(args)
-            except TypeError:
+            else:
                 handler()
-        return True
+            return True
+        return False
 
     async def _handle_bash_command(self, command: str) -> None:
         if not command:
@@ -456,37 +475,6 @@ class VibeApp(App):
                 await user_message.set_pending(False)
             return
 
-    def _update_queue_indicator(self) -> None:
-        """Update the queue indicator with current count."""
-        try:
-            indicator = self.query_one(QueueIndicator)
-            indicator.update_count(len(self._input_queue))
-        except Exception:
-            pass  # Indicator not mounted yet
-
-    async def _process_input_queue(self) -> None:
-        """Process all queued inputs in FIFO order after agent turn completes."""
-        if not self._input_queue:
-            return
-
-        # Pop one message from the queue and process it
-        queued = self._input_queue.popleft()
-        self._update_queue_indicator()
-
-        # Handle the queued message - this will trigger another agent turn
-        # which will call _process_input_queue again in its finally block
-        if queued.startswith("!"):
-            await self._handle_bash_command(queued[1:])
-            # After bash command, continue processing queue
-            await self._process_input_queue()
-        elif await self._handle_command(queued):
-            # After command, continue processing queue
-            await self._process_input_queue()
-        else:
-            # Regular message - _handle_user_message will trigger agent turn
-            # which will process remaining queue in its finally block
-            await self._handle_user_message(queued)
-
     async def _initialize_agent(self) -> None:
         if self.agent or self._agent_initializing:
             return
@@ -533,31 +521,32 @@ class VibeApp(App):
         messages_area = self.query_one("#messages")
         tool_call_map: dict[str, str] = {}
 
-        for msg in self._loaded_messages:
-            if msg.role == Role.system:
-                continue
+        with self.batch_update():
+            for msg in self._loaded_messages:
+                if msg.role == Role.system:
+                    continue
 
-            match msg.role:
-                case Role.user:
-                    if msg.content:
-                        await messages_area.mount(UserMessage(msg.content))
+                match msg.role:
+                    case Role.user:
+                        if msg.content:
+                            await messages_area.mount(UserMessage(msg.content))
 
-                case Role.assistant:
-                    await self._mount_history_assistant_message(
-                        msg, messages_area, tool_call_map
-                    )
-
-                case Role.tool:
-                    tool_name = msg.name or tool_call_map.get(
-                        msg.tool_call_id or "", "tool"
-                    )
-                    await messages_area.mount(
-                        ToolResultMessage(
-                            tool_name=tool_name,
-                            content=msg.content,
-                            collapsed=self._tools_collapsed,
+                    case Role.assistant:
+                        await self._mount_history_assistant_message(
+                            msg, messages_area, tool_call_map
                         )
-                    )
+
+                    case Role.tool:
+                        tool_name = msg.name or tool_call_map.get(
+                            msg.tool_call_id or "", "tool"
+                        )
+                        await messages_area.mount(
+                            ToolResultMessage(
+                                tool_name=tool_name,
+                                content=msg.content,
+                                collapsed=self._tools_collapsed,
+                            )
+                        )
 
     async def _mount_history_assistant_message(
         self, msg: LLMMessage, messages_area: Widget, tool_call_map: dict[str, str]
@@ -595,7 +584,7 @@ class VibeApp(App):
         return self._agent_init_task
 
     async def _approval_callback(
-        self, tool: str, args: dict, tool_call_id: str
+        self, tool: str, args: BaseModel, tool_call_id: str
     ) -> tuple[ApprovalResponse, str | None]:
         self._pending_approval = asyncio.Future()
         await self._switch_to_approval_app(tool, args)
@@ -658,10 +647,6 @@ class VibeApp(App):
             self._loading_widget = None
             self._hide_todo_area()
             await self._finalize_current_streaming_message()
-            # Process any queued inputs after turn completes
-            await self._process_input_queue()
-            # Restore focus to input after agent turn completes
-            self._restore_input_focus()
 
     async def _interrupt_agent(self) -> None:
         interrupting_agent_init = bool(
@@ -743,8 +728,8 @@ class VibeApp(App):
 
             if self.agent:
                 await self.agent.reload_with_initial_messages(config=new_config)
-
-            self.config = new_config
+            else:
+                self._config = new_config
             if self._context_progress:
                 if self.config.auto_compact_threshold > 0:
                     current_tokens = (
@@ -917,369 +902,6 @@ class VibeApp(App):
     async def _exit_app(self) -> None:
         self.exit(result=self._get_session_resume_info())
 
-    async def _mcp_command(self, args: str) -> None:
-        """Manage MCP servers: list, add, remove."""
-        import shlex
-        from pathlib import Path
-
-        parts = args.split(None, 1) if args else []
-        subcommand = parts[0].lower() if parts else "list"
-        sub_args = parts[1] if len(parts) > 1 else ""
-
-        if subcommand == "list" or not args:
-            await self._mcp_list()
-        elif subcommand == "add":
-            await self._mcp_add(sub_args)
-        elif subcommand == "remove":
-            await self._mcp_remove(sub_args)
-        else:
-            await self._mount_and_scroll(
-                ErrorMessage(
-                    f"Unknown subcommand: {subcommand}\n\n"
-                    "Usage:\n"
-                    "  `/mcp` or `/mcp list` - List all MCP servers\n"
-                    "  `/mcp add <name> [--scope user|project] <url>` - Add HTTP server\n"
-                    "  `/mcp add <name> [--scope user|project] -- <cmd> [args...]` - Add STDIO server\n"
-                    "  `/mcp remove <name>` - Remove an MCP server",
-                    collapsed=self._tools_collapsed,
-                )
-            )
-
-    async def _mcp_list(self) -> None:
-        """List all configured MCP servers."""
-        servers = self.config.mcp_servers
-        if not servers:
-            await self._mount_and_scroll(
-                UserCommandMessage("No MCP servers configured.")
-            )
-            return
-
-        lines = ["## MCP Servers\n"]
-        for srv in servers:
-            transport = getattr(srv, "transport", "unknown")
-            if transport == "http":
-                url = getattr(srv, "url", "")
-                lines.append(f"- **{srv.name}** (http): `{url}`")
-            elif transport == "stdio":
-                cmd = getattr(srv, "command", "")
-                cmd_args = getattr(srv, "args", [])
-                full_cmd = f"{cmd} {' '.join(cmd_args)}".strip()
-                lines.append(f"- **{srv.name}** (stdio): `{full_cmd}`")
-            else:
-                lines.append(f"- **{srv.name}** ({transport})")
-
-            if srv.prompt:
-                lines.append(f"  {srv.prompt}")
-
-        await self._mount_and_scroll(UserCommandMessage("\n".join(lines)))
-
-    async def _mcp_add(self, args: str) -> None:
-        """Add an MCP server.
-
-        Syntax:
-          /mcp add <name> [--scope user|project] <url>           # HTTP
-          /mcp add <name> [--scope user|project] -- <cmd> [args] # STDIO
-        """
-        import shlex
-        from pathlib import Path
-        from kitty_code.core.config import MCPHttp, MCPStdio, VibeConfig
-
-        if not args:
-            await self._mount_and_scroll(
-                ErrorMessage(
-                    "Usage:\n"
-                    "  `/mcp add <name> [--scope user|project] <url>`\n"
-                    "  `/mcp add <name> [--scope user|project] -- <cmd> [args...]`\n\n"
-                    "Examples:\n"
-                    "  `/mcp add github https://localhost:3000/mcp`\n"
-                    "  `/mcp add filesystem --scope project -- npx -y @anthropic/mcp-filesystem /tmp`",
-                    collapsed=self._tools_collapsed,
-                )
-            )
-            return
-
-        # Check for STDIO (has -- separator)
-        is_stdio = " -- " in args
-
-        if is_stdio:
-            # Parse: <name> [--scope X] -- <command> [args...]
-            before_sep, after_sep = args.split(" -- ", 1)
-            parts = shlex.split(before_sep)
-        else:
-            parts = shlex.split(args)
-
-        if len(parts) < 1:
-            await self._mount_and_scroll(
-                ErrorMessage("Missing server name.", collapsed=self._tools_collapsed)
-            )
-            return
-
-        name = parts[0]
-        scope = "user"  # default
-
-        # Parse --scope option
-        remaining = parts[1:]
-        i = 0
-        while i < len(remaining):
-            if remaining[i] == "--scope" and i + 1 < len(remaining):
-                scope = remaining[i + 1]
-                remaining = remaining[:i] + remaining[i + 2:]
-            else:
-                i += 1
-
-        if scope not in ("user", "project"):
-            await self._mount_and_scroll(
-                ErrorMessage(
-                    f"Invalid scope: {scope}. Must be 'user' or 'project'.",
-                    collapsed=self._tools_collapsed,
-                )
-            )
-            return
-
-        if is_stdio:
-            # STDIO server
-            cmd_parts = shlex.split(after_sep)
-            if not cmd_parts:
-                await self._mount_and_scroll(
-                    ErrorMessage(
-                        "Missing command after '--'.",
-                        collapsed=self._tools_collapsed,
-                    )
-                )
-                return
-
-            command = cmd_parts[0]
-            cmd_args = cmd_parts[1:] if len(cmd_parts) > 1 else []
-
-            server = MCPStdio(
-                name=name,
-                transport="stdio",
-                command=command,
-                args=cmd_args,
-            )
-            server_dict = {
-                "name": name,
-                "transport": "stdio",
-                "command": command,
-                "args": cmd_args,
-            }
-        else:
-            # HTTP server
-            if not remaining:
-                await self._mount_and_scroll(
-                    ErrorMessage(
-                        "Missing URL for HTTP server.",
-                        collapsed=self._tools_collapsed,
-                    )
-                )
-                return
-
-            url = remaining[0]
-            if not url.startswith(("http://", "https://")):
-                await self._mount_and_scroll(
-                    ErrorMessage(
-                        f"Invalid URL: {url}. Must start with http:// or https://",
-                        collapsed=self._tools_collapsed,
-                    )
-                )
-                return
-
-            server = MCPHttp(
-                name=name,
-                transport="http",
-                url=url,
-            )
-            server_dict = {
-                "name": name,
-                "transport": "http",
-                "url": url,
-            }
-
-        # Save to config file
-        if scope == "user":
-            config_path = Path.home() / ".kitty-code" / "config.toml"
-        else:
-            config_path = self.config.effective_workdir / ".kitty-code" / "config.toml"
-
-        try:
-            self._save_mcp_server_to_config(config_path, server_dict)
-        except Exception as e:
-            await self._mount_and_scroll(
-                ErrorMessage(
-                    f"Failed to save config: {e}",
-                    collapsed=self._tools_collapsed,
-                )
-            )
-            return
-
-        # Add to current session
-        self.config.mcp_servers.append(server)
-
-        scope_label = "user (~/.kitty-code/config.toml)" if scope == "user" else f"project ({config_path})"
-        await self._mount_and_scroll(
-            UserCommandMessage(
-                f"Added MCP server **{name}** ({server.transport}) to {scope_label}\n\n"
-                "Note: Reload config with `/reload` to connect to the new server."
-            )
-        )
-
-    def _save_mcp_server_to_config(self, config_path: Path, server: dict) -> None:
-        """Save an MCP server to a TOML config file."""
-        import tomllib
-        import tomli_w
-
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Load existing config
-        if config_path.exists():
-            with open(config_path, "rb") as f:
-                config = tomllib.load(f)
-        else:
-            config = {}
-
-        # Get or create mcp_servers list
-        if "mcp_servers" not in config:
-            config["mcp_servers"] = []
-
-        # Check for duplicate name
-        existing_names = {s.get("name") for s in config["mcp_servers"]}
-        if server["name"] in existing_names:
-            # Update existing
-            for i, s in enumerate(config["mcp_servers"]):
-                if s.get("name") == server["name"]:
-                    config["mcp_servers"][i] = server
-                    break
-        else:
-            config["mcp_servers"].append(server)
-
-        # Write back
-        with open(config_path, "wb") as f:
-            tomli_w.dump(config, f)
-
-    async def _mcp_remove(self, args: str) -> None:
-        """Remove an MCP server by name."""
-        import tomllib
-        import tomli_w
-        from pathlib import Path
-
-        name = args.strip()
-        if not name:
-            await self._mount_and_scroll(
-                ErrorMessage(
-                    "Usage: `/mcp remove <name>`",
-                    collapsed=self._tools_collapsed,
-                )
-            )
-            return
-
-        # Try to find and remove from both user and project config
-        user_config = Path.home() / ".kitty-code" / "config.toml"
-        project_config = self.config.effective_workdir / ".kitty-code" / "config.toml"
-
-        removed_from = []
-
-        for config_path, label in [(user_config, "user"), (project_config, "project")]:
-            if config_path.exists():
-                try:
-                    with open(config_path, "rb") as f:
-                        config = tomllib.load(f)
-
-                    if "mcp_servers" in config:
-                        original_len = len(config["mcp_servers"])
-                        config["mcp_servers"] = [
-                            s for s in config["mcp_servers"]
-                            if s.get("name") != name
-                        ]
-                        if len(config["mcp_servers"]) < original_len:
-                            with open(config_path, "wb") as f:
-                                tomli_w.dump(config, f)
-                            removed_from.append(label)
-                except Exception:
-                    pass
-
-        # Remove from current session
-        original_count = len(self.config.mcp_servers)
-        self.config.mcp_servers = [
-            s for s in self.config.mcp_servers if s.name != name
-        ]
-        session_removed = len(self.config.mcp_servers) < original_count
-
-        if removed_from or session_removed:
-            locations = []
-            if removed_from:
-                locations.append(f"config ({', '.join(removed_from)})")
-            if session_removed:
-                locations.append("session")
-            await self._mount_and_scroll(
-                UserCommandMessage(f"Removed MCP server **{name}** from {', '.join(locations)}.")
-            )
-        else:
-            await self._mount_and_scroll(
-                ErrorMessage(
-                    f"MCP server '{name}' not found.",
-                    collapsed=self._tools_collapsed,
-                )
-            )
-
-    async def _change_directory(self, path_arg: str) -> None:
-        """Change the working directory.
-
-        If no path is given, opens an interactive directory browser.
-        If a path is given, changes directly to that directory.
-        """
-        from pathlib import Path
-        import os
-
-        if not path_arg:
-            # No path given - open interactive directory browser
-            await self._switch_to_directory_browser()
-            return
-
-        # Expand ~ and resolve the path
-        try:
-            target_path = Path(os.path.expanduser(path_arg)).resolve()
-        except Exception as e:
-            await self._mount_and_scroll(
-                ErrorMessage(
-                    f"Invalid path: {e}",
-                    collapsed=self._tools_collapsed,
-                )
-            )
-            return
-
-        # Check if directory exists
-        if not target_path.exists():
-            await self._mount_and_scroll(
-                ErrorMessage(
-                    f"Directory not found: {target_path}",
-                    collapsed=self._tools_collapsed,
-                )
-            )
-            return
-
-        if not target_path.is_dir():
-            await self._mount_and_scroll(
-                ErrorMessage(
-                    f"Not a directory: {target_path}",
-                    collapsed=self._tools_collapsed,
-                )
-            )
-            return
-
-        # Update the config workdir
-        self.config.workdir = target_path
-
-        # Update the PathDisplay widget
-        try:
-            path_display = self.query_one(PathDisplay)
-            path_display.set_path(target_path)
-        except Exception:
-            pass
-
-        await self._mount_and_scroll(
-            UserCommandMessage(f"Changed directory to: `{target_path}`")
-        )
-
     async def _setup_terminal(self) -> None:
         result = setup_terminal()
 
@@ -1308,11 +930,6 @@ class VibeApp(App):
         bottom_container = self.query_one("#bottom-app-container")
         await self._mount_and_scroll(UserCommandMessage("Configuration opened..."))
 
-        # Disable focus refocusing on the input widget before removing it
-        # This prevents ChatTextArea.on_blur from stealing focus back
-        if self._chat_input_container and self._chat_input_container.input_widget:
-            self._chat_input_container.input_widget.set_app_focus(False)
-
         try:
             chat_input_container = self.query_one(ChatInputContainer)
             await chat_input_container.remove()
@@ -1322,19 +939,18 @@ class VibeApp(App):
         if self._mode_indicator:
             self._mode_indicator.display = False
 
-        config_app = ConfigApp(self.config)
+        config_app = ConfigApp(
+            self.config, has_terminal_theme=self._terminal_theme is not None
+        )
         await bottom_container.mount(config_app)
         self._current_bottom_app = BottomApp.Config
 
         self.call_after_refresh(config_app.focus)
 
-    async def _switch_to_approval_app(self, tool_name: str, tool_args: dict) -> None:
+    async def _switch_to_approval_app(
+        self, tool_name: str, tool_args: BaseModel
+    ) -> None:
         bottom_container = self.query_one("#bottom-app-container")
-
-        # Disable focus refocusing on the input widget before removing it
-        # This prevents ChatTextArea.on_blur from stealing focus back
-        if self._chat_input_container and self._chat_input_container.input_widget:
-            self._chat_input_container.input_widget.set_app_focus(False)
 
         try:
             chat_input_container = self.query_one(ChatInputContainer)
@@ -1357,63 +973,6 @@ class VibeApp(App):
         self.call_after_refresh(approval_app.focus)
         self.call_after_refresh(self._scroll_to_bottom)
 
-    async def _switch_to_directory_browser(self) -> None:
-        """Switch to the interactive directory browser."""
-        from pathlib import Path
-
-        if self._current_bottom_app == BottomApp.DirectoryBrowser:
-            return
-
-        bottom_container = self.query_one("#bottom-app-container")
-
-        # Disable focus refocusing on the input widget before removing it
-        # This prevents ChatTextArea.on_blur from stealing focus back
-        if self._chat_input_container and self._chat_input_container.input_widget:
-            self._chat_input_container.input_widget.set_app_focus(False)
-
-        try:
-            chat_input_container = self.query_one(ChatInputContainer)
-            await chat_input_container.remove()
-        except Exception:
-            pass
-
-        if self._mode_indicator:
-            self._mode_indicator.display = False
-
-        initial_path = self.config.effective_workdir
-        browser = DirectoryBrowserApp(initial_path=Path(initial_path))
-        await bottom_container.mount(browser)
-        self._current_bottom_app = BottomApp.DirectoryBrowser
-
-        self.call_after_refresh(browser.focus)
-
-    async def on_directory_browser_app_directory_selected(
-        self, message: DirectoryBrowserApp.DirectorySelected
-    ) -> None:
-        """Handle directory selection from the browser."""
-        new_path = message.path
-
-        # Update the config workdir
-        self.config.workdir = new_path
-
-        # Update the PathDisplay widget
-        try:
-            path_display = self.query_one(PathDisplay)
-            path_display.set_path(new_path)
-        except Exception:
-            pass
-
-        await self._mount_and_scroll(
-            UserCommandMessage(f"Changed directory to: `{new_path}`")
-        )
-        await self._switch_to_input_app()
-
-    async def on_directory_browser_app_browser_cancelled(
-        self, message: DirectoryBrowserApp.BrowserCancelled
-    ) -> None:
-        """Handle browser cancellation."""
-        await self._switch_to_input_app()
-
     async def _switch_to_input_app(self) -> None:
         bottom_container = self.query_one("#bottom-app-container")
 
@@ -1429,12 +988,6 @@ class VibeApp(App):
         except Exception:
             pass
 
-        try:
-            directory_browser = self.query_one("#directory-browser-app")
-            await directory_browser.remove()
-        except Exception:
-            pass
-
         if self._mode_indicator:
             self._mode_indicator.display = True
 
@@ -1442,9 +995,6 @@ class VibeApp(App):
             chat_input_container = self.query_one(ChatInputContainer)
             self._chat_input_container = chat_input_container
             self._current_bottom_app = BottomApp.Input
-            # Re-enable focus handling on the input widget
-            if chat_input_container.input_widget:
-                chat_input_container.input_widget.set_app_focus(True)
             self.call_after_refresh(chat_input_container.focus_input)
             return
         except Exception:
@@ -1461,26 +1011,7 @@ class VibeApp(App):
 
         self._current_bottom_app = BottomApp.Input
 
-        # Enable focus handling on the new input widget
-        if chat_input_container.input_widget:
-            chat_input_container.input_widget.set_app_focus(True)
         self.call_after_refresh(chat_input_container.focus_input)
-
-    def _restore_input_focus(self) -> None:
-        """Restore focus to the chat input after agent operations complete.
-
-        Uses the same pattern as _switch_to_input_app() to ensure focus is
-        properly restored even when widgets have been mounted/unmounted.
-        """
-        if self._current_bottom_app != BottomApp.Input:
-            return
-        try:
-            chat_input = self.query_one(ChatInputContainer)
-            if chat_input.input_widget:
-                chat_input.input_widget.set_app_focus(True)
-            self.call_after_refresh(chat_input.focus_input)
-        except Exception:
-            pass
 
     def _focus_current_bottom_app(self) -> None:
         try:
@@ -1491,8 +1022,6 @@ class VibeApp(App):
                     self.query_one(ConfigApp).focus()
                 case BottomApp.Approval:
                     self.query_one(ApprovalApp).focus()
-                case BottomApp.DirectoryBrowser:
-                    self.query_one(DirectoryBrowserApp).focus()
                 case app:
                     assert_never(app)
         except Exception:
@@ -1514,15 +1043,6 @@ class VibeApp(App):
             try:
                 approval_app = self.query_one(ApprovalApp)
                 approval_app.action_reject()
-            except Exception:
-                pass
-            self._last_escape_time = None
-            return
-
-        if self._current_bottom_app == BottomApp.DirectoryBrowser:
-            try:
-                browser = self.query_one(DirectoryBrowserApp)
-                browser.action_cancel()
             except Exception:
                 pass
             self._last_escape_time = None
@@ -1553,9 +1073,6 @@ class VibeApp(App):
         )
 
         if interrupt_needed:
-            # Clear the queue when interrupting - user wants to stop everything
-            self._input_queue.clear()
-            self._update_queue_indicator()
             self.run_worker(self._interrupt_agent(), exclusive=False)
 
         self._last_escape_time = current_time
@@ -1665,11 +1182,35 @@ class VibeApp(App):
             await self._mount_and_scroll(WarningMessage(warning, show_border=False))
 
     async def _finalize_current_streaming_message(self) -> None:
+        if self._current_streaming_reasoning is not None:
+            self._current_streaming_reasoning.stop_spinning()
+            await self._current_streaming_reasoning.stop_stream()
+            self._current_streaming_reasoning = None
+
         if self._current_streaming_message is None:
             return
 
         await self._current_streaming_message.stop_stream()
         self._current_streaming_message = None
+
+    async def _handle_streaming_widget[T: StreamingMessageBase](
+        self,
+        widget: T,
+        current_stream: T | None,
+        other_stream: StreamingMessageBase | None,
+        messages_area: Widget,
+    ) -> T | None:
+        if other_stream is not None:
+            await other_stream.stop_stream()
+
+        if current_stream is not None:
+            if widget._content:
+                await current_stream.append_content(widget._content)
+            return None
+
+        await messages_area.mount(widget)
+        await widget.write_initial_content()
+        return widget
 
     async def _mount_and_scroll(self, widget: Widget) -> None:
         messages_area = self.query_one("#messages")
@@ -1679,15 +1220,28 @@ class VibeApp(App):
         if was_at_bottom:
             self._auto_scroll = True
 
-        if isinstance(widget, AssistantMessage):
-            if self._current_streaming_message is not None:
-                content = widget._content or ""
-                if content:
-                    await self._current_streaming_message.append_content(content)
-            else:
-                self._current_streaming_message = widget
-                await messages_area.mount(widget)
-                await widget.write_initial_content()
+        if isinstance(widget, ReasoningMessage):
+            result = await self._handle_streaming_widget(
+                widget,
+                self._current_streaming_reasoning,
+                self._current_streaming_message,
+                messages_area,
+            )
+            if result is not None:
+                self._current_streaming_reasoning = result
+            self._current_streaming_message = None
+        elif isinstance(widget, AssistantMessage):
+            if self._current_streaming_reasoning is not None:
+                self._current_streaming_reasoning.stop_spinning()
+            result = await self._handle_streaming_widget(
+                widget,
+                self._current_streaming_message,
+                self._current_streaming_reasoning,
+                messages_area,
+            )
+            if result is not None:
+                self._current_streaming_message = result
+            self._current_streaming_reasoning = None
         else:
             await self._finalize_current_streaming_message()
             await messages_area.mount(widget)
@@ -1811,7 +1365,6 @@ def run_textual_ui(
     initial_prompt: str | None = None,
     loaded_messages: list[LLMMessage] | None = None,
 ) -> None:
-    """Run the Textual UI."""
     update_notifier = PyPIVersionUpdateGateway(project_name="mistral-vibe")
     update_cache_repository = FileSystemUpdateCacheRepository()
     app = VibeApp(
@@ -1823,5 +1376,5 @@ def run_textual_ui(
         version_update_notifier=update_notifier,
         update_cache_repository=update_cache_repository,
     )
-    session_id = app.run(mouse=False)  # Disable mouse to prevent escape sequence leaks
+    session_id = app.run()
     _print_session_resume_message(session_id)

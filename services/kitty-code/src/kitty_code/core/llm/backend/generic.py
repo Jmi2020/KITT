@@ -108,7 +108,6 @@ class OpenAIAdapter(APIAdapter):
     def _reasoning_to_api(
         self, msg_dict: dict[str, Any], field_name: str
     ) -> dict[str, Any]:
-        """Translate reasoning_content to provider-specific field name."""
         if field_name != "reasoning_content" and "reasoning_content" in msg_dict:
             msg_dict[field_name] = msg_dict.pop("reasoning_content")
         return msg_dict
@@ -116,7 +115,6 @@ class OpenAIAdapter(APIAdapter):
     def _reasoning_from_api(
         self, msg_dict: dict[str, Any], field_name: str
     ) -> dict[str, Any]:
-        """Translate provider-specific reasoning field to reasoning_content."""
         if field_name != "reasoning_content" and field_name in msg_dict:
             msg_dict["reasoning_content"] = msg_dict.pop(field_name)
         return msg_dict
@@ -152,7 +150,6 @@ class OpenAIAdapter(APIAdapter):
             payload["stream_options"] = stream_options
 
         headers = self.build_headers(api_key)
-
         body = json.dumps(payload).encode("utf-8")
 
         return PreparedRequest(self.endpoint, headers, body)
@@ -160,7 +157,6 @@ class OpenAIAdapter(APIAdapter):
     def _parse_message(
         self, data: dict[str, Any], field_name: str
     ) -> LLMMessage | None:
-        """Parse message from response data with reasoning field translation."""
         if data.get("choices"):
             choice = data["choices"][0]
             if "message" in choice:
@@ -187,17 +183,13 @@ class OpenAIAdapter(APIAdapter):
         if message is None:
             message = LLMMessage(role=Role.assistant, content="")
 
-        finish_reason = None
-        if data.get("choices"):
-            finish_reason = data["choices"][0].get("finish_reason", None)
-
         usage_data = data.get("usage") or {}
         usage = LLMUsage(
             prompt_tokens=usage_data.get("prompt_tokens", 0),
             completion_tokens=usage_data.get("completion_tokens", 0),
         )
 
-        return LLMChunk(message=message, usage=usage, finish_reason=finish_reason)
+        return LLMChunk(message=message, usage=usage)
 
 
 class GenericBackend:
@@ -291,7 +283,7 @@ class GenericBackend:
                 provider=self._provider.name,
                 endpoint=url,
                 response=e.response,
-                headers=dict(e.response.headers.items()),
+                headers=e.response.headers,
                 model=model.name,
                 messages=messages,
                 temperature=temperature,
@@ -356,7 +348,7 @@ class GenericBackend:
                 provider=self._provider.name,
                 endpoint=url,
                 response=e.response,
-                headers=dict(e.response.headers.items()),
+                headers=e.response.headers,
                 model=model.name,
                 messages=messages,
                 temperature=temperature,
@@ -405,7 +397,11 @@ class GenericBackend:
                     continue
 
                 DELIM_CHAR = ":"
-                assert f"{DELIM_CHAR} " in line, "line should look like `key: value`"
+                if f"{DELIM_CHAR} " not in line:
+                    raise ValueError(
+                        f"Stream chunk improperly formatted. "
+                        f"Expected `key{DELIM_CHAR} value`, received `{line}`"
+                    )
                 delim_index = line.find(DELIM_CHAR)
                 key = line[0:delim_index]
                 value = line[delim_index + 2 :]
@@ -440,9 +436,8 @@ class GenericBackend:
             tool_choice=tool_choice,
             extra_headers=extra_headers,
         )
-        assert result.usage is not None, (
-            "Usage should be present in non-streaming completions"
-        )
+        if result.usage is None:
+            raise ValueError("Missing usage in non streaming completion")
 
         return result.usage.prompt_tokens
 

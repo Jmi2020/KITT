@@ -3,4 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 KITTY_CODE_ROOT = Path(__file__).parent
-__version__ = "0.1.0"
+# Alias for compatibility with upstream vibe code
+VIBE_ROOT = KITTY_CODE_ROOT
+__version__ = "0.2.0"  # Reset version for vanilla base

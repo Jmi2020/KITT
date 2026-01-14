@@ -7,40 +7,38 @@ from textual.containers import Horizontal
 from textual.widgets import Static
 
 from kitty_code.cli.textual_ui.widgets.messages import NonSelectableStatic
-from kitty_code.cli.textual_ui.widgets.spinner import Spinner, SpinnerType, create_spinner
+from kitty_code.cli.textual_ui.widgets.no_markup_static import NoMarkupStatic
+from kitty_code.cli.textual_ui.widgets.spinner import SpinnerMixin, SpinnerType
 
 
-class StatusMessage(Static):
+class StatusMessage(SpinnerMixin, NoMarkupStatic):
     SPINNER_TYPE: ClassVar[SpinnerType] = SpinnerType.LINE
 
     def __init__(self, initial_text: str = "", **kwargs: Any) -> None:
-        self._spinner: Spinner = create_spinner(self.SPINNER_TYPE)
-        self._spinner_timer = None
-        self._is_spinning = True
-        self.success = True
         self._initial_text = initial_text
         self._indicator_widget: Static | None = None
-        self._text_widget: Static | None = None
+        self._text_widget: NoMarkupStatic | None = None
+        self.success = True
+        self.init_spinner()
         super().__init__(**kwargs)
 
     def compose(self) -> ComposeResult:
         with Horizontal():
             self._indicator_widget = NonSelectableStatic(
-                self._spinner.current_frame(),
-                markup=False,
-                classes="status-indicator-icon",
+                self._spinner.current_frame(), classes="status-indicator-icon"
             )
             yield self._indicator_widget
-            self._text_widget = Static(
-                "", markup=False, classes="status-indicator-text"
-            )
+            self._text_widget = NoMarkupStatic("", classes="status-indicator-text")
             yield self._text_widget
 
     def on_mount(self) -> None:
         self.update_display()
-        self._spinner_timer = self.set_interval(0.1, self._update_spinner)
+        self.start_spinner_timer()
 
-    def _update_spinner(self) -> None:
+    def on_resize(self) -> None:
+        self.refresh_spinner()
+
+    def _update_spinner_frame(self) -> None:
         if not self._is_spinning:
             return
         self.update_display()
@@ -72,4 +70,7 @@ class StatusMessage(Static):
     def stop_spinning(self, success: bool = True) -> None:
         self._is_spinning = False
         self.success = success
+        if self._spinner_timer:
+            self._spinner_timer.stop()
+            self._spinner_timer = None
         self.update_display()

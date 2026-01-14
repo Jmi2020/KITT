@@ -12,7 +12,7 @@ from acp.schema import (
     WaitForTerminalExitResponse,
 )
 
-from kitty_code import KITTY_CODE_ROOT
+from kitty_code import VIBE_ROOT
 from kitty_code.acp.tools.base import AcpToolState, BaseAcpTool
 from kitty_code.core.tools.base import BaseToolState, ToolError
 from kitty_code.core.tools.builtins.bash import Bash as CoreBashTool, BashArgs, BashResult
@@ -25,7 +25,7 @@ class AcpBashState(BaseToolState, AcpToolState):
 
 
 class Bash(CoreBashTool, BaseAcpTool[AcpBashState]):
-    prompt_path = KITTY_CODE_ROOT / "core" / "tools" / "builtins" / "prompts" / "bash.md"
+    prompt_path = VIBE_ROOT / "core" / "tools" / "builtins" / "prompts" / "bash.md"
     state: AcpBashState
 
     @classmethod
