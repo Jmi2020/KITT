@@ -83,7 +83,7 @@ def parse_arguments() -> argparse.Namespace:
         "--agent",
         metavar="NAME",
         default=None,
-        help="Load agent configuration from ~/.vibe/agents/NAME.toml",
+        help="Load agent configuration from ~/.kitty-code/agents/NAME.toml",
     )
     parser.add_argument("--setup", action="store_true", help="Setup API key and exit")
 

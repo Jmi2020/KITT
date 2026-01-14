@@ -16,23 +16,26 @@ class GlobalPath:
         return self._resolver()
 
 
-_DEFAULT_VIBE_HOME = Path.home() / ".vibe"
+_DEFAULT_KITTY_CODE_HOME = Path.home() / ".kitty-code"
 
 
-def _get_vibe_home() -> Path:
+def _get_kitty_code_home() -> Path:
+    # Check KITTY_CODE_HOME first, then fall back to VIBE_HOME for compatibility
+    if kitty_home := os.getenv("KITTY_CODE_HOME"):
+        return Path(kitty_home).expanduser().resolve()
     if vibe_home := os.getenv("VIBE_HOME"):
         return Path(vibe_home).expanduser().resolve()
-    return _DEFAULT_VIBE_HOME
+    return _DEFAULT_KITTY_CODE_HOME
 
 
-VIBE_HOME = GlobalPath(_get_vibe_home)
-GLOBAL_CONFIG_FILE = GlobalPath(lambda: VIBE_HOME.path / "config.toml")
-GLOBAL_ENV_FILE = GlobalPath(lambda: VIBE_HOME.path / ".env")
-GLOBAL_TOOLS_DIR = GlobalPath(lambda: VIBE_HOME.path / "tools")
-GLOBAL_SKILLS_DIR = GlobalPath(lambda: VIBE_HOME.path / "skills")
-SESSION_LOG_DIR = GlobalPath(lambda: VIBE_HOME.path / "logs" / "session")
-TRUSTED_FOLDERS_FILE = GlobalPath(lambda: VIBE_HOME.path / "trusted_folders.toml")
-LOG_DIR = GlobalPath(lambda: VIBE_HOME.path / "logs")
-LOG_FILE = GlobalPath(lambda: VIBE_HOME.path / "vibe.log")
+KITTY_CODE_HOME = GlobalPath(_get_kitty_code_home)
+GLOBAL_CONFIG_FILE = GlobalPath(lambda: KITTY_CODE_HOME.path / "config.toml")
+GLOBAL_ENV_FILE = GlobalPath(lambda: KITTY_CODE_HOME.path / ".env")
+GLOBAL_TOOLS_DIR = GlobalPath(lambda: KITTY_CODE_HOME.path / "tools")
+GLOBAL_SKILLS_DIR = GlobalPath(lambda: KITTY_CODE_HOME.path / "skills")
+SESSION_LOG_DIR = GlobalPath(lambda: KITTY_CODE_HOME.path / "logs" / "session")
+TRUSTED_FOLDERS_FILE = GlobalPath(lambda: KITTY_CODE_HOME.path / "trusted_folders.toml")
+LOG_DIR = GlobalPath(lambda: KITTY_CODE_HOME.path / "logs")
+LOG_FILE = GlobalPath(lambda: KITTY_CODE_HOME.path / "kitty-code.log")
 
 DEFAULT_TOOL_DIR = GlobalPath(lambda: VIBE_ROOT / "core" / "tools" / "builtins")

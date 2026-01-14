@@ -8,12 +8,12 @@ from kitty_code.cli.update_notifier.ports.update_cache_repository import (
     UpdateCache,
     UpdateCacheRepository,
 )
-from kitty_code.core.paths.global_paths import VIBE_HOME
+from kitty_code.core.paths.global_paths import KITTY_CODE_HOME
 
 
 class FileSystemUpdateCacheRepository(UpdateCacheRepository):
     def __init__(self, base_path: Path | str | None = None) -> None:
-        self._base_path = Path(base_path) if base_path is not None else VIBE_HOME.path
+        self._base_path = Path(base_path) if base_path is not None else KITTY_CODE_HOME.path
         self._cache_file = self._base_path / "update_cache.json"
 
     async def get(self) -> UpdateCache | None:
