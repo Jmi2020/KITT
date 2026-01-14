@@ -43,6 +43,10 @@ from kitty_code.cli.textual_ui.widgets.messages import (
 from kitty_code.cli.textual_ui.widgets.mode_indicator import ModeIndicator
 from kitty_code.cli.textual_ui.widgets.no_markup_static import NoMarkupStatic
 from kitty_code.cli.textual_ui.widgets.path_display import PathDisplay
+from kitty_code.cli.textual_ui.widgets.plan_approval import (
+    PlanApprovalApp,
+    PlanApprovalChoice,
+)
 from kitty_code.cli.textual_ui.widgets.tools import ToolCallMessage, ToolResultMessage
 from kitty_code.cli.textual_ui.widgets.welcome import WelcomeBanner
 from kitty_code.cli.update_notifier import (
@@ -73,6 +77,7 @@ class BottomApp(StrEnum):
     Approval = auto()
     Config = auto()
     Input = auto()
+    PlanApproval = auto()
 
 
 class VibeApp(App):  # noqa: PLR0904
@@ -279,6 +284,32 @@ class VibeApp(App):  # noqa: PLR0904
 
         if self._loading_widget and self._loading_widget.parent:
             await self._remove_loading_widget()
+
+    async def on_plan_approval_app_plan_approved(
+        self, message: PlanApprovalApp.PlanApproved
+    ) -> None:
+        """Handle plan approval choice from the dialogue."""
+        await self._switch_to_input_app()
+
+        if message.choice == PlanApprovalChoice.AUTO_ITERATE:
+            # Switch to AUTO_ITERATE mode and auto-submit proceed
+            self._switch_mode(AgentMode.AUTO_ITERATE)
+            # Auto-submit "proceed" to start execution
+            self.run_worker(self._submit_prompt("proceed"), exclusive=True)
+
+        elif message.choice == PlanApprovalChoice.ACCEPT_WITH_APPROVALS:
+            # Switch to DEFAULT mode - user will type proceed manually
+            self._switch_mode(AgentMode.DEFAULT)
+            # Show helpful message
+            await self._mount_and_scroll(
+                UserCommandMessage(
+                    'Switched to DEFAULT mode. Type "proceed" to start execution with approvals.'
+                )
+            )
+
+        else:  # CONTINUE_EDITING
+            # Stay in PLAN mode, user continues editing
+            pass
 
     async def _remove_loading_widget(self) -> None:
         if self._loading_widget and self._loading_widget.parent:
@@ -701,6 +732,10 @@ class VibeApp(App):  # noqa: PLR0904
                     current_tokens=self.agent.stats.context_tokens,
                 )
 
+            # Show plan approval dialogue if in PLAN mode after turn completes
+            if self._current_agent_mode == AgentMode.PLAN:
+                await self._switch_to_plan_approval_app()
+
     async def _interrupt_agent(self) -> None:
         interrupting_agent_init = bool(
             self._agent_init_task and not self._agent_init_task.done()
@@ -1026,6 +1061,26 @@ class VibeApp(App):  # noqa: PLR0904
         self.call_after_refresh(approval_app.focus)
         self.call_after_refresh(self._scroll_to_bottom)
 
+    async def _switch_to_plan_approval_app(self) -> None:
+        """Show the plan approval dialogue after a plan is presented."""
+        bottom_container = self.query_one("#bottom-app-container")
+
+        try:
+            chat_input_container = self.query_one(ChatInputContainer)
+            await chat_input_container.remove()
+        except Exception:
+            pass
+
+        if self._mode_indicator:
+            self._mode_indicator.display = False
+
+        plan_approval_app = PlanApprovalApp()
+        await bottom_container.mount(plan_approval_app)
+        self._current_bottom_app = BottomApp.PlanApproval
+
+        self.call_after_refresh(plan_approval_app.focus)
+        self.call_after_refresh(self._scroll_to_bottom)
+
     async def _switch_to_input_app(self) -> None:
         bottom_container = self.query_one("#bottom-app-container")
 
@@ -1038,6 +1093,12 @@ class VibeApp(App):  # noqa: PLR0904
         try:
             approval_app = self.query_one("#approval-app")
             await approval_app.remove()
+        except Exception:
+            pass
+
+        try:
+            plan_approval_app = self.query_one("#plan-approval-app")
+            await plan_approval_app.remove()
         except Exception:
             pass
 
@@ -1075,6 +1136,8 @@ class VibeApp(App):  # noqa: PLR0904
                     self.query_one(ConfigApp).focus()
                 case BottomApp.Approval:
                     self.query_one(ApprovalApp).focus()
+                case BottomApp.PlanApproval:
+                    self.query_one(PlanApprovalApp).focus()
                 case app:
                     assert_never(app)
         except Exception:

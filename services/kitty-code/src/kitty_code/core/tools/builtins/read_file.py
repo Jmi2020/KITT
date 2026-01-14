@@ -47,6 +47,10 @@ class ReadFileResult(BaseModel):
 
 class ReadFileToolConfig(BaseToolConfig):
     permission: ToolPermission = ToolPermission.ALWAYS
+    restrict_to_workdir: bool = Field(
+        default=True,
+        description="Require approval to read files outside the working directory.",
+    )
 
     max_read_bytes: int = Field(
         default=64_000, description="Maximum total bytes to read from a file in one go."
@@ -99,6 +103,15 @@ class ReadFile(
         for pattern in self.config.allowlist:
             if fnmatch.fnmatch(file_str, pattern):
                 return ToolPermission.ALWAYS
+
+        # Require approval for files outside the working directory
+        if self.config.restrict_to_workdir:
+            try:
+                resolved_path = file_path.resolve()
+                resolved_path.relative_to(self.config.effective_workdir.resolve())
+            except ValueError:
+                # Path is outside working directory - require approval
+                return ToolPermission.ASK
 
         return None
 

@@ -28,6 +28,10 @@ class GrepBackend(StrEnum):
 
 class GrepToolConfig(BaseToolConfig):
     permission: ToolPermission = ToolPermission.ALWAYS
+    restrict_to_workdir: bool = Field(
+        default=True,
+        description="Require approval to search files outside the working directory.",
+    )
 
     max_output_bytes: int = Field(
         default=64_000, description="Hard cap for the total size of matched lines."
@@ -103,6 +107,34 @@ class Grep(
         "Recursively search files for a regex pattern using ripgrep (rg) or grep. "
         "Respects .gitignore and .codeignore files by default when using ripgrep."
     )
+
+    def check_allowlist_denylist(self, args: GrepArgs) -> ToolPermission | None:
+        """Check if the search path requires approval (outside working directory)."""
+        import fnmatch
+
+        path_obj = Path(args.path).expanduser()
+        if not path_obj.is_absolute():
+            path_obj = self.config.effective_workdir / path_obj
+        path_str = str(path_obj)
+
+        for pattern in self.config.denylist:
+            if fnmatch.fnmatch(path_str, pattern):
+                return ToolPermission.NEVER
+
+        for pattern in self.config.allowlist:
+            if fnmatch.fnmatch(path_str, pattern):
+                return ToolPermission.ALWAYS
+
+        # Require approval for searching outside the working directory
+        if self.config.restrict_to_workdir:
+            try:
+                resolved_path = path_obj.resolve()
+                resolved_path.relative_to(self.config.effective_workdir.resolve())
+            except ValueError:
+                # Path is outside working directory - require approval
+                return ToolPermission.ASK
+
+        return None
 
     def _detect_backend(self) -> GrepBackend:
         if shutil.which("rg"):

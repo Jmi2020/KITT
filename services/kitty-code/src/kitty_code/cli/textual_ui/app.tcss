@@ -852,6 +852,34 @@ WelcomeBanner {
     color: $foreground;
 }
 
+/* Plan approval widget styles */
+#plan-approval-app {
+    width: 100%;
+    height: auto;
+    padding: 0 1;
+}
+
+#plan-approval-content {
+    width: 100%;
+    height: auto;
+}
+
+.plan-approval-title {
+    height: auto;
+    text-style: bold;
+    color: $success;
+}
+
+.plan-approval-option {
+    height: auto;
+    color: $foreground;
+}
+
+.plan-approval-help {
+    height: auto;
+    color: $text-muted;
+}
+
 .code-block {
     height: auto;
     color: $foreground;
