@@ -610,13 +610,6 @@ class VibeApp(App):  # noqa: PLR0904
                 prompt, base_dir=self.config.effective_workdir
             )
             async for event in self.agent.act(rendered_prompt):
-                if self._context_progress and self.agent:
-                    current_state = self._context_progress.tokens
-                    self._context_progress.tokens = TokenState(
-                        max_tokens=current_state.max_tokens,
-                        current_tokens=self.agent.stats.context_tokens,
-                    )
-
                 if self.event_handler:
                     await self.event_handler.handle_event(
                         event,
@@ -647,6 +640,13 @@ class VibeApp(App):  # noqa: PLR0904
             self._loading_widget = None
             self._hide_todo_area()
             await self._finalize_current_streaming_message()
+            # Update context progress after agent turn completes (stats are now populated)
+            if self._context_progress and self.agent:
+                current_state = self._context_progress.tokens
+                self._context_progress.tokens = TokenState(
+                    max_tokens=current_state.max_tokens,
+                    current_tokens=self.agent.stats.context_tokens,
+                )
 
     async def _interrupt_agent(self) -> None:
         interrupting_agent_init = bool(
