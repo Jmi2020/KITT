@@ -1,5 +1,7 @@
 Use the `todo` tool to manage a simple task list. This tool helps you track tasks and their progress.
 
+**CRITICAL: You MUST use this tool for any multi-step implementation work.** Without task tracking, you will lose focus and fail to complete the user's request. This is non-negotiable for tasks with 3+ steps.
+
 ## How it works
 
 - **Reading:** Use `action: "read"` to view the current todo list
@@ -14,20 +16,18 @@ Each todo item has:
 
 ## When to Use This Tool
 
-**Use proactively for:**
-- Complex multi-step tasks (3+ distinct steps)
-- Non-trivial tasks requiring careful planning
-- Multiple tasks provided by the user (numbered or comma-separated)
-- Tracking progress on ongoing work
-- After receiving new instructions - immediately capture requirements
-- When starting work - mark task as in_progress BEFORE beginning
-- After completing work - mark as completed and add any follow-up tasks discovered
+**MANDATORY - You MUST use this tool for:**
+- ANY implementation task with 3+ files or steps
+- After a plan is approved - IMMEDIATELY create todos from the plan steps
+- When the user says "proceed", "implement", "do it", etc. after reviewing a plan
+- Feature implementations, refactoring, or multi-file changes
 
-**Skip this tool for:**
-- Single, straightforward tasks
-- Trivial operations (< 3 simple steps)
+**Skip this tool ONLY for:**
+- Single, straightforward tasks (1-2 steps max)
 - Purely conversational or informational requests
-- Tasks that provide no organizational benefit
+- Quick one-file fixes with obvious scope
+
+**FAILURE MODE:** If you do NOT create todos when starting multi-step work, you WILL lose focus and stop prematurely, leaving the user's request incomplete. The system relies on your todo list to keep you on track.
 
 ## Task Management Best Practices
 

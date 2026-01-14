@@ -204,7 +204,9 @@ class Agent:
         self.middleware_pipeline.add(PlanModeMiddleware(lambda: self._mode))
 
         # Focus preservation: inject task context during execution
-        self._task_injection_middleware = TaskInjectionMiddleware(lambda: self._mode)
+        self._task_injection_middleware = TaskInjectionMiddleware(
+            lambda: self._mode, todo_reader=self._get_todo_list
+        )
         self.middleware_pipeline.add(self._task_injection_middleware)
 
         # Ralph-Wiggum: check for incomplete tasks before allowing stop

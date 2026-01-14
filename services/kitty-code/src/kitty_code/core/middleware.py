@@ -175,6 +175,21 @@ Current plan/tasks to complete:
 </task-context>
 Continue executing the plan. Mark tasks complete as you finish them using the todo tool."""
 
+# Stronger message when there's a plan but no todos created yet
+CREATE_TODOS_REMINDER = """<critical-action-required>
+You have a plan but have NOT created todos to track your progress.
+
+**STOP. Before doing ANYTHING else, you MUST:**
+1. Use the `todo` tool with action="write" to create todos from your plan
+2. Each numbered step in your plan should become a todo item
+3. Only AFTER creating todos should you begin implementation
+
+Your plan to extract tasks from:
+{plan_content}
+
+DO THIS NOW. Create the todos, then start on the first task.
+</critical-action-required>"""
+
 
 class TaskInjectionMiddleware:
     """Injects current plan/task list at start of each turn during execution mode.
@@ -183,9 +198,18 @@ class TaskInjectionMiddleware:
     transitioning from plan mode to execution mode.
     """
 
-    def __init__(self, mode_getter: Callable[[], AgentMode]) -> None:
+    def __init__(
+        self,
+        mode_getter: Callable[[], AgentMode],
+        todo_reader: Callable[[], list[dict[str, Any]]] | None = None,
+    ) -> None:
         self._mode_getter = mode_getter
         self._plan_content: str | None = None
+        self._todo_reader = todo_reader
+
+    def set_todo_reader(self, reader: Callable[[], list[dict[str, Any]]]) -> None:
+        """Set the function to read current todos from the todo tool."""
+        self._todo_reader = reader
 
     def _is_execution_mode(self) -> bool:
         mode = self._mode_getter()
@@ -224,6 +248,16 @@ class TaskInjectionMiddleware:
         except OSError as e:
             logger.warning("Failed to clear plan file: %s", e)
 
+    def _has_todos(self) -> bool:
+        """Check if there are any todos tracked."""
+        if not self._todo_reader:
+            return False
+        try:
+            todos = self._todo_reader()
+            return len(todos) > 0
+        except Exception:
+            return False
+
     async def before_turn(self, context: ConversationContext) -> MiddlewareResult:
         if not self._is_execution_mode():
             return MiddlewareResult()
@@ -233,7 +267,13 @@ class TaskInjectionMiddleware:
         if not plan_content:
             return MiddlewareResult()
 
-        reminder = TASK_CONTEXT_REMINDER.format(plan_content=plan_content)
+        # Check if there are todos - if not, inject stronger reminder
+        if not self._has_todos():
+            logger.info("Plan exists but no todos created - injecting create-todos reminder")
+            reminder = CREATE_TODOS_REMINDER.format(plan_content=plan_content)
+        else:
+            reminder = TASK_CONTEXT_REMINDER.format(plan_content=plan_content)
+
         return MiddlewareResult(action=MiddlewareAction.INJECT_MESSAGE, message=reminder)
 
     async def after_turn(self, context: ConversationContext) -> MiddlewareResult:
