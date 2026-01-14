@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from enum import StrEnum, auto
 import subprocess
 import time
@@ -35,7 +36,9 @@ from kitty_code.cli.textual_ui.widgets.messages import (
     WarningMessage,
 )
 from kitty_code.cli.textual_ui.widgets.mode_indicator import ModeIndicator
+from kitty_code.cli.textual_ui.widgets.no_markup_static import NoMarkupStatic
 from kitty_code.cli.textual_ui.widgets.path_display import PathDisplay
+from kitty_code.cli.textual_ui.widgets.queue_indicator import QueueIndicator
 from kitty_code.cli.textual_ui.widgets.tools import ToolCallMessage, ToolResultMessage
 from kitty_code.cli.textual_ui.widgets.welcome import WelcomeBanner
 from kitty_code.cli.update_notifier import (
@@ -140,6 +143,7 @@ class VibeApp(App):
         self._agent_init_interrupted = False
         self._auto_scroll = True
         self._last_escape_time: float | None = None
+        self._input_queue: deque[str] = deque()  # FIFO queue for pending inputs
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="chat"):
@@ -164,7 +168,8 @@ class VibeApp(App):
             yield PathDisplay(
                 self.config.displayed_workdir or self.config.effective_workdir
             )
-            yield Static(id="spacer")
+            yield NoMarkupStatic(id="spacer")
+            yield QueueIndicator(id="queue-indicator")
             yield ContextProgress()
 
     async def on_mount(self) -> None:
@@ -215,7 +220,14 @@ class VibeApp(App):
         input_widget.value = ""
 
         if self._agent_running:
-            await self._interrupt_agent()
+            # Queue instead of interrupt - message will be sent after current turn
+            self._input_queue.append(value)
+            self._update_queue_indicator()
+            # Restore focus using the proper pattern (set_app_focus + focus_input)
+            if input_widget.input_widget:
+                input_widget.input_widget.set_app_focus(True)
+            self.call_after_refresh(input_widget.focus_input)
+            return
 
         if value.startswith("!"):
             await self._handle_bash_command(value[1:])
@@ -444,6 +456,37 @@ class VibeApp(App):
                 await user_message.set_pending(False)
             return
 
+    def _update_queue_indicator(self) -> None:
+        """Update the queue indicator with current count."""
+        try:
+            indicator = self.query_one(QueueIndicator)
+            indicator.update_count(len(self._input_queue))
+        except Exception:
+            pass  # Indicator not mounted yet
+
+    async def _process_input_queue(self) -> None:
+        """Process all queued inputs in FIFO order after agent turn completes."""
+        if not self._input_queue:
+            return
+
+        # Pop one message from the queue and process it
+        queued = self._input_queue.popleft()
+        self._update_queue_indicator()
+
+        # Handle the queued message - this will trigger another agent turn
+        # which will call _process_input_queue again in its finally block
+        if queued.startswith("!"):
+            await self._handle_bash_command(queued[1:])
+            # After bash command, continue processing queue
+            await self._process_input_queue()
+        elif await self._handle_command(queued):
+            # After command, continue processing queue
+            await self._process_input_queue()
+        else:
+            # Regular message - _handle_user_message will trigger agent turn
+            # which will process remaining queue in its finally block
+            await self._handle_user_message(queued)
+
     async def _initialize_agent(self) -> None:
         if self.agent or self._agent_initializing:
             return
@@ -615,6 +658,10 @@ class VibeApp(App):
             self._loading_widget = None
             self._hide_todo_area()
             await self._finalize_current_streaming_message()
+            # Process any queued inputs after turn completes
+            await self._process_input_queue()
+            # Restore focus to input after agent turn completes
+            self._restore_input_focus()
 
     async def _interrupt_agent(self) -> None:
         interrupting_agent_init = bool(
@@ -1261,6 +1308,11 @@ class VibeApp(App):
         bottom_container = self.query_one("#bottom-app-container")
         await self._mount_and_scroll(UserCommandMessage("Configuration opened..."))
 
+        # Disable focus refocusing on the input widget before removing it
+        # This prevents ChatTextArea.on_blur from stealing focus back
+        if self._chat_input_container and self._chat_input_container.input_widget:
+            self._chat_input_container.input_widget.set_app_focus(False)
+
         try:
             chat_input_container = self.query_one(ChatInputContainer)
             await chat_input_container.remove()
@@ -1278,6 +1330,11 @@ class VibeApp(App):
 
     async def _switch_to_approval_app(self, tool_name: str, tool_args: dict) -> None:
         bottom_container = self.query_one("#bottom-app-container")
+
+        # Disable focus refocusing on the input widget before removing it
+        # This prevents ChatTextArea.on_blur from stealing focus back
+        if self._chat_input_container and self._chat_input_container.input_widget:
+            self._chat_input_container.input_widget.set_app_focus(False)
 
         try:
             chat_input_container = self.query_one(ChatInputContainer)
@@ -1308,6 +1365,11 @@ class VibeApp(App):
             return
 
         bottom_container = self.query_one("#bottom-app-container")
+
+        # Disable focus refocusing on the input widget before removing it
+        # This prevents ChatTextArea.on_blur from stealing focus back
+        if self._chat_input_container and self._chat_input_container.input_widget:
+            self._chat_input_container.input_widget.set_app_focus(False)
 
         try:
             chat_input_container = self.query_one(ChatInputContainer)
@@ -1380,6 +1442,9 @@ class VibeApp(App):
             chat_input_container = self.query_one(ChatInputContainer)
             self._chat_input_container = chat_input_container
             self._current_bottom_app = BottomApp.Input
+            # Re-enable focus handling on the input widget
+            if chat_input_container.input_widget:
+                chat_input_container.input_widget.set_app_focus(True)
             self.call_after_refresh(chat_input_container.focus_input)
             return
         except Exception:
@@ -1396,7 +1461,26 @@ class VibeApp(App):
 
         self._current_bottom_app = BottomApp.Input
 
+        # Enable focus handling on the new input widget
+        if chat_input_container.input_widget:
+            chat_input_container.input_widget.set_app_focus(True)
         self.call_after_refresh(chat_input_container.focus_input)
+
+    def _restore_input_focus(self) -> None:
+        """Restore focus to the chat input after agent operations complete.
+
+        Uses the same pattern as _switch_to_input_app() to ensure focus is
+        properly restored even when widgets have been mounted/unmounted.
+        """
+        if self._current_bottom_app != BottomApp.Input:
+            return
+        try:
+            chat_input = self.query_one(ChatInputContainer)
+            if chat_input.input_widget:
+                chat_input.input_widget.set_app_focus(True)
+            self.call_after_refresh(chat_input.focus_input)
+        except Exception:
+            pass
 
     def _focus_current_bottom_app(self) -> None:
         try:
@@ -1469,6 +1553,9 @@ class VibeApp(App):
         )
 
         if interrupt_needed:
+            # Clear the queue when interrupting - user wants to stop everything
+            self._input_queue.clear()
+            self._update_queue_indicator()
             self.run_worker(self._interrupt_agent(), exclusive=False)
 
         self._last_escape_time = current_time
@@ -1736,5 +1823,5 @@ def run_textual_ui(
         version_update_notifier=update_notifier,
         update_cache_repository=update_cache_repository,
     )
-    session_id = app.run()
+    session_id = app.run(mouse=False)  # Disable mouse to prevent escape sequence leaks
     _print_session_resume_message(session_id)

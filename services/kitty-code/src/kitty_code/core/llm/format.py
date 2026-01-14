@@ -3,8 +3,10 @@ from __future__ import annotations
 from fnmatch import fnmatch
 from functools import lru_cache
 import json
+from logging import getLogger
 import re
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -20,6 +22,107 @@ from kitty_code.core.types import (
 if TYPE_CHECKING:
     from kitty_code.core.config import VibeConfig
     from kitty_code.core.tools.manager import ToolManager
+
+logger = getLogger("kitty_code")
+
+
+def _extract_tool_calls_from_content(content: str) -> list[dict[str, Any]]:
+    """Extract tool calls from JSON embedded in content.
+
+    Some models (especially local ones via llama.cpp/Ollama) output tool calls
+    as JSON text in the content field instead of using native function calling.
+    This function parses those JSON tool calls.
+
+    Supports multiple formats:
+    1. {"tool_calls": [{"name": "...", "arguments": {...}, "id": "..."}]}
+    2. [{"name": "...", "arguments": {...}}]
+    3. {"name": "...", "arguments": {...}}
+
+    Returns a list of parsed tool call dicts, or empty list if no valid JSON found.
+    """
+    if not content:
+        return []
+
+    # Try to find JSON in the content
+    # Look for JSON object or array patterns
+    json_patterns = [
+        # Match JSON object starting with { and containing "tool_calls" or "name"
+        r'\{[^{}]*"(?:tool_calls|name)"[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',
+        # Match JSON array of objects
+        r'\[[^[\]]*\{[^{}]*"name"[^{}]*\}[^[\]]*\]',
+    ]
+
+    # First, try to parse the entire content as JSON
+    stripped = content.strip()
+    try:
+        data = json.loads(stripped)
+        return _normalize_tool_calls_data(data)
+    except json.JSONDecodeError:
+        pass
+
+    # Try to find JSON embedded in the content
+    # Look for the first { that might start a tool_calls object
+    for match in re.finditer(r'\{["\s]*tool_calls|\[\s*\{["\s]*name', stripped):
+        start = match.start()
+        # Try to parse from this position
+        remaining = stripped[start:]
+
+        # Find matching brackets
+        bracket_count = 0
+        in_string = False
+        escape_next = False
+        end_pos = 0
+
+        for i, char in enumerate(remaining):
+            if escape_next:
+                escape_next = False
+                continue
+            if char == "\\":
+                escape_next = True
+                continue
+            if char == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+
+            if char in "{[":
+                bracket_count += 1
+            elif char in "}]":
+                bracket_count -= 1
+                if bracket_count == 0:
+                    end_pos = i + 1
+                    break
+
+        if end_pos > 0:
+            json_str = remaining[:end_pos]
+            try:
+                data = json.loads(json_str)
+                result = _normalize_tool_calls_data(data)
+                if result:
+                    return result
+            except json.JSONDecodeError:
+                continue
+
+    return []
+
+
+def _normalize_tool_calls_data(data: Any) -> list[dict[str, Any]]:
+    """Normalize various tool call JSON formats to a standard list."""
+    if isinstance(data, dict):
+        # Format: {"tool_calls": [...]}
+        if "tool_calls" in data:
+            tool_calls = data["tool_calls"]
+            if isinstance(tool_calls, list):
+                return tool_calls
+        # Format: {"name": "...", "arguments": {...}}
+        elif "name" in data:
+            return [data]
+    elif isinstance(data, list):
+        # Format: [{"name": "...", "arguments": {...}}, ...]
+        if all(isinstance(item, dict) and "name" in item for item in data):
+            return data
+    return []
 
 
 def _is_regex_hint(pattern: str) -> bool:
@@ -185,6 +288,7 @@ class APIToolFormatHandler:
     def parse_message(self, message: LLMMessage) -> ParsedMessage:
         tool_calls = []
 
+        # First, try native API tool_calls field
         api_tool_calls = message.tool_calls or []
         for tc in api_tool_calls:
             if not (function_call := tc.function):
@@ -201,6 +305,39 @@ class APIToolFormatHandler:
                     call_id=tc.id or "",
                 )
             )
+
+        # Fallback: Parse tool calls from JSON embedded in content
+        # This handles local models (llama.cpp/Ollama) that output tool calls as JSON text
+        if not tool_calls and message.content:
+            content_tool_calls = _extract_tool_calls_from_content(message.content)
+            for tc_data in content_tool_calls:
+                tool_name = tc_data.get("name", "")
+                if not tool_name:
+                    continue
+
+                # Handle arguments in various formats
+                raw_args = tc_data.get("arguments", {})
+                if isinstance(raw_args, str):
+                    try:
+                        raw_args = json.loads(raw_args)
+                    except json.JSONDecodeError:
+                        raw_args = {}
+
+                call_id = tc_data.get("id", "") or str(uuid4())[:8]
+
+                tool_calls.append(
+                    ParsedToolCall(
+                        tool_name=tool_name,
+                        raw_args=raw_args if isinstance(raw_args, dict) else {},
+                        call_id=call_id,
+                    )
+                )
+
+            if tool_calls:
+                logger.debug(
+                    "Parsed %d tool call(s) from content JSON (fallback mode)",
+                    len(tool_calls),
+                )
 
         return ParsedMessage(tool_calls=tool_calls)
 

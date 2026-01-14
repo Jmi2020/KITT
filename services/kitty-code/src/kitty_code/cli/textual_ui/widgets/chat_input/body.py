@@ -11,6 +11,7 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from kitty_code.cli.history_manager import HistoryManager
+from kitty_code.cli.textual_ui.widgets.no_markup_static import NoMarkupStatic
 from kitty_code.cli.textual_ui.widgets.chat_input.text_area import ChatTextArea, InputMode
 
 
@@ -23,7 +24,7 @@ class ChatInputBody(Widget):
     def __init__(self, history_file: Path | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.input_widget: ChatTextArea | None = None
-        self.prompt_widget: Static | None = None
+        self.prompt_widget: NoMarkupStatic | None = None
 
         if history_file:
             self.history = HistoryManager(history_file)
@@ -34,7 +35,7 @@ class ChatInputBody(Widget):
 
     def compose(self) -> ComposeResult:
         with Horizontal():
-            self.prompt_widget = Static(">", id="prompt")
+            self.prompt_widget = NoMarkupStatic(">", id="prompt")
             yield self.prompt_widget
 
             self.input_widget = ChatTextArea(placeholder="Ask anything...", id="input")
