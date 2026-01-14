@@ -292,14 +292,15 @@ class VibeApp(App):  # noqa: PLR0904
         await self._switch_to_input_app()
 
         if message.choice == PlanApprovalChoice.AUTO_ITERATE:
-            # Switch to AUTO_ITERATE mode and auto-submit proceed
-            self._switch_mode(AgentMode.AUTO_ITERATE)
-            # Auto-submit "proceed" to start execution
+            # Switch to AUTO_ITERATE mode and AWAIT completion before proceeding
+            # This prevents race condition where "proceed" is sent before tools reload
+            await self._switch_mode_async(AgentMode.AUTO_ITERATE)
+            # Now auto-submit "proceed" to start execution
             self.run_worker(self._handle_user_message("proceed"), exclusive=True)
 
         elif message.choice == PlanApprovalChoice.ACCEPT_WITH_APPROVALS:
             # Switch to DEFAULT mode - user will type proceed manually
-            self._switch_mode(AgentMode.DEFAULT)
+            await self._switch_mode_async(AgentMode.DEFAULT)
             # Show helpful message
             await self._mount_and_scroll(
                 UserCommandMessage(
@@ -1242,6 +1243,33 @@ class VibeApp(App):  # noqa: PLR0904
             self.run_worker(
                 self._do_agent_switch(mode), group="mode_switch", exclusive=True
             )
+
+        self._focus_current_bottom_app()
+
+    async def _switch_mode_async(self, mode: AgentMode) -> None:
+        """Async version of _switch_mode that awaits agent switch completion.
+
+        Use this when subsequent operations depend on mode switch being complete
+        (e.g., auto-submit after plan approval needs tools to be reloaded first).
+        """
+        if mode == self._current_agent_mode:
+            return
+
+        self._current_agent_mode = mode
+
+        if self._mode_indicator:
+            self._mode_indicator.set_mode(mode)
+        if self._chat_input_container:
+            self._chat_input_container.set_safety(mode.safety)
+
+        if self.agent:
+            if mode.auto_approve:
+                self.agent.approval_callback = None
+            else:
+                self.agent.approval_callback = self._approval_callback
+
+            # Await the agent switch instead of running as worker
+            await self._do_agent_switch(mode)
 
         self._focus_current_bottom_app()
 
