@@ -143,11 +143,11 @@ logging.basicConfig(
     handlers=[logging.FileHandler(LOG_FILE.path, "a", "utf-8")],
 )
 
-logger = logging.getLogger("vibe")
+logger = logging.getLogger("kitty-code")
 
 
 def get_user_agent(backend: Backend) -> str:
-    user_agent = f"Mistral-Vibe/{__version__}"
+    user_agent = f"Kitty-Code/{__version__}"
     if backend == Backend.MISTRAL:
         mistral_sdk_prefix = "mistral-client-python/"
         user_agent = f"{mistral_sdk_prefix}{user_agent}"

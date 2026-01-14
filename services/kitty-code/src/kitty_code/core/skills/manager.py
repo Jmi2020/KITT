@@ -13,7 +13,7 @@ from kitty_code.core.skills.parser import SkillParseError, parse_frontmatter
 if TYPE_CHECKING:
     from kitty_code.core.config import VibeConfig
 
-logger = getLogger("vibe")
+logger = getLogger("kitty-code")
 
 
 class SkillManager:

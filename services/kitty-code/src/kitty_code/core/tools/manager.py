@@ -21,7 +21,7 @@ from kitty_code.core.tools.mcp import (
 )
 from kitty_code.core.utils import run_sync
 
-logger = getLogger("vibe")
+logger = getLogger("kitty-code")
 
 if TYPE_CHECKING:
     from kitty_code.core.config import MCPHttp, MCPStdio, MCPStreamableHttp, VibeConfig
