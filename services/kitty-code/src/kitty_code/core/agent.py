@@ -913,6 +913,28 @@ class Agent:
             logger.debug("Could not read todo list: %s", e)
             return []
 
+    def get_incomplete_todos(self) -> list[dict[str, Any]]:
+        """Get todos that are not completed or cancelled.
+
+        Used by TUI for AUTO_ITERATE mode to determine when to continue.
+
+        Returns:
+            List of todo dicts with status 'pending' or 'in_progress'
+        """
+        todos = self._get_todo_list()
+        return [
+            t for t in todos
+            if t.get("status") not in ("completed", "cancelled")
+        ]
+
+    def has_incomplete_todos(self) -> bool:
+        """Check if there are any incomplete todos.
+
+        Returns:
+            True if there are pending or in_progress todos
+        """
+        return len(self.get_incomplete_todos()) > 0
+
     async def reload_with_initial_messages(
         self,
         config: VibeConfig | None = None,

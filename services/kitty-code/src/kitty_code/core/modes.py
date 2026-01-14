@@ -17,6 +17,7 @@ class AgentMode(StrEnum):
     AUTO_APPROVE = auto()
     PLAN = auto()
     ACCEPT_EDITS = auto()
+    AUTO_ITERATE = auto()
 
     @property
     def display_name(self) -> str:
@@ -37,6 +38,11 @@ class AgentMode(StrEnum):
     @property
     def safety(self) -> ModeSafety:
         return MODE_CONFIGS[self].safety
+
+    @property
+    def should_auto_iterate(self) -> bool:
+        """Returns True if this mode should automatically continue on incomplete tasks."""
+        return self == AgentMode.AUTO_ITERATE
 
     @classmethod
     def from_string(cls, value: str) -> AgentMode | None:
@@ -90,6 +96,12 @@ MODE_CONFIGS: dict[AgentMode, ModeConfig] = {
         safety=ModeSafety.YOLO,
         auto_approve=True,
     ),
+    AgentMode.AUTO_ITERATE: ModeConfig(
+        display_name="Auto Iterate",
+        description="Auto-approves and loops until todos complete",
+        safety=ModeSafety.YOLO,
+        auto_approve=True,
+    ),
 }
 
 
@@ -99,6 +111,7 @@ def get_mode_order() -> list[AgentMode]:
         AgentMode.PLAN,
         AgentMode.ACCEPT_EDITS,
         AgentMode.AUTO_APPROVE,
+        AgentMode.AUTO_ITERATE,
     ]
 
 

@@ -605,16 +605,69 @@ class VibeApp(App):  # noqa: PLR0904
         await loading_area.mount(loading)
         self._show_todo_area()
 
+        # AUTO_ITERATE settings
+        MAX_AUTO_ITERATIONS = 20
+        iteration = 0
+        current_prompt = prompt
+
         try:
-            rendered_prompt = render_path_prompt(
-                prompt, base_dir=self.config.effective_workdir
-            )
-            async for event in self.agent.act(rendered_prompt):
-                if self.event_handler:
-                    await self.event_handler.handle_event(
-                        event,
-                        loading_active=self._loading_widget is not None,
-                        loading_widget=self._loading_widget,
+            while True:
+                rendered_prompt = render_path_prompt(
+                    current_prompt, base_dir=self.config.effective_workdir
+                )
+                async for event in self.agent.act(rendered_prompt):
+                    if self.event_handler:
+                        await self.event_handler.handle_event(
+                            event,
+                            loading_active=self._loading_widget is not None,
+                            loading_widget=self._loading_widget,
+                        )
+
+                # Only auto-continue in AUTO_ITERATE mode
+                if not self._current_agent_mode.should_auto_iterate:
+                    break
+
+                # Check if we should continue (has incomplete todos)
+                if not self.agent.has_incomplete_todos():
+                    logger.info("AUTO_ITERATE: All todos complete, stopping")
+                    break
+
+                iteration += 1
+                if iteration >= MAX_AUTO_ITERATIONS:
+                    logger.warning(
+                        "AUTO_ITERATE: Max iterations (%d) reached, stopping",
+                        MAX_AUTO_ITERATIONS,
+                    )
+                    await self._mount_and_scroll(
+                        WarningMessage(
+                            f"Auto-iteration stopped: reached max {MAX_AUTO_ITERATIONS} iterations",
+                            collapsed=self._tools_collapsed,
+                        )
+                    )
+                    break
+
+                # Create continuation prompt
+                incomplete = self.agent.get_incomplete_todos()
+                task_list = "\n".join(
+                    f"- [{t.get('status', 'pending')}] {t.get('content', 'Unknown task')}"
+                    for t in incomplete
+                )
+                current_prompt = (
+                    f"Continue with the remaining tasks. "
+                    f"Iteration {iteration}/{MAX_AUTO_ITERATIONS}.\n\n"
+                    f"Incomplete tasks:\n{task_list}"
+                )
+                logger.info(
+                    "AUTO_ITERATE: Continuing iteration %d/%d with %d incomplete tasks",
+                    iteration,
+                    MAX_AUTO_ITERATIONS,
+                    len(incomplete),
+                )
+
+                # Update loading widget to show iteration progress
+                if self._loading_widget:
+                    self._loading_widget.set_status(
+                        f"Iterating ({iteration}/{MAX_AUTO_ITERATIONS})"
                     )
 
         except asyncio.CancelledError:
