@@ -295,7 +295,7 @@ class VibeApp(App):  # noqa: PLR0904
             # Switch to AUTO_ITERATE mode and auto-submit proceed
             self._switch_mode(AgentMode.AUTO_ITERATE)
             # Auto-submit "proceed" to start execution
-            self.run_worker(self._submit_prompt("proceed"), exclusive=True)
+            self.run_worker(self._handle_user_message("proceed"), exclusive=True)
 
         elif message.choice == PlanApprovalChoice.ACCEPT_WITH_APPROVALS:
             # Switch to DEFAULT mode - user will type proceed manually
