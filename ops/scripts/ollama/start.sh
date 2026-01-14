@@ -104,22 +104,81 @@ if [ $ELAPSED -ge $MAX_WAIT ]; then
     exit 1
 fi
 
-# Check if model is already pulled
+# Directory containing custom Modelfiles
+MODELFILE_DIR="$PROJECT_ROOT/ops/ollama"
+
+# Function to check if a Modelfile exists for a model
+get_modelfile() {
+    local model_name="$1"
+    local modelfile="$MODELFILE_DIR/Modelfile.${model_name}"
+    if [ -f "$modelfile" ]; then
+        echo "$modelfile"
+    fi
+}
+
+# Function to extract base model from a Modelfile
+get_base_model() {
+    local modelfile="$1"
+    grep -i "^FROM " "$modelfile" | head -1 | awk '{print $2}'
+}
+
+# Check if model is already available
 log "Checking for model: $OLLAMA_MODEL"
 if curl -s "${CLIENT_OLLAMA_HOST}/api/tags" | grep -q "\"$OLLAMA_MODEL\""; then
     log "Model $OLLAMA_MODEL is already available"
 else
     warn "Model $OLLAMA_MODEL not found"
-    log "Pulling model (this may take a while, ~65 GB download)..."
-    log "You can also run manually: ollama pull $OLLAMA_MODEL"
 
-    # Pull model
-    if OLLAMA_HOST="$CLIENT_OLLAMA_HOST" ollama pull "$OLLAMA_MODEL"; then
-        log "Model $OLLAMA_MODEL pulled successfully"
+    # Check if this is a custom model with a Modelfile
+    MODELFILE=$(get_modelfile "$OLLAMA_MODEL")
+
+    if [ -n "$MODELFILE" ]; then
+        log "Found custom Modelfile: $MODELFILE"
+        BASE_MODEL=$(get_base_model "$MODELFILE")
+
+        if [ -z "$BASE_MODEL" ]; then
+            error "Could not extract base model from Modelfile"
+            exit 1
+        fi
+
+        log "Base model required: $BASE_MODEL"
+
+        # Check if base model is available, pull if not
+        if ! curl -s "${CLIENT_OLLAMA_HOST}/api/tags" | grep -q "\"$BASE_MODEL\""; then
+            log "Pulling base model $BASE_MODEL (this may take a while, ~65 GB download)..."
+            log "You can also run manually: ollama pull $BASE_MODEL"
+
+            if ! OLLAMA_HOST="$CLIENT_OLLAMA_HOST" ollama pull "$BASE_MODEL"; then
+                error "Failed to pull base model $BASE_MODEL"
+                error "Please run manually: ollama pull $BASE_MODEL"
+                exit 1
+            fi
+            log "Base model $BASE_MODEL pulled successfully"
+        else
+            log "Base model $BASE_MODEL is already available"
+        fi
+
+        # Create custom model from Modelfile
+        log "Creating custom model $OLLAMA_MODEL from Modelfile..."
+        if OLLAMA_HOST="$CLIENT_OLLAMA_HOST" ollama create "$OLLAMA_MODEL" -f "$MODELFILE"; then
+            log "Custom model $OLLAMA_MODEL created successfully"
+        else
+            error "Failed to create custom model $OLLAMA_MODEL"
+            error "Please run manually: ollama create $OLLAMA_MODEL -f $MODELFILE"
+            exit 1
+        fi
     else
-        error "Failed to pull model $OLLAMA_MODEL"
-        error "Please run manually: ollama pull $OLLAMA_MODEL"
-        exit 1
+        # No Modelfile - try to pull directly from registry
+        log "Pulling model (this may take a while, ~65 GB download)..."
+        log "You can also run manually: ollama pull $OLLAMA_MODEL"
+
+        if OLLAMA_HOST="$CLIENT_OLLAMA_HOST" ollama pull "$OLLAMA_MODEL"; then
+            log "Model $OLLAMA_MODEL pulled successfully"
+        else
+            error "Failed to pull model $OLLAMA_MODEL"
+            error "Please run manually: ollama pull $OLLAMA_MODEL"
+            exit 1
+        fi
     fi
 fi
 

@@ -48,3 +48,6 @@ __pycache__/
 .env.backup.*
 *.zip
 services/brain/uv.lock
+
+## Testing
+test

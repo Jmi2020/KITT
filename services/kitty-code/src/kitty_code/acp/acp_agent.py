@@ -118,12 +118,12 @@ class VibeAcpAgent(AcpAgent):
                 AuthMethod(
                     id="vibe-setup",
                     name="Register your API Key",
-                    description="Register your API Key inside Mistral Vibe",
+                    description="Register your API Key inside Kitty Code",
                     field_meta={
                         "terminal-auth": {
                             "command": command,
                             "args": args,
-                            "label": "Mistral Vibe Setup",
+                            "label": "Kitty Code Setup",
                         }
                     },
                 )
@@ -141,8 +141,8 @@ class VibeAcpAgent(AcpAgent):
             ),
             protocolVersion=PROTOCOL_VERSION,
             agentInfo=Implementation(
-                name="@mistralai/mistral-vibe",
-                title="Mistral Vibe",
+                name="@kitty/kitty-code",
+                title="Kitty Code",
                 version=__version__,
             ),
             authMethods=auth_methods,
