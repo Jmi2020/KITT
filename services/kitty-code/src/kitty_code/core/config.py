@@ -231,12 +231,13 @@ class ModelConfig(BaseModel):
         return data
 
 
+# Default providers - local only for airgap compliance
+# Cloud providers can be added via config file if needed
 DEFAULT_PROVIDERS = [
     ProviderConfig(
-        name="mistral",
-        api_base="https://api.mistral.ai/v1",
-        api_key_env_var="MISTRAL_API_KEY",
-        backend=Backend.MISTRAL,
+        name="ollama",
+        api_base="http://localhost:11434/v1",
+        api_key_env_var="",
     ),
     ProviderConfig(
         name="llamacpp",
@@ -245,25 +246,20 @@ DEFAULT_PROVIDERS = [
     ),
 ]
 
+# Default models - local only for airgap compliance
+# Cloud models can be added via config file if needed
 DEFAULT_MODELS = [
     ModelConfig(
-        name="mistral-vibe-cli-latest",
-        provider="mistral",
-        alias="devstral-2",
-        input_price=0.4,
-        output_price=2.0,
-    ),
-    ModelConfig(
-        name="devstral-small-latest",
-        provider="mistral",
-        alias="devstral-small",
-        input_price=0.1,
-        output_price=0.3,
+        name="devstral-2:latest",
+        provider="ollama",
+        alias="local",
+        input_price=0.0,
+        output_price=0.0,
     ),
     ModelConfig(
         name="devstral",
         provider="llamacpp",
-        alias="local",
+        alias="llamacpp",
         input_price=0.0,
         output_price=0.0,
     ),
@@ -285,7 +281,7 @@ class VibeConfig(BaseSettings):
     include_model_info: bool = True
     include_project_context: bool = True
     include_prompt_detail: bool = True
-    enable_update_checks: bool = True
+    enable_update_checks: bool = False  # Disabled for airgap compliance
     api_timeout: float = 720.0
     providers: list[ProviderConfig] = Field(
         default_factory=lambda: list(DEFAULT_PROVIDERS)
