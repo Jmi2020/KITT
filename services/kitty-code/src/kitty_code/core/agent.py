@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable
 from enum import StrEnum, auto
 import time
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 from pydantic import BaseModel
@@ -16,6 +16,7 @@ from kitty_code.core.llm.format import APIToolFormatHandler, ResolvedMessage
 from kitty_code.core.llm.types import BackendLike
 from kitty_code.core.middleware import (
     AutoCompactMiddleware,
+    CompletionCheckMiddleware,
     ContextWarningMiddleware,
     ConversationContext,
     MiddlewareAction,
@@ -24,6 +25,7 @@ from kitty_code.core.middleware import (
     PlanModeMiddleware,
     PriceLimitMiddleware,
     ResetReason,
+    TaskInjectionMiddleware,
     TurnLimitMiddleware,
 )
 from kitty_code.core.modes import AgentMode
@@ -62,6 +64,7 @@ from kitty_code.core.utils import (
     get_user_agent,
     get_user_cancellation_message,
     is_user_cancellation_event,
+    logger,
 )
 
 
@@ -115,11 +118,14 @@ class Agent:
         self._last_observed_message_index: int = 0
         self.middleware_pipeline = MiddlewarePipeline()
         self.enable_streaming = enable_streaming
+
+        # Focus preservation middleware (stored for direct access)
+        self._task_injection_middleware: TaskInjectionMiddleware | None = None
+        self._completion_check_middleware: CompletionCheckMiddleware | None = None
+
         self._setup_middleware()
 
-        system_prompt = get_universal_system_prompt(
-            self.tool_manager, config, self.skill_manager
-        )
+        system_prompt = get_universal_system_prompt(self.tool_manager, config, self.skill_manager)
         self.messages = [LLMMessage(role=Role.system, content=system_prompt)]
 
         if self.message_observer:
@@ -189,15 +195,23 @@ class Agent:
             self.middleware_pipeline.add(PriceLimitMiddleware(self._max_price))
 
         if self.config.auto_compact_threshold > 0:
-            self.middleware_pipeline.add(
-                AutoCompactMiddleware(self.config.auto_compact_threshold)
-            )
+            self.middleware_pipeline.add(AutoCompactMiddleware(self.config.auto_compact_threshold))
             if self.config.context_warnings:
                 self.middleware_pipeline.add(
                     ContextWarningMiddleware(0.5, self.config.auto_compact_threshold)
                 )
 
         self.middleware_pipeline.add(PlanModeMiddleware(lambda: self._mode))
+
+        # Focus preservation: inject task context during execution
+        self._task_injection_middleware = TaskInjectionMiddleware(lambda: self._mode)
+        self.middleware_pipeline.add(self._task_injection_middleware)
+
+        # Ralph-Wiggum: check for incomplete tasks before allowing stop
+        self._completion_check_middleware = CompletionCheckMiddleware(
+            max_iterations=20, todo_reader=self._get_todo_list
+        )
+        self.middleware_pipeline.add(self._completion_check_middleware)
 
     async def _handle_middleware_result(
         self, result: MiddlewareResult
@@ -218,16 +232,10 @@ class Agent:
                         last_msg.content = result.message
 
             case MiddlewareAction.COMPACT:
-                old_tokens = result.metadata.get(
-                    "old_tokens", self.stats.context_tokens
-                )
-                threshold = result.metadata.get(
-                    "threshold", self.config.auto_compact_threshold
-                )
+                old_tokens = result.metadata.get("old_tokens", self.stats.context_tokens)
+                threshold = result.metadata.get("threshold", self.config.auto_compact_threshold)
 
-                yield CompactStartEvent(
-                    current_context_tokens=old_tokens, threshold=threshold
-                )
+                yield CompactStartEvent(current_context_tokens=old_tokens, threshold=threshold)
 
                 summary = await self.compact()
 
@@ -241,9 +249,7 @@ class Agent:
                 pass
 
     def _get_context(self) -> ConversationContext:
-        return ConversationContext(
-            messages=self.messages, stats=self.stats, config=self.config
-        )
+        return ConversationContext(messages=self.messages, stats=self.stats, config=self.config)
 
     async def _conversation_loop(self, user_msg: str) -> AsyncGenerator[BaseEvent]:
         self.messages.append(LLMMessage(role=Role.user, content=user_msg))
@@ -252,9 +258,7 @@ class Agent:
         try:
             should_break_loop = False
             while not should_break_loop:
-                result = await self.middleware_pipeline.run_before_turn(
-                    self._get_context()
-                )
+                result = await self.middleware_pipeline.run_before_turn(self._get_context())
                 async for event in self._handle_middleware_result(result):
                     yield event
 
@@ -276,9 +280,7 @@ class Agent:
                 if user_cancelled:
                     return
 
-                after_result = await self.middleware_pipeline.run_after_turn(
-                    self._get_context()
-                )
+                after_result = await self.middleware_pipeline.run_after_turn(self._get_context())
                 async for event in self._handle_middleware_result(after_result):
                     yield event
 
@@ -303,11 +305,15 @@ class Agent:
         last_message = self.messages[-1]
 
         parsed = self.format_handler.parse_message(last_message)
-        resolved = self.format_handler.resolve_tool_calls(
-            parsed, self.tool_manager, self.config
-        )
+        resolved = self.format_handler.resolve_tool_calls(parsed, self.tool_manager, self.config)
 
-        if not resolved.tool_calls and not resolved.failed_calls:
+        has_tool_calls = bool(resolved.tool_calls or resolved.failed_calls)
+
+        # Record for Ralph-Wiggum: track if this was a completion attempt (no tool calls)
+        if self._completion_check_middleware:
+            self._completion_check_middleware.record_response(has_tool_calls)
+
+        if not has_tool_calls:
             return
 
         async for event in self._handle_tool_calls(resolved):
@@ -376,9 +382,7 @@ class Agent:
 
             self.stats.tool_calls_failed += 1
             self.messages.append(
-                self.format_handler.create_failed_tool_response_message(
-                    failed, error_msg
-                )
+                self.format_handler.create_failed_tool_response_message(failed, error_msg)
             )
 
         for tool_call in resolved.tool_calls:
@@ -403,9 +407,7 @@ class Agent:
                 )
                 self.messages.append(
                     LLMMessage.model_validate(
-                        self.format_handler.create_tool_response_message(
-                            tool_call, error_msg
-                        )
+                        self.format_handler.create_tool_response_message(tool_call, error_msg)
                     )
                 )
                 continue
@@ -432,9 +434,7 @@ class Agent:
 
                 self.messages.append(
                     LLMMessage.model_validate(
-                        self.format_handler.create_tool_response_message(
-                            tool_call, skip_reason
-                        )
+                        self.format_handler.create_tool_response_message(tool_call, skip_reason)
                     )
                 )
                 continue
@@ -446,15 +446,11 @@ class Agent:
                 result_model = await tool_instance.invoke(**tool_call.args_dict)
                 duration = time.perf_counter() - start_time
 
-                text = "\n".join(
-                    f"{k}: {v}" for k, v in result_model.model_dump().items()
-                )
+                text = "\n".join(f"{k}: {v}" for k, v in result_model.model_dump().items())
 
                 self.messages.append(
                     LLMMessage.model_validate(
-                        self.format_handler.create_tool_response_message(
-                            tool_call, text
-                        )
+                        self.format_handler.create_tool_response_message(tool_call, text)
                     )
                 )
 
@@ -469,9 +465,7 @@ class Agent:
                 self.stats.tool_calls_succeeded += 1
 
             except asyncio.CancelledError:
-                cancel = str(
-                    get_user_cancellation_message(CancellationReason.TOOL_INTERRUPTED)
-                )
+                cancel = str(get_user_cancellation_message(CancellationReason.TOOL_INTERRUPTED))
                 yield ToolResultEvent(
                     tool_name=tool_call.tool_name,
                     tool_class=tool_call.tool_class,
@@ -480,17 +474,13 @@ class Agent:
                 )
                 self.messages.append(
                     LLMMessage.model_validate(
-                        self.format_handler.create_tool_response_message(
-                            tool_call, cancel
-                        )
+                        self.format_handler.create_tool_response_message(tool_call, cancel)
                     )
                 )
                 raise
 
             except KeyboardInterrupt:
-                cancel = str(
-                    get_user_cancellation_message(CancellationReason.TOOL_INTERRUPTED)
-                )
+                cancel = str(get_user_cancellation_message(CancellationReason.TOOL_INTERRUPTED))
                 yield ToolResultEvent(
                     tool_name=tool_call.tool_name,
                     tool_class=tool_call.tool_class,
@@ -499,15 +489,15 @@ class Agent:
                 )
                 self.messages.append(
                     LLMMessage.model_validate(
-                        self.format_handler.create_tool_response_message(
-                            tool_call, cancel
-                        )
+                        self.format_handler.create_tool_response_message(tool_call, cancel)
                     )
                 )
                 raise
 
             except (ToolError, ToolPermissionError) as exc:
-                error_msg = f"<{TOOL_ERROR_TAG}>{tool_instance.get_name()} failed: {exc}</{TOOL_ERROR_TAG}>"
+                error_msg = (
+                    f"<{TOOL_ERROR_TAG}>{tool_instance.get_name()} failed: {exc}</{TOOL_ERROR_TAG}>"
+                )
 
                 yield ToolResultEvent(
                     tool_name=tool_call.tool_name,
@@ -523,9 +513,7 @@ class Agent:
                     self.stats.tool_calls_failed += 1
                 self.messages.append(
                     LLMMessage.model_validate(
-                        self.format_handler.create_tool_response_message(
-                            tool_call, error_msg
-                        )
+                        self.format_handler.create_tool_response_message(tool_call, error_msg)
                     )
                 )
                 continue
@@ -534,9 +522,7 @@ class Agent:
         active_model = self.config.get_active_model()
         provider = self.config.get_provider_for_model(active_model)
 
-        available_tools = self.format_handler.get_available_tools(
-            self.tool_manager, self.config
-        )
+        available_tools = self.format_handler.get_available_tools(self.tool_manager, self.config)
         tool_choice = self.format_handler.get_tool_choice()
 
         try:
@@ -557,14 +543,10 @@ class Agent:
             end_time = time.perf_counter()
 
             if result.usage is None:
-                raise LLMResponseError(
-                    "Usage data missing in non-streaming completion response"
-                )
+                raise LLMResponseError("Usage data missing in non-streaming completion response")
             self._update_stats(usage=result.usage, time_seconds=end_time - start_time)
 
-            processed_message = self.format_handler.process_api_response_message(
-                result.message
-            )
+            processed_message = self.format_handler.process_api_response_message(result.message)
             self.messages.append(processed_message)
             return LLMChunk(message=processed_message, usage=result.usage)
 
@@ -573,20 +555,29 @@ class Agent:
                 f"API error from {provider.name} (model: {active_model.name}): {e}"
             ) from e
 
-    async def _chat_streaming(
-        self, max_tokens: int | None = None
-    ) -> AsyncGenerator[LLMChunk]:
+    async def _chat_streaming(self, max_tokens: int | None = None) -> AsyncGenerator[LLMChunk]:
         active_model = self.config.get_active_model()
         provider = self.config.get_provider_for_model(active_model)
 
-        available_tools = self.format_handler.get_available_tools(
-            self.tool_manager, self.config
-        )
+        available_tools = self.format_handler.get_available_tools(self.tool_manager, self.config)
         tool_choice = self.format_handler.get_tool_choice()
+
+        # Inference logging: track LLM call start
+        logger.info(
+            "LLM streaming call started: model=%s, provider=%s, messages=%d",
+            active_model.name,
+            provider.name,
+            len(self.messages),
+        )
+
         try:
             start_time = time.perf_counter()
+            last_chunk_time = start_time
             usage = LLMUsage()
             chunk_agg = LLMChunk(message=LLMMessage(role=Role.assistant))
+            chunks_received = 0
+            PROGRESS_LOG_INTERVAL = 20  # Log every N chunks
+
             async with self.backend as backend:
                 async for chunk in backend.complete_streaming(
                     model=active_model,
@@ -600,26 +591,66 @@ class Agent:
                     },
                     max_tokens=max_tokens,
                 ):
-                    processed_message = (
-                        self.format_handler.process_api_response_message(chunk.message)
+                    chunks_received += 1
+                    current_time = time.perf_counter()
+                    chunk_delta = current_time - last_chunk_time
+                    last_chunk_time = current_time
+
+                    # Log progress periodically
+                    if chunks_received % PROGRESS_LOG_INTERVAL == 0:
+                        elapsed = current_time - start_time
+                        logger.debug(
+                            "LLM streaming progress: %d chunks in %.2fs (last chunk delta: %.3fs)",
+                            chunks_received,
+                            elapsed,
+                            chunk_delta,
+                        )
+
+                    # Warn if chunk delta exceeds threshold (potential stall indicator)
+                    if chunk_delta > 10.0:
+                        logger.warning(
+                            "LLM streaming slow: %.2fs between chunks (chunk %d)",
+                            chunk_delta,
+                            chunks_received,
+                        )
+
+                    processed_message = self.format_handler.process_api_response_message(
+                        chunk.message
                     )
-                    processed_chunk = LLMChunk(
-                        message=processed_message, usage=chunk.usage
-                    )
+                    processed_chunk = LLMChunk(message=processed_message, usage=chunk.usage)
                     chunk_agg += processed_chunk
                     usage += chunk.usage or LLMUsage()
                     yield processed_chunk
+
             end_time = time.perf_counter()
+            total_time = end_time - start_time
+
+            # Inference logging: track completion
+            logger.info(
+                "LLM streaming call completed: %d chunks in %.2fs (%.1f chunks/sec)",
+                chunks_received,
+                total_time,
+                chunks_received / total_time if total_time > 0 else 0,
+            )
 
             if chunk_agg.usage is None:
-                raise LLMResponseError(
-                    "Usage data missing in final chunk of streamed completion"
+                logger.warning(
+                    "LLM streaming: usage data missing in final chunk after %d chunks",
+                    chunks_received,
                 )
-            self._update_stats(usage=usage, time_seconds=end_time - start_time)
+                raise LLMResponseError("Usage data missing in final chunk of streamed completion")
+            self._update_stats(usage=usage, time_seconds=total_time)
 
             self.messages.append(chunk_agg.message)
 
         except Exception as e:
+            elapsed = time.perf_counter() - start_time
+            logger.error(
+                "LLM streaming call failed after %.2fs (%d chunks): %s",
+                elapsed,
+                chunks_received if "chunks_received" in dir() else 0,
+                str(e),
+            )
             raise RuntimeError(
                 f"API error from {provider.name} (model: {active_model.name}): {e}"
             ) from e
@@ -681,13 +712,9 @@ class Agent:
 
         match response:
             case ApprovalResponse.YES:
-                return ToolDecision(
-                    verdict=ToolExecutionResponse.EXECUTE, feedback=feedback
-                )
+                return ToolDecision(verdict=ToolExecutionResponse.EXECUTE, feedback=feedback)
             case ApprovalResponse.NO:
-                return ToolDecision(
-                    verdict=ToolExecutionResponse.SKIP, feedback=feedback
-                )
+                return ToolDecision(verdict=ToolExecutionResponse.SKIP, feedback=feedback)
 
     def _clean_message_history(self) -> None:
         ACCEPTABLE_HISTORY_SIZE = 2
@@ -765,9 +792,7 @@ class Agent:
 
         try:
             active_model = self.config.get_active_model()
-            self.stats.update_pricing(
-                active_model.input_price, active_model.output_price
-            )
+            self.stats.update_pricing(active_model.input_price, active_model.output_price)
         except ValueError:
             pass
 
@@ -795,15 +820,11 @@ class Agent:
 
             summary_result = await self._chat()
             if summary_result.usage is None:
-                raise LLMResponseError(
-                    "Usage data missing in compaction summary response"
-                )
+                raise LLMResponseError("Usage data missing in compaction summary response")
             summary_content = summary_result.message.content or ""
 
             if last_user_message:
-                summary_content += (
-                    f"\n\nLast request from user was: {last_user_message}"
-                )
+                summary_content += f"\n\nLast request from user was: {last_user_message}"
 
             system_message = self.messages[0]
             summary_message = LLMMessage(role=Role.user, content=summary_content)
@@ -816,9 +837,7 @@ class Agent:
                 actual_context_tokens = await backend.count_tokens(
                     model=active_model,
                     messages=self.messages,
-                    tools=self.format_handler.get_available_tools(
-                        self.tool_manager, self.config
-                    ),
+                    tools=self.format_handler.get_available_tools(self.tool_manager, self.config),
                     extra_headers={"user-agent": get_user_agent(provider.backend)},
                 )
 
@@ -842,12 +861,55 @@ class Agent:
     async def switch_mode(self, new_mode: AgentMode) -> None:
         if new_mode == self._mode:
             return
-        new_config = VibeConfig.load(
-            workdir=self.config.workdir, **new_mode.config_overrides
-        )
+
+        old_mode = self._mode
+
+        # When transitioning FROM plan mode TO execution mode, persist the plan
+        if old_mode == AgentMode.PLAN and new_mode != AgentMode.PLAN:
+            self._persist_current_plan()
+
+        new_config = VibeConfig.load(workdir=self.config.workdir, **new_mode.config_overrides)
 
         await self.reload_with_initial_messages(config=new_config)
         self._mode = new_mode
+
+    def _persist_current_plan(self) -> None:
+        """Extract and persist the current plan from conversation history.
+
+        Called when transitioning from plan mode to execution mode to ensure
+        the plan is available for task injection middleware.
+        """
+        # Look for plan content in recent assistant messages
+        plan_content = None
+        for msg in reversed(self.messages):
+            if msg.role == Role.assistant and msg.content:
+                # Look for plan markers or structured task lists
+                content = msg.content
+                if any(
+                    marker in content.lower()
+                    for marker in ["## plan", "# plan", "tasks:", "steps:", "1.", "- ["]
+                ):
+                    plan_content = content
+                    break
+
+        if plan_content and self._task_injection_middleware:
+            logger.info("Persisting plan from conversation for focus preservation")
+            self._task_injection_middleware.set_plan_content(plan_content)
+
+    def _get_todo_list(self) -> list[dict[str, Any]]:
+        """Get the current todo list from the todo tool.
+
+        Used by CompletionCheckMiddleware to check for incomplete tasks.
+        """
+        try:
+            todo_tool = self.tool_manager.get("todo")
+            # The todo tool stores todos in state.todos (TodoState model)
+            if hasattr(todo_tool, "state") and hasattr(todo_tool.state, "todos"):
+                return [t.model_dump() for t in todo_tool.state.todos]
+            return []
+        except Exception as e:
+            logger.debug("Could not read todo list: %s", e)
+            return []
 
     async def reload_with_initial_messages(
         self,
@@ -886,9 +948,7 @@ class Agent:
 
         try:
             active_model = self.config.get_active_model()
-            self.stats.update_pricing(
-                active_model.input_price, active_model.output_price
-            )
+            self.stats.update_pricing(active_model.input_price, active_model.output_price)
         except ValueError:
             pass
 

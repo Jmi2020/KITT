@@ -37,5 +37,6 @@ SESSION_LOG_DIR = GlobalPath(lambda: KITTY_CODE_HOME.path / "logs" / "session")
 TRUSTED_FOLDERS_FILE = GlobalPath(lambda: KITTY_CODE_HOME.path / "trusted_folders.toml")
 LOG_DIR = GlobalPath(lambda: KITTY_CODE_HOME.path / "logs")
 LOG_FILE = GlobalPath(lambda: KITTY_CODE_HOME.path / "kitty-code.log")
+CURRENT_PLAN_FILE = GlobalPath(lambda: KITTY_CODE_HOME.path / "current_plan.md")
 
 DEFAULT_TOOL_DIR = GlobalPath(lambda: VIBE_ROOT / "core" / "tools" / "builtins")

@@ -6,7 +6,8 @@ from enum import StrEnum, auto
 from typing import TYPE_CHECKING, Any, Protocol
 
 from kitty_code.core.modes import AgentMode
-from kitty_code.core.utils import VIBE_WARNING_TAG
+from kitty_code.core.paths.global_paths import CURRENT_PLAN_FILE
+from kitty_code.core.utils import VIBE_WARNING_TAG, logger
 
 if TYPE_CHECKING:
     from kitty_code.core.config import VibeConfig
@@ -109,9 +110,7 @@ class AutoCompactMiddleware:
 
 
 class ContextWarningMiddleware:
-    def __init__(
-        self, threshold_percent: float = 0.5, max_context: int | None = None
-    ) -> None:
+    def __init__(self, threshold_percent: float = 0.5, max_context: int | None = None) -> None:
         self.threshold_percent = threshold_percent
         self.max_context = max_context
         self.has_warned = False
@@ -130,9 +129,7 @@ class ContextWarningMiddleware:
             percentage_used = (context.stats.context_tokens / max_context) * 100
             warning_msg = f"<{VIBE_WARNING_TAG}>You have used {percentage_used:.0f}% of your total context ({context.stats.context_tokens:,}/{max_context:,} tokens)</{VIBE_WARNING_TAG}>"
 
-            return MiddlewareResult(
-                action=MiddlewareAction.INJECT_MESSAGE, message=warning_msg
-            )
+            return MiddlewareResult(action=MiddlewareAction.INJECT_MESSAGE, message=warning_msg)
 
         return MiddlewareResult()
 
@@ -163,15 +160,185 @@ class PlanModeMiddleware:
     async def before_turn(self, context: ConversationContext) -> MiddlewareResult:
         if not self._is_plan_mode():
             return MiddlewareResult()
-        return MiddlewareResult(
-            action=MiddlewareAction.INJECT_MESSAGE, message=self.reminder
-        )
+        return MiddlewareResult(action=MiddlewareAction.INJECT_MESSAGE, message=self.reminder)
 
     async def after_turn(self, context: ConversationContext) -> MiddlewareResult:
         return MiddlewareResult()
 
     def reset(self, reset_reason: ResetReason = ResetReason.STOP) -> None:
         pass
+
+
+TASK_CONTEXT_REMINDER = """<task-context>
+Current plan/tasks to complete:
+{plan_content}
+</task-context>
+Continue executing the plan. Mark tasks complete as you finish them using the todo tool."""
+
+
+class TaskInjectionMiddleware:
+    """Injects current plan/task list at start of each turn during execution mode.
+
+    This helps maintain focus by reminding the agent of pending tasks after
+    transitioning from plan mode to execution mode.
+    """
+
+    def __init__(self, mode_getter: Callable[[], AgentMode]) -> None:
+        self._mode_getter = mode_getter
+        self._plan_content: str | None = None
+
+    def _is_execution_mode(self) -> bool:
+        mode = self._mode_getter()
+        return mode in (AgentMode.DEFAULT, AgentMode.ACCEPT_EDITS)
+
+    def _read_current_plan(self) -> str | None:
+        """Read the current plan file if it exists."""
+        plan_path = CURRENT_PLAN_FILE.path
+        if plan_path.exists():
+            try:
+                content = plan_path.read_text(encoding="utf-8").strip()
+                if content:
+                    return content
+            except OSError as e:
+                logger.warning("Failed to read plan file: %s", e)
+        return None
+
+    def set_plan_content(self, content: str) -> None:
+        """Set plan content directly (used when transitioning from plan mode)."""
+        self._plan_content = content
+        # Also persist to file for session recovery
+        try:
+            CURRENT_PLAN_FILE.path.parent.mkdir(parents=True, exist_ok=True)
+            CURRENT_PLAN_FILE.path.write_text(content, encoding="utf-8")
+            logger.info("Plan persisted to %s", CURRENT_PLAN_FILE.path)
+        except OSError as e:
+            logger.warning("Failed to persist plan file: %s", e)
+
+    def clear_plan(self) -> None:
+        """Clear the current plan (called when all tasks complete)."""
+        self._plan_content = None
+        try:
+            if CURRENT_PLAN_FILE.path.exists():
+                CURRENT_PLAN_FILE.path.unlink()
+                logger.info("Plan file cleared")
+        except OSError as e:
+            logger.warning("Failed to clear plan file: %s", e)
+
+    async def before_turn(self, context: ConversationContext) -> MiddlewareResult:
+        if not self._is_execution_mode():
+            return MiddlewareResult()
+
+        # Try in-memory plan first, then file
+        plan_content = self._plan_content or self._read_current_plan()
+        if not plan_content:
+            return MiddlewareResult()
+
+        reminder = TASK_CONTEXT_REMINDER.format(plan_content=plan_content)
+        return MiddlewareResult(action=MiddlewareAction.INJECT_MESSAGE, message=reminder)
+
+    async def after_turn(self, context: ConversationContext) -> MiddlewareResult:
+        return MiddlewareResult()
+
+    def reset(self, reset_reason: ResetReason = ResetReason.STOP) -> None:
+        # Don't clear plan on reset - it should persist until explicitly cleared
+        pass
+
+
+RALPH_WIGGUM_CONTINUATION = """You have incomplete tasks remaining:
+
+{task_list}
+
+Continue working on these tasks. Mark each as 'in_progress' when you start and 'completed' when done.
+Do not stop until all tasks are completed or explicitly cancelled."""
+
+
+class CompletionCheckMiddleware:
+    """Checks task completion before allowing agent to stop (Ralph-Wiggum pattern).
+
+    If there are incomplete tasks and the agent attempts to stop (no tool calls
+    in response), this middleware re-injects the task list with a reminder to
+    continue. This creates a self-correcting loop that ensures all planned
+    tasks are completed.
+
+    Named after the Claude Code ralph-wiggum plugin which implements similar
+    autonomous iteration functionality.
+    """
+
+    def __init__(
+        self,
+        max_iterations: int = 20,
+        todo_reader: Callable[[], list[dict[str, Any]]] | None = None,
+    ) -> None:
+        self.max_iterations = max_iterations
+        self.iteration_count = 0
+        self._todo_reader = todo_reader
+        self._last_response_had_tool_calls = True  # Assume true initially
+
+    def set_todo_reader(self, reader: Callable[[], list[dict[str, Any]]]) -> None:
+        """Set the function to read current todos from the todo tool."""
+        self._todo_reader = reader
+
+    def record_response(self, has_tool_calls: bool) -> None:
+        """Record whether the last response had tool calls.
+
+        Called by the agent after each LLM response to track completion attempts.
+        """
+        self._last_response_had_tool_calls = has_tool_calls
+
+    def _get_incomplete_tasks(self) -> list[dict[str, Any]]:
+        """Get tasks not yet completed from todo reader."""
+        if not self._todo_reader:
+            return []
+        try:
+            todos = self._todo_reader()
+            return [t for t in todos if t.get("status") not in ("completed", "cancelled")]
+        except Exception as e:
+            logger.warning("Failed to read todos: %s", e)
+            return []
+
+    def _create_continuation_prompt(self, incomplete: list[dict[str, Any]]) -> str:
+        """Create a prompt to continue working on incomplete tasks."""
+        task_list = "\n".join(
+            f"- [{t.get('status', 'pending')}] {t.get('content', 'unknown task')}"
+            for t in incomplete
+        )
+        return RALPH_WIGGUM_CONTINUATION.format(task_list=task_list)
+
+    async def before_turn(self, context: ConversationContext) -> MiddlewareResult:
+        # Check if last response was a completion attempt (no tool calls)
+        # and there are incomplete tasks
+        if self._last_response_had_tool_calls:
+            return MiddlewareResult()
+
+        incomplete = self._get_incomplete_tasks()
+        if not incomplete:
+            return MiddlewareResult()
+
+        if self.iteration_count >= self.max_iterations:
+            logger.warning(
+                "Ralph-Wiggum: max iterations (%d) reached, allowing stop with %d incomplete tasks",
+                self.max_iterations,
+                len(incomplete),
+            )
+            return MiddlewareResult()
+
+        self.iteration_count += 1
+        logger.info(
+            "Ralph-Wiggum: %d incomplete tasks, iteration %d/%d - re-injecting task list",
+            len(incomplete),
+            self.iteration_count,
+            self.max_iterations,
+        )
+
+        continuation = self._create_continuation_prompt(incomplete)
+        return MiddlewareResult(action=MiddlewareAction.INJECT_MESSAGE, message=continuation)
+
+    async def after_turn(self, context: ConversationContext) -> MiddlewareResult:
+        return MiddlewareResult()
+
+    def reset(self, reset_reason: ResetReason = ResetReason.STOP) -> None:
+        self.iteration_count = 0
+        self._last_response_had_tool_calls = True
 
 
 class MiddlewarePipeline:
