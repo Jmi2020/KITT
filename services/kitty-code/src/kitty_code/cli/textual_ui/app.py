@@ -1079,8 +1079,10 @@ class VibeApp(App):  # noqa: PLR0904
         await bottom_container.mount(plan_approval_app)
         self._current_bottom_app = BottomApp.PlanApproval
 
-        self.call_after_refresh(plan_approval_app.focus)
-        self.call_after_refresh(self._scroll_to_bottom)
+        # Use set_focus directly instead of call_after_refresh to ensure
+        # focus is set even when called from async worker context
+        self.set_focus(plan_approval_app)
+        self._scroll_to_bottom()
 
     async def _switch_to_input_app(self) -> None:
         bottom_container = self.query_one("#bottom-app-container")
@@ -1160,6 +1162,16 @@ class VibeApp(App):  # noqa: PLR0904
             try:
                 approval_app = self.query_one(ApprovalApp)
                 approval_app.action_reject()
+            except Exception:
+                pass
+            self._last_escape_time = None
+            return
+
+        if self._current_bottom_app == BottomApp.PlanApproval:
+            # ESC in plan approval means "continue editing" (option 3)
+            try:
+                plan_approval_app = self.query_one(PlanApprovalApp)
+                plan_approval_app.action_select_3()
             except Exception:
                 pass
             self._last_escape_time = None
