@@ -11,7 +11,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from typing import TYPE_CHECKING
+
 from ..config import ModelConfig
+
+if TYPE_CHECKING:
+    from ..config import VibeConfig
+    from ..llm.types import BackendLike
 
 logger = logging.getLogger("kitty-code")
 
@@ -292,3 +298,26 @@ class BackendPool:
                         logger.warning(f"Error shutting down {role} backend: {e}")
 
         self._backends.clear()
+
+
+def create_backend_from_config(
+    model_config: ModelConfig,
+    config: "VibeConfig",
+) -> "BackendLike":
+    """Create an LLM backend from model config using VibeConfig.
+
+    Uses the same pattern as Agent._select_backend() to create
+    the appropriate backend based on provider configuration.
+
+    Args:
+        model_config: Model configuration with name, provider, etc.
+        config: Full application config with provider settings
+
+    Returns:
+        BackendLike instance ready for LLM calls
+    """
+    from kitty_code.core.llm.backend.factory import BACKEND_FACTORY
+
+    provider = config.get_provider_for_model(model_config)
+    timeout = config.api_timeout
+    return BACKEND_FACTORY[provider.backend](provider=provider, timeout=timeout)

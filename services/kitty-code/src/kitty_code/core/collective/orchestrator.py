@@ -8,9 +8,13 @@ machine transitions, error handling, and graceful degradation.
 import json
 import logging
 import time
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional
+
+from kitty_code.core.llm.format import APIToolFormatHandler
+from kitty_code.core.types import AssistantEvent, LLMMessage, LLMUsage, Role
 
 from .backends import BackendInstance, BackendPool
 from .config import CollectiveConfig
@@ -157,6 +161,125 @@ class CollectiveOrchestrator:
                 error=str(e),
                 duration_ms=int((time.time() - start_time) * 1000),
             )
+
+    async def process_with_events(
+        self,
+        user_input: str,
+        conversation_context: Optional[str] = None,
+    ) -> AsyncGenerator[AssistantEvent, None]:
+        """Process with streaming events for TUI integration.
+
+        Yields AssistantEvent objects during orchestration to provide
+        real-time feedback on Planner → Executor → Judge workflow.
+
+        Args:
+            user_input: The user's request
+            conversation_context: Optional conversation history
+
+        Yields:
+            AssistantEvent objects with progress updates
+        """
+        # Route the task
+        routing = self.router.route(user_input)
+        logger.info(
+            f"Collective process_with_events: routing={routing.mode}, "
+            f"confidence={routing.confidence:.2f}"
+        )
+
+        if routing.is_direct():
+            # Signal direct mode - let normal agent flow handle it
+            # Empty content signals to agent to use normal flow
+            return
+
+        yield AssistantEvent(
+            content=f"\n[Collective] Complex task detected (confidence: {routing.confidence:.0%})\n"
+        )
+
+        # Reset context for new request
+        self.context.reset_for_new_request(user_input)
+        self.context.transition_to(CollectiveState.ROUTING, "Processing user input")
+
+        # Planning phase
+        yield AssistantEvent(content=f"[Planner:{self.config.planner_model}] Decomposing task...\n")
+        self.context.transition_to(CollectiveState.PLANNING, "Creating task plan")
+        plan = await self._run_planner(user_input, conversation_context)
+
+        if plan is None:
+            yield AssistantEvent(content="[Planner] Failed to create plan\n")
+            self.context.transition_to(CollectiveState.ERROR, "Planning failed")
+            return
+
+        self.context.current_plan = plan
+        yield AssistantEvent(content=f"[Planner] Created {len(plan.steps)} steps:\n")
+        for i, step in enumerate(plan.steps):
+            yield AssistantEvent(content=f"  {i+1}. {step.description}\n")
+
+        # Execute each step
+        all_executions = []
+        all_judgments = []
+
+        for step_idx, step in enumerate(plan.steps):
+            self.context.current_step_index = step_idx
+            yield AssistantEvent(
+                content=f"\n[Executor:{self.config.executor_model}] Step {step_idx+1}/{len(plan.steps)}: {step.description}\n"
+            )
+
+            # Execute step
+            self.context.transition_to(CollectiveState.EXECUTING, f"Step {step_idx + 1}")
+            execution = await self._run_executor(step, plan.summary, all_executions)
+            all_executions.append(execution)
+            self.context.execution_results.append(execution)
+
+            if execution.response_text:
+                # Truncate long responses for display
+                display_text = execution.response_text
+                if len(display_text) > 500:
+                    display_text = display_text[:500] + "...\n"
+                yield AssistantEvent(content=display_text)
+
+            if not execution.success:
+                yield AssistantEvent(content=f"\n[Executor] Error: {execution.error}\n")
+                if self.context.can_escalate(self.config.judgment.max_escalations):
+                    self.context.record_escalation()
+                    yield AssistantEvent(content="[Collective] Escalating...\n")
+                    continue
+                else:
+                    yield AssistantEvent(content="[Collective] Max escalations reached, stopping\n")
+                    return
+
+            # Judge the execution
+            yield AssistantEvent(content=f"[Judge:{self.config.judge_model}] Reviewing... ")
+            self.context.transition_to(CollectiveState.JUDGING, f"Reviewing step {step_idx + 1}")
+            judgment = await self._run_judge(plan, step, execution)
+            all_judgments.append(judgment)
+            self.context.judgments.append(judgment)
+
+            verdict_emoji = {"APPROVE": "✓", "REVISE": "↻", "REJECT": "✗"}.get(
+                judgment.verdict.value, "?"
+            )
+            yield AssistantEvent(content=f"{verdict_emoji} {judgment.verdict.value}\n")
+
+            if judgment.needs_revision():
+                yield AssistantEvent(
+                    content=f"[Judge] Revision needed: {judgment.reasoning}\n"
+                )
+                # Handle revision loop (simplified for now)
+                if self.context.can_revise(self.config.judgment.max_revision_cycles):
+                    self.context.record_revision()
+                    # TODO: Implement revision loop in streaming mode
+
+            elif judgment.is_rejected():
+                yield AssistantEvent(content=f"[Judge] Rejected: {judgment.reasoning}\n")
+                if self.context.can_escalate(self.config.judgment.max_escalations):
+                    self.context.record_escalation()
+                    yield AssistantEvent(content="[Collective] Escalating to re-plan...\n")
+                else:
+                    yield AssistantEvent(content="[Collective] Max escalations reached\n")
+                    return
+
+        # All steps complete
+        self.context.transition_to(CollectiveState.COMPLETE, "All steps approved")
+        yield AssistantEvent(content="\n[Collective] ✓ All steps complete\n")
 
     async def _direct_execute(
         self,
@@ -429,6 +552,31 @@ class CollectiveOrchestrator:
         )
         execution.complete()
 
+        # Execute any tool calls from executor response
+        if execution.tool_calls and self.tool_executor:
+            tool_results = []
+            for tool_call in execution.tool_calls:
+                try:
+                    tool_name = tool_call.get("name", "")
+                    tool_args = tool_call.get("arguments", {})
+                    logger.info(f"Collective executing tool: {tool_name}")
+                    tool_result = await self.tool_executor(tool_name, tool_args)
+                    tool_results.append(f"[{tool_name}]: {tool_result}")
+
+                    # Track file modifications
+                    if "file" in tool_name.lower() or "write" in tool_name.lower():
+                        if isinstance(tool_args, dict) and "path" in tool_args:
+                            execution.files_modified.append(tool_args["path"])
+                except Exception as e:
+                    logger.error(f"Tool execution error: {e}")
+                    tool_results.append(f"[{tool_name}] ERROR: {e}")
+                    execution.success = False
+                    execution.error = f"Tool {tool_name} failed: {e}"
+
+            # Append tool results to execution response
+            if tool_results:
+                execution.response_text += "\n\n## Tool Results:\n" + "\n".join(tool_results)
+
         return execution
 
     async def _run_executor_revision(
@@ -535,53 +683,64 @@ class CollectiveOrchestrator:
         system_prompt: str,
         user_prompt: str,
     ) -> Dict[str, Any]:
-        """
-        Call a model backend.
-
-        This is a placeholder - actual implementation will depend on
-        the backend interface (OpenAI-compatible, Ollama, etc.)
-        """
+        """Call a model backend with actual LLM inference."""
         start_time = time.time()
 
+        if backend.backend is None:
+            return {"content": "", "success": False, "error": "Backend not initialized"}
+
         try:
-            # This would be replaced with actual backend call
-            # For now, return empty result
-            if backend.backend is None:
-                return {
-                    "content": "",
-                    "success": False,
-                    "error": "Backend not initialized",
-                }
+            # Build messages for LLM
+            messages = [
+                LLMMessage(role=Role.system, content=system_prompt),
+                LLMMessage(role=Role.user, content=user_prompt),
+            ]
 
-            # Actual call would look something like:
-            # response = await backend.backend.chat(
-            #     messages=[
-            #         {"role": "system", "content": system_prompt},
-            #         {"role": "user", "content": user_prompt},
-            #     ],
-            # )
+            # Call the backend using async context manager pattern
+            async with backend.backend as llm:
+                result = await llm.complete(
+                    model=backend.model_config,
+                    messages=messages,
+                    temperature=backend.model_config.temperature,
+                    tools=None,  # Collective doesn't use API-style tools
+                    max_tokens=8192,
+                    tool_choice=None,
+                    extra_headers=None,
+                )
 
-            # For now, return placeholder
             duration_ms = int((time.time() - start_time) * 1000)
-            backend.record_request(True, duration_ms)
+            usage = result.usage or LLMUsage()
+            backend.record_request(
+                True, duration_ms,
+                usage.prompt_tokens,
+                usage.completion_tokens
+            )
+
+            # Parse tool calls from text format (Mistral outputs tool_name[ARGS]{...})
+            content = result.message.content or ""
+            tool_calls = []
+            if "[ARGS]" in content:
+                handler = APIToolFormatHandler()
+                parsed = handler.parse_message(result.message)
+                tool_calls = [
+                    {"name": tc.name, "arguments": tc.arguments}
+                    for tc in parsed.tool_calls
+                ]
 
             return {
-                "content": "",
+                "content": content,
                 "success": True,
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
+                "prompt_tokens": usage.prompt_tokens,
+                "completion_tokens": usage.completion_tokens,
+                "tool_calls": tool_calls,
             }
 
         except Exception as e:
             duration_ms = int((time.time() - start_time) * 1000)
             backend.record_request(False, duration_ms, error=str(e))
             backend.mark_unhealthy(str(e))
-
-            return {
-                "content": "",
-                "success": False,
-                "error": str(e),
-            }
+            logger.error(f"Model call failed: {e}", exc_info=True)
+            return {"content": "", "success": False, "error": str(e)}
 
     def _compile_output(
         self,

@@ -4,8 +4,11 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable
 from enum import StrEnum, auto
 import time
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from kitty_code.core.collective.orchestrator import CollectiveOrchestrator
 
 from pydantic import BaseModel
 
@@ -123,6 +126,9 @@ class Agent:
         # Focus preservation middleware (stored for direct access)
         self._task_injection_middleware: TaskInjectionMiddleware | None = None
         self._completion_check_middleware: CompletionCheckMiddleware | None = None
+
+        # Collective orchestrator (lazy initialized when collective mode triggered)
+        self._collective_orchestrator: "CollectiveOrchestrator | None" = None
 
         self._setup_middleware()
 
@@ -281,9 +287,40 @@ class Agent:
                 use_collective = result.metadata.get("use_collective", False)
                 if use_collective:
                     logger.info("Collective: routing to multi-model orchestration")
-                    # TODO: Full collective orchestration (Planner → Executor → Judge)
-                    # For now, log that collective would be used and proceed with normal flow
-                    # The collective architecture needs async event streaming integration
+
+                    # Lazy init orchestrator
+                    if self._collective_orchestrator is None:
+                        self._collective_orchestrator = self._create_collective_orchestrator()
+
+                    # Get user input from metadata or last user message
+                    collective_input = result.metadata.get("user_input", "")
+                    if not collective_input:
+                        for msg in reversed(self.messages):
+                            if msg.role == Role.user and msg.content:
+                                collective_input = msg.content
+                                break
+
+                    # Stream events from collective orchestrator
+                    handled_by_collective = False
+                    async for event in self._collective_orchestrator.process_with_events(
+                        user_input=collective_input,
+                        conversation_context=self._get_conversation_summary(),
+                    ):
+                        if event.content:  # Non-empty means collective is handling it
+                            handled_by_collective = True
+                            yield event
+
+                    if handled_by_collective:
+                        # Collective handled this turn, skip normal LLM
+                        # Add a placeholder assistant message to maintain history
+                        self.messages.append(
+                            LLMMessage(
+                                role=Role.assistant,
+                                content="[Collective orchestration completed]",
+                            )
+                        )
+                        self._flush_new_messages()
+                        continue  # Skip normal _perform_llm_turn for this iteration
 
                 self.stats.steps += 1
                 user_cancelled = False
@@ -957,6 +994,74 @@ class Agent:
             True if there are pending or in_progress todos
         """
         return len(self.get_incomplete_todos()) > 0
+
+    def _create_collective_orchestrator(self) -> "CollectiveOrchestrator":
+        """Create collective orchestrator with backend pool.
+
+        Lazy-initializes the orchestrator when collective routing is triggered.
+        Uses BackendPool for multi-model management (Planner/Executor/Judge).
+        """
+        from kitty_code.core.collective.backends import BackendPool, create_backend_from_config
+        from kitty_code.core.collective.orchestrator import CollectiveOrchestrator
+
+        # Build model configs dict by alias for BackendPool lookup
+        model_configs = {m.alias: m for m in self.config.models if m.alias}
+
+        pool = BackendPool(
+            planner_model=self.config.collective.planner_model,
+            executor_model=self.config.collective.executor_model,
+            judge_model=self.config.collective.judge_model,
+            backend_factory=lambda mc: create_backend_from_config(mc, self.config),
+            model_configs=model_configs,
+        )
+
+        return CollectiveOrchestrator(
+            config=self.config.collective,
+            backend_pool=pool,
+            tool_executor=self._execute_tool_for_collective,
+        )
+
+    def _get_conversation_summary(self) -> str:
+        """Get a summary of recent conversation for collective context.
+
+        Returns last 3 user/assistant exchanges (6 messages max) to provide
+        the Planner with recent context without overwhelming it.
+        """
+        summary_parts = []
+        count = 0
+        for msg in reversed(self.messages[1:]):  # Skip system message
+            if msg.role in (Role.user, Role.assistant) and msg.content:
+                role = "User" if msg.role == Role.user else "Assistant"
+                # Truncate long messages to avoid context bloat
+                summary_parts.insert(0, f"{role}: {msg.content[:500]}")
+                count += 1
+                if count >= 6:
+                    break
+        return "\n".join(summary_parts)
+
+    async def _execute_tool_for_collective(self, tool_name: str, args: dict) -> str:
+        """Execute a tool for the collective executor.
+
+        Simplified tool execution for collective mode - no approval flow.
+        The collective architecture handles safety through Judge validation.
+
+        Args:
+            tool_name: Name of the tool to execute
+            args: Dictionary of tool arguments
+
+        Returns:
+            Tool result as formatted string, or error message
+        """
+        try:
+            tool = self.tool_manager.get(tool_name)
+        except Exception as e:
+            return f"Error: Tool '{tool_name}' not found: {e}"
+
+        try:
+            result_model = await tool.invoke(**args)
+            return "\n".join(f"{k}: {v}" for k, v in result_model.model_dump().items())
+        except Exception as e:
+            return f"Error executing {tool_name}: {e}"
 
     async def reload_with_initial_messages(
         self,
