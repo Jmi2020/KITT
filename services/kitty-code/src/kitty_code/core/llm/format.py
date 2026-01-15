@@ -182,11 +182,78 @@ def _extract_balanced_json(content: str, start_pos: int) -> str | None:
     return None
 
 
+def _parse_json_tool_calls(content: str) -> list[ParsedToolCall]:
+    """Parse tool calls from JSON format embedded in text.
+
+    Handles format: { "tool_calls": [ { "name": "...", "arguments": {...} } ] }
+    This is used by some models (like Devstral) that output tool calls as JSON.
+    """
+    tool_calls = []
+
+    # Look for JSON objects in the content that contain tool_calls
+    # Find potential JSON starts
+    for i, char in enumerate(content):
+        if char != "{":
+            continue
+
+        json_str = _extract_balanced_json(content, i)
+        if not json_str:
+            continue
+
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError:
+            continue
+
+        # Check if this is a tool_calls format
+        if isinstance(data, dict) and "tool_calls" in data:
+            calls = data.get("tool_calls", [])
+            if not isinstance(calls, list):
+                continue
+
+            for idx, call in enumerate(calls):
+                if not isinstance(call, dict):
+                    continue
+
+                name = call.get("name", "")
+                args = call.get("arguments", {})
+
+                if not name:
+                    continue
+
+                # Handle case where arguments might be a string
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        args = {}
+
+                tool_calls.append(
+                    ParsedToolCall(
+                        tool_name=name,
+                        raw_args=args if isinstance(args, dict) else {},
+                        call_id=f"json_call_{len(tool_calls)}",
+                    )
+                )
+
+            # Found tool_calls, stop looking
+            if tool_calls:
+                return tool_calls
+
+    return tool_calls
+
+
 def _parse_text_tool_calls(content: str) -> list[ParsedToolCall]:
-    """Parse tool calls from text content in format: tool_name[ARGS]{"key": "value"}"""
+    """Parse tool calls from text content.
+
+    Supports multiple formats:
+    1. tool_name[ARGS]{"key": "value"} (Devstral text format)
+    2. { "tool_calls": [...] } (JSON embedded format)
+    """
     tool_calls = []
     idx = 0
 
+    # First try the [ARGS] format
     for match in _TEXT_TOOL_CALL_START_PATTERN.finditer(content):
         tool_name = match.group(1)
         json_start = match.end() - 1  # Position of the '{'
@@ -208,6 +275,10 @@ def _parse_text_tool_calls(content: str) -> list[ParsedToolCall]:
             )
         )
         idx += 1
+
+    # If no [ARGS] format found, try JSON embedded format
+    if not tool_calls:
+        tool_calls = _parse_json_tool_calls(content)
 
     return tool_calls
 
