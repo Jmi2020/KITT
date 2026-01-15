@@ -9,6 +9,7 @@ MODE_ICONS: dict[AgentMode, str] = {
     AgentMode.PLAN: "⏸︎",
     AgentMode.ACCEPT_EDITS: "⏵⏵",
     AgentMode.AUTO_APPROVE: "⏵⏵⏵",
+    AgentMode.AUTO_ITERATE: "🔄",  # Loop icon to indicate auto-iteration
 }
 
 SAFETY_CLASSES: dict[ModeSafety, str] = {
