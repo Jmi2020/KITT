@@ -1079,10 +1079,12 @@ class VibeApp(App):  # noqa: PLR0904
         await bottom_container.mount(plan_approval_app)
         self._current_bottom_app = BottomApp.PlanApproval
 
-        # Use set_focus directly instead of call_after_refresh to ensure
-        # focus is set even when called from async worker context
-        self.set_focus(plan_approval_app)
-        self._scroll_to_bottom()
+        # Force a refresh and schedule focus after - this ensures the widget
+        # is fully rendered before we try to focus it. Using call_later
+        # schedules in the next event loop iteration.
+        self.refresh()
+        self.call_later(lambda: self.set_focus(plan_approval_app))
+        self.call_later(self._scroll_to_bottom)
 
     async def _switch_to_input_app(self) -> None:
         bottom_container = self.query_one("#bottom-app-container")
