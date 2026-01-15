@@ -287,12 +287,10 @@ class TaskInjectionMiddleware:
         pass
 
 
-RALPH_WIGGUM_CONTINUATION = """You have incomplete tasks remaining:
-
-{task_list}
-
-Continue working on these tasks. Mark each as 'in_progress' when you start and 'completed' when done.
-Do not stop until all tasks are completed or explicitly cancelled."""
+# Optimized continuation prompt - concise to reduce token overhead
+# Previous version listed all tasks which caused model to re-output full JSON array
+RALPH_WIGGUM_CONTINUATION = """Continue: {in_progress_count} in-progress, {pending_count} pending tasks remaining.
+{current_task}Mark completed when done. Move to next pending task."""
 
 
 class CompletionCheckMiddleware:
@@ -340,12 +338,30 @@ class CompletionCheckMiddleware:
             return []
 
     def _create_continuation_prompt(self, incomplete: list[dict[str, Any]]) -> str:
-        """Create a prompt to continue working on incomplete tasks."""
-        task_list = "\n".join(
-            f"- [{t.get('status', 'pending')}] {t.get('content', 'unknown task')}"
-            for t in incomplete
+        """Create a concise prompt to continue working on incomplete tasks.
+
+        Optimized to reduce token overhead by providing counts and current
+        focus instead of listing all tasks (which caused model to re-output
+        the full task array).
+        """
+        in_progress = [t for t in incomplete if t.get("status") == "in_progress"]
+        pending = [t for t in incomplete if t.get("status") == "pending"]
+
+        # Show current task if one is in progress
+        current_task = ""
+        if in_progress:
+            task_content = in_progress[0].get("content", "current task")
+            current_task = f'Current: "{task_content}". '
+        elif pending:
+            # Suggest first pending task if nothing in progress
+            task_content = pending[0].get("content", "next task")
+            current_task = f'Start: "{task_content}". '
+
+        return RALPH_WIGGUM_CONTINUATION.format(
+            in_progress_count=len(in_progress),
+            pending_count=len(pending),
+            current_task=current_task,
         )
-        return RALPH_WIGGUM_CONTINUATION.format(task_list=task_list)
 
     async def before_turn(self, context: ConversationContext) -> MiddlewareResult:
         # Check if last response was a completion attempt (no tool calls)

@@ -309,6 +309,11 @@ class Agent:
         parsed = self.format_handler.parse_message(last_message)
         resolved = self.format_handler.resolve_tool_calls(parsed, self.tool_manager, self.config)
 
+        # Backfill tool_calls on assistant message for text-based tool calls
+        # This ensures proper message structure for llama.cpp Jinja templates
+        if parsed.tool_calls and not last_message.tool_calls:
+            self.format_handler.backfill_tool_calls(last_message, parsed.tool_calls)
+
         has_tool_calls = bool(resolved.tool_calls or resolved.failed_calls)
 
         # Record for Ralph-Wiggum: track if this was a completion attempt (no tool calls)

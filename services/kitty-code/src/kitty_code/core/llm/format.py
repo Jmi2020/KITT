@@ -330,6 +330,37 @@ class APIToolFormatHandler:
 
         return LLMMessage.model_validate(clean_message)
 
+    def backfill_tool_calls(
+        self, message: LLMMessage, parsed_calls: list[ParsedToolCall]
+    ) -> None:
+        """Backfill tool_calls on assistant message from text-based tool calls.
+
+        When models output tool calls as text (JSON embedded or [ARGS] format),
+        the assistant message has tool_calls=None. This causes issues with
+        llama.cpp Jinja templates which expect:
+          assistant (with tool_calls) → tool result → assistant
+
+        This method populates the tool_calls field so the message history
+        has the proper structure for subsequent LLM calls.
+        """
+        if message.tool_calls or not parsed_calls:
+            return  # Already has tool_calls or nothing to backfill
+
+        from kitty_code.core.types import FunctionCall, ToolCall
+
+        message.tool_calls = [
+            ToolCall(
+                id=call.call_id,
+                index=idx,
+                type="function",
+                function=FunctionCall(
+                    name=call.tool_name,
+                    arguments=json.dumps(call.raw_args),
+                ),
+            )
+            for idx, call in enumerate(parsed_calls)
+        ]
+
     def parse_message(self, message: LLMMessage) -> ParsedMessage:
         tool_calls = []
 
