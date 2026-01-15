@@ -43,10 +43,6 @@ from kitty_code.cli.textual_ui.widgets.messages import (
 from kitty_code.cli.textual_ui.widgets.mode_indicator import ModeIndicator
 from kitty_code.cli.textual_ui.widgets.no_markup_static import NoMarkupStatic
 from kitty_code.cli.textual_ui.widgets.path_display import PathDisplay
-from kitty_code.cli.textual_ui.widgets.plan_approval import (
-    PlanApprovalApp,
-    PlanApprovalChoice,
-)
 from kitty_code.cli.textual_ui.widgets.tools import ToolCallMessage, ToolResultMessage
 from kitty_code.cli.textual_ui.widgets.welcome import WelcomeBanner
 from kitty_code.cli.update_notifier import (
@@ -77,7 +73,6 @@ class BottomApp(StrEnum):
     Approval = auto()
     Config = auto()
     Input = auto()
-    PlanApproval = auto()
 
 
 class VibeApp(App):  # noqa: PLR0904
@@ -128,7 +123,6 @@ class VibeApp(App):  # noqa: PLR0904
         self._chat_input_container: ChatInputContainer | None = None
         self._mode_indicator: ModeIndicator | None = None
         self._context_progress: ContextProgress | None = None
-        self._plan_approval_widget: PlanApprovalApp | None = None
         self._current_bottom_app: BottomApp = BottomApp.Input
 
         self.history_file = HISTORY_FILE.path
@@ -285,33 +279,6 @@ class VibeApp(App):  # noqa: PLR0904
 
         if self._loading_widget and self._loading_widget.parent:
             await self._remove_loading_widget()
-
-    async def on_plan_approval_app_plan_approved(
-        self, message: PlanApprovalApp.PlanApproved
-    ) -> None:
-        """Handle plan approval choice from the dialogue."""
-        await self._switch_to_input_app()
-
-        if message.choice == PlanApprovalChoice.AUTO_ITERATE:
-            # Switch to AUTO_ITERATE mode and AWAIT completion before proceeding
-            # This prevents race condition where "proceed" is sent before tools reload
-            await self._switch_mode_async(AgentMode.AUTO_ITERATE)
-            # Now auto-submit "proceed" to start execution
-            self.run_worker(self._handle_user_message("proceed"), exclusive=True)
-
-        elif message.choice == PlanApprovalChoice.ACCEPT_WITH_APPROVALS:
-            # Switch to DEFAULT mode - user will type proceed manually
-            await self._switch_mode_async(AgentMode.DEFAULT)
-            # Show helpful message
-            await self._mount_and_scroll(
-                UserCommandMessage(
-                    'Switched to DEFAULT mode. Type "proceed" to start execution with approvals.'
-                )
-            )
-
-        else:  # CONTINUE_EDITING
-            # Stay in PLAN mode, user continues editing
-            pass
 
     async def _remove_loading_widget(self) -> None:
         if self._loading_widget and self._loading_widget.parent:
@@ -734,9 +701,16 @@ class VibeApp(App):  # noqa: PLR0904
                     current_tokens=self.agent.stats.context_tokens,
                 )
 
-            # Show plan approval dialogue if in PLAN mode after turn completes
+            # Show mode switch instructions if in PLAN mode after turn completes
             if self._current_agent_mode == AgentMode.PLAN:
-                await self._switch_to_plan_approval_app()
+                await self._mount_and_scroll(
+                    UserCommandMessage(
+                        "Plan complete. Press Shift+Tab to switch modes:\n"
+                        "  🔄 AUTO_ITERATE - Auto-execute until all tasks done\n"
+                        "  ⏵  DEFAULT - Step-by-step with approvals\n"
+                        'Then type "proceed" to start execution.'
+                    )
+                )
 
     async def _interrupt_agent(self) -> None:
         interrupting_agent_init = bool(
@@ -1063,37 +1037,6 @@ class VibeApp(App):  # noqa: PLR0904
         self.call_after_refresh(approval_app.focus)
         self.call_after_refresh(self._scroll_to_bottom)
 
-    async def _switch_to_plan_approval_app(self) -> None:
-        """Show the plan approval dialogue after a plan is presented."""
-        bottom_container = self.query_one("#bottom-app-container")
-
-        try:
-            chat_input_container = self.query_one(ChatInputContainer)
-            await chat_input_container.remove()
-        except Exception:
-            pass
-
-        if self._mode_indicator:
-            self._mode_indicator.display = False
-
-        plan_approval_app = PlanApprovalApp()
-        await bottom_container.mount(plan_approval_app)
-        self._current_bottom_app = BottomApp.PlanApproval
-
-        # Scroll first, then set focus to prevent scroll from stealing focus
-        self._scroll_to_bottom()
-
-        # Store reference for focus callback
-        self._plan_approval_widget = plan_approval_app
-
-        # Use set_timer for more reliable focus after everything settles
-        self.set_timer(0.1, self._focus_plan_approval)
-
-    def _focus_plan_approval(self) -> None:
-        """Focus the plan approval widget after a timer delay."""
-        if self._plan_approval_widget and self._current_bottom_app == BottomApp.PlanApproval:
-            self._plan_approval_widget.focus()
-
     async def _switch_to_input_app(self) -> None:
         bottom_container = self.query_one("#bottom-app-container")
 
@@ -1106,12 +1049,6 @@ class VibeApp(App):  # noqa: PLR0904
         try:
             approval_app = self.query_one("#approval-app")
             await approval_app.remove()
-        except Exception:
-            pass
-
-        try:
-            plan_approval_app = self.query_one("#plan-approval-app")
-            await plan_approval_app.remove()
         except Exception:
             pass
 
@@ -1149,8 +1086,6 @@ class VibeApp(App):  # noqa: PLR0904
                     self.query_one(ConfigApp).focus()
                 case BottomApp.Approval:
                     self.query_one(ApprovalApp).focus()
-                case BottomApp.PlanApproval:
-                    self.query_one(PlanApprovalApp).focus()
                 case app:
                     assert_never(app)
         except Exception:
@@ -1172,16 +1107,6 @@ class VibeApp(App):  # noqa: PLR0904
             try:
                 approval_app = self.query_one(ApprovalApp)
                 approval_app.action_reject()
-            except Exception:
-                pass
-            self._last_escape_time = None
-            return
-
-        if self._current_bottom_app == BottomApp.PlanApproval:
-            # ESC in plan approval means "continue editing" (option 3)
-            try:
-                plan_approval_app = self.query_one(PlanApprovalApp)
-                plan_approval_app.action_select_3()
             except Exception:
                 pass
             self._last_escape_time = None
