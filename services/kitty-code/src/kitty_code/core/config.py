@@ -23,6 +23,7 @@ from kitty_code.core.paths.config_paths import AGENT_DIR, CONFIG_DIR, CONFIG_FIL
 from kitty_code.core.paths.global_paths import GLOBAL_ENV_FILE, SESSION_LOG_DIR
 from kitty_code.core.prompts import SystemPrompt
 from kitty_code.core.tools.base import BaseToolConfig
+from kitty_code.core.collective.config import CollectiveConfig
 
 
 def load_api_keys_from_env() -> None:
@@ -329,6 +330,17 @@ class VibeConfig(BaseSettings):
         ),
     )
 
+    # Tiered Collective Architecture configuration
+    # Multi-model orchestration: Planner (123B) → Executor (24B) → Judge (123B)
+    collective: CollectiveConfig = Field(
+        default_factory=CollectiveConfig,
+        description=(
+            "Configuration for the tiered collective architecture. "
+            "When enabled, complex tasks are routed through Planner → Executor → Judge workflow. "
+            "Simple tasks bypass collective via pattern matching."
+        ),
+    )
+
     model_config = SettingsConfigDict(
         env_prefix="VIBE_", case_sensitive=False, extra="ignore"
     )
@@ -364,6 +376,17 @@ class VibeConfig(BaseSettings):
         raise ValueError(
             f"Provider '{model.provider}' for model '{model.name}' not found in configuration."
         )
+
+    def get_model_by_alias(self, alias: str) -> ModelConfig | None:
+        """Get model config by alias (for collective backend pool)."""
+        for model in self.models:
+            if model.alias == alias:
+                return model
+        return None
+
+    def get_model_configs_dict(self) -> dict[str, ModelConfig]:
+        """Get all model configs as a dictionary keyed by alias."""
+        return {model.alias: model for model in self.models}
 
     @classmethod
     def settings_customise_sources(
@@ -434,6 +457,17 @@ class VibeConfig(BaseSettings):
         if not v:
             return []
         return [Path(p).expanduser().resolve() for p in v]
+
+    @field_validator("collective", mode="before")
+    @classmethod
+    def _load_collective_config(cls, v: Any) -> CollectiveConfig:
+        if v is None:
+            return CollectiveConfig()
+        if isinstance(v, CollectiveConfig):
+            return v
+        if isinstance(v, dict):
+            return CollectiveConfig.from_dict(v)
+        return CollectiveConfig()
 
     @field_validator("workdir", mode="before")
     @classmethod

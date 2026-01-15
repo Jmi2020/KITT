@@ -384,6 +384,87 @@ class CompletionCheckMiddleware:
         self._last_response_had_tool_calls = True
 
 
+class CollectiveMiddleware:
+    """Routes complex tasks through the Tiered Collective Architecture.
+
+    When collective is enabled and a task is complex (based on routing),
+    this middleware intercepts the request and processes it through:
+    Planner (123B) → Executor (24B) → Judge (123B)
+
+    Simple tasks (pattern-matched or high confidence) bypass collective
+    and go directly to single-model execution.
+    """
+
+    def __init__(
+        self,
+        config_getter: Callable[[], "VibeConfig"],
+        mode_getter: Callable[[], AgentMode],
+    ) -> None:
+        self._config_getter = config_getter
+        self._mode_getter = mode_getter
+        self._orchestrator = None  # Lazy initialized
+        self._last_user_input: str | None = None
+
+    def _is_collective_enabled(self) -> bool:
+        """Check if collective is enabled in config."""
+        config = self._config_getter()
+        return config.collective.enabled
+
+    def _should_use_collective(self, user_input: str) -> bool:
+        """Check if this request should use collective orchestration."""
+        if not self._is_collective_enabled():
+            return False
+
+        # Don't use collective in plan mode (planning is already happening)
+        if self._mode_getter() == AgentMode.PLAN:
+            return False
+
+        # Import here to avoid circular dependency
+        from kitty_code.core.collective.router import should_use_collective
+
+        config = self._config_getter()
+        return should_use_collective(user_input, config.collective)
+
+    def _get_latest_user_input(self, context: ConversationContext) -> str | None:
+        """Extract the latest user message from context."""
+        for msg in reversed(context.messages):
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    return content
+                # Handle list content (e.g., multimodal)
+                if isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            return item.get("text", "")
+        return None
+
+    async def before_turn(self, context: ConversationContext) -> MiddlewareResult:
+        """Check if collective should be used for this turn."""
+        user_input = self._get_latest_user_input(context)
+        if not user_input:
+            return MiddlewareResult()
+
+        self._last_user_input = user_input
+
+        if self._should_use_collective(user_input):
+            logger.info("Collective: routing to orchestrator for complex task")
+            # Return metadata indicating collective should handle this
+            # The agent will check this and route appropriately
+            return MiddlewareResult(
+                action=MiddlewareAction.CONTINUE,
+                metadata={"use_collective": True, "user_input": user_input},
+            )
+
+        return MiddlewareResult()
+
+    async def after_turn(self, context: ConversationContext) -> MiddlewareResult:
+        return MiddlewareResult()
+
+    def reset(self, reset_reason: ResetReason = ResetReason.STOP) -> None:
+        self._last_user_input = None
+
+
 class MiddlewarePipeline:
     def __init__(self) -> None:
         self.middlewares: list[ConversationMiddleware] = []
