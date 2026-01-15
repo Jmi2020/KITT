@@ -139,6 +139,79 @@ class ResolvedMessage(BaseModel):
     failed_calls: list[FailedToolCall] = Field(default_factory=list)
 
 
+# Regex pattern to match text-based tool calls like: tool_name[ARGS]{"key": "value"}
+# This handles models like Devstral that output tool calls as text instead of using API format
+# The pattern captures the tool name and then uses a separate function to extract balanced JSON
+_TEXT_TOOL_CALL_START_PATTERN = re.compile(r"(\w+)\[ARGS\]\{")
+
+
+def _extract_balanced_json(content: str, start_pos: int) -> str | None:
+    """Extract a balanced JSON object starting at start_pos (which points to '{')."""
+    if start_pos >= len(content) or content[start_pos] != "{":
+        return None
+
+    depth = 0
+    in_string = False
+    escape_next = False
+
+    for i in range(start_pos, len(content)):
+        char = content[i]
+
+        if escape_next:
+            escape_next = False
+            continue
+
+        if char == "\\":
+            escape_next = True
+            continue
+
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+
+        if in_string:
+            continue
+
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return content[start_pos : i + 1]
+
+    return None
+
+
+def _parse_text_tool_calls(content: str) -> list[ParsedToolCall]:
+    """Parse tool calls from text content in format: tool_name[ARGS]{"key": "value"}"""
+    tool_calls = []
+    idx = 0
+
+    for match in _TEXT_TOOL_CALL_START_PATTERN.finditer(content):
+        tool_name = match.group(1)
+        json_start = match.end() - 1  # Position of the '{'
+
+        args_str = _extract_balanced_json(content, json_start)
+        if args_str is None:
+            continue
+
+        try:
+            args = json.loads(args_str)
+        except json.JSONDecodeError:
+            args = {}
+
+        tool_calls.append(
+            ParsedToolCall(
+                tool_name=tool_name,
+                raw_args=args,
+                call_id=f"text_call_{idx}",
+            )
+        )
+        idx += 1
+
+    return tool_calls
+
+
 class APIToolFormatHandler:
     @property
     def name(self) -> str:
@@ -189,6 +262,7 @@ class APIToolFormatHandler:
     def parse_message(self, message: LLMMessage) -> ParsedMessage:
         tool_calls = []
 
+        # First try API-style tool calls (OpenAI format)
         api_tool_calls = message.tool_calls or []
         for tc in api_tool_calls:
             if not (function_call := tc.function):
@@ -205,6 +279,11 @@ class APIToolFormatHandler:
                     call_id=tc.id or "",
                 )
             )
+
+        # If no API tool calls found, try text-based format (Devstral/Mistral style)
+        # Format: tool_name[ARGS]{"key": "value"}
+        if not tool_calls and message.content:
+            tool_calls = _parse_text_tool_calls(message.content)
 
         return ParsedMessage(tool_calls=tool_calls)
 
