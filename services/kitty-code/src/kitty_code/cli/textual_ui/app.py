@@ -128,6 +128,7 @@ class VibeApp(App):  # noqa: PLR0904
         self._chat_input_container: ChatInputContainer | None = None
         self._mode_indicator: ModeIndicator | None = None
         self._context_progress: ContextProgress | None = None
+        self._plan_approval_widget: PlanApprovalApp | None = None
         self._current_bottom_app: BottomApp = BottomApp.Input
 
         self.history_file = HISTORY_FILE.path
@@ -1079,12 +1080,19 @@ class VibeApp(App):  # noqa: PLR0904
         await bottom_container.mount(plan_approval_app)
         self._current_bottom_app = BottomApp.PlanApproval
 
-        # Force a refresh and schedule focus after - this ensures the widget
-        # is fully rendered before we try to focus it. Using call_later
-        # schedules in the next event loop iteration.
-        self.refresh()
-        self.call_later(lambda: self.set_focus(plan_approval_app))
-        self.call_later(self._scroll_to_bottom)
+        # Scroll first, then set focus to prevent scroll from stealing focus
+        self._scroll_to_bottom()
+
+        # Store reference for focus callback
+        self._plan_approval_widget = plan_approval_app
+
+        # Use set_timer for more reliable focus after everything settles
+        self.set_timer(0.1, self._focus_plan_approval)
+
+    def _focus_plan_approval(self) -> None:
+        """Focus the plan approval widget after a timer delay."""
+        if self._plan_approval_widget and self._current_bottom_app == BottomApp.PlanApproval:
+            self._plan_approval_widget.focus()
 
     async def _switch_to_input_app(self) -> None:
         bottom_container = self.query_one("#bottom-app-container")
