@@ -444,8 +444,9 @@ class CollectiveMiddleware:
     def _get_latest_user_input(self, context: ConversationContext) -> str | None:
         """Extract the latest user message from context."""
         for msg in reversed(context.messages):
-            if msg.get("role") == "user":
-                content = msg.get("content", "")
+            # LLMMessage is a Pydantic model - use attribute access, not dict.get()
+            if msg.role == "user":
+                content = msg.content or ""
                 if isinstance(content, str):
                     return content
                 # Handle list content (e.g., multimodal)
@@ -459,14 +460,34 @@ class CollectiveMiddleware:
         """Check if collective should be used for this turn."""
         user_input = self._get_latest_user_input(context)
         if not user_input:
+            logger.debug("Collective: no user input found in context")
             return MiddlewareResult()
 
         self._last_user_input = user_input
+        logger.debug(f"Collective: checking routing for input: {user_input[:100]}...")
 
-        if self._should_use_collective(user_input):
+        # Log why we might skip collective
+        if not self._is_collective_enabled():
+            logger.debug("Collective: disabled in config")
+            return MiddlewareResult()
+
+        if self._mode_getter() == AgentMode.PLAN:
+            logger.debug("Collective: skipping in plan mode")
+            return MiddlewareResult()
+
+        # Check routing decision
+        from kitty_code.core.collective.router import ComplexityRouter
+
+        config = self._config_getter()
+        router = ComplexityRouter(config.collective.routing)
+        decision = router.route(user_input)
+        logger.info(
+            f"Collective: routing={decision.mode}, confidence={decision.confidence:.2f}, "
+            f"pattern={decision.matched_pattern or 'confidence-based'}"
+        )
+
+        if decision.is_collective():
             logger.info("Collective: routing to orchestrator for complex task")
-            # Return metadata indicating collective should handle this
-            # The agent will check this and route appropriately
             return MiddlewareResult(
                 action=MiddlewareAction.CONTINUE,
                 metadata={"use_collective": True, "user_input": user_input},

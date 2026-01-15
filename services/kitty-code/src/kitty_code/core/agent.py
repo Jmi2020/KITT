@@ -16,6 +16,7 @@ from kitty_code.core.llm.format import APIToolFormatHandler, ResolvedMessage
 from kitty_code.core.llm.types import BackendLike
 from kitty_code.core.middleware import (
     AutoCompactMiddleware,
+    CollectiveMiddleware,
     CompletionCheckMiddleware,
     ContextWarningMiddleware,
     ConversationContext,
@@ -203,6 +204,15 @@ class Agent:
 
         self.middleware_pipeline.add(PlanModeMiddleware(lambda: self._mode))
 
+        # Collective orchestration: route complex tasks through Planner → Executor → Judge
+        if self.config.collective.enabled:
+            self.middleware_pipeline.add(
+                CollectiveMiddleware(
+                    config_getter=lambda: self.config,
+                    mode_getter=lambda: self._mode,
+                )
+            )
+
         # Focus preservation: inject task context during execution
         self._task_injection_middleware = TaskInjectionMiddleware(
             lambda: self._mode, todo_reader=self._get_todo_list
@@ -266,6 +276,14 @@ class Agent:
 
                 if result.action == MiddlewareAction.STOP:
                     return
+
+                # Check if collective middleware wants to route this task
+                use_collective = result.metadata.get("use_collective", False)
+                if use_collective:
+                    logger.info("Collective: routing to multi-model orchestration")
+                    # TODO: Full collective orchestration (Planner → Executor → Judge)
+                    # For now, log that collective would be used and proceed with normal flow
+                    # The collective architecture needs async event streaming integration
 
                 self.stats.steps += 1
                 user_cancelled = False
