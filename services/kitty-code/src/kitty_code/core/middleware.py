@@ -205,6 +205,7 @@ class TaskInjectionMiddleware:
     ) -> None:
         self._mode_getter = mode_getter
         self._plan_content: str | None = None
+        self._plan_is_current_session: bool = False  # Track if plan was set this session
         self._todo_reader = todo_reader
 
     def set_todo_reader(self, reader: Callable[[], list[dict[str, Any]]]) -> None:
@@ -230,6 +231,7 @@ class TaskInjectionMiddleware:
     def set_plan_content(self, content: str) -> None:
         """Set plan content directly (used when transitioning from plan mode)."""
         self._plan_content = content
+        self._plan_is_current_session = True  # Mark as current session plan
         # Also persist to file for session recovery
         try:
             CURRENT_PLAN_FILE.path.parent.mkdir(parents=True, exist_ok=True)
@@ -241,6 +243,7 @@ class TaskInjectionMiddleware:
     def clear_plan(self) -> None:
         """Clear the current plan (called when all tasks complete)."""
         self._plan_content = None
+        self._plan_is_current_session = False
         try:
             if CURRENT_PLAN_FILE.path.exists():
                 CURRENT_PLAN_FILE.path.unlink()
@@ -262,17 +265,17 @@ class TaskInjectionMiddleware:
         if not self._is_execution_mode():
             return MiddlewareResult()
 
-        # Try in-memory plan first, then file
-        plan_content = self._plan_content or self._read_current_plan()
-        if not plan_content:
+        # Only use in-memory plan from current session
+        # Don't read stale plans from file - they cause false positives for simple commands
+        if not self._plan_content:
             return MiddlewareResult()
 
-        # Check if there are todos - if not, inject stronger reminder
-        if not self._has_todos():
+        # Check if there are todos - if not AND this is a current-session plan, inject reminder
+        if not self._has_todos() and self._plan_is_current_session:
             logger.info("Plan exists but no todos created - injecting create-todos reminder")
-            reminder = CREATE_TODOS_REMINDER.format(plan_content=plan_content)
+            reminder = CREATE_TODOS_REMINDER.format(plan_content=self._plan_content)
         else:
-            reminder = TASK_CONTEXT_REMINDER.format(plan_content=plan_content)
+            reminder = TASK_CONTEXT_REMINDER.format(plan_content=self._plan_content)
 
         return MiddlewareResult(action=MiddlewareAction.INJECT_MESSAGE, message=reminder)
 
