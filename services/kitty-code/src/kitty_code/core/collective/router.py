@@ -53,17 +53,23 @@ class ComplexityRouter:
     """
     Routes tasks using pattern matching + confidence scoring.
 
-    Borrowed from KITTY brain/routing/confidence_scorer.py pattern.
+    Supports two modes via config.default_mode:
+    - "collective": Senior/Junior delegation by default (recommended)
+      Only trivial_patterns bypass to direct execution
+    - "direct": Original behavior (collective only when confidence < threshold)
 
-    Flow:
-    1. Check auto-execute patterns (fast path to direct execution)
-    2. Check always-plan patterns (fast path to collective)
-    3. Fall back to confidence scoring (linguistic analysis)
+    Flow (collective mode):
+    1. Check trivial patterns → direct
+    2. Everything else → collective (Senior/Junior delegation)
 
-    Confidence Thresholds:
+    Flow (direct mode - legacy):
+    1. Check auto-execute patterns → direct
+    2. Check always-plan patterns → collective
+    3. Fall back to confidence scoring
+
+    Confidence Thresholds (direct mode only):
     - >= 0.7: Direct execution (high confidence)
     - < 0.7: Collective orchestration (needs planning/review)
-    - < 0.3: Low confidence, will likely need re-planning
     """
 
     # Linguistic markers that reduce confidence (uncertainty)
@@ -112,7 +118,12 @@ class ComplexityRouter:
         """
         self.config = config
 
-        # Compile patterns for efficiency
+        # Compile trivial patterns (collective mode bypass)
+        self._trivial_patterns = [
+            re.compile(p, re.IGNORECASE) for p in config.trivial_patterns
+        ]
+
+        # Compile legacy patterns for backwards compatibility (direct mode)
         self._auto_execute_patterns = [
             re.compile(p, re.IGNORECASE) for p in config.auto_execute_patterns
         ]
@@ -124,6 +135,10 @@ class ComplexityRouter:
         """
         Route a user request to direct or collective execution.
 
+        Routing behavior depends on config.default_mode:
+        - "collective": Senior/Junior delegation by default, trivial patterns bypass
+        - "direct": Legacy confidence-based routing
+
         Args:
             user_input: The user's request text
             context: Optional context (conversation history, file state, etc.)
@@ -132,9 +147,30 @@ class ComplexityRouter:
             RoutingDecision with mode, confidence, and factors
         """
         context = context or {}
-        factors = []
 
-        # 1. Pattern matching (fast path)
+        # 1. Check trivial patterns first (always bypass collective)
+        # These are truly simple tasks that don't need senior review
+        for pattern in self._trivial_patterns:
+            if pattern.search(user_input):
+                return RoutingDecision(
+                    mode="direct",
+                    confidence=0.95,
+                    matched_pattern=pattern.pattern,
+                    factors=[("trivial_pattern", 0.95)],
+                )
+
+        # 2. Route based on default_mode setting
+        if self.config.default_mode == "collective":
+            # COLLECTIVE MODE: Senior/Junior delegation by default
+            # Everything except trivial patterns goes through collective
+            return RoutingDecision(
+                mode="collective",
+                confidence=0.85,
+                factors=[("default_mode_collective", 0.85)],
+            )
+
+        # 3. DIRECT MODE (legacy): Pattern matching + confidence scoring
+        # Check auto-execute patterns (fast path to direct)
         for pattern in self._auto_execute_patterns:
             if pattern.search(user_input):
                 return RoutingDecision(
@@ -144,6 +180,7 @@ class ComplexityRouter:
                     factors=[("auto_execute_pattern", 0.95)],
                 )
 
+        # Check always-plan patterns (force collective)
         for pattern in self._always_plan_patterns:
             if pattern.search(user_input):
                 return RoutingDecision(
@@ -153,10 +190,10 @@ class ComplexityRouter:
                     factors=[("always_plan_pattern", -0.95)],
                 )
 
-        # 2. Confidence scoring (detailed analysis)
+        # Fall back to confidence scoring (detailed analysis)
         score, factors = self._compute_confidence_score(user_input, context)
 
-        # 3. Make decision based on threshold
+        # Make decision based on threshold
         mode = "direct" if score >= self.config.complexity_threshold else "collective"
 
         return RoutingDecision(

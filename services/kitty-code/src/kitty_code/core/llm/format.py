@@ -283,6 +283,69 @@ def _parse_text_tool_calls(content: str) -> list[ParsedToolCall]:
     return tool_calls
 
 
+def strip_tool_call_json(content: str) -> str:
+    """Strip tool call JSON from content before display.
+
+    Removes both formats:
+    1. tool_name[ARGS]{...} - Devstral text format
+    2. { "tool_calls": [...] } - JSON embedded format
+
+    This prevents raw JSON from appearing in TUI output when models
+    output tool calls as text instead of using API format.
+    """
+    if not content:
+        return content
+
+    result = content
+
+    # Strip [ARGS] format: tool_name[ARGS]{...}
+    # Find and remove all occurrences
+    while True:
+        match = _TEXT_TOOL_CALL_START_PATTERN.search(result)
+        if not match:
+            break
+
+        json_start = match.end() - 1
+        json_str = _extract_balanced_json(result, json_start)
+        if json_str:
+            # Remove the entire tool call (tool_name[ARGS]{...})
+            full_match_start = match.start()
+            full_match_end = json_start + len(json_str)
+            result = result[:full_match_start] + result[full_match_end:]
+        else:
+            # Malformed, skip this match by removing just the pattern
+            result = result[: match.start()] + result[match.end() :]
+
+    # Strip JSON embedded format: { "tool_calls": [...] }
+    # Look for JSON objects containing tool_calls key
+    i = 0
+    while i < len(result):
+        if result[i] != "{":
+            i += 1
+            continue
+
+        json_str = _extract_balanced_json(result, i)
+        if not json_str:
+            i += 1
+            continue
+
+        try:
+            data = json.loads(json_str)
+            if isinstance(data, dict) and "tool_calls" in data:
+                # Remove this JSON block
+                result = result[:i] + result[i + len(json_str) :]
+                # Don't increment i, check same position again
+                continue
+        except json.JSONDecodeError:
+            pass
+
+        i += 1
+
+    # Clean up extra whitespace left behind
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result.strip()
+
+
 class APIToolFormatHandler:
     @property
     def name(self) -> str:

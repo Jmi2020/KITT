@@ -13,12 +13,27 @@ from typing import List, Optional
 class RoutingConfig:
     """Configuration for task complexity routing."""
 
-    # Confidence threshold for collective vs direct execution
-    # < threshold → collective orchestration
-    # >= threshold → direct execution
+    # Default routing mode:
+    # "collective" = Senior/Junior delegation by default (recommended)
+    # "direct" = Original behavior (collective only when confidence < threshold)
+    default_mode: str = "collective"
+
+    # Patterns that ALWAYS bypass collective (truly trivial tasks)
+    # These are questions, explanations, or single-line fixes
+    trivial_patterns: List[str] = field(default_factory=lambda: [
+        r"^fix\s+typo",           # Only if starts with "fix typo"
+        r"^add\s+import\s+\w+$",  # Single import statement
+        r"^what\s+is",            # Questions
+        r"^explain\s+",           # Explanations
+        r"^show\s+",              # Display requests
+        r"^list\s+",              # Listing requests
+    ])
+
+    # Confidence threshold for collective vs direct execution (legacy mode)
+    # Only used when default_mode = "direct"
     complexity_threshold: float = 0.7
 
-    # Patterns that always bypass collective (direct execution)
+    # Patterns that always bypass collective (direct execution) - legacy
     auto_execute_patterns: List[str] = field(default_factory=lambda: [
         r"fix\s+typo",
         r"add\s+import",
@@ -27,7 +42,7 @@ class RoutingConfig:
         r"format\s+code",
     ])
 
-    # Patterns that always trigger collective orchestration
+    # Patterns that always trigger collective orchestration - legacy
     always_plan_patterns: List[str] = field(default_factory=lambda: [
         r"refactor",
         r"implement\s+feature",
@@ -60,6 +75,20 @@ class JudgmentConfig:
 
     # Maximum escalations before error
     max_escalations: int = 2
+
+    # Teaching mode settings (Senior/Junior mentorship)
+    # When True, Judge provides detailed educational feedback
+    teaching_mode: bool = True
+
+    # Include before/after code diffs in feedback
+    show_code_diffs: bool = True
+
+    # Maximum issues to report per review (don't overwhelm junior)
+    max_issues_per_review: int = 5
+
+    # Quality threshold for praise (0.0-1.0)
+    # Above this, Judge provides positive reinforcement
+    praise_threshold: float = 0.7
 
 
 @dataclass
@@ -174,6 +203,11 @@ class CollectiveConfig:
             executor_model=data.get("executor_model", "devstral-small:24b"),
             judge_model=data.get("judge_model", "devstral:123b"),
             routing=RoutingConfig(
+                default_mode=routing_data.get("default_mode", "collective"),
+                trivial_patterns=routing_data.get("trivial_patterns", [
+                    r"^fix\s+typo", r"^add\s+import\s+\w+$", r"^what\s+is",
+                    r"^explain\s+", r"^show\s+", r"^list\s+",
+                ]),
                 complexity_threshold=routing_data.get("complexity_threshold", 0.7),
                 auto_execute_patterns=routing_data.get("auto_execute_patterns", [
                     r"fix\s+typo", r"add\s+import", r"rename\s+variable",
@@ -193,6 +227,10 @@ class CollectiveConfig:
                 ]),
                 max_revision_cycles=judgment_data.get("max_revision_cycles", 3),
                 max_escalations=judgment_data.get("max_escalations", 2),
+                teaching_mode=judgment_data.get("teaching_mode", True),
+                show_code_diffs=judgment_data.get("show_code_diffs", True),
+                max_issues_per_review=judgment_data.get("max_issues_per_review", 5),
+                praise_threshold=judgment_data.get("praise_threshold", 0.7),
             ),
             performance=PerformanceConfig(
                 executor_fast_path_target_ms=performance_data.get(
@@ -213,6 +251,8 @@ class CollectiveConfig:
             "executor_model": self.executor_model,
             "judge_model": self.judge_model,
             "routing": {
+                "default_mode": self.routing.default_mode,
+                "trivial_patterns": self.routing.trivial_patterns,
                 "complexity_threshold": self.routing.complexity_threshold,
                 "auto_execute_patterns": self.routing.auto_execute_patterns,
                 "always_plan_patterns": self.routing.always_plan_patterns,
@@ -222,6 +262,10 @@ class CollectiveConfig:
                 "auto_approve": self.judgment.auto_approve,
                 "max_revision_cycles": self.judgment.max_revision_cycles,
                 "max_escalations": self.judgment.max_escalations,
+                "teaching_mode": self.judgment.teaching_mode,
+                "show_code_diffs": self.judgment.show_code_diffs,
+                "max_issues_per_review": self.judgment.max_issues_per_review,
+                "praise_threshold": self.judgment.praise_threshold,
             },
             "performance": {
                 "executor_fast_path_target_ms": self.performance.executor_fast_path_target_ms,

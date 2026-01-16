@@ -384,16 +384,22 @@ class Agent:
     async def _stream_assistant_events(
         self,
     ) -> AsyncGenerator[AssistantEvent | ReasoningEvent]:
+        from kitty_code.core.llm.format import strip_tool_call_json
+
         content_buffer = ""
         reasoning_buffer = ""
+        full_content = ""  # Accumulate full content for tool call detection
+        displayed_content = ""  # Track what we've already yielded
         chunks_with_content = 0
         chunks_with_reasoning = 0
         BATCH_SIZE = 5
+        tool_call_mode = False  # True once we're inside a tool call block
 
         async for chunk in self._chat_streaming():
             if chunk.message.reasoning_content:
                 if content_buffer:
                     yield AssistantEvent(content=content_buffer)
+                    displayed_content += content_buffer
                     content_buffer = ""
                     chunks_with_content = 0
 
@@ -412,17 +418,69 @@ class Agent:
                     chunks_with_reasoning = 0
 
                 content_buffer += chunk.message.content
+                full_content += chunk.message.content
                 chunks_with_content += 1
+
+                # Detect COMPLETE tool call patterns (not partial)
+                # Only enter tool_call_mode when we see a full pattern
+                if not tool_call_mode:
+                    # Check for complete [ARGS] pattern: tool_name[ARGS]{
+                    if "[ARGS]{" in full_content:
+                        tool_call_mode = True
+                        # Yield any content before the tool call
+                        if content_buffer:
+                            # Find where tool call starts and yield content before it
+                            tool_start = full_content.find("[ARGS]{")
+                            prefix_end = full_content.rfind("\n", 0, tool_start)
+                            if prefix_end > len(displayed_content):
+                                prefix = full_content[len(displayed_content):prefix_end]
+                                if prefix.strip():
+                                    yield AssistantEvent(content=prefix)
+                                    displayed_content = full_content[:prefix_end]
+                            content_buffer = ""
+                            chunks_with_content = 0
+                    # Check for complete JSON embedded pattern with opening brace
+                    elif '"tool_calls":' in full_content and "[" in full_content[
+                        full_content.find('"tool_calls":'):
+                    ]:
+                        tool_call_mode = True
+                        # Yield any content before the JSON block
+                        if content_buffer:
+                            json_start = full_content.find('{ "tool_calls"')
+                            if json_start == -1:
+                                json_start = full_content.find('{"tool_calls"')
+                            if json_start > len(displayed_content):
+                                prefix = full_content[len(displayed_content):json_start]
+                                if prefix.strip():
+                                    yield AssistantEvent(content=prefix)
+                                    displayed_content = full_content[:json_start]
+                            content_buffer = ""
+                            chunks_with_content = 0
+
+                if tool_call_mode:
+                    # Silently accumulate - ToolCallEvent will show what's being called
+                    continue
 
                 if chunks_with_content >= BATCH_SIZE:
                     yield AssistantEvent(content=content_buffer)
+                    displayed_content += content_buffer
                     content_buffer = ""
                     chunks_with_content = 0
 
         if reasoning_buffer:
             yield ReasoningEvent(content=reasoning_buffer)
 
-        if content_buffer:
+        # Final content handling
+        if tool_call_mode:
+            # Strip tool call JSON and show what remains
+            cleaned_content = strip_tool_call_json(full_content)
+            # Remove any content we already displayed
+            if displayed_content and cleaned_content.startswith(displayed_content):
+                cleaned_content = cleaned_content[len(displayed_content):]
+            # Show any remaining content after tool calls
+            if cleaned_content.strip():
+                yield AssistantEvent(content=cleaned_content)
+        elif content_buffer:
             yield AssistantEvent(content=content_buffer)
 
     async def _get_assistant_event(self) -> AssistantEvent:

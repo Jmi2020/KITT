@@ -10,14 +10,22 @@ class TestComplexityRouter:
     """Test suite for ComplexityRouter."""
 
     @pytest.fixture
-    def router(self) -> ComplexityRouter:
-        """Create a router with default config."""
-        return ComplexityRouter(RoutingConfig())
+    def collective_router(self) -> ComplexityRouter:
+        """Create a router with collective mode (new default)."""
+        config = RoutingConfig(default_mode="collective")
+        return ComplexityRouter(config)
+
+    @pytest.fixture
+    def direct_router(self) -> ComplexityRouter:
+        """Create a router with direct mode (legacy behavior)."""
+        config = RoutingConfig(default_mode="direct")
+        return ComplexityRouter(config)
 
     @pytest.fixture
     def custom_router(self) -> ComplexityRouter:
-        """Create a router with custom patterns."""
+        """Create a router with custom patterns (direct mode for testing)."""
         config = RoutingConfig(
+            default_mode="direct",
             complexity_threshold=0.6,
             auto_execute_patterns=[r"fix\s+typo", r"add\s+import"],
             always_plan_patterns=[r"refactor", r"implement\s+feature"],
@@ -25,102 +33,153 @@ class TestComplexityRouter:
         return ComplexityRouter(config)
 
     # =========================================================================
-    # Pattern Matching Tests
+    # Collective Mode Tests (New Default)
     # =========================================================================
 
-    def test_auto_execute_pattern_fix_typo(self, router: ComplexityRouter):
-        """Simple typo fix should bypass collective."""
-        decision = router.route("fix typo in README")
+    def test_collective_mode_trivial_pattern_fix_typo(self, collective_router: ComplexityRouter):
+        """Trivial fix typo pattern should bypass collective even in collective mode."""
+        decision = collective_router.route("fix typo in README")
         assert decision.is_direct()
         assert decision.confidence == 0.95
         assert decision.matched_pattern is not None
+        assert "trivial_pattern" in [f for f, _ in decision.factors]
 
-    def test_auto_execute_pattern_add_import(self, router: ComplexityRouter):
-        """Adding import should bypass collective."""
-        decision = router.route("add import for os module")
+    def test_collective_mode_trivial_pattern_add_import(self, collective_router: ComplexityRouter):
+        """Single import pattern should bypass collective."""
+        # Note: pattern is ^add\s+import\s+\w+$ (anchored)
+        decision = collective_router.route("add import os")
+        assert decision.is_direct()
+
+    def test_collective_mode_trivial_pattern_what_is(self, collective_router: ComplexityRouter):
+        """Questions starting with 'what is' should bypass collective."""
+        decision = collective_router.route("what is this code doing?")
         assert decision.is_direct()
         assert decision.confidence == 0.95
 
-    def test_auto_execute_pattern_rename_variable(self, router: ComplexityRouter):
-        """Renaming variable should bypass collective."""
-        decision = router.route("rename variable foo to bar")
+    def test_collective_mode_trivial_pattern_explain(self, collective_router: ComplexityRouter):
+        """Explanations should bypass collective."""
+        decision = collective_router.route("explain this function")
         assert decision.is_direct()
-        assert decision.confidence == 0.95
 
-    def test_auto_execute_pattern_format_code(self, router: ComplexityRouter):
-        """Formatting code should bypass collective."""
-        decision = router.route("format code in utils.py")
-        assert decision.is_direct()
-        assert decision.confidence == 0.95
+    def test_collective_mode_default_is_collective(self, collective_router: ComplexityRouter):
+        """Non-trivial requests should route to collective by default."""
+        decision = collective_router.route("update the config file")
+        assert decision.is_collective()
+        assert decision.confidence == 0.85
+        assert "default_mode_collective" in [f for f, _ in decision.factors]
 
-    def test_always_plan_pattern_refactor(self, router: ComplexityRouter):
+    def test_collective_mode_coding_task_uses_collective(self, collective_router: ComplexityRouter):
+        """Coding tasks should use collective in collective mode."""
+        decision = collective_router.route("add error handling to the API")
+        assert decision.is_collective()
+
+    def test_collective_mode_refactor_uses_collective(self, collective_router: ComplexityRouter):
         """Refactoring should use collective."""
-        decision = router.route("refactor the authentication module")
+        decision = collective_router.route("refactor the authentication module")
+        assert decision.is_collective()
+        # In collective mode, it's routed by default, not by pattern match
+        assert decision.confidence == 0.85
+
+    # =========================================================================
+    # Direct Mode Tests (Legacy Behavior)
+    # =========================================================================
+
+    def test_direct_mode_auto_execute_pattern_fix_typo(self, direct_router: ComplexityRouter):
+        """Simple typo fix should bypass collective in direct mode."""
+        decision = direct_router.route("fix typo in README")
+        assert decision.is_direct()
+        assert decision.confidence == 0.95
+        # Could be trivial OR auto_execute pattern
+        assert decision.matched_pattern is not None
+
+    def test_direct_mode_auto_execute_pattern_add_import(self, direct_router: ComplexityRouter):
+        """Adding import should bypass collective."""
+        decision = direct_router.route("add import for os module")
+        assert decision.is_direct()
+        assert decision.confidence == 0.95
+
+    def test_direct_mode_auto_execute_pattern_rename_variable(self, direct_router: ComplexityRouter):
+        """Renaming variable should bypass collective."""
+        decision = direct_router.route("rename variable foo to bar")
+        assert decision.is_direct()
+        assert decision.confidence == 0.95
+
+    def test_direct_mode_auto_execute_pattern_format_code(self, direct_router: ComplexityRouter):
+        """Formatting code should bypass collective."""
+        decision = direct_router.route("format code in utils.py")
+        assert decision.is_direct()
+        assert decision.confidence == 0.95
+
+    def test_direct_mode_always_plan_pattern_refactor(self, direct_router: ComplexityRouter):
+        """Refactoring should use collective in direct mode via pattern."""
+        decision = direct_router.route("refactor the authentication module")
         assert decision.is_collective()
         assert decision.confidence == 0.95
         assert decision.matched_pattern is not None
 
-    def test_always_plan_pattern_implement_feature(self, router: ComplexityRouter):
+    def test_direct_mode_always_plan_pattern_implement_feature(self, direct_router: ComplexityRouter):
         """Implementing a feature should use collective."""
-        decision = router.route("implement feature for user notifications")
+        decision = direct_router.route("implement feature for user notifications")
         assert decision.is_collective()
         assert decision.confidence == 0.95
 
-    def test_always_plan_pattern_design_system(self, router: ComplexityRouter):
+    def test_direct_mode_always_plan_pattern_design_system(self, direct_router: ComplexityRouter):
         """Designing a system should use collective."""
-        decision = router.route("design system for caching")
+        decision = direct_router.route("design system for caching")
         assert decision.is_collective()
         assert decision.confidence == 0.95
 
-    def test_always_plan_pattern_add_tests(self, router: ComplexityRouter):
+    def test_direct_mode_always_plan_pattern_add_tests(self, direct_router: ComplexityRouter):
         """Adding tests should use collective."""
-        decision = router.route("add tests for the API endpoints")
+        decision = direct_router.route("add tests for the API endpoints")
         assert decision.is_collective()
         assert decision.confidence == 0.95
 
     # =========================================================================
-    # Confidence Scoring Tests
+    # Confidence Scoring Tests (Direct Mode Only)
     # =========================================================================
 
-    def test_simple_request_high_confidence(self, router: ComplexityRouter):
-        """Simple request without complexity markers."""
-        decision = router.route("read the file config.py")
+    def test_direct_mode_simple_request_high_confidence(self, direct_router: ComplexityRouter):
+        """Simple request without complexity markers in direct mode."""
+        decision = direct_router.route("read the file config.py")
         assert decision.confidence >= 0.7
         assert decision.is_direct()
 
-    def test_uncertainty_markers_reduce_confidence(self, router: ComplexityRouter):
+    def test_direct_mode_uncertainty_markers_reduce_confidence(self, direct_router: ComplexityRouter):
         """Uncertainty markers should reduce confidence."""
-        decision = router.route("maybe we should update the config, I think")
+        decision = direct_router.route("maybe we should update the config, I think")
         # Should have reduced confidence due to "maybe" and "I think"
         assert decision.confidence < 1.0
-        assert ("uncertainty_markers", pytest.approx(-0.2, abs=0.05)) in [
-            (f, pytest.approx(v, abs=0.05)) for f, v in decision.factors
-        ] or any("uncertainty" in f for f, _ in decision.factors)
+        assert any("uncertainty" in f for f, _ in decision.factors)
 
-    def test_multi_step_indicators_reduce_confidence(self, router: ComplexityRouter):
+    def test_direct_mode_multi_step_indicators_reduce_confidence(self, direct_router: ComplexityRouter):
         """Multi-step indicators should reduce confidence."""
-        decision = router.route("first read the file, then update it, next run tests")
+        decision = direct_router.route("first read the file, then update it, next run tests")
         # "first", "then", "next" are step indicators
         assert any("step" in f for f, _ in decision.factors)
 
-    def test_multiple_files_reduce_confidence(self, router: ComplexityRouter):
+    def test_direct_mode_multiple_files_reduce_confidence(self, direct_router: ComplexityRouter):
         """Multiple files mentioned should reduce confidence."""
-        decision = router.route(
+        decision = direct_router.route(
             "update config.py, utils.py, main.py, app.py, and test_app.py"
         )
         assert any("files" in f for f, _ in decision.factors)
 
-    def test_complexity_markers_reduce_confidence(self, router: ComplexityRouter):
+    def test_direct_mode_complexity_markers_reduce_confidence(self, direct_router: ComplexityRouter):
         """Complexity markers should reduce confidence."""
         # Note: "refactor" would match always_plan pattern, so use different markers
-        decision = router.route("need to integrate this with the architecture")
+        decision = direct_router.route("need to integrate this with the architecture")
         # "integrate" and "architecture" are complexity markers
         assert any("complexity" in f for f, _ in decision.factors)
 
-    def test_code_context_adds_confidence(self, router: ComplexityRouter):
+    def test_direct_mode_code_context_adds_confidence(self, direct_router: ComplexityRouter):
         """Code blocks in request should add confidence."""
-        decision = router.route("what does this code do?\n```python\nprint('hello')\n```")
-        assert any("code" in f for f, _ in decision.factors)
+        decision = direct_router.route("what does this code do?\n```python\nprint('hello')\n```")
+        # In direct mode, code context adds confidence
+        # But "what" matches trivial pattern, so it bypasses scoring
+        # Let's use a different prompt
+        decision2 = direct_router.route("update this code:\n```python\nprint('hello')\n```")
+        assert any("code" in f for f, _ in decision2.factors)
 
     # =========================================================================
     # Threshold Tests
@@ -138,21 +197,27 @@ class TestComplexityRouter:
     # Edge Cases
     # =========================================================================
 
-    def test_empty_input(self, router: ComplexityRouter):
-        """Empty input should default to direct."""
-        decision = router.route("")
+    def test_collective_mode_empty_input(self, collective_router: ComplexityRouter):
+        """Empty input in collective mode routes to collective."""
+        decision = collective_router.route("")
+        assert decision.is_collective()
+        assert decision.confidence == 0.85
+
+    def test_direct_mode_empty_input(self, direct_router: ComplexityRouter):
+        """Empty input in direct mode defaults to direct with high confidence."""
+        decision = direct_router.route("")
         assert decision.is_direct()
         assert decision.confidence == 1.0
 
-    def test_very_long_request(self, router: ComplexityRouter):
-        """Very long request should reduce confidence."""
-        long_request = "please " * 100  # 100 words
-        decision = router.route(long_request)
+    def test_direct_mode_very_long_request(self, direct_router: ComplexityRouter):
+        """Very long request should reduce confidence in direct mode."""
+        long_request = "please update " * 60  # More than 50 words
+        decision = direct_router.route(long_request)
         assert any("long" in f for f, _ in decision.factors)
 
-    def test_case_insensitive_patterns(self, router: ComplexityRouter):
+    def test_case_insensitive_patterns(self, collective_router: ComplexityRouter):
         """Patterns should match case-insensitively."""
-        decision = router.route("FIX TYPO IN README")
+        decision = collective_router.route("FIX TYPO IN README")
         assert decision.is_direct()
         assert decision.confidence == 0.95
 

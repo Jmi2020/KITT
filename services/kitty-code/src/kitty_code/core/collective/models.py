@@ -29,7 +29,8 @@ class TaskStep:
     """
     A single step in the task plan.
 
-    Represents one unit of work for the Executor to implement.
+    Represents one unit of work for the Executor (junior developer) to implement.
+    Includes detailed instructions from the Planner (senior developer).
     """
 
     # Step identifier
@@ -56,13 +57,25 @@ class TaskStep:
     # Whether this step is optional
     optional: bool = False
 
+    # === Senior/Junior Delegation Fields ===
+
+    # Detailed instructions for the junior developer (code examples, patterns)
+    junior_instructions: str = ""
+
+    # What the result should look like
+    expected_output: str = ""
+
+    # Warnings about common mistakes
+    pitfalls: List[str] = field(default_factory=list)
+
 
 @dataclass
 class TaskPlan:
     """
-    Strategic plan produced by the Planner role.
+    Strategic plan produced by the Planner (senior developer) role.
 
-    Decomposes a complex user request into ordered, reviewable steps.
+    Decomposes a complex user request into ordered, reviewable steps
+    with detailed instructions for the Executor (junior developer).
     """
 
     # Plan identifier
@@ -91,6 +104,11 @@ class TaskPlan:
 
     # Model that generated this plan
     model: str = ""
+
+    # === Senior/Junior Delegation Fields ===
+
+    # Note to junior developer (encouragement + key warnings)
+    delegation_note: str = ""
 
     def get_step(self, step_id: str) -> Optional[TaskStep]:
         """Get a step by ID."""
@@ -122,6 +140,10 @@ class TaskPlan:
                 depends_on=s.get("depends_on", []),
                 complexity=s.get("complexity", 0.5),
                 optional=s.get("optional", False),
+                # New Senior/Junior delegation fields
+                junior_instructions=s.get("junior_instructions", ""),
+                expected_output=s.get("expected_output", ""),
+                pitfalls=s.get("pitfalls", []),
             )
             for i, s in enumerate(data.get("steps", []))
         ]
@@ -135,6 +157,8 @@ class TaskPlan:
             total_complexity=data.get("total_complexity", 0.5),
             affected_files=data.get("affected_files", []),
             model=data.get("model", ""),
+            # New Senior/Junior delegation field
+            delegation_note=data.get("delegation_note", ""),
         )
 
     def to_json(self) -> Dict[str, Any]:
@@ -143,6 +167,7 @@ class TaskPlan:
             "plan_id": self.plan_id,
             "user_request": self.user_request,
             "summary": self.summary,
+            "delegation_note": self.delegation_note,
             "steps": [
                 {
                     "step_id": s.step_id,
@@ -153,6 +178,10 @@ class TaskPlan:
                     "depends_on": s.depends_on,
                     "complexity": s.complexity,
                     "optional": s.optional,
+                    # New Senior/Junior delegation fields
+                    "junior_instructions": s.junior_instructions,
+                    "expected_output": s.expected_output,
+                    "pitfalls": s.pitfalls,
                 }
                 for s in self.steps
             ],
@@ -248,6 +277,62 @@ class ExecutionResult:
 
 
 @dataclass
+class JudgeIssue:
+    """
+    Structured issue feedback from Judge (senior reviewer).
+
+    Provides specific, teachable feedback with code examples.
+    Part of the Senior/Junior delegation pattern.
+    """
+
+    # Issue severity: minor, major, critical
+    severity: str = "major"
+
+    # File where the issue was found
+    file: str = ""
+
+    # Line number (if applicable)
+    line: int = 0
+
+    # The problematic code snippet
+    problem_code: str = ""
+
+    # Explanation of why this is an issue
+    explanation: str = ""
+
+    # Suggested fix with code
+    suggested_fix: str = ""
+
+    # Educational takeaway for the junior developer
+    learning_point: str = ""
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> "JudgeIssue":
+        """Parse JudgeIssue from JSON."""
+        return cls(
+            severity=data.get("severity", "major"),
+            file=data.get("file", ""),
+            line=data.get("line", 0),
+            problem_code=data.get("problem_code", ""),
+            explanation=data.get("explanation", ""),
+            suggested_fix=data.get("suggested_fix", ""),
+            learning_point=data.get("learning_point", ""),
+        )
+
+    def to_json(self) -> Dict[str, Any]:
+        """Convert to JSON."""
+        return {
+            "severity": self.severity,
+            "file": self.file,
+            "line": self.line,
+            "problem_code": self.problem_code,
+            "explanation": self.explanation,
+            "suggested_fix": self.suggested_fix,
+            "learning_point": self.learning_point,
+        }
+
+
+@dataclass
 class RevisionFeedback:
     """Structured feedback for revision requests."""
 
@@ -267,9 +352,10 @@ class RevisionFeedback:
 @dataclass
 class Judgment:
     """
-    Judge's evaluation of Executor output.
+    Judge's (senior reviewer) evaluation of Executor (junior) output.
 
     Determines whether to approve, request revision, or reject.
+    Includes mentorship feedback with specific code examples.
     """
 
     # Which execution this judges
@@ -290,7 +376,7 @@ class Judgment:
     # Criteria that failed
     criteria_failed: List[str] = field(default_factory=list)
 
-    # Feedback for revision (if verdict is REVISE)
+    # Feedback for revision (if verdict is REVISE) - legacy format
     revision_feedback: Optional[RevisionFeedback] = None
 
     # Timestamp
@@ -298,6 +384,17 @@ class Judgment:
 
     # Model used
     model: str = ""
+
+    # === Senior/Junior Mentorship Fields ===
+
+    # Positive feedback - what the junior did well (specific, not generic)
+    praise: str = ""
+
+    # Structured issues with code examples and learning points
+    issues: List[JudgeIssue] = field(default_factory=list)
+
+    # Summary and encouragement for the junior
+    overall_feedback: str = ""
 
     def is_approved(self) -> bool:
         """Check if this is an approval."""
@@ -321,6 +418,7 @@ class Judgment:
             "reject": JudgmentVerdict.REJECT,
         }.get(verdict_str, JudgmentVerdict.APPROVE)
 
+        # Parse legacy revision_feedback format
         revision_feedback = None
         if verdict == JudgmentVerdict.REVISE and "revision_feedback" in data:
             rf = data["revision_feedback"]
@@ -331,6 +429,10 @@ class Judgment:
                 try_different_approach=rf.get("try_different_approach", False),
             )
 
+        # Parse new mentorship format issues (list of JudgeIssue)
+        issues_data = data.get("issues", [])
+        issues = [JudgeIssue.from_json(i) for i in issues_data if isinstance(i, dict)]
+
         return cls(
             step_id=step_id,
             verdict=verdict,
@@ -340,6 +442,10 @@ class Judgment:
             criteria_failed=data.get("criteria_failed", []),
             revision_feedback=revision_feedback,
             model=data.get("model", ""),
+            # New mentorship fields
+            praise=data.get("praise", ""),
+            issues=issues,
+            overall_feedback=data.get("overall_feedback", ""),
         )
 
     def to_json(self) -> Dict[str, Any]:
@@ -353,6 +459,10 @@ class Judgment:
             "criteria_failed": self.criteria_failed,
             "judged_at": self.judged_at.isoformat(),
             "model": self.model,
+            # New mentorship fields
+            "praise": self.praise,
+            "issues": [issue.to_json() for issue in self.issues],
+            "overall_feedback": self.overall_feedback,
         }
 
         if self.revision_feedback:
