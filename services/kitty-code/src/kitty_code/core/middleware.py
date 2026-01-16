@@ -519,20 +519,28 @@ class MiddlewarePipeline:
 
     async def run_before_turn(self, context: ConversationContext) -> MiddlewareResult:
         messages_to_inject = []
+        merged_metadata: dict[str, Any] = {}
 
         for mw in self.middlewares:
             result = await mw.before_turn(context)
+            # Merge metadata from all middlewares (later middlewares can override)
+            if result.metadata:
+                merged_metadata.update(result.metadata)
             if result.action == MiddlewareAction.INJECT_MESSAGE and result.message:
                 messages_to_inject.append(result.message)
             elif result.action in {MiddlewareAction.STOP, MiddlewareAction.COMPACT}:
+                # Preserve metadata even when stopping/compacting
+                result.metadata.update(merged_metadata)
                 return result
         if messages_to_inject:
             combined_message = "\n\n".join(messages_to_inject)
             return MiddlewareResult(
-                action=MiddlewareAction.INJECT_MESSAGE, message=combined_message
+                action=MiddlewareAction.INJECT_MESSAGE,
+                message=combined_message,
+                metadata=merged_metadata,
             )
 
-        return MiddlewareResult()
+        return MiddlewareResult(metadata=merged_metadata)
 
     async def run_after_turn(self, context: ConversationContext) -> MiddlewareResult:
         for mw in self.middlewares:
